@@ -6,6 +6,8 @@ import {
   Check, Sparkles, Trash2,
 } from 'lucide-react'
 import { INK, TEAL, BORDER, SURFACE } from '@/app/components/ulearn/theme'
+import { useConfirm } from '@/components/ui/use-confirm'
+import { InlineLoader } from '@/components/loaders'
 
 type Props = {
   schoolId: number
@@ -51,6 +53,7 @@ const EXTRA_BOARD = 'EXTRA'
 const VALID_CURRICULUM_BOARDS = ['CBSE', 'AP_SSC', 'TS_SSC']
 
 export default function CurriculumCustomizer({ schoolId }: Props) {
+  const { confirm, ConfirmDialog } = useConfirm()
   const [subjects, setSubjects] = useState<Subject[]>([])
   const [activeSubject, setActiveSubject] = useState<Subject | null>(null)
   const [loading, setLoading] = useState(true)
@@ -549,7 +552,8 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
   // a topic marked taught); see app/api/school/subjects/[id]/route.ts. A
   // freshly subscribed/never-set-up subject deletes cleanly.
   const handleDeleteSubject = async (subject: Subject) => {
-    if (!window.confirm(`Delete "${subject.subject_name}" (Grade ${subject.grade})? This removes it from your school — it can't be undone.`)) return
+    const ok = await confirm(`Delete "${subject.subject_name}" (Grade ${subject.grade})? This removes it from your school — it can't be undone.`, { title: 'Delete subject?', confirmText: 'Delete', destructive: true })
+    if (!ok) return
     setDeletingSubjectId(subject.id)
     setError('')
     setSuccess('')
@@ -575,6 +579,7 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
 
   return (
     <div className="space-y-6">
+      {ConfirmDialog}
       {/* Subject Header / Action Group */}
       <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 bg-white p-5 rounded-2xl border" style={{ borderColor: BORDER }}>
         <div>
@@ -658,9 +663,8 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
       )}
 
       {loading ? (
-        <div className="bg-white border rounded-3xl py-24 flex flex-col items-center justify-center gap-4" style={{ borderColor: BORDER }}>
-          <div className="w-10 h-10 border-2 rounded-full animate-spin" style={{ borderColor: TEAL, borderTopColor: 'transparent' }} />
-          <p className="text-xs text-gray-400 font-semibold">Loading curriculum overrides…</p>
+        <div className="rounded-lg border bg-white py-16" style={{ borderColor: BORDER }}>
+          <InlineLoader portal="school-admin" label="Loading curriculum overrides…" size="lg" />
         </div>
       ) : subjects.length === 0 ? (
         <div className="bg-white border border-dashed rounded-3xl py-24 text-center" style={{ borderColor: BORDER }}>

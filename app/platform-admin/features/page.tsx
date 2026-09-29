@@ -1,8 +1,10 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useConfirm } from '@/components/ui/use-confirm'
+import { overLimitSchoolsMessage } from '@/lib/planChangeMessage'
 
-type Feature    = { key: string; label: string; category: string; portals: string[] }
+type Feature   = { key: string; label: string; category: string; portals: string[] }
 
 const PORTAL_LABEL: Record<string, string> = { 'school-admin': 'School', student: 'Student', parent: 'Parent' }
 type Matrix     = Record<string, Record<string, boolean>>  // feature_key → { basic, standard, premium }
@@ -17,6 +19,7 @@ const TIERS = [
 const CATEGORY_ORDER = ['Core', 'Scheduling', 'Analytics', 'Finance', 'Communication', 'Administration']
 
 export default function FeaturePlansPage() {
+  const { confirm, ConfirmDialog } = useConfirm()
   const [features, setFeatures]     = useState<Feature[]>([])
   const [matrix, setMatrix]         = useState<Matrix>({})
   const [staffLimits, setStaffLimits] = useState<StaffLimits>({ basic: '2', standard: '5', premium: '', none: '1' })
@@ -68,16 +71,31 @@ export default function FeaturePlansPage() {
           assignments.push({ feature_key: featureKey, tier, enabled })
         }
       }
-      const res = await fetch('/api/platform/features', {
+      const send = (confirmOverLimit: boolean) => fetch('/api/platform/features', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ assignments, staffLimits }),
+        body: JSON.stringify({ assignments, staffLimits, confirmOverLimit: confirmOverLimit || undefined }),
       })
-      if (!res.ok) throw new Error()
+      let res = await send(false)
+      // Lowering a plan's staff limit applies to every school on that plan. If that leaves any
+      // school with more active staff than the new limit, show which ones and ask first.
+      if (res.status === 409) {
+        const d = await res.json().catch(() => ({}))
+        if (d.code === 'OVER_SEAT_LIMIT') {
+          const ok = await confirm(overLimitSchoolsMessage(d.affected), { title: 'Some schools would go over their staff limit', confirmText: 'Save anyway', destructive: true })
+          if (!ok) return
+          res = await send(true)
+        }
+      }
+      if (!res.ok) {
+        // Show the server's reason (e.g. an invalid staff limit) instead of a bare "Failed".
+        const d = await res.json().catch(() => ({}))
+        throw new Error(d.error || 'Failed to save')
+      }
       setSaved(true)
       setShowSavedPopup(true)
       setTimeout(() => setSaved(false), 3000)
-    } catch { setError('Failed to save') }
+    } catch (e) { setError(e instanceof Error ? e.message : 'Failed to save') }
     finally { setSaving(false) }
   }
 
@@ -102,7 +120,7 @@ export default function FeaturePlansPage() {
           {saved && <span className="text-green-600 text-sm font-medium">✓ Saved — school admins will see changes immediately</span>}
           {error && <span className="text-red-600 text-sm">{error}</span>}
           <button onClick={handleSave} disabled={saving}
-            className="bg-purple-600 hover:bg-purple-700 text-white px-5 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50">
+            className="bg-primary hover:bg-primary/90 text-white px-5 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50">
             {saving ? 'Saving…' : 'Save Plan Config'}
           </button>
         </div>
@@ -120,9 +138,9 @@ export default function FeaturePlansPage() {
         {/* Plan summary */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
           {TIERS.map(t => (
-            <div key={t.key} className={`rounded-xl border-2 p-5 ${t.bg} border-${t.key === 'basic' ? 'green' : t.key === 'standard' ? 'blue' : 'purple'}-200`}>
+            <div key={t.key} className={`rounded-md border-2 p-5 ${t.bg} border-${t.key === 'basic' ? 'green' : t.key === 'standard' ? 'blue' : 'purple'}-200`}>
               <p className={`text-sm font-bold uppercase tracking-wide ${t.color}`}>{t.label}</p>
-              <p className="text-3xl font-black text-gray-900 mt-2">{loading ? '—' : counts[t.key]}</p>
+              <p className="text-3xl font-semibold text-gray-900 mt-2">{loading ? '—' : counts[t.key]}</p>
               <p className="text-xs text-gray-500 mt-1">of {features.length} features enabled</p>
               <div className="mt-4 pt-4 border-t border-black/10">
                 <label className="text-xs font-semibold text-gray-600 block mb-1.5">Staff Account Limit</label>
@@ -137,16 +155,16 @@ export default function FeaturePlansPage() {
                     data-testid={`staff-limit-${t.key}`}
                   />
                 </div>
-                <p className="text-[11px] text-gray-400 mt-1">Leave blank for unlimited</p>
+                <p className="text-xs text-muted-foreground mt-1">Leave blank for unlimited</p>
               </div>
             </div>
           ))}
         </div>
 
         {loading ? (
-          <div className="py-20 text-center text-gray-400">Loading features…</div>
+          <div className="py-20 text-center text-muted-foreground">Loading features…</div>
         ) : (
-          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <div className="bg-white rounded-md border border-gray-200 overflow-hidden">
             {/* Header */}
             <div className="grid grid-cols-[1fr_100px_100px_100px] bg-gray-50 border-b border-gray-200">
               <div className="px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Feature</div>
@@ -161,7 +179,7 @@ export default function FeaturePlansPage() {
               <div key={group.category}>
                 {/* Category header */}
                 <div className="px-5 py-2 bg-gray-50 border-y border-gray-100">
-                  <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">{group.category}</span>
+                  <span className="text-xs font-bold text-muted-foreground uppercase tracking-widest">{group.category}</span>
                 </div>
 
                 {group.items.map((feature, fi) => (
@@ -177,15 +195,15 @@ export default function FeaturePlansPage() {
                         const b = matrix[feature.key]?.basic    ?? false
                         const s = matrix[feature.key]?.standard ?? false
                         const p = matrix[feature.key]?.premium  ?? false
-                        if (!b && !s && p)  return <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-purple-100 text-purple-700">Premium only</span>
-                        if (!b && s && p)   return <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700">Standard+</span>
-                        if (!b && !s && !p) return <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-400">Disabled</span>
+                        if (!b && !s && p)  return <span className="text-xs font-semibold px-1.5 py-0.5 rounded-full bg-purple-100 text-purple-700">Premium only</span>
+                        if (!b && s && p)   return <span className="text-xs font-semibold px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700">Standard+</span>
+                        if (!b && !s && !p) return <span className="text-xs font-semibold px-1.5 py-0.5 rounded-full bg-gray-100 text-muted-foreground">Disabled</span>
                         return null
                       })()}
                       {/* Badge: this toggle also gates other portals, not just School Admin */}
                       {feature.portals?.length > 1 && (
                         <span
-                          className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700"
+                          className="text-xs font-semibold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700"
                           title={`Also gates: ${feature.portals.filter(p => p !== 'school-admin').map(p => PORTAL_LABEL[p] || p).join(', ')} portal`}
                         >
                           {feature.portals.map(p => PORTAL_LABEL[p] || p).join(' · ')}
@@ -221,7 +239,7 @@ export default function FeaturePlansPage() {
           </div>
         )}
 
-        <p className="text-xs text-gray-400 mt-4 text-center">
+        <p className="text-xs text-muted-foreground mt-4 text-center">
           Changes saved here are reflected immediately in all school admin dashboards on next page load.
         </p>
       </div>
@@ -229,7 +247,7 @@ export default function FeaturePlansPage() {
       {/* ── Save Confirmation Popup ── */}
       {showSavedPopup && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden">
+          <div className="bg-white rounded-lg w-full max-w-sm shadow-2xl overflow-hidden">
             <div className="bg-green-600 px-6 py-5">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 bg-white/20 rounded-full flex items-center justify-center">
@@ -252,17 +270,18 @@ export default function FeaturePlansPage() {
                   </div>
                 ))}
               </div>
-              <p className="text-xs text-gray-400 bg-gray-50 rounded-lg px-3 py-2 mb-4">
+              <p className="text-xs text-muted-foreground bg-gray-50 rounded-lg px-3 py-2 mb-4">
                 School admin dashboards will reflect these changes on next page load.
               </p>
               <button onClick={() => setShowSavedPopup(false)}
-                className="w-full bg-gray-900 hover:bg-gray-800 text-white py-2.5 rounded-xl text-sm font-medium transition-colors">
+                className="w-full bg-gray-900 hover:bg-gray-800 text-white py-2.5 rounded-md text-sm font-medium transition-colors">
                 Done
               </button>
             </div>
           </div>
         </div>
       )}
+      {ConfirmDialog}
     </div>
   )
 }

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import pool from '@/lib/db'
+import pool, { ensureDB } from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
 import { gradeOrderSql } from '@/lib/grades'
 import { resolveAcademicYear } from '@/lib/academicYear'
@@ -64,28 +64,16 @@ export async function POST(req: NextRequest) {
         }, { status: 409 })
       }
 
+      // Must run before pool.connect() below, not after — on Vercel's max:1 pool,
+      // ensureDB()'s own pool.query() calls would otherwise block waiting for a
+      // connection that `client` is already holding, and `client` can't be
+      // released until this call returns: a deadlock resolved only by
+      // connectionTimeoutMillis expiring into an error.
+      await ensureDB()
       const client = await pool.connect()
       const saved = []
       try {
         await client.query('BEGIN')
-
-        // Ensure history table exists
-        await client.query(`
-          CREATE TABLE IF NOT EXISTS fee_structure_history (
-            id               SERIAL PRIMARY KEY,
-            school_id        INTEGER NOT NULL,
-            fee_structure_id INTEGER,
-            fee_category_id  INTEGER NOT NULL,
-            grade            TEXT    NOT NULL,
-            academic_year    TEXT    NOT NULL,
-            old_amount       NUMERIC(10,2),
-            new_amount       NUMERIC(10,2) NOT NULL,
-            old_due_day      INTEGER,
-            new_due_day      INTEGER NOT NULL,
-            change_type      TEXT    NOT NULL DEFAULT 'updated',
-            changed_by       TEXT    NOT NULL DEFAULT 'Admin',
-            changed_at       TIMESTAMPTZ DEFAULT NOW()
-          )`)
 
         for (const s of structures) {
           // Snapshot existing value before upsert

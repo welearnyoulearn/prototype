@@ -5,9 +5,12 @@ import Link from 'next/link'
 import {
   BookOpen, Plus, Pencil, X, Upload, ChevronRight, FileText, Sparkles,
   HelpCircle, CheckCircle2, Layers, ArrowLeft, Trash2, Check, FolderInput, Loader2, Download,
+  ImageOff,
 } from 'lucide-react'
+import { EmptyState } from '@/components/ui/empty-state'
+import { useConfirm } from '@/components/ui/use-confirm'
 import { INK, TEAL, CREAM, GREEN, PURPLE, BORDER, SURFACE } from '@/app/components/ulearn/theme'
-import { ProgressBar } from '@/components/loaders'
+import { InlineLoader, ProgressBar } from '@/components/loaders'
 import { BulkImportPanel } from '@/app/components/ulearn/BulkImportPanel'
 import { Toast } from '@/app/components/ulearn/primitives'
 import { useToast } from '@/app/components/ulearn/useToast'
@@ -246,6 +249,7 @@ const GRADES = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10']
 const EXTRA_BOARD = 'EXTRA'
 
 export default function PlatformCurriculum() {
+  const { confirm, ConfirmDialog } = useConfirm()
   const [subjects, setSubjects] = useState<Subject[]>([])
   const [category, setCategory] = useState<'academic' | 'extra'>('academic')
   const [selectedBoard, setSelectedBoard] = useState('CBSE')
@@ -524,9 +528,13 @@ export default function PlatformCurriculum() {
   const handleBulkImport = async (json: string, mode: 'append' | 'replace') => {
     if (!activeSubject) return
     const bookLabel = bulkBookName.trim() || BOOK_TYPE_LABELS[bulkBookType]
-    if (mode === 'replace' && !confirm(
-      `Replace all chapters for "${activeSubject.subject_name}"?\n\nThis permanently deletes every existing chapter (and its topics) for whichever exact book this JSON covers — typically "${bookLabel}" — before writing the new ones. Other books on this subject (including other ${BOOK_TYPE_LABELS[bulkBookType]}s) are untouched. This cannot be undone.`
-    )) return
+    if (mode === 'replace') {
+      const ok = await confirm(
+        `Replace all chapters for "${activeSubject.subject_name}"?\n\nThis permanently deletes every existing chapter (and its topics) for whichever exact book this JSON covers — typically "${bookLabel}" — before writing the new ones. Other books on this subject (including other ${BOOK_TYPE_LABELS[bulkBookType]}s) are untouched. This cannot be undone.`,
+        { title: 'Replace all chapters?', confirmText: 'Replace', destructive: true }
+      )
+      if (!ok) return
+    }
     setBulkError('')
     setImporting(true)
     try {
@@ -652,7 +660,7 @@ export default function PlatformCurriculum() {
   // free-tier 10MB-per-file cap (some run 50-80MB), and R2 has no such limit.
   // Same presign-then-PUT-directly shape as handleUploadFile above, just
   // against our own /api/platform/materials/upload-sign instead of Cloudinary.
-  const handleUploadFileToR2 = async (file: File, onError?: (msg: string) => void) => {
+  const handleUploadFileToR2 = async (file: File, onError?: (msg: string) => void, materialType?: 'textbook' | 'handbook', subjectIdOverride?: number) => {
     if (!file) return null
     setUploading(true)
     setUploadProgress(0)
@@ -661,7 +669,7 @@ export default function PlatformCurriculum() {
       const signRes = await fetch('/api/platform/materials/upload-sign', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ filename: file.name, content_type: file.type || 'application/pdf', subject_id: activeSubject?.id }),
+        body: JSON.stringify({ filename: file.name, content_type: file.type || 'application/pdf', subject_id: subjectIdOverride ?? activeSubject?.id, material_type: materialType }),
       })
       const signData = await signRes.json()
       if (!signRes.ok) throw new Error(signData?.error || 'Failed to get upload URL')
@@ -786,7 +794,8 @@ export default function PlatformCurriculum() {
   }
 
   const handleDeleteTopic = async (topicId: number, name: string) => {
-    if (!confirm(`Are you absolutely sure you want to delete the Master Topic "${name}"?\nThis will permanently delete this topic and all its attachments.`)) return
+    const ok = await confirm(`Are you absolutely sure you want to delete the Master Topic "${name}"?\nThis will permanently delete this topic and all its attachments.`, { title: 'Delete Master Topic?', confirmText: 'Delete', destructive: true })
+    if (!ok) return
     setError('')
     setSuccess('')
     try {
@@ -845,7 +854,7 @@ export default function PlatformCurriculum() {
       const title = file.name.replace(/\.[^./]+$/, '')
       try {
         let uploadErrMsg = ''
-        const url = await handleUploadFileToR2(file, msg => { uploadErrMsg = msg })
+        const url = await handleUploadFileToR2(file, msg => { uploadErrMsg = msg }, materialTypeToUpload, activeSubject.id)
         if (!url) throw new Error(uploadErrMsg || 'File upload failed')
 
         const res = await fetch(`/api/platform/subjects/${activeSubject.id}/materials`, {
@@ -871,7 +880,8 @@ export default function PlatformCurriculum() {
   }
 
   const handleDeleteMaterial = async (id: number, title: string) => {
-    if (!confirm(`Delete "${title}"?`)) return
+    const ok = await confirm(`Delete "${title}"?`, { title: 'Delete material?', confirmText: 'Delete', destructive: true })
+    if (!ok) return
     setError('')
     setSuccess('')
     try {
@@ -889,9 +899,11 @@ export default function PlatformCurriculum() {
   // wants a clean slate instead of re-importing over it with "Replace all".
   const handleDeleteBook = async (group: BookGroup) => {
     if (!activeSubject) return
-    if (!confirm(
-      `Delete "${group.label}" for "${activeSubject.subject_name}"?\n\nThis permanently deletes all ${group.chapters.length} chapter${group.chapters.length === 1 ? '' : 's'} (and their topics) in this book. Other books on this subject are untouched. This cannot be undone.`
-    )) return
+    const ok = await confirm(
+      `Delete "${group.label}" for "${activeSubject.subject_name}"?\n\nThis permanently deletes all ${group.chapters.length} chapter${group.chapters.length === 1 ? '' : 's'} (and their topics) in this book. Other books on this subject are untouched. This cannot be undone.`,
+      { title: 'Delete book?', confirmText: 'Delete', destructive: true }
+    )
+    if (!ok) return
     setError('')
     setSuccess('')
     try {
@@ -1154,16 +1166,16 @@ export default function PlatformCurriculum() {
 
       for (const book of group.books) {
         try {
-          let uploadErrMsg = ''
-          const url = await handleUploadFileToR2(book.file, msg => { uploadErrMsg = msg })
-          if (!url) throw new Error(uploadErrMsg || 'upload failed')
-          const title = book.file.name.replace(/\.pdf$/i, '')
           // master_subject_materials only accepts textbook/handbook (the
           // downloadable-file registry, separate from chapter book_type) —
           // a workbook classification still registers the PDF, just filed as
           // a handbook until that table's CHECK is widened.
           const classification = bookTypeChoices[book.bookType] || 'textbook'
-          const material_type = classification === 'workbook' ? 'handbook' : classification
+          const material_type = (classification === 'workbook' ? 'handbook' : classification) as 'textbook' | 'handbook'
+          let uploadErrMsg = ''
+          const url = await handleUploadFileToR2(book.file, msg => { uploadErrMsg = msg }, material_type, subjectId)
+          if (!url) throw new Error(uploadErrMsg || 'upload failed')
+          const title = book.file.name.replace(/\.pdf$/i, '')
           const res = await fetch(`/api/platform/subjects/${subjectId}/materials`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1190,7 +1202,8 @@ export default function PlatformCurriculum() {
   }
 
   const handleDeleteSubject = async (id: number, name: string) => {
-    if (!confirm(`Are you absolutely sure you want to delete the Master Subject "${name}"?\nThis will cascade and delete all Chapters, Topics, and Tasks in this master template.`)) return
+    const ok = await confirm(`Are you absolutely sure you want to delete the Master Subject "${name}"?\nThis will cascade and delete all Chapters, Topics, and Tasks in this master template.`, { title: 'Delete Master Subject?', confirmText: 'Delete', destructive: true })
+    if (!ok) return
     setError('')
     setSuccess('')
     try {
@@ -1214,7 +1227,8 @@ export default function PlatformCurriculum() {
   const handleBulkDeleteSubjects = async () => {
     const ids = Array.from(selectedSubjectIds)
     if (ids.length === 0) return
-    if (!confirm(`Delete ${ids.length} selected subject${ids.length === 1 ? '' : 's'}?\nThis will cascade and delete all their Chapters, Topics, and Tasks.`)) return
+    const ok = await confirm(`Delete ${ids.length} selected subject${ids.length === 1 ? '' : 's'}?\nThis will cascade and delete all their Chapters, Topics, and Tasks.`, { title: 'Delete selected subjects?', confirmText: 'Delete', destructive: true })
+    if (!ok) return
     setError('')
     setSuccess('')
     setBulkDeleting(true)
@@ -1281,6 +1295,7 @@ export default function PlatformCurriculum() {
 
   return (
     <div className="min-h-screen font-sans" style={{ background: CREAM, color: INK }}>
+      {ConfirmDialog}
       {/* Top Header */}
       <div className="bg-white border-b sticky top-0 z-20 shadow-sm" style={{ borderColor: BORDER }}>
         <div className="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between gap-4">
@@ -1361,11 +1376,13 @@ export default function PlatformCurriculum() {
               <p className="text-xs text-gray-400 font-semibold">Scanning catalog for gaps…</p>
             </div>
           ) : emptySubjects.length === 0 && emptyChapters.length === 0 ? (
-            <div className="bg-white border border-dashed rounded-3xl py-24 text-center" style={{ borderColor: BORDER }}>
-              <CheckCircle2 size={28} className="mx-auto mb-3" style={{ color: GREEN }} />
-              <h3 className="text-base font-semibold mb-1" style={{ color: INK }}>No gaps found</h3>
-              <p className="text-xs text-gray-500 max-w-sm mx-auto">Every subject has at least one chapter, and every chapter has at least one topic.</p>
-            </div>
+            <EmptyState
+              icon={CheckCircle2}
+              title="No gaps found"
+              description="Every subject has at least one chapter, and every chapter has at least one topic."
+              className="rounded-3xl border-dashed bg-white py-24"
+              style={{ borderColor: BORDER }}
+            />
           ) : (
             <div className="space-y-6">
               {emptySubjects.length > 0 && (
@@ -1642,7 +1659,7 @@ export default function PlatformCurriculum() {
                           <p className="text-[10px] text-gray-400 mt-1">Supports PDF files up to 10MB</p>
                         </div>
                       )}
-                      {uploadError && <p className="text-[10px]" style={{ color: '#791F1F' }}>⚠️ {uploadError}</p>}
+                      {uploadError && <p role="alert" className="text-[10px]" style={{ color: '#791F1F' }}>{uploadError}</p>}
                     </div>
                   </div>
                 </div>
@@ -1669,9 +1686,12 @@ export default function PlatformCurriculum() {
                     Current Attachments ({editingTopic.resources.length})
                   </h4>
                   {editingTopic.resources.length === 0 ? (
-                    <div className="border border-dashed rounded-2xl py-12 text-center" style={{ borderColor: BORDER }}>
-                      <p className="text-xs text-gray-400 font-medium">No media items attached yet</p>
-                    </div>
+                    <EmptyState
+                      icon={ImageOff}
+                      title="No media items attached yet"
+                      className="rounded-2xl border-dashed py-12"
+                      style={{ borderColor: BORDER }}
+                    />
                   ) : (
                     <div className="space-y-2">
                       {editingTopic.resources.map((res, rIdx) => (
@@ -1742,7 +1762,7 @@ export default function PlatformCurriculum() {
                     ) : (
                       <p className="text-[11px] font-bold" style={{ color: INK }}>Upload file, or <span style={{ color: PURPLE }}>browse</span></p>
                     )}
-                    {uploadError && <p className="text-[9px]" style={{ color: '#791F1F' }}>⚠️ {uploadError}</p>}
+                    {uploadError && <p role="alert" className="text-[9px]" style={{ color: '#791F1F' }}>{uploadError}</p>}
                   </div>
                   <div className="space-y-3 pt-2">
                     <div>
@@ -2004,9 +2024,7 @@ export default function PlatformCurriculum() {
                 </div>
               )}
               {loading ? (
-                <div className="py-6 flex items-center justify-center">
-                  <div className="w-5 h-5 border-2 rounded-full animate-spin" style={{ borderColor: PURPLE, borderTopColor: 'transparent' }} />
-                </div>
+                <InlineLoader portal="platform-admin" label="Loading subjects…" />
               ) : subjects.length === 0 ? (
                 <p className="text-xs text-gray-400 text-center py-6">No subjects for this board & grade.</p>
               ) : (
@@ -2050,7 +2068,7 @@ export default function PlatformCurriculum() {
           <div className="lg:col-span-3 space-y-6">
             {error && (
               <div className="px-4 py-3 rounded-xl flex justify-between items-center text-xs" style={{ background: '#FCEBEB', color: '#791F1F' }}>
-                <span>⚠️ {error}</span>
+                <span>{error}</span>
                 <button onClick={() => setError('')}><X size={13} /></button>
               </div>
             )}
@@ -2219,15 +2237,17 @@ export default function PlatformCurriculum() {
 
                 {/* Chapters */}
                 {loadingDetails ? (
-                  <div className="py-24 text-center">
-                    <div className="w-8 h-8 border-2 rounded-full animate-spin mx-auto mb-3" style={{ borderColor: PURPLE, borderTopColor: 'transparent' }} />
-                    <p className="text-xs text-gray-400 font-medium">Loading syllabus template…</p>
-                  </div>
+                  <InlineLoader portal="platform-admin" label="Loading syllabus template…" size="lg" className="py-24" />
                 ) : chapters.length === 0 ? (
-                  <div className="bg-white border border-dashed rounded-3xl py-16 text-center" style={{ borderColor: BORDER }}>
-                    <p className="text-xs text-gray-400 mb-3">No chapters yet — add one, or bulk-import above.</p>
-                    <button onClick={() => setShowChapterModal(true)} className="text-xs font-bold hover:underline" style={{ color: PURPLE }}>+ Add first chapter</button>
-                  </div>
+                  <EmptyState
+                    icon={BookOpen}
+                    title="No chapters yet — add one, or bulk-import above."
+                    className="rounded-3xl border-dashed bg-white py-16"
+                    style={{ borderColor: BORDER }}
+                    action={
+                      <button onClick={() => setShowChapterModal(true)} className="text-xs font-bold hover:underline" style={{ color: PURPLE }}>+ Add first chapter</button>
+                    }
+                  />
                 ) : (
                   <div className="space-y-6">
                     {semesterGroups.map(group => (
@@ -2327,7 +2347,7 @@ export default function PlatformCurriculum() {
                                           </div>
                                         </div>
                                         {t.content_text && <p className="text-[10px] text-gray-400 mt-1 line-clamp-2">{t.content_text}</p>}
-                                        {t.content_pdf_url && <p className="text-[10px] truncate mt-1" style={{ color: PURPLE }}>📄 {t.content_pdf_url}</p>}
+                                        {t.content_pdf_url && <p className="text-[10px] truncate mt-1" style={{ color: PURPLE }}>PDF attached</p>}
                                         {t.subtopics && t.subtopics.length > 0 && (
                                           <ul className="mt-1.5 space-y-0.5">
                                             {t.subtopics.map((st, si) => (
@@ -2597,9 +2617,7 @@ export default function PlatformCurriculum() {
 
             <div className="flex-1 overflow-y-auto space-y-2 pr-1">
               {loadingMaterials ? (
-                <div className="py-10 text-center">
-                  <div className="w-6 h-6 border-2 rounded-full animate-spin mx-auto" style={{ borderColor: PURPLE, borderTopColor: 'transparent' }} />
-                </div>
+                <InlineLoader portal="platform-admin" label="Loading files…" />
               ) : materials.length === 0 ? (
                 <p className="text-xs text-gray-400 text-center py-10">No files uploaded yet — use &quot;Upload textbook / handbook&quot; to add one.</p>
               ) : (
@@ -2773,7 +2791,7 @@ export default function PlatformCurriculum() {
                                   )}
                                   {mergeError && mergeError.subjectName === group.subjectName && mergeError.bookType === bt && (
                                     <div className="flex items-start gap-1.5 text-[11px] rounded-lg px-2.5 py-2" style={{ background: '#FCEBEB', color: '#791F1F' }}>
-                                      ⚠️ {mergeError.message}
+                                      {mergeError.message}
                                     </div>
                                   )}
                                 </div>

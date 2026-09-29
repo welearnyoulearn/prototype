@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import jwt from 'jsonwebtoken'
 import pool from '@/lib/db'
-import { requireFeeAccess } from '@/lib/auth'
+import { requireFeeAccess, schoolHasFeature } from '@/lib/auth'
 import { JWT_SECRET } from '@/lib/auth-constants'
 
 // GET /api/fees/upi-id?school_id=X — returns { upi_id, locked }
@@ -13,6 +13,12 @@ export async function GET(req: NextRequest) {
     const school_id = req.nextUrl.searchParams.get('school_id')
     if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
     if (!await requireFeeAccess(school_id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    // Server-side plan gate — the UI hides this whole panel when the school's
+    // plan/override doesn't include online-payments, but that's presentation
+    // only; without this a direct API call could still set up UPI collection.
+    if (!await schoolHasFeature(Number(school_id), 'online-payments')) {
+      return NextResponse.json({ error: 'Online payments is not enabled for this school' }, { status: 403 })
+    }
     const { rows: [sc] } = await pool.query(`SELECT upi_id FROM schools WHERE id = $1`, [school_id])
     const upi_id = sc?.upi_id || ''
     return NextResponse.json({ upi_id, locked: !!upi_id })
@@ -37,6 +43,9 @@ export async function PUT(req: NextRequest) {
     const { school_id, upi_id, unlockToken } = await req.json()
     if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
     if (!await requireFeeAccess(school_id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    if (!await schoolHasFeature(Number(school_id), 'online-payments')) {
+      return NextResponse.json({ error: 'Online payments is not enabled for this school' }, { status: 403 })
+    }
 
     const { rows: [sc] } = await pool.query(`SELECT upi_id FROM schools WHERE id = $1`, [school_id])
     const alreadySet = !!sc?.upi_id

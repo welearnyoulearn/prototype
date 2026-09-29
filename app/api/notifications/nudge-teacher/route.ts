@@ -7,9 +7,8 @@ import { requireFeeAccess } from '@/lib/auth'
 //
 // School-admin-only, one-off nudge from the Syllabus Tracking screen when a
 // class-subject is "Behind" — a plain in-app notification row, same
-// mechanism and shape as every other teacher-directed alert in this app
-// (see PUT /api/leave-requests/:id's approved/rejected notification): a
-// direct INSERT INTO notifications with sender_teacher_id left NULL (the
+// mechanism and shape as every other teacher-directed alert in this app:
+// a direct INSERT INTO notifications with sender_teacher_id left NULL (the
 // sender is a school admin, not a teacher), fire-and-forget, no new
 // notification channel introduced.
 export async function POST(req: NextRequest) {

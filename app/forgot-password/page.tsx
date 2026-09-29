@@ -2,7 +2,8 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
-import AuthShell, { THEMES, AuthError } from '@/app/components/AuthShell'
+import AuthShell, { THEMES, AuthError, AuthInput } from '@/app/components/AuthShell'
+import { ButtonLoader } from '@/components/loaders'
 
 export default function ForgotPasswordPage() {
   const theme = THEMES.admin
@@ -38,23 +39,17 @@ export default function ForgotPasswordPage() {
       ) : (
         <>
           <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-white/70 mb-1.5">School ID or Email</label>
-              <input
-                type="text" value={identifier} onChange={e => setIdentifier(e.target.value)}
-                placeholder="wlyl-schl-... or admin@email.com" required
-                className={`w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder:text-white/25 focus:outline-none focus:ring-2 ${theme.ring} focus:border-transparent transition backdrop-blur-sm`}
-              />
-            </div>
+            <AuthInput label="School ID or Email" type="text" value={identifier} onChange={setIdentifier}
+          required={true} placeholder="wlyl-schl-... or admin@email.com" ring={theme.ring} />
             <button type="submit" disabled={loading}
-              className={`w-full bg-gradient-to-r ${theme.btnGradient} text-white font-semibold py-3 rounded-xl text-sm transition-all disabled:opacity-50 shadow-lg hover:shadow-xl hover:scale-[1.01] active:scale-[0.99] flex items-center justify-center gap-2`}>
+              className="auth-submit">
               {loading
-                ? <><svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>Sending...</>
+                ? <ButtonLoader label="Sending…" />
                 : 'Send Reset Link'}
             </button>
           </form>
-          <div className="mt-5 pt-5 border-t border-white/8 text-center">
-            <Link href="/login" className="text-sm text-white/30 hover:text-white/50 transition">← Back to login</Link>
+          <div className="mt-5 pt-5 border-t border-border text-center">
+            <Link href="/login" className="text-sm text-muted-foreground hover:text-primary transition">← Back to login</Link>
           </div>
         </>
       )}

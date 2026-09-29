@@ -7,6 +7,9 @@ export type QueueEntry = {
   body: Record<string, unknown>
   status: 'pending' | 'synced' | 'failed'
   queued_at: string
+  /** The server refused this submission for good (already marked, holiday, …) — retrying is pointless. */
+  terminal?: boolean
+  reason?: string
 }
 
 export type SyncResult = { id: number; status: string }
@@ -76,7 +79,7 @@ export function useOfflineAttendance() {
   }
 
   async function retryFailed() {
-    const failed = queue.filter(q => q.status === 'failed')
+    const failed = queue.filter(q => q.status === 'failed' && !q.terminal)
     for (const entry of failed) {
       try {
         await fetch('/api/attendance', {
@@ -89,7 +92,19 @@ export function useOfflineAttendance() {
     await loadQueue()
   }
 
-  return { isOnline, queue, swReady, syncResults, loadQueue, retryFailed }
+  // Clears submissions the server refused, once the user has read why.
+  async function dismissRejected() {
+    try {
+      const db = await openDB()
+      const tx = db.transaction('queue', 'readwrite')
+      const store = tx.objectStore('queue')
+      for (const q of queue.filter(e => e.terminal)) store.delete(q.id)
+      await new Promise<void>((resolve, reject) => { tx.oncomplete = () => resolve(); tx.onerror = () => reject(tx.error) })
+    } catch { /* nothing to clear */ }
+    await loadQueue()
+  }
+
+  return { isOnline, queue, swReady, syncResults, loadQueue, retryFailed, dismissRejected }
 }
 
 function openDB(): Promise<IDBDatabase> {

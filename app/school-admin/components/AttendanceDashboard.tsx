@@ -1,30 +1,15 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
+import { ClipboardList } from 'lucide-react'
 import { useOfflineAttendance } from '../hooks/useOfflineAttendance'
+import AttendanceTodayPanel, { type AttendanceOverview } from './AttendanceTodayPanel'
+import { todayIST } from '@/lib/attendanceRules'
+import { EmptyState } from '@/components/ui/empty-state'
+import AttendanceOverviewDashboard from './AttendanceOverviewDashboard'
+import AttendanceAbsentees from './AttendanceAbsentees'
 
-type Props = { schoolId: number }
-
-// Analytics types
-type ChronicAbsentee = {
-  student_id: number; name: string; grade: string; section: string
-  roll_number: string; absent_days: number; last_absent_date: string
-}
-type WeeklyTrend = { week_start: string; present: number; total: number }
-type ClassSummary  = { class_id: number; grade: string; section: string; present: number; total: number; pct: number | null }
-
-type SubstituteRecord = {
-  id: number
-  period_number: number
-  subject_name: string | null
-  grade: string
-  section: string
-  original_teacher_name: string | null
-  substitute_teacher_name: string | null
-  time_from: string | null
-  time_to: string | null
-  date: string
-}
+type Props = { schoolId: number; onNavigate?: (key: string) => void }
 
 type ClassAttendance = {
   id: number
@@ -117,18 +102,16 @@ function SessionCell({ total, present, absent, late, markedBy, markedAt, session
   )
 }
 
-export default function AttendanceDashboard({ schoolId }: Props) {
-  const { isOnline, queue, retryFailed } = useOfflineAttendance()
-  const [tab, setTab]           = useState<'daily' | 'analytics'>('daily')
-  const [date, setDate]         = useState(new Date().toISOString().split('T')[0])
+export default function AttendanceDashboard({ schoolId, onNavigate }: Props) {
+  const { isOnline, queue, retryFailed, dismissRejected } = useOfflineAttendance()
+  const [tab, setTab]           = useState<'overview' | 'daily'>('overview')
+  // Day register: the class cards, or every absentee on one page
+  const [dailyView, setDailyView] = useState<'classes' | 'absentees'>('classes')
+  const [date, setDate]         = useState(todayIST())
   const [data, setData]         = useState<ClassAttendance[]>([])
   const [loading, setLoading]   = useState(true)
   const [error, setError]       = useState('')
-  const [substitutes, setSubstitutes] = useState<SubstituteRecord[]>([])
-  // Analytics state
-  const [analyticsDays, setAnalyticsDays]   = useState(30)
-  const [analytics, setAnalytics]           = useState<{ chronic_absentees: ChronicAbsentee[]; weekly_trend: WeeklyTrend[]; class_summary: ClassSummary[] } | null>(null)
-  const [analyticsLoading, setAnalyticsLoading] = useState(false)
+  const [overview, setOverview] = useState<AttendanceOverview | null>(null)
   // Class detail modal
   const [modalClass, setModalClass]         = useState<ClassAttendance | null>(null)
   const [modalRecords, setModalRecords]     = useState<StudentRecord[]>([])
@@ -138,15 +121,14 @@ export default function AttendanceDashboard({ schoolId }: Props) {
     setLoading(true)
     setError('')
     try {
-      const [attRes, subRes] = await Promise.all([
+      const [attRes, ovRes] = await Promise.all([
         fetch(`/api/attendance?school_id=${schoolId}&date=${d}&view=school`),
-        fetch(`/api/substitutes?school_id=${schoolId}&date=${d}`),
+        fetch(`/api/attendance/overview?date=${d}`),
       ])
+      setOverview(ovRes.ok ? await ovRes.json() : null)
       const attJson = await attRes.json()
       if (!attRes.ok) throw new Error(attJson.error)
       setData(Array.isArray(attJson) ? attJson : [])
-      const subJson = await subRes.json()
-      setSubstitutes(Array.isArray(subJson) ? subJson : [])
     } catch {
       setError('Failed to load attendance data')
     } finally {
@@ -155,14 +137,6 @@ export default function AttendanceDashboard({ schoolId }: Props) {
   }, [schoolId])
 
   useEffect(() => { load(date) }, [load, date])
-
-  async function loadAnalytics(days: number) {
-    setAnalyticsLoading(true); setAnalytics(null)
-    try {
-      const data = await fetch(`/api/attendance/analytics?school_id=${schoolId}&days=${days}`).then(r => r.json())
-      if (data.chronic_absentees) setAnalytics(data)
-    } finally { setAnalyticsLoading(false) }
-  }
 
   async function openClassDetail(cls: ClassAttendance) {
     setModalClass(cls)
@@ -216,8 +190,17 @@ export default function AttendanceDashboard({ schoolId }: Props) {
               ))}
             </div>
           </div>
-          {queue.some(q => q.status === 'failed') && (
-            <button onClick={retryFailed} className="text-xs bg-blue-600 text-white px-3 py-1.5 rounded-lg">Retry Failed</button>
+          {queue.some(q => q.status === 'failed' && !q.terminal) && (
+            <button onClick={retryFailed} data-testid="attendance-retry-failed-btn" className="text-xs bg-blue-600 text-white px-3 py-1.5 rounded-lg">Retry Failed</button>
+          )}
+          {queue.some(q => q.terminal) && (
+            <div className="w-full basis-full" data-testid="attendance-rejected-queue">
+              {queue.filter(q => q.terminal).map(q => (
+                <p key={q.id} className="text-xs text-red-700 mt-1">Not saved: {q.reason}</p>
+              ))}
+              <button onClick={dismissRejected} data-testid="attendance-dismiss-rejected-btn"
+                className="mt-2 text-xs border border-red-300 text-red-700 px-3 py-1.5 rounded-lg hover:bg-red-50">Dismiss</button>
+            </div>
           )}
         </div>
       )}
@@ -226,32 +209,24 @@ export default function AttendanceDashboard({ schoolId }: Props) {
       <div className={`flex items-center justify-between mb-5 flex-wrap gap-3 ${modalClass ? 'hidden' : ''}`}>
         <div>
           <h2 className="text-xl font-bold text-gray-900">Attendance</h2>
-          <p className="text-sm text-gray-500 mt-0.5">Daily register and attendance analytics</p>
+          <p className="text-sm text-gray-500 mt-0.5">School overview, class and student attendance, and the daily register</p>
         </div>
         <div className="flex items-center gap-2">
           {tab === 'daily' && (
             <>
-              <input type="date" value={date} max={new Date().toISOString().split('T')[0]}
+              <input type="date" value={date} max={todayIST()}
+                data-testid="attendance-date-input"
                 onChange={e => setDate(e.target.value)}
                 className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" />
-              <button onClick={() => load(date)} className="text-sm text-blue-600 border border-blue-200 px-3 py-2 rounded-lg hover:bg-blue-50">Refresh</button>
+              <button onClick={() => load(date)} data-testid="attendance-refresh-btn" className="text-sm text-blue-600 border border-blue-200 px-3 py-2 rounded-lg hover:bg-blue-50">Refresh</button>
             </>
           )}
-          {tab === 'analytics' && (
-            <div className="flex gap-1">
-              {[7, 30, 90].map(d => (
-                <button key={d} onClick={() => { setAnalyticsDays(d); loadAnalytics(d) }}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${analyticsDays === d ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
-                  {d}d
-                </button>
-              ))}
-            </div>
-          )}
-          <div className="flex gap-1 bg-gray-100 p-1 rounded-lg">
-            {(['daily', 'analytics'] as const).map(t => (
-              <button key={t} onClick={() => { setTab(t); if (t === 'analytics' && !analytics) loadAnalytics(analyticsDays) }}
-                className={`px-3 py-1.5 rounded-md text-xs font-semibold capitalize transition-colors ${tab === t ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
-                {t === 'daily' ? 'Daily View' : 'Analytics'}
+          <div className="flex gap-1 bg-gray-100 p-1 rounded-lg" role="tablist" aria-label="Attendance view">
+            {(['overview', 'daily'] as const).map(t => (
+              <button key={t} type="button" role="tab" aria-selected={tab === t} data-testid={`attendance-tab-${t}`}
+                onClick={() => setTab(t)}
+                className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${tab === t ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+                {t === 'overview' ? 'Overview' : 'Day register'}
               </button>
             ))}
           </div>
@@ -259,13 +234,27 @@ export default function AttendanceDashboard({ schoolId }: Props) {
       </div>
 
       {tab === 'daily' && !modalClass && <p className="text-sm text-gray-500 mb-4">{dateFormatted}</p>}
+      {tab === 'daily' && !modalClass && (
+        <div className="flex gap-1 bg-gray-100 p-1 rounded-lg w-fit mb-4" role="tablist" aria-label="Day register view">
+          {(['classes', 'absentees'] as const).map(v => (
+            <button key={v} type="button" role="tab" aria-selected={dailyView === v} data-testid={`attendance-daily-view-${v}`}
+              onClick={() => setDailyView(v)}
+              className={`px-4 py-1.5 rounded-md text-xs font-semibold transition-colors ${dailyView === v ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+              {v === 'classes' ? 'Classes' : 'Absentees'}
+            </button>
+          ))}
+        </div>
+      )}
+      {tab === 'daily' && !modalClass && dailyView === 'absentees' && (
+        <AttendanceAbsentees date={date} onOpenClass={id => { const c = data.find(x => x.id === id); if (c) void openClassDetail(c) }} />
+      )}
+      {tab === 'daily' && !modalClass && dailyView === 'classes' && (
+        <AttendanceTodayPanel overview={overview} onNavigate={onNavigate}
+          onOpenClass={id => { const c = data.find(x => x.id === id); if (c) void openClassDetail(c) }} />
+      )}
 
-      {tab === 'analytics' && (
-        <AttendanceAnalyticsPanel
-          analytics={analytics}
-          loading={analyticsLoading}
-          days={analyticsDays}
-        />
+      {tab === 'overview' && (
+        <AttendanceOverviewDashboard overview={overview} onOpenRegister={() => setTab('daily')} />
       )}
 
       {/* ── Class Detail Full Page View ── */}
@@ -273,7 +262,7 @@ export default function AttendanceDashboard({ schoolId }: Props) {
         <div>
           {/* Back header */}
           <div className="flex items-center gap-3 mb-5">
-            <button onClick={() => setModalClass(null)}
+            <button onClick={() => setModalClass(null)} data-testid="attendance-class-back-btn"
               className="flex items-center justify-center w-9 h-9 rounded-xl bg-gray-100 hover:bg-gray-200 transition-colors text-gray-600">
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
@@ -414,7 +403,7 @@ export default function AttendanceDashboard({ schoolId }: Props) {
         </div>
       )}
 
-      {tab === 'daily' && !modalClass && <>
+      {tab === 'daily' && !modalClass && dailyView === 'classes' && !overview?.nonWorking && <>
       {error && (
         <div className="mb-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
           {error}
@@ -422,7 +411,7 @@ export default function AttendanceDashboard({ schoolId }: Props) {
       )}
 
       {/* Summary stat cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5" data-testid="attendance-day-stats">
         <div className="bg-white border border-gray-200 rounded-xl px-4 py-3">
           <p className="text-2xl font-bold text-gray-900">{totalClasses}</p>
           <p className="text-xs text-gray-400 mt-0.5">Total Classes</p>
@@ -442,45 +431,6 @@ export default function AttendanceDashboard({ schoolId }: Props) {
           </p>
         </div>
       </div>
-
-      {/* Substitutes active on selected date */}
-      {substitutes.length > 0 && (
-        <div className="mb-4 bg-amber-50 border border-amber-200 rounded-xl overflow-hidden">
-          <div className="px-4 py-3 border-b border-amber-100 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-semibold text-amber-800">Substitute Assignments</span>
-              <span className="text-xs bg-amber-200 text-amber-800 px-2 py-0.5 rounded-full font-medium">{substitutes.length} period{substitutes.length > 1 ? 's' : ''}</span>
-            </div>
-            <p className="text-xs text-amber-600">Teachers covering for absent staff on this date</p>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="bg-amber-100/50">
-                  <th className="text-left px-4 py-2 font-semibold text-amber-700">Class</th>
-                  <th className="text-left px-3 py-2 font-semibold text-amber-700">Period</th>
-                  <th className="text-left px-3 py-2 font-semibold text-amber-700">Subject</th>
-                  <th className="text-left px-3 py-2 font-semibold text-amber-700">Time</th>
-                  <th className="text-left px-3 py-2 font-semibold text-amber-700">Absent Teacher</th>
-                  <th className="text-left px-3 py-2 font-semibold text-amber-700">Substitute</th>
-                </tr>
-              </thead>
-              <tbody>
-                {substitutes.map(s => (
-                  <tr key={s.id} className="border-t border-amber-100 hover:bg-amber-50">
-                    <td className="px-4 py-2 font-semibold text-gray-800">Class {s.grade}-{s.section}</td>
-                    <td className="px-3 py-2 text-gray-600">P{s.period_number}</td>
-                    <td className="px-3 py-2 text-gray-700">{s.subject_name || '—'}</td>
-                    <td className="px-3 py-2 text-gray-500">{s.time_from ? `${s.time_from}–${s.time_to}` : '—'}</td>
-                    <td className="px-3 py-2 text-red-600">{s.original_teacher_name || '—'}</td>
-                    <td className="px-3 py-2 text-green-700 font-medium">{s.substitute_teacher_name || '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
 
       {/* Alert: classes with no attendance */}
       {notMarkedAny > 0 && (
@@ -504,16 +454,18 @@ export default function AttendanceDashboard({ schoolId }: Props) {
       {loading ? (
         <div className="bg-white border border-gray-200 rounded-xl py-16 text-center text-gray-400">Loading...</div>
       ) : data.length === 0 ? (
-        <div className="bg-white border border-gray-200 rounded-xl py-16 text-center">
-          <p className="text-gray-400">No classes found for this school</p>
-        </div>
+        <EmptyState
+          icon={ClipboardList}
+          title="No classes found for this school"
+          className="bg-white py-16"
+        />
       ) : (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {data.map(cls => {
             const bothMarked = !!cls.morning_total && !!cls.afternoon_total
             const noneMarked = !cls.morning_total && !cls.afternoon_total
             return (
-              <button key={cls.id} onClick={() => openClassDetail(cls)}
+              <button key={cls.id} onClick={() => openClassDetail(cls)} data-testid={`attendance-class-card-${cls.id}`}
                 className={`text-left bg-white rounded-xl border p-4 hover:shadow-md transition-all cursor-pointer w-full ${
                   bothMarked ? 'border-green-200 hover:border-green-400' :
                   noneMarked ? 'border-red-200 hover:border-red-400' :
@@ -546,155 +498,6 @@ export default function AttendanceDashboard({ schoolId }: Props) {
       )}
       </> /* end daily tab */}
 
-    </div>
-  )
-}
-
-// ─── Analytics Panel ──────────────────────────────────────────────────────────
-function AttendanceAnalyticsPanel({
-  analytics, loading, days,
-}: {
-  analytics: { chronic_absentees: ChronicAbsentee[]; weekly_trend: WeeklyTrend[]; class_summary: ClassSummary[] } | null
-  loading: boolean
-  days: number
-}) {
-  if (loading) return (
-    <div className="py-20 text-center">
-      <div className="w-5 h-5 border-2 border-blue-400 border-t-transparent rounded-full animate-spin mx-auto" />
-    </div>
-  )
-  if (!analytics) return (
-    <div className="py-16 text-center text-gray-400 text-sm">No analytics data available.</div>
-  )
-
-  const { chronic_absentees, weekly_trend, class_summary } = analytics
-  const maxPresent = Math.max(...weekly_trend.map(w => w.total), 1)
-  const classesWithData = class_summary.filter(c => c.total > 0)
-  const worstClasses = [...classesWithData].sort((a, b) => (a.pct ?? 100) - (b.pct ?? 100)).slice(0, 5)
-  const bestClasses  = [...classesWithData].sort((a, b) => (b.pct ?? 0) - (a.pct ?? 0)).slice(0, 5)
-
-  return (
-    <div className="space-y-5">
-      {/* Weekly trend chart */}
-      {weekly_trend.length > 0 && (
-        <div className="bg-white rounded-xl border border-gray-200 p-5">
-          <p className="font-bold text-gray-800 text-sm mb-4">Weekly Attendance Trend — Last {days} days</p>
-          <div className="flex items-end gap-2 h-28">
-            {weekly_trend.map(w => {
-              const p = w.total > 0 ? Math.round((w.present / w.total) * 100) : 0
-              const h = Math.max(4, Math.round((p / 100) * 100))
-              const label = new Date(w.week_start + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
-              return (
-                <div key={w.week_start} className="flex-1 flex flex-col items-center gap-1">
-                  <span className="text-[10px] font-semibold text-gray-500">{p}%</span>
-                  <div className="w-full flex items-end justify-center">
-                    <div className="w-full max-w-[40px] rounded-t-md transition-all"
-                      style={{
-                        height: `${h}px`,
-                        backgroundColor: p >= 85 ? '#10b981' : p >= 70 ? '#f59e0b' : '#ef4444',
-                      }} />
-                  </div>
-                  <span className="text-[9px] text-gray-400 whitespace-nowrap">{label}</span>
-                </div>
-              )
-            })}
-          </div>
-        </div>
-      )}
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-        {/* Chronic absentees */}
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-          <div className="px-5 py-3 border-b border-gray-100 flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-red-500" />
-            <p className="font-bold text-gray-800 text-sm">Chronic Absentees</p>
-            <span className="text-xs text-gray-400 ml-auto">3+ absences in {days} days</span>
-          </div>
-          {chronic_absentees.length === 0 ? (
-            <p className="text-xs text-emerald-600 font-medium text-center py-6">No chronic absentees — great attendance!</p>
-          ) : (
-            <div className="divide-y divide-gray-50 max-h-72 overflow-y-auto">
-              {chronic_absentees.map(s => (
-                <div key={s.student_id} className="flex items-center justify-between px-4 py-2.5">
-                  <div>
-                    <p className="text-sm font-semibold text-gray-800">{s.name}</p>
-                    <p className="text-[10px] text-gray-400">Gr.{s.grade}-{s.section} · {s.roll_number}</p>
-                  </div>
-                  <div className="text-right">
-                    <p className={`text-sm font-black ${s.absent_days >= 7 ? 'text-red-600' : s.absent_days >= 5 ? 'text-orange-500' : 'text-amber-500'}`}>
-                      {s.absent_days} days
-                    </p>
-                    <p className="text-[10px] text-gray-400">Last: {new Date(s.last_absent_date + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Class performance split */}
-        <div className="bg-white rounded-xl border border-gray-200 p-5">
-          <p className="font-bold text-gray-800 text-sm mb-3">Class Attendance (Last {days} days)</p>
-          {classesWithData.length === 0 ? (
-            <p className="text-xs text-gray-400 text-center py-4">No data recorded yet.</p>
-          ) : (
-            <div className="space-y-2">
-              {class_summary
-                .filter(c => c.total > 0)
-                .sort((a, b) => parseInt(a.grade) - parseInt(b.grade))
-                .map(c => (
-                  <div key={c.class_id} className="flex items-center gap-3">
-                    <span className="text-xs text-gray-500 w-14 flex-shrink-0">Gr.{c.grade}-{c.section}</span>
-                    <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
-                      <div className="h-full rounded-full transition-all"
-                        style={{
-                          width: `${c.pct ?? 0}%`,
-                          backgroundColor: (c.pct ?? 0) >= 85 ? '#10b981' : (c.pct ?? 0) >= 70 ? '#f59e0b' : '#ef4444',
-                        }} />
-                    </div>
-                    <span className={`text-xs font-bold w-10 text-right flex-shrink-0 ${(c.pct ?? 0) >= 85 ? 'text-emerald-600' : (c.pct ?? 0) >= 70 ? 'text-amber-500' : 'text-red-500'}`}>
-                      {c.pct ?? 0}%
-                    </span>
-                  </div>
-                ))}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Best vs worst */}
-      {classesWithData.length > 0 && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-          <div className="bg-emerald-50 rounded-xl border border-emerald-200 p-4">
-            <p className="text-xs font-bold text-emerald-700 mb-3">Best Attendance</p>
-            <div className="space-y-2">
-              {bestClasses.map((c, i) => (
-                <div key={c.class_id} className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-emerald-400 font-bold w-4">#{i+1}</span>
-                    <span className="text-sm font-semibold text-gray-800">Grade {c.grade} – Sec {c.section}</span>
-                  </div>
-                  <span className="text-sm font-black text-emerald-600">{c.pct}%</span>
-                </div>
-              ))}
-            </div>
-          </div>
-          <div className="bg-red-50 rounded-xl border border-red-200 p-4">
-            <p className="text-xs font-bold text-red-600 mb-3">Needs Attention</p>
-            <div className="space-y-2">
-              {worstClasses.map((c, i) => (
-                <div key={c.class_id} className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-red-300 font-bold w-4">#{i+1}</span>
-                    <span className="text-sm font-semibold text-gray-800">Grade {c.grade} – Sec {c.section}</span>
-                  </div>
-                  <span className="text-sm font-black text-red-500">{c.pct}%</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }

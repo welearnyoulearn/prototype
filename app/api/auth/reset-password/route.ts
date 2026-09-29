@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
-import { hashPassword } from '@/lib/auth'
+import { hashPassword, revokeUserSessions } from '@/lib/auth'
 
 export async function POST(req: NextRequest) {
   try {
@@ -8,9 +8,14 @@ export async function POST(req: NextRequest) {
     if (!token || !newPassword) return NextResponse.json({ error: 'Token and new password required' }, { status: 400 })
     if (newPassword.length < 8) return NextResponse.json({ error: 'Password must be at least 8 characters' }, { status: 400 })
 
+    // A deactivated account can't use any set-password link, even an unused one
+    // issued before it was deactivated (deactivation also voids them, this is the
+    // backstop for links created any other way).
     const result = await pool.query(
-      `SELECT * FROM password_reset_tokens
-       WHERE token = $1 AND used = FALSE AND expires_at > NOW()`,
+      `SELECT t.* FROM password_reset_tokens t
+       JOIN users u ON u.id = t.user_id
+       WHERE t.token = $1 AND t.used = FALSE AND t.expires_at > NOW()
+         AND COALESCE(u.status, 'active') <> 'inactive'`,
       [token]
     )
 
@@ -23,6 +28,8 @@ export async function POST(req: NextRequest) {
 
     await pool.query('UPDATE users SET password_hash = $1, first_login = FALSE WHERE id = $2', [newHash, resetRecord.user_id])
     await pool.query('UPDATE password_reset_tokens SET used = TRUE WHERE id = $1', [resetRecord.id])
+    // Whoever knew the old password (or held a stolen session) is signed out.
+    await revokeUserSessions(resetRecord.user_id)
 
     return NextResponse.json({ success: true })
   } catch (error) {

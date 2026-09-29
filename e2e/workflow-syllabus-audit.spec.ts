@@ -36,7 +36,7 @@ async function loginSchoolAdmin(identifier: string, password: string): Promise<s
   const res = await fetch(`${BASE}/api/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ identifier, password }),
+    body: JSON.stringify({ email: identifier, password }),
     redirect: 'manual',
   })
   const setCookies = res.headers.getSetCookie?.() ?? []
@@ -65,7 +65,7 @@ test.describe.serial('Syllabus UX — Full Audit', () => {
 
   let platformCookie: string
   let schoolId: number
-  let schoolCode: string
+  let adminEmail: string
   let schoolPass: string
   let adminCookie: string
   let classId: number
@@ -111,11 +111,11 @@ test.describe.serial('Syllabus UX — Full Audit', () => {
     // ── School A (main test subject) ──
     const school = await createSchoolWithRetry(platformCookie, { name: `Syllabus Audit School ${ts}` })
     schoolId = school.id
-    schoolCode = school.school_code
+    adminEmail = school.email
     schoolPass = school.temp_password
     await setSubscription(platformCookie, schoolId, 'premium')
 
-    adminCookie = await loginSchoolAdmin(schoolCode, schoolPass)
+    adminCookie = await loginSchoolAdmin(adminEmail, schoolPass)
 
     const classRes = await api('/api/classes', 'POST', { school_id: schoolId, grade: GRADE, section: 'A' }, adminCookie)
     classId = (classRes.data as any).id ?? (classRes.data as any).class?.id
@@ -228,7 +228,7 @@ test.describe.serial('Syllabus UX — Full Audit', () => {
     const schoolB = await createSchoolWithRetry(platformCookie, { name: `Syllabus Audit School B ${ts}` })
     otherSchoolId = schoolB.id
     await setSubscription(platformCookie, otherSchoolId, 'premium')
-    otherAdminCookie = await loginSchoolAdmin(schoolB.school_code, schoolB.temp_password)
+    otherAdminCookie = await loginSchoolAdmin(schoolB.email, schoolB.temp_password)
     const otherClassRes = await api('/api/classes', 'POST', { school_id: otherSchoolId, grade: GRADE, section: 'A' }, otherAdminCookie)
     otherClassId = (otherClassRes.data as any).id ?? (otherClassRes.data as any).class?.id
     if (!otherClassId) {

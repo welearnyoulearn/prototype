@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { GRADE_SEQUENCE } from '@/lib/grades'
+import { useConfirm } from '@/components/ui/use-confirm'
 
 type Book = {
   id: number
@@ -29,6 +30,7 @@ function fmt(chars: number) {
 }
 
 export default function TextbookLibrary({ schoolId }: { schoolId: number }) {
+  const { confirm, ConfirmDialog } = useConfirm()
   const [books, setBooks]           = useState<Book[]>([])
   const [loading, setLoading]       = useState(true)
   const [filterGrade, setFilterGrade] = useState('')
@@ -94,7 +96,8 @@ export default function TextbookLibrary({ schoolId }: { schoolId: number }) {
   }
 
   async function handleDelete(id: number, title: string) {
-    if (!confirm(`Remove "${title}" from the library? This will also remove all its AI context.`)) return
+    const ok = await confirm(`Remove "${title}" from the library? This will also remove all its AI context.`, { title: 'Remove textbook?', confirmText: 'Remove', destructive: true })
+    if (!ok) return
     await fetch(`/api/textbooks/${id}?school_id=${schoolId}`, { method: 'DELETE' })
     setBooks(prev => prev.filter(b => b.id !== id))
   }
@@ -108,10 +111,11 @@ export default function TextbookLibrary({ schoolId }: { schoolId: number }) {
 
   return (
     <div>
+      {ConfirmDialog}
       <div className="mb-6">
         <h2 className="text-xl font-bold text-gray-900">Textbook Library</h2>
         <p className="text-sm text-gray-500 mt-0.5">
-          Upload class textbooks as PDFs — AI automatically uses them for homework suggestions, student Q&amp;A, lesson plans and doubt answers.
+          Upload class textbooks as PDFs — AI automatically uses them for lesson plans.
         </p>
       </div>
 
@@ -193,13 +197,10 @@ export default function TextbookLibrary({ schoolId }: { schoolId: number }) {
       </div>
 
       {/* How AI uses it */}
-      <div className="bg-gradient-to-r from-violet-50 to-blue-50 border border-violet-200 rounded-xl p-5 mb-6">
+      <div className="bg-[#edf2eb] border-l-2 border-[#245b46] p-5 mb-6">
         <h4 className="font-semibold text-gray-800 mb-3 text-sm">How the AI uses uploaded textbooks</h4>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {[
-            { icon: '💬', label: 'Student Q&A', desc: 'AI answers from actual textbook content' },
-            { icon: '📝', label: 'Homework', desc: 'Homework questions match what\'s in the book' },
-            { icon: '🎯', label: 'Doubt Answers', desc: 'Doubt explanations cite textbook material' },
             { icon: '📋', label: 'Lesson Plans', desc: 'Lesson plans built around textbook chapters' },
           ].map(item => (
             <div key={item.label} className="bg-white rounded-lg p-3 border border-violet-100">

@@ -116,34 +116,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         [id, normalisedSubjectName, resolvedTeacherId, ppw]
       )
 
-      // If timetable already exists for this class, propagate teacher assignment (conflict-safe)
-      if (resolvedTeacherId) {
-        await pool.query(
-          `UPDATE class_timetable ct
-           SET teacher_id = $1
-           WHERE ct.class_id = $2
-             AND ct.subject_name = $3
-             AND ct.is_break = FALSE
-             AND ct.teacher_id IS DISTINCT FROM $1
-             AND NOT EXISTS (
-               SELECT 1 FROM class_timetable other
-               WHERE other.school_id   = ct.school_id
-                 AND other.class_id   != ct.class_id
-                 AND other.day_of_week   = ct.day_of_week
-                 AND other.period_number = ct.period_number
-                 AND other.teacher_id    = $1
-                 AND other.is_break = FALSE
-             )`,
-          [resolvedTeacherId, id, normalisedSubjectName]
-        )
-      }
-
       const teacherName = resolvedTeacherId
         ? (await pool.query('SELECT name FROM teachers WHERE id = $1', [resolvedTeacherId])).rows[0]?.name ?? null
         : null
 
       invalidateCache(`subjects:class:${id}`)
-      invalidateCache(`timetable:class:${id}`)
       invalidateCache(`health:${cls.school_id}`)
 
       return NextResponse.json({ ...result.rows[0], teacher_name: teacherName }, { status: 201 })
@@ -220,35 +197,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
       const effectiveName = newName || sub.subject_name
 
-      // If name changed, update timetable slots
-      if (newName && newName !== sub.subject_name) {
-        await pool.query(
-          `UPDATE class_timetable SET subject_name = $1 WHERE class_id = $2 AND subject_name = $3`,
-          [newName, id, sub.subject_name]
-        )
-      }
-
-      // If teacher changed, propagate to timetable (conflict-safe)
-      if (teacher_id !== undefined) {
-        const tid = teacher_id ? Number(teacher_id) : null
-        if (tid) {
-          await pool.query(
-            `UPDATE class_timetable ct SET teacher_id = $1
-             WHERE ct.class_id = $2 AND ct.subject_name = $3 AND ct.is_break = FALSE
-               AND ct.teacher_id IS DISTINCT FROM $1
-               AND NOT EXISTS (
-                 SELECT 1 FROM class_timetable o
-                 WHERE o.school_id = ct.school_id AND o.class_id != ct.class_id
-                   AND o.day_of_week = ct.day_of_week AND o.period_number = ct.period_number
-                   AND o.teacher_id = $1 AND o.is_break = FALSE
-               )`,
-            [tid, id, effectiveName]
-          )
-        }
-      }
-
       invalidateCache(`subjects:class:${id}`)
-      invalidateCache(`timetable:class:${id}`)
       invalidateCache(`health:${sub.school_id}`)
 
       const tid = teacher_id !== undefined ? (teacher_id ? Number(teacher_id) : null) : null
@@ -282,21 +231,8 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
         return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
       }
       await pool.query('DELETE FROM class_subjects WHERE id = $1 AND class_id = $2', [subject_id, id])
-      // Clear this subject from the timetable so no orphaned slots remain
-      if (sub?.subject_name) {
-        await pool.query(
-          `UPDATE class_timetable
-           SET subject_name = NULL, teacher_id = NULL, is_manual = FALSE
-           WHERE class_id = $1 AND subject_name = $2 AND is_break = FALSE`,
-          [id, sub.subject_name]
-        )
-      }
       invalidateCache(`subjects:class:${id}`)
-      invalidateCache(`timetable:class:${id}`)
-      if (sub?.school_id) {
-        invalidateCache(`health:${sub.school_id}`)
-        invalidateCache(`timetable:school:${sub.school_id}`)
-      }
+      if (sub?.school_id) invalidateCache(`health:${sub.school_id}`)
       return NextResponse.json({ success: true })
     } catch (error) {
       console.error(error)

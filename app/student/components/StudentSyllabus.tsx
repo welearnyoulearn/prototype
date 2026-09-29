@@ -1,10 +1,12 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { BookOpen, Check, Lock } from 'lucide-react'
+import { motion, useReducedMotion } from 'framer-motion'
+import { ArrowRight, BookOpen } from 'lucide-react'
 import TopicContentViewer from '@/app/components/TopicContentViewer'
-import { INK, GREEN, BORDER, SURFACE, CREAM } from '@/app/components/ulearn/theme'
-import { Pills, ProgressBar, UlearnCard, StatusPill } from '@/app/components/ulearn/primitives'
+import { Skeleton } from '@/components/ui/skeleton'
+import { StudentEmptyState, StudentPageIntro, StudentProgressTrack } from './StudentExperience'
+import { Sticker, subjectSticker, subjectTone } from './stickers'
 
 type Resource = { id: number; title: string; url: string; resource_type: string }
 
@@ -63,6 +65,7 @@ export default function StudentSyllabus({ schoolId, classId, grade }: Props) {
   const [activeClassSemester, setActiveClassSemester] = useState('')
   const [activeTopic, setActiveTopic] = useState<Topic | null>(null)
   const [materials, setMaterials] = useState<Material[]>([])
+  const reduceMotion = useReducedMotion()
 
   useEffect(() => {
     setLoading(true)
@@ -90,28 +93,23 @@ export default function StudentSyllabus({ schoolId, classId, grade }: Props) {
 
   if (loading) {
     return (
-      <div className="space-y-4 animate-pulse max-w-3xl mx-auto">
-        <div className="h-9 rounded-xl w-64" style={{ background: BORDER }} />
+      <div className="mx-auto max-w-4xl space-y-5" role="status" aria-live="polite" aria-busy="true">
+        <span className="sr-only">Preparing your learning path…</span>
+        <Skeleton className="h-28 rounded-[22px]" />
         <div className="flex gap-2">
-          {[1, 2, 3].map(i => <div key={i} className="h-9 w-24 rounded-lg" style={{ background: BORDER }} />)}
+          {[1, 2, 3].map(i => <Skeleton key={i} className="h-12 w-32 rounded-t-2xl" />)}
         </div>
-        <div className="h-20 rounded-2xl" style={{ background: BORDER }} />
-        {[1, 2].map(i => <div key={i} className="h-32 rounded-2xl" style={{ background: BORDER }} />)}
+        <Skeleton className="h-80 rounded-[22px]" />
       </div>
     )
   }
 
   if (subjects.length === 0) {
     return (
-      <UlearnCard className="max-w-md mx-auto text-center py-16 px-6" borderColor={BORDER}>
-        <p className="text-4xl mb-3">📚</p>
-        <p className="font-semibold" style={{ color: INK }}>No syllabus yet</p>
-        <p className="text-xs text-gray-400 mt-1">Your teacher hasn&apos;t mapped the syllabus for your class yet.</p>
-      </UlearnCard>
+      <StudentEmptyState sticker="thinking-face" title="Your learning path is not ready yet" description="Your teacher has not mapped the syllabus for this class. It will appear here when it is available." />
     )
   }
 
-  const subjectNames = subjects.map(s => s.subject)
   const subject = subjects.find(s => s.subject === activeSubject) ?? subjects[0]
 
   // This class's own Semester 1/2/... tabs — only when the teacher ran
@@ -140,111 +138,109 @@ export default function StudentSyllabus({ schoolId, classId, grade }: Props) {
     : [{ semester: null, chapters: chaptersForClassSemester }]
 
   const allLocked = subject.chapters.every(c => c.topics.every(t => t.status !== 'covered'))
+  const tone = subjectTone(subject.subject)
+  const meterTone = tone === 'yellow' ? 'pink' : 'yellow'
+  const cheer = subject.completion_pct >= 100 ? 'All done — amazing!' : subject.completion_pct >= 60 ? 'Nearly there!' : subject.completion_pct > 0 ? 'Keep going!' : 'Fresh start!'
 
   return (
-    <div className="max-w-3xl mx-auto space-y-5">
-      <div className="rounded-3xl p-4 sm:p-5" style={{ background: CREAM, border: `1px solid ${BORDER}` }}>
-        <h2 className="text-lg font-semibold" style={{ color: INK }}>My learning</h2>
-        <p className="text-sm text-gray-500 mt-0.5">Topics unlock as your teacher teaches them. Take the quiz once one&apos;s unlocked.</p>
-      </div>
+    <div className="mx-auto max-w-4xl space-y-8">
+      <StudentPageIntro eyebrow="Your learning path" title="Syllabus" sticker="graduation-cap" tone="blue"
+        description="Follow what has been taught, open study material, and see what comes next in each subject."
+        aside={<span className="sb-chip" data-size="lg" data-tone="yellow"><Sticker name="notebook" size="xs" />Grade {grade}</span>} />
 
-      <Pills items={subjectNames} value={activeSubject} onChange={setActiveSubject} color={GREEN} />
-
-      {classSemesterChoices.length > 0 && (
-        <Pills
-          items={classSemesterChoices}
-          value={effectiveClassSemester}
-          onChange={setActiveClassSemester}
-          color={GREEN}
-        />
-      )}
-
-      <UlearnCard className="p-4 flex items-center justify-between gap-4" borderColor={BORDER}>
-        <div className="flex-1 min-w-0">
-          <div className="text-sm font-medium mb-1.5 truncate" style={{ color: INK }}>
-            {subject.subject} &middot; {subject.covered}/{subject.total} topics taught
-          </div>
-          <ProgressBar pct={subject.completion_pct} color={GREEN} className="w-full" />
-        </div>
-        <div className="text-right shrink-0">
-          <div className="text-2xl font-semibold" style={{ color: INK }}>{subject.completion_pct}%</div>
-          <div className="text-xs text-gray-400">covered</div>
-        </div>
-      </UlearnCard>
-
-      {materials.length > 0 && (
-        <UlearnCard className="p-4" borderColor={BORDER}>
-          <div className="text-sm font-medium mb-2" style={{ color: INK }}>Textbook</div>
-          <div className="space-y-2">
-            {materials.map(m => (
-              <a key={m.id} href={m.file_url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-sm px-3 py-2 rounded-lg hover:underline" style={{ background: SURFACE, color: GREEN }}>
-                <BookOpen size={14} className="shrink-0" /> {m.title}
-              </a>
-            ))}
-          </div>
-        </UlearnCard>
-      )}
-
-      {allLocked && (
-        <UlearnCard className="p-4 text-center text-sm text-gray-400" borderColor={BORDER}>
-          Nothing unlocked in {subject.subject} yet — your teacher hasn&apos;t marked any topics as taught.
-        </UlearnCard>
-      )}
-
-      {semesterGroups.map(group => (
-        <div key={group.semester ?? '__none__'} className="space-y-4">
-          {group.semester && (
-            <h3 className="text-xs font-bold uppercase tracking-widest px-1" style={{ color: GREEN }}>{group.semester}</h3>
-          )}
-          {group.chapters.map(ch => (
-        <UlearnCard key={ch.chapter_name} className="p-4" borderColor={BORDER}>
-          <div className="flex items-center gap-2 mb-3">
-            <BookOpen size={16} style={{ color: GREEN }} />
-            <span className="font-medium text-sm" style={{ color: INK }}>{ch.chapter_name}</span>
-            <span className="text-xs text-gray-400 ml-auto">{ch.covered}/{ch.topics.length} taught</span>
-          </div>
-          <div className="space-y-2">
-            {ch.topics.length === 0 && (
-              <p className="text-xs text-gray-400 italic">No topics added to this chapter yet.</p>
-            )}
-            {ch.topics.map(t => {
-              const taught = t.status === 'covered'
-              if (!taught) {
-                // Locked topics stay visible so the student can see the road ahead,
-                // but the name is all they get until the teacher marks it taught.
-                return (
-                  <div
-                    key={t.id}
-                    data-testid={`topic-locked-${t.id}`}
-                    className="flex items-center gap-3 rounded-lg px-3 py-2 flex-wrap"
-                    style={{ background: SURFACE, opacity: 0.7 }}
-                  >
-                    <Lock size={14} className="shrink-0" style={{ color: '#9b978d' }} />
-                    <span className="text-sm flex-1 min-w-[140px]" style={{ color: '#5F5E5A' }}>{t.topic_name}</span>
-                    <StatusPill status="locked" />
-                  </div>
-                )
-              }
-              return (
-                <div key={t.id} className="flex items-center gap-3 rounded-lg px-3 py-2 flex-wrap" style={{ background: SURFACE }}>
-                  <Check size={14} style={{ color: GREEN }} className="shrink-0" />
-                  <button
-                    data-testid={`topic-study-${t.id}`}
-                    onClick={() => setActiveTopic(t)}
-                    className="text-sm flex-1 text-left hover:underline min-w-[140px]"
-                    style={{ color: INK }}
-                  >
-                    {t.topic_name}
-                  </button>
-                  <StatusPill status="taught" />
-                </div>
-              )
-            })}
-          </div>
-        </UlearnCard>
+      <div>
+        <div className="sb-folder-tabs" role="group" aria-label="Subjects">
+          {subjects.map((s, i) => (
+            <button key={s.subject} type="button" onClick={() => setActiveSubject(s.subject)} aria-pressed={s.subject === subject.subject}
+              className="sb-folder-tab" data-tone={subjectTone(s.subject)} data-testid={`syllabus-subject-tab-${i}`}>
+              <Sticker name={subjectSticker(s.subject)} size="sm" tilt={-8} />
+              {s.subject}
+            </button>
           ))}
         </div>
-      ))}
+
+        <motion.div key={subject.subject} initial={reduceMotion ? false : { opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}
+          className="sb-folder-body space-y-7" data-tone={tone} data-testid="student-syllabus-panel">
+          <div className="grid items-center gap-6 sm:grid-cols-[auto_1fr_auto]">
+            <Sticker name={subjectSticker(subject.subject)} size="hero" tilt={-8} className="hidden sm:inline-block" />
+            <div className="min-w-0">
+              <h2 className="sb-display truncate text-3xl sm:text-4xl">{subject.subject}</h2>
+              <div className="mt-3 max-w-md"><StudentProgressTrack value={subject.completion_pct} tone={meterTone} label={`${subject.covered} of ${subject.total} topics taught`} /></div>
+            </div>
+            <div className="sb-score-badge" data-testid="syllabus-coverage">
+              <span>
+                <motion.strong key={subject.completion_pct} initial={reduceMotion ? false : { scale: 0.8 }} animate={{ scale: 1 }} transition={{ duration: 0.25 }}>{subject.completion_pct}%</motion.strong>
+                <span className="block text-[11px] font-extrabold uppercase tracking-[.08em]">covered</span>
+                <span className="sb-hand mt-0.5 block text-base">{cheer}</span>
+              </span>
+            </div>
+          </div>
+
+          {classSemesterChoices.length > 0 && (
+            <div className="sb-seg" role="group" aria-label="Semester">
+              {classSemesterChoices.map(c => (
+                <button key={c} type="button" onClick={() => setActiveClassSemester(c)} aria-pressed={c === effectiveClassSemester}>{c}</button>
+              ))}
+            </div>
+          )}
+
+          {materials.length > 0 && (
+            <div className="sb-card flex flex-wrap items-center gap-3 p-4" data-tone="paper">
+              <Sticker name="paperclip" size="md" tilt={-20} />
+              <p className="sb-display mr-2 text-lg">Your {subject.subject} textbook</p>
+              {materials.map(m => (
+                <a key={m.id} href={m.file_url} target="_blank" rel="noopener noreferrer" className="sb-btn" data-size="sm" data-tone="yellow">
+                  <BookOpen size={15} aria-hidden="true" />{m.title}
+                </a>
+              ))}
+            </div>
+          )}
+
+          {allLocked && (
+            <div className="sb-card flex items-center gap-4 p-5" data-tone="paper">
+              <Sticker name="sleeping-face" size="lg" />
+              <p className="text-sm font-semibold">Nothing unlocked in {subject.subject} yet — your teacher hasn&apos;t marked any topics as taught.</p>
+            </div>
+          )}
+
+          {semesterGroups.map(group => (
+            <div key={group.semester ?? '__none__'} className="space-y-5">
+              {group.semester && <span className="sb-kicker" data-tone="paper">{group.semester}</span>}
+              {group.chapters.map((ch, i) => (
+                <motion.section key={ch.chapter_name} className="sb-notebook" data-tone={tone}
+                  initial={reduceMotion ? false : { opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: Math.min(i * 0.05, 0.3), duration: 0.3, ease: [0.16, 1, 0.3, 1] }}>
+                  <header className="sb-notebook-head">
+                    <Sticker name={subjectSticker(subject.subject)} size="xs" />
+                    <h3 className="min-w-0 flex-1 truncate text-[15px] font-extrabold">{ch.chapter_name}</h3>
+                    <span className="sb-chip" data-tone={ch.covered === ch.topics.length && ch.topics.length > 0 ? 'mint' : 'paper'}>{ch.covered}/{ch.topics.length} taught</span>
+                  </header>
+                  {ch.topics.length === 0 && (
+                    <p className="sb-notebook-row text-sm italic text-[#8b8373]">No topics added to this chapter yet.</p>
+                  )}
+                  {ch.topics.map(t => t.status === 'covered' ? (
+                    <div key={t.id} className="sb-notebook-row">
+                      <Sticker name="check-mark-button" size="xs" className="sb-row-mark" />
+                      <button type="button" data-testid={`topic-study-${t.id}`} onClick={() => setActiveTopic(t)} className="sb-topic-btn">
+                        <span>{t.topic_name}</span>
+                        <span className="sb-topic-go" aria-hidden="true">Study <ArrowRight size={12} /></span>
+                      </button>
+                    </div>
+                  ) : (
+                    // Locked topics stay visible so the student can see the road ahead,
+                    // but the name is all they get until the teacher marks it taught.
+                    <div key={t.id} data-testid={`topic-locked-${t.id}`} className="sb-notebook-row">
+                      <Sticker name="locked" size="xs" className="sb-row-mark opacity-70" />
+                      <span className="sb-topic-locked flex-1">{t.topic_name}</span>
+                      <span className="sb-chip" data-tone="paper">Coming up</span>
+                    </div>
+                  ))}
+                </motion.section>
+              ))}
+            </div>
+          ))}
+        </motion.div>
+      </div>
 
       {activeTopic && (
         <TopicContentViewer topic={activeTopic} onClose={() => setActiveTopic(null)} role="student" />

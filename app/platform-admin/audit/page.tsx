@@ -19,6 +19,8 @@ const ACTION_LABELS: Record<string, { label: string; color: string }> = {
   delete_school:       { label: 'Deleted School',       color: 'bg-red-100 text-red-700' },
   update_subscription: { label: 'Changed Plan',         color: 'bg-purple-100 text-purple-700' },
   reset_password:      { label: 'Reset Password',       color: 'bg-amber-100 text-amber-700' },
+  plan_renewal_request: { label: 'Renewal Requested',   color: 'bg-amber-100 text-amber-700' },
+  school_data_export:  { label: 'School Data Export',   color: 'bg-gray-100 text-gray-700' },
   backfill_portal_access: { label: 'Activated Portal Access', color: 'bg-teal-100 text-teal-700' },
 }
 
@@ -26,6 +28,10 @@ function formatDetails(action: string, details: Record<string, unknown>): string
   if (action === 'update_subscription') {
     return `${details.from ?? '?'} → ${details.to ?? '?'}`
   }
+  if (action === 'plan_renewal_request') {
+    return `${details.tier ?? '?'} · ${details.plan_status ?? ''}${details.plan_end_date ? ` · ends ${details.plan_end_date}` : ''}`
+  }
+  if (action === 'school_data_export') return `${details.dataset ?? ''}`
   if (action === 'update_school' && Array.isArray(details.updated_fields)) {
     return `Fields: ${(details.updated_fields as string[]).join(', ')}`
   }
@@ -71,15 +77,15 @@ export default function AuditLogPage() {
         <div className="flex items-center justify-between mb-6">
           <div>
             <h1 className="text-xl font-bold text-gray-900">Audit Log</h1>
-            <p className="text-gray-400 text-sm mt-0.5">{total} total actions recorded</p>
+            <p className="text-muted-foreground text-sm mt-0.5">{total} total actions recorded</p>
           </div>
         </div>
 
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <div className="bg-white rounded-md border border-gray-200 overflow-hidden">
           {loading ? (
-            <div className="py-16 text-center text-gray-400">Loading…</div>
+            <div className="py-16 text-center text-muted-foreground">Loading…</div>
           ) : logs.length === 0 ? (
-            <div className="py-16 text-center text-gray-400">No actions recorded yet.</div>
+            <div className="py-16 text-center text-muted-foreground">No actions recorded yet.</div>
           ) : (
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b border-gray-200">
@@ -105,10 +111,10 @@ export default function AuditLogPage() {
                         {log.entity_name ? (
                           <span className="text-gray-800 font-medium">{log.entity_name}</span>
                         ) : (
-                          <span className="text-gray-400">—</span>
+                          <span className="text-muted-foreground">—</span>
                         )}
                         {log.entity_id && (
-                          <span className="text-gray-400 text-xs ml-1">#{log.entity_id}</span>
+                          <span className="text-muted-foreground text-xs ml-1">#{log.entity_id}</span>
                         )}
                       </td>
                       <td className="px-5 py-3.5 text-gray-500 text-xs">

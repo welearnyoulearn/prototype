@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
-import { requireFeeAccess, generateFeedbackCode } from '@/lib/auth'
+import { requireFeeAccess } from '@/lib/auth'
+import { mintFeedbackCode } from '@/lib/feedback-public-access'
+import { feedbackPublicUrl } from '@/lib/feedback-qr-points'
 import { feedbackRegenerateCodeSchema } from '@/lib/validation/feedback'
 
 // POST /api/feedback/settings/regenerate-code — Body: { school_id }
@@ -19,15 +21,14 @@ export async function POST(req: NextRequest) {
     // Retry on the rare collision with another school's code (10-char
     // alphanumeric space is large, but UNIQUE is enforced regardless).
     for (let attempt = 0; attempt < 5; attempt++) {
-      const code = generateFeedbackCode()
+      const code = await mintFeedbackCode(pool)
       try {
         const { rows: [settings] } = await pool.query(
           `UPDATE feedback_settings SET public_code = $2, updated_at = NOW() WHERE school_id = $1 RETURNING *`,
           [access.schoolId, code]
         )
         if (!settings) return NextResponse.json({ error: 'Not found — visit Settings once to initialize it first' }, { status: 404 })
-        const base = process.env.APP_URL || 'https://welearnyoulearn.com'
-        return NextResponse.json({ public_code: settings.public_code, is_active: settings.is_active, feedback_url: `${base.replace(/\/$/, '')}/feedback/${settings.public_code}` })
+        return NextResponse.json({ public_code: settings.public_code, is_active: settings.is_active, feedback_url: feedbackPublicUrl(settings.public_code) })
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : String(e)
         if (!msg.includes('duplicate') && !msg.includes('unique')) throw e

@@ -7,6 +7,7 @@ import { sendWhatsappMessage } from '@/lib/whatsapp'
 import { findOrCreateParent, linkStudentParent, generateStudentId } from '@/lib/studentOnboarding'
 import { gradeOrderSql } from '@/lib/grades'
 import { isValidName, NAME_INVALID_MESSAGE } from '@/lib/nameValidation'
+import { withWatchline } from '@/lib/logger'
 
 // Never `SELECT *`: students carries password_hash, which would otherwise be
 // serialised straight to the browser. Enumerate every safe column instead.
@@ -24,7 +25,11 @@ function parseCount(raw: string | null, fallback: number): number {
   return /^\d+$/.test(raw) ? Number(raw) : NaN
 }
 
-export async function GET(req: NextRequest) {
+// Wrapped with withWatchline so its duration_ms shows up in request_logs
+// alongside the fee routes that already call it (ledger, reports, stats, ...) —
+// this is the route Passbook and Reports hit for a school's full roster, so
+// its cost matters just as much for diagnosing slow fee-tab loads as theirs.
+async function handleGET(req: NextRequest) {
   try {
     const session = await getAnySession()
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -74,7 +79,7 @@ export async function GET(req: NextRequest) {
       const where = `WHERE ${conditions.join(' AND ')}`
 
       // Pagination is strictly opt-in. A default cap was tried and rejected: several
-      // screens (FeeManagement, StudentsManagement, StudentTeacherAnalysis) fetch the
+      // screens (FeeManagement, StudentsManagement) fetch the
       // whole roster and aggregate over it, so a silent LIMIT would quietly produce
       // WRONG fee totals for any school past the cap. A slow correct answer beats a
       // fast wrong one — callers that want paging ask for it and get `total` back so
@@ -116,6 +121,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
+export const GET = withWatchline(handleGET, { route: '/api/students' })
 
 export async function POST(req: NextRequest) {
   const admin = await requireSchoolAdmin()

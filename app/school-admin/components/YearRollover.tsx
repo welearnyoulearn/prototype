@@ -14,12 +14,30 @@ type AcademicYear = {
   student_snapshot_count: number
 }
 
+type Readiness = {
+  current_year: { id: number; label: string } | null
+  next_year: { id: number; label: string } | null
+  fee_gate_required: boolean
+  fee_closed: boolean
+  fee_open_count: number
+  fee_open_total: number
+  rolled_over: boolean
+  can_run: boolean
+}
+
+type RosterStudent = { id: number; name: string; grade: string | null; section: string | null; school_roll_number: number | null }
+type ClassRow = { grade: string; section: string }
+type Exception = { action: 'repeat' } | { action: 'move'; to_section: string }
+
 type GradeGroup = { grade: string; section: string; student_count: number }
 
 type RolloverResult = {
   snapshotted: number
   promoted: number
   graduated: number
+  repeated?: number
+  moved?: number
+  roll_numbers_cleared?: number
   errors: string[]
   message: string
 }
@@ -41,7 +59,7 @@ function genLabel(startYear: number) {
 
 // ── Component ──────────────────────────────────────────────────────────────
 
-export default function YearRollover({ schoolId }: { schoolId: number }) {
+export default function YearRollover({ schoolId, onGoToFeeYearEnd }: { schoolId: number; onGoToFeeYearEnd?: () => void }) {
   const [years, setYears]             = useState<AcademicYear[]>([])
   const [groups, setGroups]           = useState<GradeGroup[]>([])
   const [loading, setLoading]         = useState(true)
@@ -49,6 +67,14 @@ export default function YearRollover({ schoolId }: { schoolId: number }) {
   const [result, setResult]           = useState<RolloverResult | null>(null)
   const [rolling, setRolling]         = useState(false)
   const [error, setError]             = useState('')
+  const [readiness, setReadiness]     = useState<Readiness | null>(null)
+  const [showFeeGate, setShowFeeGate]  = useState(false)
+  // Per-student exceptions to "everyone moves up one grade, same section"
+  const [roster, setRoster]            = useState<RosterStudent[]>([])
+  const [classes, setClasses]          = useState<ClassRow[]>([])
+  const [exceptions, setExceptions]    = useState<Record<number, Exception>>({})
+  const [studentSearch, setStudentSearch] = useState('')
+  const [changesOnly, setChangesOnly]  = useState(false)
 
   // Year setup form
   const currentYear = new Date().getFullYear()
@@ -68,12 +94,26 @@ export default function YearRollover({ schoolId }: { schoolId: number }) {
   async function init() {
     setLoading(true)
     try {
-      const [yr, gr] = await Promise.all([
+      const [yr, gr, rd, st, cl] = await Promise.all([
         fetch(`/api/academic-years?school_id=${schoolId}`).then(r => r.json()),
         fetch(`/api/students/promote?school_id=${schoolId}`).then(r => r.json()),
+        fetch(`/api/academic-years/rollover?school_id=${schoolId}&readiness=1`).then(r => r.ok ? r.json() : null),
+        fetch(`/api/students?school_id=${schoolId}`).then(r => r.ok ? r.json() : []),
+        fetch(`/api/classes?school_id=${schoolId}`).then(r => r.ok ? r.json() : []),
       ])
+      setRoster(Array.isArray(st) ? st : [])
+      setClasses(Array.isArray(cl) ? cl : [])
       setYears(Array.isArray(yr) ? yr : [])
       setGroups(gr.groups ?? [])
+      setReadiness(rd)
+      // The year to roll into is always the one after the current year — no manual picking
+      if (rd?.next_year) setSelectedToYear(rd.next_year.id)
+      if (rd?.current_year) {
+        const startNum = parseInt(rd.current_year.label.split('-')[0])
+        if (!isNaN(startNum)) {
+          setNewLabel(genLabel(startNum + 1)); setNewStart(`${startNum + 1}-04-01`); setNewEnd(`${startNum + 2}-03-31`)
+        }
+      }
     } finally {
       setLoading(false)
     }
@@ -89,9 +129,32 @@ export default function YearRollover({ schoolId }: { schoolId: number }) {
     return { ...g, to, isGrad }
   })
 
+  const activeExceptions = Object.entries(exceptions)
+  const repeatCount = activeExceptions.filter(([, e]) => e.action === 'repeat').length
+  const moveCount   = activeExceptions.filter(([, e]) => e.action === 'move').length
+  // A repeating student is not promoted (or graduated); a moved one is promoted into another section
+  const isFinal = (grade: string | null) => !!grade && grade === finalGrade
+  const finalRepeaters = activeExceptions.filter(([id, e]) => e.action === 'repeat' && isFinal(roster.find(r => r.id === Number(id))?.grade ?? null)).length
+
+  function setException(studentId: number, value: string) {
+    setExceptions(prev => {
+      const next = { ...prev }
+      if (value === 'default') delete next[studentId]
+      else if (value === 'repeat') next[studentId] = { action: 'repeat' }
+      else if (value.startsWith('move:')) next[studentId] = { action: 'move', to_section: value.slice(5) }
+      return next
+    })
+  }
+
+  const visibleStudents = roster
+    .filter(st => st.grade)
+    .filter(st => !changesOnly || exceptions[st.id])
+    .filter(st => !studentSearch.trim() || `${st.name} ${st.grade}-${st.section ?? ''}`.toLowerCase().includes(studentSearch.trim().toLowerCase()))
+    .slice(0, 200)
+
   const totalStudents  = groups.reduce((s, g) => s + g.student_count, 0)
-  const gradStudents   = groups.filter(g => g.grade === finalGrade).reduce((s, g) => s + g.student_count, 0)
-  const promoteStudents = totalStudents - gradStudents
+  const gradStudents   = groups.filter(g => g.grade === finalGrade).reduce((s, g) => s + g.student_count, 0) - finalRepeaters
+  const promoteStudents = totalStudents - gradStudents - repeatCount
 
   // ── Set a year as current ────────────────────────────────────────────────
 
@@ -152,10 +215,14 @@ export default function YearRollover({ schoolId }: { schoolId: number }) {
           to_year_id: selectedToYear,
           final_grade: finalGrade || null,
           grade_sequence: sequence,
+          exceptions: activeExceptions.map(([id, e]) => ({ student_id: Number(id), ...e })),
         }),
       })
       const d = await r.json()
-      if (!r.ok) throw new Error(d.error)
+      if (!r.ok) {
+        if (d.code === 'FEES_NOT_CLOSED') { setShowFeeGate(true); setStep('configure'); await init(); return }
+        throw new Error(d.error)
+      }
       setResult(d)
       setStep('done')
       await init()
@@ -175,13 +242,13 @@ export default function YearRollover({ schoolId }: { schoolId: number }) {
       <div>
         <h2 className="text-lg font-bold text-gray-800">Academic Year Rollover</h2>
         <p className="text-sm text-gray-400 mt-0.5">
-          Advance all students to next year — every student's history is permanently recorded before promotion
+          Close the year for the whole school: students move up, and the new academic year becomes active everywhere. Fee year-end must be completed first.
         </p>
       </div>
 
       {/* How it works */}
       <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-5">
-        <p className="text-xs font-bold text-indigo-700 uppercase tracking-widest mb-3">How this works</p>
+        <p className="text-xs font-bold text-indigo-700 uppercase tracking-widest mb-3">How this works (after Fee Year-End is closed)</p>
         <div className="grid grid-cols-4 gap-3 text-center">
           {[
             { step: '1', label: 'Snapshot', desc: 'Every student\'s current grade is archived permanently under the current year' },
@@ -202,12 +269,39 @@ export default function YearRollover({ schoolId }: { schoolId: number }) {
         <div className="bg-red-50 border border-red-100 text-red-600 text-sm px-4 py-3 rounded-xl">{error}</div>
       )}
 
+      {/* ── Fee year-end not completed: block ─────────────────────── */}
+      {showFeeGate && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={() => setShowFeeGate(false)}>
+          <div data-testid="fee-gate-modal" role="alertdialog" className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-4" onClick={e => e.stopPropagation()}>
+            <div className="flex items-start gap-3">
+              <span className="text-3xl">⚠️</span>
+              <div>
+                <h3 className="text-base font-bold text-gray-900">Complete the fee year-end first</h3>
+                <p className="text-sm text-gray-600 mt-1">
+                  The year cannot be rolled over until Fee Management → Year-End for <strong>{currentYearObj?.label}</strong> is completed:
+                  decide each student’s pending dues (carry forward, write off, passout or leave open) and close the year.
+                </p>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <button data-testid="btn-fee-gate-close" onClick={() => setShowFeeGate(false)}
+                className="flex-1 border border-gray-200 text-gray-600 py-2 rounded-lg text-sm hover:bg-gray-50">Not now</button>
+              <button data-testid="btn-fee-gate-go" onClick={() => { setShowFeeGate(false); onGoToFeeYearEnd?.() }}
+                className="flex-1 bg-indigo-600 text-white py-2 rounded-lg text-sm font-semibold hover:bg-indigo-700">Go to Fee Year-End →</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── DONE STATE ────────────────────────────────────────────── */}
       {step === 'done' && result && (
         <div className="bg-white border-2 border-green-200 rounded-2xl p-8 text-center space-y-5">
           <div className="text-5xl">🎓</div>
           <h3 className="text-xl font-bold text-gray-800">Rollover Complete!</h3>
           <p className="text-sm text-gray-500">{result.message}</p>
+          {((result.repeated ?? 0) > 0 || (result.moved ?? 0) > 0) && (
+            <p data-testid="rollover-exceptions-result" className="text-xs text-gray-500">{result.repeated ?? 0} repeating the year · {result.moved ?? 0} moved to a different section</p>
+          )}
           <div className="grid grid-cols-3 gap-4 max-w-md mx-auto">
             <div className="bg-blue-50 rounded-xl p-4">
               <p className="text-3xl font-black text-blue-600">{result.snapshotted}</p>
@@ -222,6 +316,11 @@ export default function YearRollover({ schoolId }: { schoolId: number }) {
               <p className="text-xs text-gray-500 mt-1">Students Graduated</p>
             </div>
           </div>
+          {(result.roll_numbers_cleared ?? 0) > 0 && (
+            <div data-testid="rollover-rolls-cleared" className="bg-amber-50 border border-amber-100 rounded-xl p-4 text-left max-w-lg mx-auto text-xs text-amber-700">
+              {result.roll_numbers_cleared} student{result.roll_numbers_cleared === 1 ? '' : 's'} need a new class roll number — the old one is already taken in the new class. Set it in Students.
+            </div>
+          )}
           {result.errors.length > 0 && (
             <div className="bg-amber-50 border border-amber-100 rounded-xl p-4 text-left max-w-lg mx-auto">
               <p className="text-xs font-semibold text-amber-700 mb-2">⚠ {result.errors.length} warning(s):</p>
@@ -246,11 +345,11 @@ export default function YearRollover({ schoolId }: { schoolId: number }) {
             <div className="bg-white border border-gray-100 rounded-xl shadow-sm p-4 space-y-2">
               <p className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-3">Steps to Rollover</p>
               {[
-                { n: 1, label: 'Create this year (FROM)', done: !!currentYearObj, hint: currentYearObj ? `✓ ${currentYearObj.label} is current` : 'Create a year and click "Set as Current"' },
-                { n: 2, label: 'Create next year (TO)',   done: years.filter(y => !y.is_current).length > 0, hint: years.filter(y => !y.is_current).length > 0 ? '✓ Year created — click "Select as Next Year"' : 'Create the next academic year below' },
-                { n: 3, label: 'Select next year',        done: !!selectedToYear, hint: selectedToYear ? `✓ ${years.find(y => y.id === selectedToYear)?.label} selected` : 'Click "Select as Next Year" in the list below' },
+                { n: 1, testid: 'step-current-year', label: 'Current year', done: !!currentYearObj, hint: currentYearObj ? `✓ ${currentYearObj.label} is current` : 'Create the school’s first year and click "Set as Current"' },
+                { n: 2, testid: 'step-next-year', label: 'Create next year', done: !!readiness?.next_year, hint: readiness?.next_year ? `✓ ${readiness.next_year.label} is ready` : 'Create the next academic year below' },
+                { n: 3, testid: 'step-fee-year-end', label: 'Fee year-end completed', done: !readiness?.fee_gate_required || !!readiness?.fee_closed, hint: !readiness?.fee_gate_required ? 'Not needed — Fee Management is off for this school' : readiness?.fee_closed ? '✓ Fee year closed' : 'Fee Management → Year-End: decide dues and close the year' },
               ].map(s => (
-                <div key={s.n} className={`flex items-start gap-3 px-3 py-2 rounded-lg ${s.done ? 'bg-green-50' : 'bg-gray-50'}`}>
+                <div key={s.n} data-testid={s.testid} className={`flex items-start gap-3 px-3 py-2 rounded-lg ${s.done ? 'bg-green-50' : 'bg-gray-50'}`}>
                   <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold flex-shrink-0 mt-0.5 ${s.done ? 'bg-green-500 text-white' : 'bg-gray-300 text-gray-600'}`}>
                     {s.done ? '✓' : s.n}
                   </div>
@@ -262,13 +361,15 @@ export default function YearRollover({ schoolId }: { schoolId: number }) {
               ))}
             </div>
 
-            {/* Create next year */}
-            <div className="bg-white border border-gray-100 rounded-xl shadow-sm p-5 space-y-3">
+            {/* Create next year — the ONLY place a new academic year is created */}
+            {!readiness?.next_year && (
+            <div data-testid="create-next-year" className="bg-white border border-gray-100 rounded-xl shadow-sm p-5 space-y-3">
               <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Create Next Academic Year</p>
               <div>
                 <label className="block text-xs text-gray-500 mb-1">Label (e.g. 2025-26)</label>
                 <input
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  data-testid="new-year-label" readOnly={!!currentYearObj}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 read-only:bg-gray-50"
                   value={newLabel}
                   onChange={e => setNewLabel(e.target.value)}
                   placeholder="2025-26"
@@ -288,11 +389,12 @@ export default function YearRollover({ schoolId }: { schoolId: number }) {
                     value={newEnd} onChange={e => setNewEnd(e.target.value)} />
                 </div>
               </div>
-              <button onClick={createYear} disabled={creatingYear || !newLabel.trim()}
+              <button data-testid="btn-create-year" onClick={createYear} disabled={creatingYear || !newLabel.trim()}
                 className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50">
                 {creatingYear ? 'Creating…' : '+ Create Year'}
               </button>
             </div>
+            )}
 
             {/* All years list */}
             {years.length > 0 && (
@@ -318,7 +420,7 @@ export default function YearRollover({ schoolId }: { schoolId: number }) {
                         <div className="flex gap-2 flex-shrink-0">
                           {y.is_current ? (
                             <span className="text-[10px] bg-green-100 text-green-700 px-2.5 py-1 rounded-full font-bold">✓ CURRENT</span>
-                          ) : (
+                          ) : !currentYearObj && (
                             <button
                               onClick={() => setAsCurrent(y.id)}
                               disabled={settingCurrent === y.id}
@@ -327,17 +429,8 @@ export default function YearRollover({ schoolId }: { schoolId: number }) {
                               {settingCurrent === y.id ? '…' : 'Set as Current'}
                             </button>
                           )}
-                          {!y.is_current && (
-                            selectedToYear === y.id ? (
-                              <span className="text-[10px] bg-indigo-600 text-white px-2.5 py-1 rounded-full font-bold">✓ Next Year</span>
-                            ) : (
-                              <button
-                                onClick={() => setSelectedToYear(y.id)}
-                                className="text-[10px] bg-indigo-100 hover:bg-indigo-200 text-indigo-700 px-2.5 py-1 rounded-full font-semibold transition-colors"
-                              >
-                                Select as Next Year →
-                              </button>
-                            )
+                          {!y.is_current && readiness?.next_year?.id === y.id && (
+                            <span className="text-[10px] bg-indigo-600 text-white px-2.5 py-1 rounded-full font-bold">✓ Next Year</span>
                           )}
                         </div>
                       </div>
@@ -414,18 +507,76 @@ export default function YearRollover({ schoolId }: { schoolId: number }) {
               </div>
             </div>
 
+            {/* Exceptions: repeat a year / change section */}
+            <div data-testid="rollover-exceptions" className="bg-white border border-gray-100 rounded-xl shadow-sm overflow-hidden">
+              <div className="px-5 py-3 border-b border-gray-50 flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Exceptions (optional)</p>
+                  <p className="text-[11px] text-gray-400 mt-0.5">By default everyone moves up one grade and keeps their section. Change it for individual students.</p>
+                </div>
+                <span data-testid="exceptions-count" className="text-xs text-gray-500 whitespace-nowrap">{repeatCount} repeat · {moveCount} section change</span>
+              </div>
+              <div className="px-5 py-3 flex items-center gap-3 border-b border-gray-50">
+                <input data-testid="exceptions-search" value={studentSearch} onChange={e => setStudentSearch(e.target.value)}
+                  placeholder="Search name or class, e.g. 6-A"
+                  className="flex-1 border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                <label className="text-xs text-gray-500 flex items-center gap-1.5 whitespace-nowrap">
+                  <input data-testid="exceptions-changes-only" type="checkbox" checked={changesOnly} onChange={e => setChangesOnly(e.target.checked)} /> Changes only
+                </label>
+              </div>
+              <div className="divide-y divide-gray-50 max-h-72 overflow-y-auto">
+                {visibleStudents.length === 0 ? (
+                  <div className="text-center py-6 text-gray-400 text-sm">{changesOnly ? 'No exceptions set' : 'No students found'}</div>
+                ) : visibleStudents.map(st => {
+                  const grad = isFinal(st.grade)
+                  const target = grad ? null : nextGrade(st.grade as string, sequence)
+                  const sections = target ? classes.filter(c => c.grade === target && c.section !== st.section).map(c => c.section) : []
+                  const ex = exceptions[st.id]
+                  const value = !ex ? 'default' : ex.action === 'repeat' ? 'repeat' : `move:${ex.to_section}`
+                  return (
+                    <div key={st.id} data-testid={`exception-row-${st.id}`} className={`flex items-center gap-3 px-5 py-2 text-sm ${ex ? 'bg-amber-50/60' : ''}`}>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-gray-800 font-medium truncate">{st.name}</p>
+                        <p className="text-[11px] text-gray-400">{st.grade}-{st.section ?? '—'}{st.school_roll_number != null ? ` · roll ${st.school_roll_number}` : ''}</p>
+                      </div>
+                      <select data-testid={`exception-select-${st.id}`} value={value} onChange={e => setException(st.id, e.target.value)}
+                        className="border border-gray-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                        <option value="default">{grad ? '🎓 Graduates' : target ? `Promote → ${target}-${st.section ?? ''}` : '⚠ Not in sequence'}</option>
+                        <option value="repeat">↺ Repeat {st.grade}-{st.section ?? ''}</option>
+                        {sections.map(sec => <option key={sec} value={`move:${sec}`}>Promote → {target}-{sec}</option>)}
+                      </select>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+
             {/* Execute button */}
             {step === 'setup' || step === 'configure' ? (
               <div className="space-y-3">
                 {(!currentYearObj || !selectedToYear) && (
                   <div className="bg-amber-50 border border-amber-100 text-amber-700 text-xs px-4 py-3 rounded-xl space-y-1">
-                    {!currentYearObj && <p>① Create a year → click <strong>"Set as Current"</strong> (this is the year students are in NOW)</p>}
-                    {currentYearObj && !selectedToYear && <p>② Create the next year → click <strong>"Select as Next Year →"</strong></p>}
+                    {!currentYearObj && <p>① Create the school’s first year → click <strong>"Set as Current"</strong></p>}
+                    {currentYearObj && !selectedToYear && <p>② Create the next academic year using the form on the left</p>}
+                  </div>
+                )}
+                {readiness?.rolled_over && (
+                  <div data-testid="rollover-already-done" className="bg-green-50 border border-green-200 text-green-700 text-xs px-4 py-3 rounded-xl">
+                    ✓ {currentYearObj?.label} has already been rolled over. It cannot be run again.
+                  </div>
+                )}
+                {readiness && readiness.fee_gate_required && !readiness.fee_closed && currentYearObj && (
+                  <div data-testid="fee-gate-banner" className="bg-red-50 border border-red-100 text-red-700 text-xs px-4 py-3 rounded-xl">
+                    ⚠ Fee year-end for <strong>{currentYearObj.label}</strong> is not completed. Finish it in Fee Management first.
                   </div>
                 )}
                 <button
-                  onClick={() => setStep('confirm')}
-                  disabled={!currentYearObj || !selectedToYear || groups.length === 0}
+                  data-testid="btn-review-rollover"
+                  onClick={() => {
+                    if (readiness && readiness.fee_gate_required && !readiness.fee_closed) { setShowFeeGate(true); return }
+                    setStep('confirm')
+                  }}
+                  disabled={!currentYearObj || !selectedToYear || groups.length === 0 || !!readiness?.rolled_over}
                   className="w-full py-3 bg-amber-500 hover:bg-amber-600 text-white font-semibold text-sm rounded-xl transition-colors disabled:opacity-40"
                 >
                   Review Rollover →
@@ -439,12 +590,12 @@ export default function YearRollover({ schoolId }: { schoolId: number }) {
                     <p className="text-sm font-bold text-red-800">This cannot be undone</p>
                     <p className="text-xs text-red-600 mt-1">
                       <strong>{currentYearObj?.label}</strong> → <strong>{years.find(y => y.id === selectedToYear)?.label}</strong><br />
-                      {promoteStudents} students promoted · {gradStudents} graduated · {totalStudents} history records written
+                      {promoteStudents} students promoted{moveCount > 0 ? ` (${moveCount} into a different section)` : ''} · {repeatCount} repeating · {gradStudents} graduated · {totalStudents} history records written
                     </p>
                   </div>
                 </div>
                 <div className="flex gap-3">
-                  <button onClick={doRollover} disabled={rolling}
+                  <button data-testid="btn-execute-rollover" onClick={doRollover} disabled={rolling}
                     className="flex-1 py-2.5 bg-red-600 hover:bg-red-700 text-white font-bold text-sm rounded-lg transition-colors disabled:opacity-50">
                     {rolling ? 'Processing…' : '✓ Execute Rollover'}
                   </button>

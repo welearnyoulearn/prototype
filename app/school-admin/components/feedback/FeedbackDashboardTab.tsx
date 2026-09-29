@@ -1,132 +1,393 @@
 'use client'
 
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { useState } from 'react'
+import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import { AlertTriangle, ArrowRight, RefreshCw, TrendingDown, TrendingUp } from 'lucide-react'
+import { FEEDBACK_ROLES } from '@/lib/feedback-defaults'
+import { ROLE_VISUAL } from '@/app/feedback/[code]/roleVisuals'
 import { useFeedbackFetch } from './useFeedbackFetch'
+import MoodFace from '@/app/feedback/[code]/MoodFace'
 
+interface CategoryStat { category_key: string; category_label: string; count: number; avg_rating: number; negative_count: number }
 interface Stats {
-  pulse_score: number
+  period: Period
+  pulse_score: number | null
+  avg_rating: number | null
   total_feedback: number
+  form_submissions: number
+  total_ratings: number
   percent_positive: number
+  percent_neutral: number
   percent_negative: number
-  today_mood_breakdown: { rating: number; count: number; percent: number }[]
-  best_categories: { category_key: string; category_label: string; count: number; avg_rating: number }[]
-  worst_categories: { category_key: string; category_label: string; count: number; avg_rating: number }[]
-  category_share: { category_key: string; category_label: string; count: number; percent: number }[]
+  previous: { total_feedback: number; pulse_score: number | null } | null
+  mood_breakdown: { rating: number; count: number; percent: number }[]
+  category_stats: CategoryStat[]
+  best_categories: CategoryStat[]
+  attention_categories: CategoryStat[]
+  by_role: { role: string; count: number }[]
+  trend: { date: string; count: number; avg_rating: number | null }[]
   high_priority_open_count: number
+  open_issues_count: number
 }
 
-const MOOD_LABEL: Record<number, string> = { 1: '😭 Terrible', 2: '😞 Bad', 3: '😐 Okay', 4: '😊 Good', 5: '🤩 Amazing' }
-const MOOD_COLOR: Record<number, string> = { 1: '#f76a6a', 2: '#f79a4a', 3: '#ffb703', 4: '#7C6EF5', 5: '#37c98a' }
+type Period = 'today' | '7d' | '30d' | 'all'
+const PERIODS: { key: Period; label: string; prevLabel: string }[] = [
+  { key: 'today', label: 'Today', prevLabel: 'yesterday' },
+  { key: '7d', label: '7 days', prevLabel: 'previous 7 days' },
+  { key: '30d', label: '30 days', prevLabel: 'previous 30 days' },
+  { key: 'all', label: 'All time', prevLabel: '' },
+]
 
-export default function FeedbackDashboardTab({ schoolId }: { schoolId: number }) {
-  const { data: stats, loading, error, reload } = useFeedbackFetch<Stats>(
-    `/api/feedback/stats?school_id=${schoolId}`, [schoolId], 'Failed to load stats'
+// Colours — brand green for single-series marks; the 1–5 mood scale is
+// diverging (red ↔ neutral grey ↔ green) and every row also carries its emoji
+// + label, so colour is never the only cue.
+const BRAND = '#245b46'
+const MOOD: Record<number, { emoji: string; label: string; color: string }> = {
+  5: { emoji: '🤩', label: 'Amazing', color: '#245b46' },
+  4: { emoji: '😊', label: 'Good', color: '#6fae8a' },
+  3: { emoji: '😐', label: 'Okay', color: '#c9c7c2' },
+  2: { emoji: '😞', label: 'Bad', color: '#ec835a' },
+  1: { emoji: '😭', label: 'Terrible', color: '#d03b3b' },
+}
+
+function pulseStatus(score: number): { label: string; color: string; emoji: string; face: number } {
+  if (score >= 70) return { label: 'Great', color: '#0f7a3d', emoji: '😊', face: 4 }
+  if (score >= 50) return { label: 'Okay', color: '#a16207', emoji: '😐', face: 3 }
+  return { label: 'Needs care', color: '#b42318', emoji: '😟', face: 2 }
+}
+
+function ratingTone(avg: number): string {
+  if (avg >= 4) return 'text-emerald-700 bg-emerald-50'
+  if (avg >= 3) return 'text-amber-700 bg-amber-50'
+  return 'text-rose-700 bg-rose-50'
+}
+
+function fmtDay(iso: string): string {
+  const [y, m, d] = iso.split('-').map(Number)
+  return new Date(y, m - 1, d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
+}
+
+function Delta({ now, before, suffix = '', prevLabel }: { now: number; before: number | null | undefined; suffix?: string; prevLabel: string }) {
+  if (before == null || !prevLabel) return null
+  const diff = now - before
+  if (diff === 0) return <span className="text-[11px] font-semibold text-gray-400">No change vs {prevLabel}</span>
+  const up = diff > 0
+  const Icon = up ? TrendingUp : TrendingDown
+  return (
+    <span className={`inline-flex items-center gap-1 text-[11px] font-semibold ${up ? 'text-emerald-700' : 'text-rose-700'}`}>
+      <Icon size={12} aria-hidden="true" />{up ? '+' : ''}{diff}{suffix} vs {prevLabel}
+    </span>
   )
+}
 
-  if (loading) return <div className="py-16 text-center text-sm text-gray-400">Loading…</div>
-  if (error || !stats) return (
-    <div className="py-16 text-center text-sm text-red-500">
-      {error || 'No data'}
-      <button type="button" onClick={reload} className="mt-2 block w-full font-semibold underline">Retry</button>
+function Card({ title, action, children, className = '' }: { title: string; action?: React.ReactNode; children: React.ReactNode; className?: string }) {
+  return (
+    <div className={`min-w-0 rounded-2xl border border-gray-200 bg-white p-5 ${className}`}>
+      <div className="mb-4 flex items-center justify-between gap-2">
+        <h3 className="text-sm font-bold text-gray-900">{title}</h3>
+        {action}
+      </div>
+      {children}
     </div>
   )
+}
+
+function LinkButton({ onClick, children, testId }: { onClick: () => void; children: React.ReactNode; testId?: string }) {
+  return (
+    <button type="button" data-testid={testId} onClick={onClick} className="inline-flex items-center gap-1 text-xs font-semibold text-[#245b46] hover:underline">
+      {children}<ArrowRight size={12} aria-hidden="true" />
+    </button>
+  )
+}
+
+// Pulse score as a ring gauge (0–100), coloured by its status band
+function PulseRing({ score }: { score: number }) {
+  const r = 30
+  const c = 2 * Math.PI * r
+  const st = pulseStatus(score)
+  return (
+    <svg width="76" height="76" viewBox="0 0 76 76" role="img" aria-label={`Pulse score ${score} of 100, ${st.label}`}>
+      <circle cx="38" cy="38" r={r} fill="none" stroke="#eef0ec" strokeWidth="8" />
+      <circle cx="38" cy="38" r={r} fill="none" stroke={st.color} strokeWidth="8" strokeLinecap="round"
+        strokeDasharray={`${(score / 100) * c} ${c}`} transform="rotate(-90 38 38)" />
+      <text x="38" y="43" textAnchor="middle" fontSize="18" fontWeight="800" fill="#111827">{score}</text>
+    </svg>
+  )
+}
+
+export default function FeedbackDashboardTab({
+  schoolId, source, onNavigate,
+}: {
+  schoolId: number
+  source: string
+  onNavigate: (tab: 'submissions' | 'issues' | 'categories' | 'qr-points') => void
+}) {
+  const [period, setPeriod] = useState<Period>('30d')
+  const { data: stats, loading, error, reload } = useFeedbackFetch<Stats>(
+    `/api/feedback/stats?school_id=${schoolId}&source=${source}&period=${period}`, [schoolId, source, period], 'Failed to load stats'
+  )
+  const prevLabel = PERIODS.find(p => p.key === period)?.prevLabel ?? ''
+
+  const header = (
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="inline-flex rounded-lg border border-gray-200 bg-white p-1" role="tablist" aria-label="Time period">
+        {PERIODS.map(p => (
+          <button
+            key={p.key}
+            type="button"
+            role="tab"
+            aria-selected={period === p.key}
+            data-testid={`feedback-dashboard-period-${p.key}`}
+            onClick={() => setPeriod(p.key)}
+            className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${period === p.key ? 'bg-[#245b46] text-white' : 'text-gray-600 hover:bg-gray-50'}`}
+          >
+            {p.label}
+          </button>
+        ))}
+      </div>
+      <button type="button" onClick={reload} className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-semibold text-gray-500 hover:bg-gray-100 hover:text-gray-800">
+        <RefreshCw size={13} className={loading ? 'animate-spin' : ''} aria-hidden="true" />Refresh
+      </button>
+    </div>
+  )
+
+  if (loading && !stats) return <div className="space-y-5">{header}<div className="py-16 text-center text-sm text-gray-400">Loading…</div></div>
+  if (error || !stats) return (
+    <div className="space-y-5">
+      {header}
+      <div className="py-16 text-center text-sm text-red-500">
+        {error || 'No data'}
+        <button type="button" onClick={reload} className="mt-2 block w-full font-semibold text-[#245b46] hover:underline">Retry</button>
+      </div>
+    </div>
+  )
+
+  const empty = stats.total_feedback === 0
+  const maxCategory = Math.max(1, ...stats.category_stats.map(c => c.count))
+  const maxRole = Math.max(1, ...stats.by_role.map(r => r.count))
+  const trendTotal = stats.trend.reduce((s, d) => s + d.count, 0)
 
   return (
     <div className="space-y-5" data-testid="feedback-dashboard">
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-        <Card><CardContent className="pt-5">
-          <div className="text-2xl font-extrabold text-gray-900">{stats.pulse_score}<span className="text-sm text-gray-400">/100</span></div>
-          <div className="mt-1 text-xs font-bold text-gray-500">😊 SCHOOL PULSE SCORE</div>
-        </CardContent></Card>
-        <Card><CardContent className="pt-5">
-          <div className="text-2xl font-extrabold text-gray-900">{stats.total_feedback.toLocaleString()}</div>
-          <div className="mt-1 text-xs font-bold text-gray-500">💬 TOTAL FEEDBACK</div>
-        </CardContent></Card>
-        <Card><CardContent className="pt-5">
-          <div className="text-2xl font-extrabold text-emerald-600">{stats.percent_positive}%</div>
-          <div className="mt-1 text-xs font-bold text-gray-500">🤩 POSITIVE</div>
-        </CardContent></Card>
-        <Card><CardContent className="pt-5">
-          <div className="text-2xl font-extrabold text-rose-600">{stats.percent_negative}%</div>
-          <div className="mt-1 text-xs font-bold text-gray-500">😡 NEGATIVE</div>
-        </CardContent></Card>
-      </div>
+      {header}
 
       {stats.high_priority_open_count > 0 && (
-        <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700" data-testid="feedback-high-priority-alert">
-          🚨 {stats.high_priority_open_count} high-priority issue{stats.high_priority_open_count === 1 ? '' : 's'} still open — see the Issue Pipeline tab.
-        </div>
+        <button
+          type="button"
+          onClick={() => onNavigate('issues')}
+          data-testid="feedback-high-priority-alert"
+          className="flex w-full items-center gap-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-left text-sm text-rose-800 transition hover:bg-rose-100"
+        >
+          <AlertTriangle size={18} className="shrink-0 text-rose-600" aria-hidden="true" />
+          <span className="flex-1"><b>{stats.high_priority_open_count} high-priority issue{stats.high_priority_open_count === 1 ? '' : 's'}</b> still open — people rated something 😭 Terrible.</span>
+          <span className="inline-flex shrink-0 items-center gap-1 text-xs font-bold">Open Issue Pipeline<ArrowRight size={13} aria-hidden="true" /></span>
+        </button>
       )}
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <Card>
-          <CardHeader><CardTitle className="text-sm">Today&apos;s Mood</CardTitle></CardHeader>
-          <CardContent className="space-y-2.5">
-            {[5, 4, 3, 2, 1].map(rating => {
-              const row = stats.today_mood_breakdown.find(m => m.rating === rating)
-              return (
-                <div key={rating} className="flex items-center gap-2.5 text-xs">
-                  <span className="w-24 shrink-0 text-gray-500">{MOOD_LABEL[rating]}</span>
-                  <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-gray-100">
-                    <div className="h-full rounded-full" style={{ width: `${row?.percent ?? 0}%`, backgroundColor: MOOD_COLOR[rating] }} />
-                  </div>
-                  <span className="w-9 shrink-0 text-right font-semibold text-gray-600">{row?.percent ?? 0}%</span>
+      {/* KPI tiles */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="flex items-center gap-4 rounded-2xl border border-gray-200 bg-white p-5" data-testid="feedback-kpi-pulse">
+          {stats.pulse_score != null ? <PulseRing score={stats.pulse_score} /> : <div className="flex h-[76px] w-[76px] items-center justify-center rounded-full bg-gray-50 text-2xl">🌱</div>}
+          <div className="min-w-0">
+            <div className="text-[11px] font-bold uppercase tracking-wide text-gray-400">School pulse</div>
+            {stats.pulse_score != null ? (
+              <>
+                <div className="text-lg font-extrabold" style={{ color: pulseStatus(stats.pulse_score).color }}>
+                  <span className="inline-flex items-center gap-1.5"><MoodFace rating={pulseStatus(stats.pulse_score).face} size={24} animated />{pulseStatus(stats.pulse_score).label}</span>
                 </div>
-              )
-            })}
-            {stats.today_mood_breakdown.length === 0 && <p className="text-xs text-gray-400">No feedback submitted yet today.</p>}
-          </CardContent>
-        </Card>
+                <div className="text-[11px] text-gray-500">avg ⭐ {stats.avg_rating?.toFixed(1)} of 5</div>
+                <Delta now={stats.pulse_score} before={stats.previous?.pulse_score} suffix=" pts" prevLabel={prevLabel} />
+              </>
+            ) : <div className="text-sm text-gray-500">No ratings yet</div>}
+          </div>
+        </div>
 
-        <Card>
-          <CardHeader><CardTitle className="text-sm">What People Are Talking About</CardTitle></CardHeader>
-          <CardContent style={{ height: 220 }}>
-            {stats.category_share.length === 0 ? (
-              <p className="text-xs text-gray-400">No ratings yet.</p>
-            ) : (
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={stats.category_share.slice(0, 6)} layout="vertical" margin={{ left: 8, right: 16 }}>
-                  <CartesianGrid strokeDasharray="3 3" horizontal={false} />
-                  <XAxis type="number" hide />
-                  <YAxis type="category" dataKey="category_label" width={110} tick={{ fontSize: 11 }} />
-                  <Tooltip formatter={(v: unknown) => (typeof v === 'number' ? `${v}%` : String(v))} />
-                  <Bar dataKey="percent" fill="#7C6EF5" radius={[0, 6, 6, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            )}
-          </CardContent>
-        </Card>
+        <button type="button" onClick={() => onNavigate('submissions')} data-testid="feedback-kpi-total" className="group rounded-2xl border border-gray-200 bg-white p-5 text-left transition hover:border-[#9bb7a4] hover:shadow-md">
+          <div className="flex items-center justify-between text-[11px] font-bold uppercase tracking-wide text-gray-400">
+            💬 Feedback received <ArrowRight size={13} className="text-gray-300 transition group-hover:translate-x-0.5 group-hover:text-[#245b46]" aria-hidden="true" />
+          </div>
+          <div className="mt-1 text-3xl font-extrabold text-gray-900">{stats.total_feedback.toLocaleString()}</div>
+          <div className="text-[11px] text-gray-500">{stats.total_ratings} rating{stats.total_ratings === 1 ? '' : 's'} · {stats.form_submissions} form request{stats.form_submissions === 1 ? '' : 's'}</div>
+          <Delta now={stats.total_feedback} before={stats.previous?.total_feedback} prevLabel={prevLabel} />
+        </button>
+
+        <div className="rounded-2xl border border-gray-200 bg-white p-5" data-testid="feedback-kpi-sentiment">
+          <div className="text-[11px] font-bold uppercase tracking-wide text-gray-400">Sentiment of ratings</div>
+          {stats.total_ratings === 0 ? (
+            <div className="mt-3 text-sm text-gray-500">No ratings yet</div>
+          ) : (
+            <>
+              <div className="mt-2 flex h-3 overflow-hidden rounded-full bg-gray-100" role="img" aria-label={`${stats.percent_positive}% positive, ${stats.percent_neutral}% neutral, ${stats.percent_negative}% negative`}>
+                <div style={{ width: `${stats.percent_positive}%`, background: MOOD[5].color }} />
+                <div style={{ width: `${stats.percent_neutral}%`, background: MOOD[3].color }} className="border-x-2 border-white" />
+                <div style={{ width: `${stats.percent_negative}%`, background: MOOD[1].color }} />
+              </div>
+              <div className="mt-3 grid grid-cols-3 text-center">
+                <div><div className="text-lg font-extrabold text-gray-900">{stats.percent_positive}%</div><div className="inline-flex items-center gap-1 text-[10px] font-semibold text-gray-500"><MoodFace rating={4} size={13} />Positive</div></div>
+                <div><div className="text-lg font-extrabold text-gray-900">{stats.percent_neutral}%</div><div className="inline-flex items-center gap-1 text-[10px] font-semibold text-gray-500"><MoodFace rating={3} size={13} />Neutral</div></div>
+                <div><div className="text-lg font-extrabold text-gray-900">{stats.percent_negative}%</div><div className="inline-flex items-center gap-1 text-[10px] font-semibold text-gray-500"><MoodFace rating={2} size={13} />Negative</div></div>
+              </div>
+            </>
+          )}
+        </div>
+
+        <button type="button" onClick={() => onNavigate('issues')} data-testid="feedback-kpi-issues" className={`group rounded-2xl border bg-white p-5 text-left transition hover:shadow-md ${stats.open_issues_count > 0 ? 'border-rose-200 hover:border-rose-300' : 'border-gray-200 hover:border-[#9bb7a4]'}`}>
+          <div className="flex items-center justify-between text-[11px] font-bold uppercase tracking-wide text-gray-400">
+            🚨 Open issues <ArrowRight size={13} className="text-gray-300 transition group-hover:translate-x-0.5 group-hover:text-[#245b46]" aria-hidden="true" />
+          </div>
+          <div className={`mt-1 text-3xl font-extrabold ${stats.open_issues_count > 0 ? 'text-rose-700' : 'text-gray-900'}`}>{stats.open_issues_count}</div>
+          <div className="text-[11px] text-gray-500">
+            {stats.open_issues_count === 0 ? '🎉 All clear' : `${stats.high_priority_open_count} high priority · from 😭/😞 ratings`}
+          </div>
+        </button>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <Card>
-          <CardHeader><CardTitle className="text-sm">🥇 Best Rated Categories</CardTitle></CardHeader>
-          <CardContent>
-            <CategoryRatingList rows={stats.best_categories} tone="good" />
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader><CardTitle className="text-sm">⚠️ Worst Rated Categories</CardTitle></CardHeader>
-          <CardContent>
-            <CategoryRatingList rows={stats.worst_categories} tone="bad" />
-          </CardContent>
-        </Card>
-      </div>
+      {empty ? (
+        <div className="rounded-2xl border border-gray-200 bg-white px-6 py-14 text-center">
+          <div className="text-5xl">📭</div>
+          <p className="mt-3 text-base font-bold text-gray-900">No feedback in this period</p>
+          <p className="mt-1 text-sm text-gray-500">Try a longer time range, or share your QR posters to start collecting feedback.</p>
+          <div className="mt-4 flex justify-center gap-4">
+            {period !== 'all' && <LinkButton onClick={() => setPeriod('all')}>Show all time</LinkButton>}
+            <LinkButton onClick={() => onNavigate('qr-points')}>Event &amp; Place QRs</LinkButton>
+          </div>
+        </div>
+      ) : (
+        <>
+          {/* Trend + audience */}
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+            <Card title={`Feedback over the last ${stats.trend.length} days`} className="lg:col-span-2" action={<span className="text-xs text-gray-400">{trendTotal} total</span>}>
+              <div style={{ height: 220 }} data-testid="feedback-trend-chart">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={stats.trend} margin={{ top: 8, right: 8, left: -20, bottom: 0 }}>
+                    <defs>
+                      <linearGradient id="feedbackTrendFill" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor={BRAND} stopOpacity={0.25} />
+                        <stop offset="100%" stopColor={BRAND} stopOpacity={0.02} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid vertical={false} stroke="#eef0ec" />
+                    <XAxis dataKey="date" tickFormatter={fmtDay} tick={{ fontSize: 11, fill: '#9CA3AF' }} tickLine={false} axisLine={false} minTickGap={24} />
+                    <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: '#9CA3AF' }} tickLine={false} axisLine={false} width={40} />
+                    <Tooltip
+                      cursor={{ stroke: '#9bb7a4', strokeDasharray: '3 3' }}
+                      content={({ active, payload }) => {
+                        if (!active || !payload?.length) return null
+                        const d = payload[0].payload as Stats['trend'][number]
+                        return (
+                          <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs shadow-md">
+                            <div className="font-bold text-gray-900">{fmtDay(d.date)}</div>
+                            <div className="text-gray-600">💬 {d.count} feedback</div>
+                            {d.avg_rating != null && <div className="text-gray-600">⭐ {d.avg_rating.toFixed(1)} avg</div>}
+                          </div>
+                        )
+                      }}
+                    />
+                    <Area type="monotone" dataKey="count" stroke={BRAND} strokeWidth={2} fill="url(#feedbackTrendFill)" dot={false} activeDot={{ r: 5, stroke: '#fff', strokeWidth: 2 }} />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            </Card>
+
+            <Card title="Who's giving feedback">
+              {stats.by_role.length === 0 ? <p className="text-xs text-gray-400">No feedback yet.</p> : (
+                <ul className="space-y-3">
+                  {stats.by_role.map(r => {
+                    const role = FEEDBACK_ROLES.find(x => x.key === r.role)
+                    const visual = ROLE_VISUAL[r.role as keyof typeof ROLE_VISUAL]
+                    const share = stats.total_feedback ? Math.round((r.count / stats.total_feedback) * 100) : 0
+                    return (
+                      <li key={r.role}>
+                        <div className="mb-1 flex items-center justify-between text-xs">
+                          <span className="inline-flex items-center gap-1.5 font-semibold text-gray-700">
+                            {visual && <visual.Icon size={13} aria-hidden="true" />}{role?.label ?? r.role}
+                          </span>
+                          <span className="text-gray-500"><b className="text-gray-900">{r.count}</b> · {share}%</span>
+                        </div>
+                        <div className="h-2 overflow-hidden rounded-full bg-gray-100">
+                          <div className="h-full rounded-full" style={{ width: `${(r.count / maxRole) * 100}%`, background: BRAND }} />
+                        </div>
+                      </li>
+                    )
+                  })}
+                </ul>
+              )}
+            </Card>
+          </div>
+
+          {/* Mood + categories */}
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <Card title="How people feel" action={<span className="text-xs text-gray-400">{stats.total_ratings} ratings</span>}>
+              {stats.total_ratings === 0 ? <p className="text-xs text-gray-400">Only form requests in this period — no emoji ratings yet.</p> : (
+                <ul className="space-y-3" data-testid="feedback-mood-breakdown">
+                  {stats.mood_breakdown.map(m => (
+                    <li key={m.rating} className="flex items-center gap-3 text-xs">
+                      <span className="inline-flex w-24 shrink-0 items-center gap-1.5 font-semibold text-gray-700"><MoodFace rating={m.rating} size={20} />{MOOD[m.rating].label}</span>
+                      <div className="h-3 flex-1 overflow-hidden rounded-full bg-gray-100" title={`${m.count} rating${m.count === 1 ? '' : 's'}`}>
+                        <div className="h-full rounded-full transition-all" style={{ width: `${m.percent}%`, background: MOOD[m.rating].color }} />
+                      </div>
+                      <span className="w-16 shrink-0 text-right text-gray-500"><b className="text-gray-900">{m.percent}%</b> ({m.count})</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Card>
+
+            <Card title="What people are talking about" action={<LinkButton onClick={() => onNavigate('categories')}>Categories</LinkButton>}>
+              {stats.category_stats.length === 0 ? <p className="text-xs text-gray-400">No category ratings yet.</p> : (
+                <ul className="space-y-3" data-testid="feedback-category-chart">
+                  {stats.category_stats.slice(0, 6).map(c => (
+                    <li key={c.category_key} className="flex items-center gap-3 text-xs">
+                      <span className="w-28 shrink-0 truncate font-semibold text-gray-700" title={c.category_label}>{c.category_label}</span>
+                      <div className="h-3 flex-1 overflow-hidden rounded-full bg-gray-100" title={`${c.count} rating${c.count === 1 ? '' : 's'}`}>
+                        <div className="h-full rounded-full" style={{ width: `${(c.count / maxCategory) * 100}%`, background: BRAND }} />
+                      </div>
+                      <span className="w-6 shrink-0 text-right font-bold text-gray-900">{c.count}</span>
+                      <span className={`w-12 shrink-0 rounded-md px-1.5 py-0.5 text-center font-bold ${ratingTone(c.avg_rating)}`}>⭐{c.avg_rating.toFixed(1)}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Card>
+          </div>
+
+          {/* Best vs needs attention — split at 3.5★ so the two never overlap */}
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <Card title="🥇 Doing well">
+              {stats.best_categories.length === 0 ? <p className="text-xs text-gray-400">No category is averaging 3.5★ or more yet.</p> : (
+                <ul className="divide-y divide-gray-100">
+                  {stats.best_categories.map((c, i) => (
+                    <li key={c.category_key} className="flex items-center justify-between gap-3 py-2.5 text-sm">
+                      <span className="flex min-w-0 items-center gap-2">
+                        <span className="w-5 shrink-0 text-center">{['🥇', '🥈', '🥉'][i] ?? `${i + 1}.`}</span>
+                        <span className="truncate font-medium text-gray-800">{c.category_label}</span>
+                      </span>
+                      <span className="shrink-0 text-xs text-gray-500">
+                        <span className={`mr-2 rounded-md px-1.5 py-0.5 font-bold ${ratingTone(c.avg_rating)}`}>⭐ {c.avg_rating.toFixed(1)}</span>{c.count} rating{c.count === 1 ? '' : 's'}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Card>
+            <Card title="⚠️ Needs attention" action={stats.open_issues_count > 0 ? <LinkButton onClick={() => onNavigate('issues')} testId="feedback-attention-issues-link">View issues</LinkButton> : undefined}>
+              {stats.attention_categories.length === 0 ? <p className="text-xs text-gray-500">🎉 Nothing below 3.5★ — keep it up!</p> : (
+                <ul className="divide-y divide-gray-100">
+                  {stats.attention_categories.map(c => (
+                    <li key={c.category_key} className="flex items-center justify-between gap-3 py-2.5 text-sm">
+                      <span className="truncate font-medium text-gray-800">{c.category_label}</span>
+                      <span className="shrink-0 text-xs text-gray-500">
+                        <span className={`mr-2 rounded-md px-1.5 py-0.5 font-bold ${ratingTone(c.avg_rating)}`}>⭐ {c.avg_rating.toFixed(1)}</span>
+                        {c.negative_count > 0 ? <span className="font-semibold text-rose-700">{c.negative_count} unhappy</span> : `${c.count} rating${c.count === 1 ? '' : 's'}`}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Card>
+          </div>
+        </>
+      )}
     </div>
-  )
-}
-
-function CategoryRatingList({ rows, tone }: { rows: Stats['best_categories']; tone: 'good' | 'bad' }) {
-  if (rows.length === 0) return <p className="text-xs text-gray-400">No ratings yet.</p>
-  return (
-    <ul className="space-y-2 text-sm">
-      {rows.map(r => (
-        <li key={r.category_key} className="flex items-center justify-between">
-          <span className="text-gray-700">{r.category_label}</span>
-          <span className={`font-bold ${tone === 'good' ? 'text-emerald-600' : 'text-rose-600'}`}>{r.avg_rating.toFixed(1)} ⭐ <span className="text-xs font-normal text-gray-400">({r.count})</span></span>
-        </li>
-      ))}
-    </ul>
   )
 }

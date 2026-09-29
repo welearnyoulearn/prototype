@@ -4,6 +4,7 @@ import { useState, useEffect, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import AuthShell, { THEMES, AuthError, PasswordField } from '@/app/components/AuthShell'
+import { ButtonLoader, InlineLoader } from '@/components/loaders'
 
 function ResetPasswordForm() {
   const router = useRouter()
@@ -46,7 +47,7 @@ function ResetPasswordForm() {
     }
   }
 
-  if (valid === null) return <p className="text-center text-gray-400 py-8">Validating link...</p>
+  if (valid === null) return <InlineLoader portal="school-admin" label="Validating link…" />
 
   if (!valid) return (
     <div className="text-center py-4">
@@ -82,9 +83,9 @@ function ResetPasswordForm() {
         <PasswordField label="Confirm Password" value={confirm} onChange={setConfirm}
           placeholder="Repeat your new password" ring={theme.ring} autoComplete="new-password" />
         <button type="submit" disabled={loading}
-          className={`w-full bg-gradient-to-r ${theme.btnGradient} text-white font-semibold py-3 rounded-xl text-sm transition-all disabled:opacity-50 shadow-lg hover:shadow-xl hover:scale-[1.01] active:scale-[0.99] flex items-center justify-center gap-2`}>
+          className="auth-submit">
           {loading
-            ? <><svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>Saving...</>
+            ? <ButtonLoader label="Saving…" />
             : 'Reset Password'}
         </button>
       </form>
@@ -95,7 +96,7 @@ function ResetPasswordForm() {
 export default function ResetPasswordPage() {
   return (
     <AuthShell theme={THEMES.admin} title="Reset Your Password" subtitle="Enter a new password for your admin account">
-      <Suspense fallback={<p className="text-center text-gray-400 py-8">Loading...</p>}>
+      <Suspense fallback={<InlineLoader portal="school-admin" label="Loading reset form…" />}>
         <ResetPasswordForm />
       </Suspense>
     </AuthShell>

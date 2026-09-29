@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
 import { withWatchline } from '@/lib/logger'
+import { todayIST } from '@/lib/istDate'
+import { claimIdempotencyKey, saveIdempotentResponse } from '@/lib/idempotency'
+import { lockYearClose } from '@/lib/feeRollover'
 
 // Hard ceiling on rows per request so a payment history can never come back unbounded.
 const MAX_LIMIT = 500
@@ -107,14 +110,31 @@ async function handlePOST(req: NextRequest) {
       payment_mode, transaction_ref,
       collected_by_name: clientCollector, notes, paid_date,
       payment_status = 'completed',
+      idempotency_key,
     } = body
 
     const access = await requireFeeAccess(school_id)
     if (!access) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-    const collected_by_name = clientCollector || access.actor
 
     if (!school_id || !student_id || !payment_mode) {
       return NextResponse.json({ error: 'school_id, student_id, payment_mode required' }, { status: 400 })
+    }
+    // payment_mode has no DB-level CHECK constraint — whitelist it here. Without
+    // this, a non-canonical value (e.g. a typo, or "cash " with a trailing space)
+    // still posts the payment and reduces the student's balance correctly, but
+    // silently falls out of day-close's SUM(...) GROUP BY payment_mode cash
+    // reconciliation (which only ever reads modeMap['cash']) — masking a real
+    // shortfall inside an unreconciled bucket no report flags.
+    const VALID_PAYMENT_MODES = ['cash', 'cheque', 'dd', 'upi', 'online']
+    if (!VALID_PAYMENT_MODES.includes(payment_mode)) {
+      return NextResponse.json({ error: `payment_mode must be one of: ${VALID_PAYMENT_MODES.join(', ')}` }, { status: 400 })
+    }
+    // Required, not defaulted to the logged-in admin's own name — several staff
+    // often share one admin login at the collection counter, so falling back to
+    // access.actor would silently misattribute who actually took the cash.
+    const collected_by_name = typeof clientCollector === 'string' ? clientCollector.trim() : ''
+    if (!collected_by_name) {
+      return NextResponse.json({ error: 'collected_by_name is required' }, { status: 400 })
     }
 
     if (paid_date !== undefined && paid_date !== null) {
@@ -122,10 +142,12 @@ async function handlePOST(req: NextRequest) {
       if (!dateRe.test(paid_date)) {
         return NextResponse.json({ error: 'paid_date must be YYYY-MM-DD' }, { status: 400 })
       }
-      const d = new Date(paid_date)
-      const now = new Date()
-      const minDate = new Date('2000-01-01')
-      if (isNaN(d.getTime()) || d > now || d < minDate) {
+      // Compare calendar dates as plain "YYYY-MM-DD" strings, not `new Date(paid_date)`
+      // (UTC midnight) against `new Date()` (the current instant) — that comparison
+      // wrongly rejects today's own date as "in the future" during the 00:00-05:29 IST
+      // window, when UTC is still on the previous day. String comparison sidesteps the
+      // UTC/IST gap entirely; todayIST() gives "today" in the schools' actual timezone.
+      if (isNaN(new Date(paid_date).getTime()) || paid_date > todayIST() || paid_date < '2000-01-01') {
         return NextResponse.json({ error: 'paid_date must be a valid past date' }, { status: 400 })
       }
     }
@@ -148,10 +170,35 @@ async function handlePOST(req: NextRequest) {
     // ── Acquire connection only after validation passes ─────────────────────────
     const client = await pool.connect()
     try {
+      const guardIds = isMulti ? ledger_ids : (ledger_id ? [ledger_id] : [])
+
+      await client.query('BEGIN')
+
+      // Serialize against year-end apply/close/reopen for every academic year these
+      // ledger rows belong to — the SAME advisory lock those actions take
+      // (lib/feeRollover.ts). Without this, the closed-year check just below could
+      // read "not closed" and this transaction could still be mid-flight applying
+      // its payment when a concurrent year-end close lands, landing a completed
+      // payment inside what the admin now believes is a closed, immutable year.
+      // Taking the lock(s) BEFORE the check (not after, like a row lock would need)
+      // is required here because there's no specific ledger row a close action
+      // itself locks — the year-end route's own comment on lockYearClose explains why.
+      if (guardIds.length > 0) {
+        const { rows: yearsRows } = await client.query(
+          `SELECT DISTINCT school_id, academic_year FROM student_fee_ledger WHERE id = ANY($1)`,
+          [guardIds]
+        )
+        for (const y of yearsRows) {
+          await lockYearClose(client, y.school_id, y.academic_year)
+        }
+      }
+
       // Guard: block payments against a closed academic year — fee_year_close is
       // guaranteed to exist (see lib/db.ts), so a query error here is a real failure,
       // not a missing table; let it propagate rather than silently failing this open.
-      const guardIds = isMulti ? ledger_ids : (ledger_id ? [ledger_id] : [])
+      // Re-checked here, now that the lock(s) above are held, so this can't read a
+      // stale "not closed" state past a concurrent close that was waiting on the
+      // same lock.
       if (guardIds.length > 0) {
         const { rows: [locked] } = await client.query(
           `SELECT 1
@@ -161,31 +208,44 @@ async function handlePOST(req: NextRequest) {
           [guardIds]
         )
         if (locked) {
+          await client.query('ROLLBACK')
           return NextResponse.json({ error: 'This academic year is closed. Reopen it to record payments.' }, { status: 409 })
         }
       }
 
-      await client.query('BEGIN')
+      // Duplicate-submission guard — see lib/idempotency.ts. A network timeout +
+      // retry, or a double-click before the UI's own disable-while-saving state
+      // lands, previously had no protection beyond "does the balance still have
+      // room for this amount", which happily admits a genuine duplicate whenever
+      // it does.
+      const claim = await claimIdempotencyKey(client, { schoolId: school_id, key: idempotency_key, endpoint: '/api/fees/payments' })
+      if (!claim.proceed) {
+        await client.query('ROLLBACK')
+        return NextResponse.json(claim.body as object, { status: claim.status })
+      }
 
       // Generate one receipt number shared across all allocations
       const { rows: [seq] } = await client.query(`SELECT nextval('receipt_number_seq') AS n`)
       const schoolCode = String(school_id).padStart(3, '0')
       const receipt_number = `RCP-${schoolCode}-${new Date().getFullYear()}-${String(seq.n).padStart(6, '0')}`
-      const payDate = paid_date || new Date().toISOString().slice(0, 10)
+      const payDate = paid_date || todayIST()
 
       const createdPayments = []
 
       if (!isMulti) {
         // ── Single-entry mode (offline admin collection) ──────────────────────────
 
-        // #15 — FOR UPDATE locks the row so concurrent cashiers queue instead of double-paying
+        // #15 — FOR UPDATE locks the row so concurrent cashiers queue instead of double-paying.
+        // student_id is also matched here (not just school_id) — without it, a caller
+        // could name student A in the receipt while ledger_id actually belongs to
+        // student B, crediting the wrong student's bill.
         const { rows: [ledgerRow] } = await client.query(
-          `SELECT amount_due, amount_paid, COALESCE(waiver_amount, 0) AS waiver_amount FROM student_fee_ledger WHERE id = $1 AND school_id = $2 FOR UPDATE`,
-          [ledger_id, school_id]
+          `SELECT amount_due, amount_paid, COALESCE(waiver_amount, 0) AS waiver_amount FROM student_fee_ledger WHERE id = $1 AND school_id = $2 AND student_id = $3 FOR UPDATE`,
+          [ledger_id, school_id, student_id]
         )
         if (!ledgerRow) {
           await client.query('ROLLBACK')
-          return NextResponse.json({ error: 'Ledger entry not found' }, { status: 404 })
+          return NextResponse.json({ error: 'Ledger entry not found for this student' }, { status: 404 })
         }
         const balance = parseFloat(ledgerRow.amount_due) - parseFloat(ledgerRow.waiver_amount) - parseFloat(ledgerRow.amount_paid)
         if (parseFloat(String(amount)) > balance + 0.001) {
@@ -225,16 +285,19 @@ async function handlePOST(req: NextRequest) {
       } else {
         // ── Multi-entry FIFO mode ─────────────────────────────────────────────────
         // Fetch ledger entries in FIFO order (oldest due_date first)
-        // #15 — FOR UPDATE locks all selected rows so concurrent cashiers queue
+        // #15 — FOR UPDATE locks all selected rows so concurrent cashiers queue.
+        // student_id is matched too — without it, a ledger_id belonging to another
+        // student in the same school would silently be allocated money under this
+        // receipt's student_id.
         const { rows: entries } = await client.query(
           `SELECT id, amount_due, amount_paid, COALESCE(waiver_amount, 0) AS waiver_amount, status,
                   GREATEST(amount_due - COALESCE(waiver_amount, 0) - amount_paid, 0) AS balance
            FROM student_fee_ledger
-           WHERE id = ANY($1) AND school_id = $2
+           WHERE id = ANY($1) AND school_id = $2 AND student_id = $3
              AND status NOT IN ('paid', 'waived')
            ORDER BY due_date ASC
            FOR UPDATE`,
-          [ledger_ids, school_id]
+          [ledger_ids, school_id, student_id]
         )
 
         const totalBalance = entries.reduce((sum, e) => sum + parseFloat(String(e.balance)), 0)
@@ -295,9 +358,11 @@ async function handlePOST(req: NextRequest) {
         }
       }
 
-      await client.query('COMMIT')
-
-      // Return enriched response for receipt display
+      // Enriched response for receipt display — computed before COMMIT (not after,
+      // as this used to be) so its exact shape can be cached against the
+      // idempotency key below; a retry then replays this same response instead of
+      // re-deriving it (and, more importantly, instead of re-running the payment
+      // logic above).
       const { rows: [full] } = await client.query(
         `SELECT fp.*, s.name AS student_name, s.roll_number, s.grade, s.section, s.parent_name,
                 fc.name AS category_name, l.period_label, l.amount_due,
@@ -323,13 +388,17 @@ async function handlePOST(req: NextRequest) {
         [createdPayments.map(p => p.id)]
       )
 
-      return NextResponse.json({
+      const responseBody = {
         ...full,
         receipt_number,
         total_paid: createdPayments.reduce((s, p) => s + parseFloat(p.amount), 0),
         line_items: lineItems.map(li => ({ category_name: li.category_name, period_label: li.period_label, amount: parseFloat(li.amount) })),
         allocations: createdPayments.map(p => ({ ledger_id: p.ledger_id, amount: parseFloat(p.amount) })),
-      }, { status: 201 })
+      }
+      await saveIdempotentResponse(client, { schoolId: school_id, key: idempotency_key, endpoint: '/api/fees/payments', status: 201, body: responseBody })
+      await client.query('COMMIT')
+
+      return NextResponse.json(responseBody, { status: 201 })
     } catch (e) {
       await client.query('ROLLBACK')
       console.error(e)

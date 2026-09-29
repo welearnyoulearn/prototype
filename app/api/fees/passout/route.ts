@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import pool from '@/lib/db'
+import pool, { ensureDB } from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
 
 // GET /api/fees/passout?school_id=X
@@ -14,13 +14,7 @@ export async function GET(req: NextRequest) {
 
     try {
       // Self-heal: ensure tables exist before querying
-      await pool.query(`
-        CREATE TABLE IF NOT EXISTS passout_students (
-          id SERIAL PRIMARY KEY, school_id INTEGER NOT NULL, student_id INTEGER NOT NULL,
-          passout_year TEXT NOT NULL, moved_by TEXT NOT NULL, moved_at TIMESTAMPTZ DEFAULT NOW(),
-          notes TEXT, UNIQUE(school_id, student_id)
-        )
-      `).catch(() => {})
+      await ensureDB()
 
       // Summary stats for the passout panel
       const { rows: [summary] } = await pool.query(

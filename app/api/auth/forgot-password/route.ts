@@ -14,7 +14,8 @@ export async function POST(req: NextRequest) {
        FROM users u
        LEFT JOIN user_profiles up ON up.user_id = u.id
        LEFT JOIN schools s ON s.id = u.school_id
-       WHERE LOWER(u.email) = $1 OR LOWER(u.school_code) = $1`,
+       WHERE (LOWER(u.email) = $1 OR LOWER(u.school_code) = $1)
+         AND COALESCE(u.status, 'active') <> 'inactive'`,
       [id]
     )
 

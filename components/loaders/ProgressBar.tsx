@@ -29,11 +29,11 @@ export default function ProgressBar({ portal, progress, label, className = '' }:
       className={`space-y-1.5 ${className}`}
     >
       {label && (
-        <p className="text-xs font-medium text-gray-600">
+        <p className="text-xs font-medium text-muted-foreground">
           {label} {clamped}%
         </p>
       )}
-      <div className="w-full h-1.5 rounded-full bg-gray-100 overflow-hidden">
+      <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
         <div
           className={`h-full rounded-full transition-all duration-300 ease-out ${theme.bgClass}`}
           style={{ width: `${clamped}%` }}

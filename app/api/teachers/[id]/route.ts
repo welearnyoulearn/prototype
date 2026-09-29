@@ -136,7 +136,6 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       // school admin re-assigns the subject explicitly.
       if (becomingInactive) {
         await pool.query('UPDATE class_subjects SET teacher_id = NULL WHERE teacher_id = $1', [id])
-        await pool.query('UPDATE class_timetable SET teacher_id = NULL, is_manual = FALSE WHERE teacher_id = $1', [id])
         await pool.query('UPDATE classes SET class_teacher_id = NULL WHERE class_teacher_id = $1', [id])
       }
 
@@ -209,21 +208,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         )
         for (const m of matches) {
           await pool.query('UPDATE class_subjects SET teacher_id = $1 WHERE id = $2', [teacher.id, m.id])
-          await pool.query(
-            `UPDATE class_timetable ct
-             SET teacher_id = $1
-             WHERE ct.class_id = $2 AND ct.subject_name = $3 AND ct.is_break = FALSE
-               AND ct.teacher_id IS DISTINCT FROM $1
-               AND NOT EXISTS (
-                 SELECT 1 FROM class_timetable other
-                 WHERE other.school_id = ct.school_id AND other.class_id != ct.class_id
-                   AND other.day_of_week = ct.day_of_week AND other.period_number = ct.period_number
-                   AND other.teacher_id = $1 AND other.is_break = FALSE
-               )`,
-            [teacher.id, m.class_id, m.subject_name]
-          )
           invalidateCache(`subjects:class:${m.class_id}`)
-          invalidateCache(`timetable:class:${m.class_id}`)
         }
         if (matches.length > 0) invalidateCache(`health:${schoolId}`)
       }
@@ -253,22 +238,17 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     // Preview mode: return what will be affected without deleting
     if (url.searchParams.get('consequences') === 'true') {
       try {
-        const [subjectsRes, classTeacherRes, ttRes] = await Promise.all([
+        const [subjectsRes, classTeacherRes] = await Promise.all([
           pool.query(
             `SELECT cs.subject_name, c.grade, c.section
              FROM class_subjects cs JOIN classes c ON c.id = cs.class_id
              WHERE cs.teacher_id = $1`, [id]),
           pool.query(
             `SELECT grade, section FROM classes WHERE class_teacher_id = $1`, [id]),
-          pool.query(
-            `SELECT DISTINCT ct.subject_name, c.grade, c.section, ct.day_of_week, ct.period_number
-             FROM class_timetable ct JOIN classes c ON c.id = ct.class_id
-             WHERE ct.teacher_id = $1 AND ct.is_break = false`, [id]),
         ])
         return NextResponse.json({
           subjects_teaching: subjectsRes.rows,
           class_teacher_of: classTeacherRes.rows,
-          timetable_slots: ttRes.rows,
         })
       } catch (error) {
         console.error(error)
@@ -281,12 +261,9 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
       await client.query('BEGIN')
 
       // Null out all FK references (keep records for audit but unlink teacher)
-      await client.query('UPDATE class_timetable SET teacher_id = NULL, is_manual = FALSE WHERE teacher_id = $1', [id])
       await client.query('UPDATE class_subjects SET teacher_id = NULL WHERE teacher_id = $1', [id])
       await client.query('UPDATE classes SET class_teacher_id = NULL WHERE class_teacher_id = $1', [id])
       await client.query('UPDATE attendance SET marked_by_teacher_id = NULL WHERE marked_by_teacher_id = $1', [id])
-      await client.query('UPDATE substitute_assignments SET original_teacher_id = NULL WHERE original_teacher_id = $1', [id])
-      await client.query('UPDATE substitute_assignments SET substitute_teacher_id = NULL WHERE substitute_teacher_id = $1', [id])
       await client.query('UPDATE tasks SET teacher_id = NULL WHERE teacher_id = $1', [id])
       await client.query('UPDATE task_submissions SET reviewed_by = NULL WHERE reviewed_by = $1', [id])
       await client.query('UPDATE task_reminders SET sent_by = NULL WHERE sent_by = $1', [id])

@@ -19,7 +19,7 @@ export async function platformAdminCookie(): Promise<string> {
   const res = await fetch(`${BASE}/api/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ identifier: EMAIL, password: PASSWORD }),
+    body: JSON.stringify({ email: EMAIL, password: PASSWORD }),
     redirect: 'manual',
   })
   const cookie = (res.headers.getSetCookie?.() ?? []).find(c => c.startsWith('wlyl-platform='))
@@ -32,7 +32,8 @@ export async function platformAdminCookie(): Promise<string> {
   return cookie.split(';')[0]
 }
 
-export type SeededSchool = { id: number; school_code: string; temp_password: string }
+// `email` is the school's first admin login (the School ID is not a login credential).
+export type SeededSchool = { id: number; school_code: string; email: string; temp_password: string }
 
 /** Creates a school as platform admin. Throws loudly rather than yielding undefined fields. */
 export async function createSchool(cookie: string, overrides: Record<string, unknown> = {}): Promise<SeededSchool> {

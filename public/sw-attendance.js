@@ -57,14 +57,26 @@ async function syncQueue() {
 
   const results = []
   for (const entry of queue) {
-    if (entry.status === 'synced') continue
+    // 'terminal' = the server understood and REFUSED it (already marked by someone else, holiday,
+    // outside the allowed dates…). Retrying can never succeed, so it is kept for the user to see
+    // — with the reason — and never re-sent.
+    if (entry.status === 'synced' || entry.terminal) continue
     try {
       const r = await fetch('/api/attendance', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(entry.body),
       })
-      entry.status = r.ok ? 'synced' : 'failed'
+      if (r.ok) {
+        entry.status = 'synced'
+      } else {
+        entry.status = 'failed'
+        if ([400, 403, 404, 409].includes(r.status)) {
+          entry.terminal = true
+          const j = await r.json().catch(() => ({}))
+          entry.reason = j.error || 'Rejected by the server'
+        }
+      }
       results.push({ id: entry.id, status: entry.status })
     } catch {
       entry.status = 'failed'

@@ -2,6 +2,8 @@
 
 import { useEffect, useState, useCallback, useRef, ChangeEvent } from 'react'
 import { calcGrade, GRADE_COLORS, type ExamGrade } from '@/lib/examGrading'
+import { Skeleton } from '@/components/ui/skeleton'
+import { BarChart3, CheckCircle2 } from 'lucide-react'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 type Teacher = { id: number; name: string; subject: string; department: string }
@@ -356,25 +358,29 @@ export default function ExamMarks({ classId, schoolId, grade, section, teacher, 
           </div>
 
           {loading ? (
-            <div className="space-y-2 animate-pulse">{[1,2,3].map(i => <div key={i} className="h-20 bg-gray-100 rounded-xl" />)}</div>
+            <div className="space-y-2" role="status" aria-live="polite" aria-busy="true">
+              <span className="sr-only">Loading exams</span>
+              {[1,2,3].map(i => <Skeleton key={i} className="h-20" />)}
+            </div>
           ) : exams.length === 0 ? (
-            <div className="bg-white rounded-xl border border-gray-200 py-16 text-center">
-              <p className="text-3xl mb-2">📊</p>
-              <p className="text-gray-500 text-sm">No exams scheduled for this class yet.</p>
+            <div className="border-y border-gray-200 py-14 text-center">
+              <BarChart3 className="mx-auto mb-3 h-6 w-6 text-gray-400" aria-hidden="true" />
+              <p className="font-medium text-gray-700 text-sm">No exams scheduled</p>
+              <p className="mt-1 text-xs text-gray-400">New exams will appear here when the school publishes them.</p>
             </div>
           ) : (
-            <div className="space-y-3">
+            <div className="divide-y border-y border-gray-200">
               {exams.map(exam => {
                 const myPending = !isClassTeacher && exam.status === 'collecting'
                 const statusInfo = STATUS_LABELS[exam.status] ?? { label: exam.status, color: 'bg-gray-100 text-gray-500' }
                 return (
                   <div key={exam.id} onClick={() => loadExamDetail(exam.id)} data-testid={`exam-card-${exam.id}`}
-                    className="bg-white rounded-xl border border-gray-200 p-4 cursor-pointer hover:border-orange-300 hover:shadow-sm transition-all">
+                    className="px-1 py-4 cursor-pointer hover:bg-teal-50/40 transition-colors sm:px-3">
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
                           <h3 className="font-semibold text-gray-800 text-sm">{exam.exam_name}</h3>
-                          <span className="text-[10px] bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full uppercase font-medium">{examTypeLabel(exam.exam_type)}</span>
+                          <span className="text-xs text-gray-500">{examTypeLabel(exam.exam_type)}</span>
                           <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase ${statusInfo.color}`}>{statusInfo.label}</span>
                           {myPending && <span className="text-[10px] bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full font-bold">ENTER YOUR MARKS</span>}
                           {isClassTeacher && exam.status === 'collecting' && exam.assigned_subjects < exam.total_subjects && (
@@ -416,7 +422,7 @@ export default function ExamMarks({ classId, schoolId, grade, section, teacher, 
             <span className="text-xs text-gray-600 font-medium">{selectedExam.exam_name}</span>
           </div>
 
-          <div className="bg-white rounded-xl border border-gray-200 p-5">
+          <div className="border-y border-gray-200 py-5">
             <div className="flex items-start justify-between gap-4 flex-wrap">
               <div>
                 <div className="flex items-center gap-2 flex-wrap">
@@ -434,13 +440,13 @@ export default function ExamMarks({ classId, schoolId, grade, section, teacher, 
               <div className="flex items-center gap-2 flex-wrap">
                 {isClassTeacher && selectedExam.status === 'collecting' && (
                   <button onClick={() => openMarksEntry(selectedExam)} data-testid="open-enter-marks"
-                    className="bg-blue-600 text-white text-sm px-4 py-2 rounded-xl hover:bg-blue-700 transition-colors font-medium">
+                    className="bg-[#21686a] text-white text-sm px-4 py-2 rounded-md hover:bg-[#164749] transition-colors font-medium">
                     Enter My Marks
                   </button>
                 )}
                 {!isClassTeacher && selectedExam.status === 'collecting' && selectedExam.subjects.some(s => s.teacher_id === teacher.id && s.status === 'pending') && (
                   <button onClick={() => openMarksEntry(selectedExam)} data-testid="open-enter-marks"
-                    className="bg-purple-600 text-white text-sm px-4 py-2 rounded-xl hover:bg-purple-700 transition-colors font-medium">
+                    className="bg-[#21686a] text-white text-sm px-4 py-2 rounded-md hover:bg-[#164749] transition-colors font-medium">
                     Enter My Marks
                   </button>
                 )}
@@ -475,12 +481,12 @@ export default function ExamMarks({ classId, schoolId, grade, section, teacher, 
           </div>
 
           {/* Subject cards — with a per-subject reopen for the class teacher */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+          <div className="grid grid-cols-2 border-y border-gray-200 sm:grid-cols-3 lg:grid-cols-5">
             {selectedExam.subjects.map(sub => {
               const isMySubject = sub.teacher_id === teacher.id
               const submitted = sub.status === 'submitted'
               return (
-                <div key={sub.id} className={`bg-white rounded-xl border p-4 ${submitted ? 'border-green-200' : isMySubject ? 'border-amber-200' : 'border-gray-200'}`}>
+                <div key={sub.id} className={`p-4 border-b border-r ${submitted ? 'border-green-200 bg-green-50/30' : isMySubject ? 'border-amber-200 bg-amber-50/30' : 'border-gray-200'}`}>
                   <div className="flex items-start justify-between mb-2">
                     <p className="text-sm font-semibold text-gray-800 leading-tight">{sub.subject_name}</p>
                     <span className={`text-[10px] font-bold ${submitted ? 'text-green-600' : 'text-gray-400'}`}>{submitted ? '✓' : '⏳'}</span>
@@ -591,7 +597,7 @@ export default function ExamMarks({ classId, schoolId, grade, section, teacher, 
                                     className={`w-16 border rounded-lg px-2 py-1 text-center text-sm focus:outline-none focus:ring-1 focus:ring-blue-300 ${invalid ? 'border-red-400 bg-red-50' : 'border-gray-200'}`} />
                                   <button onClick={() => updateMark(student.id, sub.id, 'absent', true)} title="Mark Absent" className="text-xs text-gray-300 hover:text-red-400 transition-colors">AB</button>
                                 </div>
-                                {invalid && <span className="text-[9px] text-red-500">max {sub.max_marks}</span>}
+                                {invalid && <span className="text-xs text-red-600">Maximum {sub.max_marks}</span>}
                               </div>
                             )}
                           </td>
@@ -618,15 +624,15 @@ export default function ExamMarks({ classId, schoolId, grade, section, teacher, 
             Back to Exam
           </button>
 
-          <div className="bg-green-50 border border-green-200 rounded-xl px-5 py-4 flex items-center gap-3">
-            <span className="text-2xl">✅</span>
+          <div className="bg-green-50 border-l-2 border-green-600 px-5 py-4 flex items-center gap-3">
+            <CheckCircle2 className="h-5 w-5 shrink-0 text-green-700" aria-hidden="true" />
             <div>
               <p className="font-semibold text-green-800">All subjects submitted for {selectedExam.exam_name}</p>
               <p className="text-sm text-green-600">Review the results below, then send to school admin for release</p>
             </div>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 border-y border-gray-200 sm:grid-cols-4">
             {[
               { label: 'Total Students', val: reviewData.students.length, color: 'text-gray-800' },
               { label: 'Will Pass', val: reviewData.pass_count, color: 'text-green-600' },
@@ -636,16 +642,16 @@ export default function ExamMarks({ classId, schoolId, grade, section, teacher, 
                 return pcts.length > 0 ? `${Math.round(pcts.reduce((a, b) => a + b, 0) / pcts.length)}%` : '—'
               })(), color: 'text-blue-600' },
             ].map(s => (
-              <div key={s.label} className="bg-white border border-gray-200 rounded-xl p-4 text-center">
-                <p className={`text-2xl font-black ${s.color}`}>{s.val}</p>
+              <div key={s.label} className="border-r border-gray-200 p-4 text-left last:border-r-0">
+                <p className={`text-2xl font-semibold tracking-tight ${s.color}`}>{s.val}</p>
                 <p className="text-xs text-gray-400 mt-0.5">{s.label}</p>
               </div>
             ))}
           </div>
 
-          <div className={`grid gap-3 grid-cols-${Math.min(5, reviewData.subject_stats.length)}`}>
+          <div className={`grid border-y border-gray-200 grid-cols-${Math.min(5, reviewData.subject_stats.length)}`}>
             {reviewData.subject_stats.map(sub => (
-              <div key={sub.exam_subject_id} className="bg-white border border-gray-200 rounded-xl p-4">
+              <div key={sub.exam_subject_id} className="border-r border-gray-200 p-4 last:border-r-0">
                 <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">{sub.subject_name}</p>
                 <p className="text-lg font-bold text-gray-800">{sub.avg_marks ?? '—'}<span className="text-xs font-normal text-gray-400">/{sub.max_marks}</span></p>
                 <p className="text-xs text-gray-400">P:{sub.pass_count} F:{sub.fail_count} AB:{sub.absent_count}</p>

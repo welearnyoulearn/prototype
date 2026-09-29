@@ -4,6 +4,7 @@ import { useState, useEffect, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import AuthShell, { THEMES, AuthError, PasswordField } from '@/app/components/AuthShell'
+import { ButtonLoader } from '@/components/loaders'
 
 function ResetForm() {
   const router = useRouter()
@@ -69,8 +70,8 @@ function ResetForm() {
         <PasswordField label="New Password" value={newPw} onChange={setNewPw} placeholder="At least 8 characters" ring={theme.ring} autoComplete="new-password" />
         <PasswordField label="Confirm Password" value={confirm} onChange={setConfirm} placeholder="Repeat your new password" ring={theme.ring} autoComplete="new-password" />
         <button type="submit" disabled={loading}
-          className={`w-full bg-gradient-to-r ${theme.btnGradient} text-white font-semibold py-3 rounded-xl text-sm transition-all disabled:opacity-50 shadow-lg hover:shadow-xl hover:scale-[1.01] active:scale-[0.99] flex items-center justify-center gap-2`}>
-          {loading ? <><svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>Saving...</> : 'Reset Password'}
+          className="auth-submit">
+          {loading ? <ButtonLoader label="Saving…" /> : 'Reset password'}
         </button>
       </form>
     </>

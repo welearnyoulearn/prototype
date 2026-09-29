@@ -1,22 +1,20 @@
 'use client'
 
 import { useEffect, useState, useCallback, useRef } from 'react'
+import { ExportButtons, useRenewalRequest } from '@/components/PlanNotice'
 import { useRouter } from 'next/navigation'
-import { getBoardLabels } from '@/lib/board-syllabus/data'
 import { ALL_FEATURES, CATEGORY_ORDER } from '@/lib/features'
-import { useFeature } from '@/lib/features-context'
+import { useConfirm } from '@/components/ui/use-confirm'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type SchoolData = {
   id: number; name: string; type: string; city: string; country: string
   phone: string; email: string; address: string
-  school_code: string; grading_scheme: GradeRow[]; board?: string
+  school_code: string
   logo_url?: string | null; receipt_header_blocks?: ReceiptHeaderBlock[]
   logo_align?: 'left' | 'center' | 'right' | null
 }
-
-type GradeRow = { grade: string; min: number; max: number }
 
 type ReceiptHeaderBlock = {
   text: string
@@ -43,23 +41,19 @@ type Subscription = {
   tier: 'basic' | 'standard' | 'premium' | 'none'
   staff_limit?: number | null
   updated_at?: string
+  plan_start_date?: string | null
+  plan_end_date?: string | null
+  plan_status?: 'none' | 'active' | 'expiring' | 'grace' | 'expired'
+  days_left?: number | null
+  grace_ends?: string | null
 }
 
-type SettingsTab = 'profile' | 'academic-years' | 'plan' | 'staff' | 'security' | 'danger'
+const fmtPlanDate = (d: string) =>
+  d ? new Date(d + 'T00:00:00Z').toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric', timeZone: 'UTC' }) : ''
+
+type SettingsTab = 'profile' | 'academic-years' | 'plan' | 'staff' | 'security'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
-
-const BOARDS = getBoardLabels()
-
-const DEFAULT_GRADING: GradeRow[] = [
-  { grade: 'A+', min: 90, max: 100 },
-  { grade: 'A',  min: 80, max: 89  },
-  { grade: 'B+', min: 70, max: 79  },
-  { grade: 'B',  min: 60, max: 69  },
-  { grade: 'C',  min: 50, max: 59  },
-  { grade: 'D',  min: 35, max: 49  },
-  { grade: 'F',  min: 0,  max: 34  },
-]
 
 const ROLE_LABELS: Record<string, string> = {
   school_admin: 'School Admin', principal: 'Principal', vice_principal: 'Vice Principal',
@@ -105,6 +99,7 @@ function suggestNextYear(years: AcademicYear[]): { label: string; start_date: st
 
 export default function SchoolSettings({ schoolId }: { schoolId: number }) {
   const router = useRouter()
+  const { confirm, ConfirmDialog } = useConfirm()
   const [tab, setTab] = useState<SettingsTab>('profile')
 
   // ── School profile ─────────────────────────────────────────────────────────
@@ -115,9 +110,8 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
   const [error, setError]     = useState('')
   const [profile, setProfile] = useState({
     name: '', type: '', city: '', country: '', phone: '', email: '',
-    address: '', board: '',
+    address: '',
   })
-  const [scheme, setScheme] = useState<GradeRow[]>(DEFAULT_GRADING)
   const [logoUrl, setLogoUrl] = useState('')
   const [logoAlign, setLogoAlign] = useState<'left' | 'center' | 'right'>('center')
   const [headerBlocks, setHeaderBlocks] = useState<ReceiptHeaderBlock[]>([])
@@ -159,6 +153,8 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
 
   // ── Plan & features ────────────────────────────────────────────────────────
   const [subscription, setSubscription] = useState<Subscription | null>(null)
+  const renewal = useRenewalRequest(null)
+  const [canRequestPlan, setCanRequestPlan] = useState(false)   // school administrator / principal
   const [enabledFeatures, setEnabledFeatures] = useState<Set<string>>(new Set())
   const [planLoading, setPlanLoading] = useState(false)
 
@@ -171,6 +167,13 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
   const [staffSuccess, setStaffSuccess] = useState('')
   const [resendingId, setResendingId] = useState<number | null>(null)
   const [resendMsg, setResendMsg]   = useState<{ id: number; text: string; ok: boolean } | null>(null)
+  // Only a School Administrator can add / deactivate / reactivate (the server enforces it);
+  // this just stops showing buttons that would be refused. Defaults to false until known.
+  const [canManageStaff, setCanManageStaff] = useState(false)
+  const [myStaffId, setMyStaffId] = useState<number | null>(null)
+  // Result of the last deactivate / reactivate — shown above the list. These handlers
+  // used to ignore the server's answer and flip the row anyway.
+  const [staffActionMsg, setStaffActionMsg] = useState<string>('')
 
   // ── Security ───────────────────────────────────────────────────────────────
   const [curPwd, setCurPwd]         = useState('')
@@ -178,12 +181,6 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
   const [confirmPwd, setConfirmPwd] = useState('')
   const [pwdSaving, setPwdSaving]   = useState(false)
   const [pwdMsg, setPwdMsg]         = useState<{ text: string; ok: boolean } | null>(null)
-
-  // ── Danger zone ────────────────────────────────────────────────────────────
-  const [exportSending, setExportSending] = useState(false)
-  const [closureSending, setClosureSending] = useState(false)
-  const [closureReason, setClosureReason] = useState('')
-  const [dangerMsg, setDangerMsg]   = useState<{ text: string; ok: boolean } | null>(null)
 
   // ── Load functions ─────────────────────────────────────────────────────────
 
@@ -198,9 +195,7 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
         name: d.name ?? '', type: d.type ?? '', city: d.city ?? '',
         country: d.country ?? '', phone: d.phone ?? '', email: d.email ?? '',
         address: d.address ?? '',
-        board: d.board ?? '',
       })
-      if (d.grading_scheme?.length) setScheme(d.grading_scheme)
       setLogoUrl(d.logo_url ?? '')
       setLogoAlign(d.logo_align ?? 'center')
       setHeaderBlocks(d.receipt_header_blocks?.length ? d.receipt_header_blocks : [])
@@ -218,7 +213,11 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
   const loadPlan = useCallback(async () => {
     setPlanLoading(true)
     try {
-      const subR = await fetch(`/api/schools/${schoolId}/subscription`)
+      const [subR, statusR] = await Promise.all([
+        fetch(`/api/schools/${schoolId}/subscription`),
+        fetch('/api/plan/status').catch(() => null),
+      ])
+      if (statusR?.ok) setCanRequestPlan((await statusR.json()).can_manage === true)
       if (subR.ok) {
         const sub: Subscription = await subR.json()
         setSubscription(sub)
@@ -234,10 +233,20 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
   }, [schoolId])
 
   const loadStaff = useCallback(async () => {
-    setStaffLoading(true)
+    setStaffLoading(true); setStaffActionMsg('')
     try {
-      const r = await fetch(`/api/school-admin/staff-accounts?school_id=${schoolId}`)
-      if (r.ok) setStaffList(await r.json())
+      // The seat limit comes from the plan and the role decides which buttons show. The
+      // plan used to be fetched only when the Plan tab was opened, so opening Staff
+      // Accounts first showed no limit and offered the Add form even when the school
+      // was already full.
+      const [listR, meR, subR] = await Promise.all([
+        fetch(`/api/school-admin/staff-accounts?school_id=${schoolId}`).catch(() => null),
+        fetch('/api/auth/me').catch(() => null),
+        fetch(`/api/schools/${schoolId}/subscription`).catch(() => null),
+      ])
+      if (listR?.ok) setStaffList(await listR.json())
+      if (meR?.ok) { const me = await meR.json(); setCanManageStaff(me.role === 'school_admin'); setMyStaffId(me.id ?? null) }
+      if (subR?.ok) setSubscription(await subR.json())
     } finally { setStaffLoading(false) }
   }, [schoolId])
 
@@ -245,6 +254,10 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
   useEffect(() => { if (tab === 'academic-years') loadYears() }, [tab, loadYears])
   useEffect(() => { if (tab === 'plan') loadPlan() }, [tab, loadPlan])
   useEffect(() => { if (tab === 'staff') loadStaff() }, [tab, loadStaff])
+
+  // All seats taken → Reactivate would be refused (it uses a seat just like Add does).
+  const staffSeatsFull = subscription?.staff_limit != null &&
+    staffList.filter(x => x.status === 'active').length >= subscription.staff_limit
 
   // ── Profile save ───────────────────────────────────────────────────────────
 
@@ -255,7 +268,7 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
       const r = await fetch(`/api/schools/${schoolId}`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          ...profile, board: profile.board || null,
+          ...profile,
           logo_url: logoUrl || null,
           logo_align: logoAlign,
           receipt_header_blocks: headerBlocks.filter(b => b.text.trim()),
@@ -312,24 +325,6 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
     } finally {
       setLogoUploading(false)
     }
-  }
-
-  async function saveGrading(e: React.FormEvent) {
-    e.preventDefault()
-    for (let i = 0; i < scheme.length; i++) {
-      if (scheme[i].min > scheme[i].max) { setError(`Row ${i + 1}: min must be ≤ max`); return }
-    }
-    setSaving(true); setError(''); setSaved(false)
-    try {
-      const r = await fetch(`/api/schools/${schoolId}`, {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ grading_scheme: scheme }),
-      })
-      if (!r.ok) throw new Error((await r.json()).error)
-      setSaved(true); setTimeout(() => setSaved(false), 3000)
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Failed to save grading scheme')
-    } finally { setSaving(false) }
   }
 
   // ── Academic year actions ──────────────────────────────────────────────────
@@ -470,7 +465,8 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
   }
 
   async function switchYear(id: number, label: string) {
-    if (!confirm(`Set "${label}" as the active academic year? All fee, attendance and exam data will show this year by default.`)) return
+    const ok = await confirm(`Set "${label}" as the active academic year? All fee, attendance and exam data will show this year by default.`, { title: 'Switch academic year?', confirmText: 'Switch' })
+    if (!ok) return
     setSwitchingYear(id); setYearsMsg(null)
     try {
       const r = await fetch(`/api/academic-years?id=${id}&school_id=${schoolId}`, { method: 'PATCH' })
@@ -495,25 +491,37 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
     if (!res.ok) { setStaffError(d.error || 'Failed'); setStaffSaving(false); return }
     setStaffList(prev => [...prev, d])
     setStaffForm({ full_name: '', email: '', role: 'principal' })
-    setStaffSuccess(`✓ Account created — login credentials sent to ${d.email}`)
+    setStaffSuccess(`✓ Invite sent to ${d.email} — they set their own password from the email link`)
     setStaffSaving(false)
   }
 
   async function deactivateStaff(id: number) {
-    if (!confirm('Deactivate this account? They will lose access immediately.')) return
-    await fetch('/api/school-admin/staff-accounts', {
-      method: 'DELETE', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id }),
-    })
-    setStaffList(prev => prev.map(s => s.id === id ? { ...s, status: 'inactive' } : s))
+    const ok = await confirm('Deactivate this account? They will lose access immediately.', { title: 'Deactivate account?', confirmText: 'Deactivate', destructive: true })
+    if (!ok) return
+    setStaffActionMsg('')
+    // Only flip the row when the server actually did it. This used to ignore the answer,
+    // so a refused request (not an admin, last administrator, network error) still
+    // showed "Deactivated" until the page was reloaded.
+    try {
+      const r = await fetch('/api/school-admin/staff-accounts', {
+        method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id }),
+      })
+      if (!r.ok) { setStaffActionMsg((await r.json().catch(() => ({}))).error || 'Could not deactivate this account'); return }
+      setStaffList(prev => prev.map(s => s.id === id ? { ...s, status: 'inactive' } : s))
+    } catch { setStaffActionMsg('Network error — the account was not deactivated') }
   }
 
   async function reactivateStaff(id: number) {
-    await fetch('/api/school-admin/staff-accounts', {
-      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id }),
-    })
-    setStaffList(prev => prev.map(s => s.id === id ? { ...s, status: 'active' } : s))
+    setStaffActionMsg('')
+    try {
+      const r = await fetch('/api/school-admin/staff-accounts', {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id }),
+      })
+      if (!r.ok) { setStaffActionMsg((await r.json().catch(() => ({}))).error || 'Could not reactivate this account'); return }
+      setStaffList(prev => prev.map(s => s.id === id ? { ...s, status: 'active' } : s))
+    } catch { setStaffActionMsg('Network error — the account was not reactivated') }
   }
 
   async function resendCredentials(id: number) {
@@ -524,7 +532,7 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
         body: JSON.stringify({ id }),
       })
       const d = await r.json()
-      if (r.ok) setResendMsg({ id, text: '✓ New credentials sent by email', ok: true })
+      if (r.ok) setResendMsg({ id, text: '✓ New set-password link sent by email', ok: true })
       else setResendMsg({ id, text: d.error || 'Failed to resend', ok: false })
     } finally { setResendingId(null) }
   }
@@ -554,40 +562,12 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
     } finally { setPwdSaving(false) }
   }
 
-  // ── Danger zone actions ────────────────────────────────────────────────────
-
-  async function sendAccountRequest(type: 'export' | 'closure') {
-    if (type === 'closure' && !closureReason.trim()) {
-      setDangerMsg({ text: 'Please provide a reason for closure', ok: false }); return
-    }
-    const setter = type === 'export' ? setExportSending : setClosureSending
-    setter(true); setDangerMsg(null)
-    try {
-      const r = await fetch('/api/school-admin/account-request', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type, reason: closureReason, school_id: schoolId }),
-      })
-      const d = await r.json()
-      if (r.ok) {
-        setDangerMsg({
-          text: type === 'export'
-            ? '✓ Data export request sent — our team will contact you within 2 business days'
-            : '✓ Closure request sent — our team will review and contact you',
-          ok: true,
-        })
-        if (type === 'closure') setClosureReason('')
-      } else {
-        setDangerMsg({ text: d.error || 'Failed to send request', ok: false })
-      }
-    } finally { setter(false) }
-  }
-
   // ── Shared helpers ─────────────────────────────────────────────────────────
 
   function resetTabState() {
     setError(''); setSaved(false)
     setStaffError(''); setStaffSuccess('')
-    setPwdMsg(null); setDangerMsg(null); setYearsMsg(null); setResendMsg(null)
+    setPwdMsg(null); setYearsMsg(null); setResendMsg(null)
   }
 
   const pwdChecks = [
@@ -604,30 +584,28 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
     { key: 'plan',           label: 'Plan & Features',  icon: '⭐' },
     { key: 'staff',          label: 'Staff Accounts',   icon: '👥' },
     { key: 'security',       label: 'Security',         icon: '🔒' },
-    { key: 'danger',         label: 'Danger Zone',      icon: '⚠️' },
   ]
 
-  const hasExamSchedule = useFeature('exam-marks')
-
-  if (loading) return <div className="text-center py-12 text-gray-400 text-sm">Loading settings…</div>
+  if (loading) return <div className="text-center py-12 text-muted-foreground text-sm">Loading settings…</div>
 
   return (
     <div className="space-y-5 max-w-3xl">
+      {ConfirmDialog}
 
       {/* Header */}
       <div>
         <h2 className="text-lg font-bold text-gray-800">School Profile</h2>
-        <p className="text-sm text-gray-400 mt-0.5">Manage your school profile, academic years, plan and security</p>
+        <p className="text-sm text-muted-foreground mt-0.5">Manage your school profile, academic years, plan and security</p>
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 bg-gray-100 p-1 rounded-xl w-fit flex-wrap">
+      <div className="flex gap-1 bg-gray-100 p-1 rounded-md w-fit flex-wrap">
         {TABS.map(({ key, label, icon }) => (
           <button key={key}
             onClick={() => { setTab(key); resetTabState() }}
             className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5 ${
-              tab === key ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'
-            } ${key === 'danger' && tab !== 'danger' ? 'hover:text-red-500' : ''}`}>
+              tab === key ? 'bg-white text-indigo-700 ' : 'text-gray-500 hover:text-gray-700'
+            }`}>
             <span className="text-xs">{icon}</span>{label}
           </button>
         ))}
@@ -635,7 +613,7 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
 
       {/* Global status banner */}
       {(saved || error) && (
-        <div className={`px-4 py-3 rounded-xl text-sm border ${saved ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-100 text-red-600'}`}>
+        <div className={`px-4 py-3 rounded-md text-sm border ${saved ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-100 text-red-600'}`}>
           {saved ? '✓ Settings saved successfully' : error}
         </div>
       )}
@@ -643,7 +621,7 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
       {/* ══ PROFILE TAB ═══════════════════════════════════════════════════════ */}
       {tab === 'profile' && (
         <div className="space-y-4">
-          <form onSubmit={saveProfile} className="bg-white border border-gray-100 rounded-xl shadow-sm p-6 space-y-5">
+          <form onSubmit={saveProfile} className="bg-white border border-gray-100 rounded-md  p-6 space-y-5">
 
             <div className="grid grid-cols-2 gap-4">
               <div>
@@ -697,70 +675,11 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
                 value={profile.address} onChange={e => setProfile(f => ({ ...f, address: e.target.value }))} />
             </div>
 
-            {/* Board */}
-            <div className="border-t border-gray-100 pt-5 space-y-3">
-              <div>
-                <h3 className="text-sm font-semibold text-gray-700">Curriculum Board</h3>
-                <p className="text-xs text-gray-400 mt-0.5">Used for syllabus management and curriculum planning</p>
-              </div>
-              <div className="max-w-xs">
-                <select value={profile.board} onChange={e => setProfile(f => ({ ...f, board: e.target.value }))}
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
-                  <option value="">— Select Board —</option>
-                  {BOARDS.map(b => <option key={b.value} value={b.value}>{b.label}</option>)}
-                </select>
-              </div>
-            </div>
-
-            {/* Grading scheme — only when exam-schedule feature is enabled */}
-            {hasExamSchedule && (
-              <div className="border-t border-gray-100 pt-5 space-y-3">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h3 className="text-sm font-semibold text-gray-700">Grading Scheme</h3>
-                    <p className="text-xs text-gray-400 mt-0.5">Used for exam results and report cards</p>
-                  </div>
-                  <button type="button" onClick={() => setScheme(DEFAULT_GRADING)}
-                    className="text-xs text-indigo-600 hover:text-indigo-800 border border-indigo-200 px-3 py-1.5 rounded-lg">
-                    Reset to Default
-                  </button>
-                </div>
-                <div className="border border-gray-100 rounded-xl overflow-hidden">
-                  <div className="grid grid-cols-4 bg-gray-50 border-b border-gray-100">
-                    {['Grade Label','Min %','Max %',''].map(h => (
-                      <div key={h} className="px-4 py-2.5 text-xs font-semibold text-gray-500">{h}</div>
-                    ))}
-                  </div>
-                  <div className="divide-y divide-gray-50">
-                    {scheme.map((row, idx) => (
-                      <div key={idx} className="grid grid-cols-4 items-center px-4 py-2 gap-2">
-                        <input className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm font-bold text-center focus:outline-none focus:ring-2 focus:ring-indigo-500 w-20"
-                          value={row.grade} maxLength={4} placeholder="A+"
-                          onChange={e => setScheme(prev => prev.map((r, i) => i === idx ? { ...r, grade: e.target.value } : r))} />
-                        <input type="number" min={0} max={100}
-                          className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-center focus:outline-none focus:ring-2 focus:ring-indigo-500 w-24"
-                          value={row.min} onChange={e => setScheme(prev => prev.map((r, i) => i === idx ? { ...r, min: Number(e.target.value) } : r))} />
-                        <input type="number" min={0} max={100}
-                          className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-center focus:outline-none focus:ring-2 focus:ring-indigo-500 w-24"
-                          value={row.max} onChange={e => setScheme(prev => prev.map((r, i) => i === idx ? { ...r, max: Number(e.target.value) } : r))} />
-                        <button type="button" onClick={() => setScheme(prev => prev.filter((_, i) => i !== idx))}
-                          className="text-red-400 hover:text-red-600 text-xs justify-self-start">Remove</button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                <button type="button" onClick={() => setScheme(prev => [...prev, { grade: '', min: 0, max: 0 }])}
-                  className="text-sm text-indigo-600 hover:text-indigo-800 border border-indigo-200 px-4 py-2 rounded-lg">
-                  + Add Grade
-                </button>
-              </div>
-            )}
-
             {/* Receipt Branding — logo + styled header lines shown on printed fee receipts */}
             <div className="border-t border-gray-100 pt-5 space-y-3">
               <div>
                 <h3 className="text-sm font-semibold text-gray-700">Receipt Branding</h3>
-                <p className="text-xs text-gray-400 mt-0.5">Shown on the header of printed fee receipts</p>
+                <p className="text-xs text-muted-foreground mt-0.5">Shown on the header of printed fee receipts</p>
               </div>
 
               <div>
@@ -781,7 +700,7 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
                   <input ref={logoFileInputRef} type="file" accept="image/jpeg,image/png" data-testid="input-logo-file"
                     className="hidden" onChange={handleLogoFileSelect} />
                 </div>
-                <p className="text-xs text-gray-400 mt-1">JPG or PNG, up to 2MB</p>
+                <p className="text-xs text-muted-foreground mt-1">JPG or PNG, up to 2MB</p>
                 {logoUploadError && <p className="text-xs text-red-500 mt-1">{logoUploadError}</p>}
 
                 {logoUrl && (
@@ -844,8 +763,8 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
               </button>
 
               {/* Live preview — mirrors exactly what prints at the top of a fee receipt */}
-              <div className="border border-gray-100 rounded-xl p-4 bg-gray-50">
-                <p className="text-xs font-semibold text-gray-400 mb-2">Receipt Preview</p>
+              <div className="border border-gray-100 rounded-md p-4 bg-gray-50">
+                <p className="text-xs font-semibold text-muted-foreground mb-2">Receipt Preview</p>
                 <div className="bg-white border border-gray-200 rounded-lg p-5 max-w-md mx-auto" data-testid="receipt-header-preview">
                   <div className="border-b-2 border-gray-800 pb-2 mb-3">
                     {logoUrl && logoAlign === 'center' && (
@@ -872,24 +791,24 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
                           </div>
                         ))}
                         <div className="text-xs font-bold tracking-wide mt-1">FEE RECEIPT</div>
-                        <div className="text-[11px] text-gray-500 mt-0.5">Receipt No: <strong>RCP-000-0000-000000</strong></div>
+                        <div className="text-xs text-gray-500 mt-0.5">Receipt No: <strong>RCP-000-0000-000000</strong></div>
                       </div>
                     </div>
                   </div>
                   <div className="grid grid-cols-2 gap-2 text-left mb-2">
-                    <div><div className="text-[10px] text-gray-400">Student Name</div><div className="text-xs font-medium">Sample Student</div></div>
-                    <div><div className="text-[10px] text-gray-400">Roll Number</div><div className="text-xs font-medium">wlyl-stu-sample-0000</div></div>
-                    <div><div className="text-[10px] text-gray-400">Class</div><div className="text-xs font-medium">Grade 1A</div></div>
-                    <div><div className="text-[10px] text-gray-400">Parent / Guardian</div><div className="text-xs font-medium">Sample Parent</div></div>
+                    <div><div className="text-xs text-muted-foreground">Student Name</div><div className="text-xs font-medium">Sample Student</div></div>
+                    <div><div className="text-xs text-muted-foreground">Roll Number</div><div className="text-xs font-medium">wlyl-stu-sample-0000</div></div>
+                    <div><div className="text-xs text-muted-foreground">Class</div><div className="text-xs font-medium">Grade 1A</div></div>
+                    <div><div className="text-xs text-muted-foreground">Parent / Guardian</div><div className="text-xs font-medium">Sample Parent</div></div>
                   </div>
                   <table className="w-full text-xs border-collapse mb-2">
-                    <thead><tr className="bg-gray-100"><th className="text-left p-1 border border-gray-200 text-[10px]">Fee Head</th><th className="text-left p-1 border border-gray-200 text-[10px]">Period</th><th className="text-right p-1 border border-gray-200 text-[10px]">Amount</th></tr></thead>
+                    <thead><tr className="bg-gray-100"><th className="text-left p-1 border border-gray-200 text-xs">Fee Head</th><th className="text-left p-1 border border-gray-200 text-xs">Period</th><th className="text-right p-1 border border-gray-200 text-xs">Amount</th></tr></thead>
                     <tbody><tr><td className="p-1 border border-gray-200">Tuition Fee</td><td className="p-1 border border-gray-200">2026-27</td><td className="p-1 border border-gray-200 text-right">₹1,200</td></tr></tbody>
                     <tfoot><tr className="font-bold bg-gray-50"><td colSpan={2} className="p-1 border border-gray-200 text-right">Total Paid:</td><td className="p-1 border border-gray-200 text-right">₹1,200</td></tr></tfoot>
                   </table>
                   <div className="flex justify-between mt-4">
-                    <div className="text-center border-t border-gray-800 w-28 pt-1 text-[10px] text-gray-500">Collected By</div>
-                    <div className="text-center border-t border-gray-800 w-28 pt-1 text-[10px] text-gray-500">Authorized Signatory</div>
+                    <div className="text-center border-t border-gray-800 w-28 pt-1 text-xs text-gray-500">Collected By</div>
+                    <div className="text-center border-t border-gray-800 w-28 pt-1 text-xs text-gray-500">Authorized Signatory</div>
                   </div>
                   {!logoUrl && !profile.name && headerBlocks.filter(b => b.text.trim()).length === 0 && (
                     <p className="text-xs text-gray-300 text-center mt-2">No branding set — receipts will show just a generic header</p>
@@ -899,7 +818,7 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
             </div>
 
             {data?.school_code && (
-              <div className="p-4 bg-blue-50 rounded-xl border border-blue-100">
+              <div className="p-4 bg-blue-50 rounded-md border border-blue-100">
                 <p className="text-xs font-semibold text-blue-600 mb-0.5">School Login Code</p>
                 <p className="font-mono text-lg font-bold text-blue-800">{data.school_code}</p>
                 <p className="text-xs text-blue-500 mt-1">Teachers and staff use this code to log in</p>
@@ -911,8 +830,6 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
                 className={`px-6 py-2.5 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-60 ${saved ? 'bg-green-600 hover:bg-green-700' : 'bg-indigo-600 hover:bg-indigo-700'}`}>
                 {saving ? 'Saving…' : saved ? '✓ Saved' : 'Save Profile & Settings'}
               </button>
-              <button type="button" onClick={() => { saveGrading(new Event('submit') as unknown as React.FormEvent) }}
-                className="hidden" />
             </div>
           </form>
         </div>
@@ -924,8 +841,8 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
           <div className="flex items-center justify-between">
             <div>
               <h3 className="text-sm font-semibold text-gray-700">Academic Years</h3>
-              <p className="text-xs text-gray-400 mt-0.5">
-                All fees, attendance, exams and reports are scoped to the active year
+              <p className="text-xs text-muted-foreground mt-0.5">
+                All fees, attendance, exams and reports are scoped to the active year. The active year changes only through the Year Rollover tab.
               </p>
             </div>
             {!showAddYear && !editingYear && (
@@ -937,14 +854,14 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
           </div>
 
           {yearsMsg && (
-            <div className={`px-4 py-3 rounded-xl text-sm border ${yearsMsg.ok ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-100 text-red-600'}`}>
+            <div className={`px-4 py-3 rounded-md text-sm border ${yearsMsg.ok ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-100 text-red-600'}`}>
               {yearsMsg.text}
             </div>
           )}
 
           {/* Add year form */}
           {showAddYear && (
-            <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-5 space-y-4">
+            <div className="bg-indigo-50 border border-indigo-200 rounded-md p-5 space-y-4">
               <p className="text-sm font-semibold text-indigo-800">New Academic Year</p>
               <div className="grid grid-cols-3 gap-3">
                 <div>
@@ -985,14 +902,14 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
 
           {/* Edit year form */}
           {editingYear && (
-            <div className="bg-amber-50 border border-amber-200 rounded-xl p-5 space-y-4">
+            <div className="bg-amber-50 border border-amber-200 rounded-md p-5 space-y-4">
               <p className="text-sm font-semibold text-amber-800">Edit — {editingYear.label}</p>
               <div className="grid grid-cols-3 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Label</label>
                   <input value={yearForm.label} disabled
                     title="Label can't be changed once a year is in use — create a new year instead"
-                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-gray-50 text-gray-400 cursor-not-allowed" />
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-gray-50 text-muted-foreground cursor-not-allowed" />
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Start Date</label>
@@ -1020,25 +937,25 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
 
           {/* Years list */}
           {yearsLoading ? (
-            <div className="py-10 text-center text-gray-400 text-sm">Loading…</div>
+            <div className="py-10 text-center text-muted-foreground text-sm">Loading…</div>
           ) : years.length === 0 ? (
-            <div className="bg-white border border-dashed border-gray-200 rounded-xl py-12 text-center">
-              <p className="text-gray-400 font-medium">No academic years set up</p>
+            <div className="bg-white border border-dashed border-gray-200 rounded-md py-12 text-center">
+              <p className="text-muted-foreground font-medium">No academic years set up</p>
               <p className="text-gray-300 text-sm mt-1">Add your first academic year to get started</p>
             </div>
           ) : (
             <div className="space-y-2">
               {years.map(y => (
-                <div key={y.id} className={`bg-white border rounded-xl overflow-hidden ${y.is_current ? 'border-indigo-300 shadow-sm shadow-indigo-100' : 'border-gray-100'}`}>
+                <div key={y.id} className={`bg-white border rounded-md overflow-hidden ${y.is_current ? 'border-indigo-300  shadow-indigo-100' : 'border-gray-100'}`}>
                   <div className="px-5 py-4 flex items-center gap-4">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
                         <p className="font-bold text-gray-800">{y.label}</p>
                         {y.is_current && (
-                          <span className="text-[10px] font-bold bg-indigo-600 text-white px-2 py-0.5 rounded-full">ACTIVE</span>
+                          <span className="text-xs font-bold bg-indigo-600 text-white px-2 py-0.5 rounded-full">ACTIVE</span>
                         )}
                       </div>
-                      <p className="text-xs text-gray-400 mt-0.5">
+                      <p className="text-xs text-muted-foreground mt-0.5">
                         {new Date(y.start_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
                         {' → '}
                         {new Date(y.end_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
@@ -1046,7 +963,7 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
                       </p>
                     </div>
                     <div className="flex items-center gap-2 flex-shrink-0">
-                      {!y.is_current && (
+                      {!y.is_current && !years.some(x => x.is_current) && (
                         <button
                           onClick={() => switchYear(y.id, y.label)}
                           disabled={switchingYear === y.id}
@@ -1069,9 +986,9 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
                   {historyYearId === y.id && (
                     <div className="border-t border-gray-100 bg-gray-50 px-5 py-4">
                       {historyLoading ? (
-                        <p className="text-xs text-gray-400">Loading history…</p>
+                        <p className="text-xs text-muted-foreground">Loading history…</p>
                       ) : historySnapshots.length === 0 ? (
-                        <p className="text-xs text-gray-400">No date changes recorded for this year yet.</p>
+                        <p className="text-xs text-muted-foreground">No date changes recorded for this year yet.</p>
                       ) : (
                         <div className="space-y-3">
                           {historySnapshots.map(snap => (
@@ -1099,7 +1016,7 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
                               </div>
                             </div>
                           ))}
-                          <p className="text-[11px] text-gray-400">
+                          <p className="text-xs text-muted-foreground">
                             Payments and audit records aren&apos;t affected by date changes — see the Payments/Audit tabs in Fee Management for the full live history.
                           </p>
                         </div>
@@ -1116,7 +1033,7 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
       {/* ══ Edit-year confirmation: warning + password ══════════════════════════ */}
       {yearConfirm && editingYear && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl overflow-hidden">
+          <div className="bg-white rounded-lg w-full max-w-md shadow-2xl overflow-hidden">
             <div className="bg-amber-50 border-b border-amber-100 px-6 py-5">
               <h3 className="font-bold text-gray-900 text-base">Confirm Date Change — {editingYear.label}</h3>
             </div>
@@ -1134,7 +1051,7 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
                   )}
                 </div>
               ) : (
-                <p className="text-xs text-gray-400">No bills will change overdue status with these new dates.</p>
+                <p className="text-xs text-muted-foreground">No bills will change overdue status with these new dates.</p>
               )}
               {yearConfirm.impact.has_bills && (
                 <p className="text-sm text-gray-600">
@@ -1156,11 +1073,11 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
                     saveAbortRef.current?.abort()
                     setYearConfirm(null); setYearConfirmPassword(''); setYearConfirmError(''); setYearConfirmSaving(false)
                   }}
-                  className="flex-1 border border-gray-200 text-gray-600 hover:bg-gray-50 py-2.5 rounded-xl text-sm font-medium transition-colors">
+                  className="flex-1 border border-gray-200 text-gray-600 hover:bg-gray-50 py-2.5 rounded-md text-sm font-medium transition-colors">
                   Cancel
                 </button>
                 <button onClick={confirmSaveYear} disabled={yearConfirmSaving}
-                  className="flex-1 bg-amber-600 hover:bg-amber-700 text-white py-2.5 rounded-xl text-sm font-medium transition-colors disabled:opacity-50">
+                  className="flex-1 bg-amber-600 hover:bg-amber-700 text-white py-2.5 rounded-md text-sm font-medium transition-colors disabled:opacity-50">
                   {yearConfirmSaving ? 'Saving…' : 'Confirm & Save'}
                 </button>
               </div>
@@ -1173,11 +1090,11 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
       {tab === 'plan' && (
         <div className="space-y-4">
           {planLoading ? (
-            <div className="py-10 text-center text-gray-400 text-sm">Loading plan details…</div>
+            <div className="py-10 text-center text-muted-foreground text-sm">Loading plan details…</div>
           ) : (
             <>
               {/* Current plan card */}
-              <div className="bg-white border border-gray-100 rounded-xl p-5">
+              <div className="bg-white border border-gray-100 rounded-md p-5">
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Current Plan</p>
@@ -1186,37 +1103,60 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
                         {subscription?.tier === 'none' ? 'No Plan Assigned' : (subscription?.tier ?? 'none')}
                       </span>
                     </div>
-                    {subscription?.updated_at && subscription.tier !== 'none' && (
-                      <p className="text-xs text-gray-400 mt-1.5">
-                        Active since {new Date(subscription.updated_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' })}
+                    {subscription?.plan_end_date && subscription.tier !== 'none' && (
+                      <p className="text-xs text-muted-foreground mt-1.5" data-testid="plan-dates">
+                        Valid {subscription.plan_start_date ? `from ${fmtPlanDate(subscription.plan_start_date)} ` : ''}until {fmtPlanDate(subscription.plan_end_date)}
                       </p>
                     )}
                   </div>
-                  <a href="mailto:support@welearnyoulearn.com?subject=Plan Upgrade Request"
-                    className="text-sm font-medium text-indigo-600 hover:text-indigo-800 border border-indigo-200 px-4 py-2 rounded-lg hover:bg-indigo-50 transition-colors">
-                    Upgrade Plan →
-                  </a>
+                  {canRequestPlan && (
+                    <div className="text-right">
+                      <button data-testid="plan-request-renewal" onClick={renewal.request} disabled={renewal.sending || renewal.sent}
+                        className="text-sm font-medium text-indigo-600 hover:text-indigo-800 border border-indigo-200 px-4 py-2 rounded-lg hover:bg-indigo-50 transition-colors disabled:opacity-60">
+                        {renewal.sent ? 'Request sent' : renewal.sending ? 'Sending…' : 'Request renewal / upgrade'}
+                      </button>
+                      {renewal.msg && <p className={`text-xs mt-1.5 ${renewal.error ? 'text-red-700' : 'text-green-700'}`} data-testid="plan-request-result">{renewal.msg}</p>}
+                    </div>
+                  )}
                 </div>
               </div>
 
+              {(subscription?.plan_status === 'expiring' || subscription?.plan_status === 'grace' || subscription?.plan_status === 'expired') && (
+                <div data-testid="plan-expiry-banner"
+                  className={`rounded-md p-4 text-sm border ${subscription.plan_status === 'expiring' ? 'bg-amber-50 border-amber-200 text-amber-800' : 'bg-red-50 border-red-200 text-red-800'}`}>
+                  {subscription.plan_status === 'expiring' && `Your plan ends ${subscription.days_left === 0 ? 'today' : `in ${subscription.days_left} day${subscription.days_left === 1 ? '' : 's'}`} (${fmtPlanDate(subscription.plan_end_date ?? '')}). Renew to keep every feature.`}
+                  {subscription.plan_status === 'grace' && `Your plan ended on ${fmtPlanDate(subscription.plan_end_date ?? '')}. Everything still works until ${fmtPlanDate(subscription.grace_ends ?? '')} — renew before then.`}
+                  {subscription.plan_status === 'expired' && `Your plan expired on ${fmtPlanDate(subscription.plan_end_date ?? '')}. Your data and logins are safe; features return as soon as the plan is renewed.`}
+                  {' '}<a className="underline font-medium" href="mailto:support@welearnyoulearn.com?subject=Plan Renewal">Contact us to renew</a>
+                </div>
+              )}
+
+              {canRequestPlan && (
+                <div className="bg-white border border-gray-100 rounded-md p-5" data-testid="plan-export-card">
+                  <p className="text-sm font-semibold text-gray-800">Export your school’s data</p>
+                  <p className="text-xs text-muted-foreground mt-0.5 mb-3">Download your records as Excel files any time. Passwords are never included.</p>
+                  <ExportButtons />
+                </div>
+              )}
+
               {/* Features grid */}
               {subscription?.tier === 'none' ? (
-                <div className="bg-amber-50 border border-amber-200 rounded-xl p-5 text-sm text-amber-800">
+                <div className="bg-amber-50 border border-amber-200 rounded-md p-5 text-sm text-amber-800">
                   No plan assigned yet. Contact your WLYL representative to activate a plan and unlock features.
                 </div>
               ) : (
-                <div className="bg-white border border-gray-100 rounded-xl p-5 space-y-5">
+                <div className="bg-white border border-gray-100 rounded-md p-5 space-y-5">
                   <p className="text-sm font-semibold text-gray-700">Features included in your plan</p>
                   {CATEGORY_ORDER.map(cat => {
                     const features = ALL_FEATURES.filter(f => f.category === cat)
                     return (
                       <div key={cat}>
-                        <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">{cat}</p>
+                        <p className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2">{cat}</p>
                         <div className="grid grid-cols-2 gap-2">
                           {features.map(f => {
                             const on = enabledFeatures.has(f.key)
                             return (
-                              <div key={f.key} className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm ${on ? 'bg-green-50 text-green-800' : 'bg-gray-50 text-gray-400'}`}>
+                              <div key={f.key} className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm ${on ? 'bg-green-50 text-green-800' : 'bg-gray-50 text-muted-foreground'}`}>
                                 <span className={`text-xs ${on ? 'text-green-500' : 'text-gray-300'}`}>
                                   {on ? '✓' : '🔒'}
                                 </span>
@@ -1241,7 +1181,7 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
           <div className="flex items-center justify-between">
             <div>
               <h3 className="text-base font-bold text-gray-800">Staff Accounts</h3>
-              <p className="text-sm text-gray-400 mt-0.5">Principal and Vice Principal access — credentials sent by email</p>
+              <p className="text-sm text-muted-foreground mt-0.5">Each person gets their own login — an invite link is sent by email</p>
             </div>
             {(() => {
               const limit = subscription?.staff_limit ?? null
@@ -1259,16 +1199,42 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
             })()}
           </div>
 
+          {/* Over the plan's limit — after a downgrade, or when the plan's limit was lowered. */}
+          {!staffLoading && (() => {
+            const limit = subscription?.staff_limit ?? null
+            const active = staffList.filter(s => s.status === 'active').length
+            const over = limit !== null ? Math.max(0, active - limit) : 0
+            if (over === 0) return null
+            return (
+              <div className="bg-amber-50 border border-amber-200 rounded-md px-4 py-3 text-sm text-amber-800 space-y-1" data-testid="staff-over-limit-banner">
+                <p className="font-semibold">Your plan allows {limit} staff account{limit === 1 ? '' : 's'}, but {active} are active.</p>
+                <p>
+                  Everyone keeps working — nobody has been switched off. Until you deactivate {over} more account{over === 1 ? '' : 's'}
+                  {' '}(or your school moves to a larger plan) you can&apos;t add or reactivate staff accounts.
+                  Deactivated accounts are kept and can be reactivated later when there is room.
+                </p>
+              </div>
+            )
+          })()}
+          {!staffLoading && !canManageStaff && (
+            <div className="bg-gray-50 border border-gray-200 text-gray-600 px-4 py-3 rounded-lg text-sm">
+              Only a school administrator can add, deactivate or reactivate staff accounts.
+            </div>
+          )}
+          {staffActionMsg && (
+            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">{staffActionMsg}</div>
+          )}
+
           {/* Staff list */}
           {staffLoading ? (
-            <p className="text-sm text-gray-400">Loading…</p>
+            <p className="text-sm text-muted-foreground">Loading…</p>
           ) : (
             <div className="space-y-2">
               {staffList.length === 0 && (
-                <p className="text-sm text-gray-400">No staff accounts yet.</p>
+                <p className="text-sm text-muted-foreground">No staff accounts yet.</p>
               )}
               {staffList.map(s => (
-                <div key={s.id} className="bg-white border border-gray-100 rounded-xl p-4">
+                <div key={s.id} className="bg-white border border-gray-100 rounded-md p-4">
                   <div className="flex items-center gap-3">
                     <div className="w-9 h-9 bg-indigo-100 rounded-full flex items-center justify-center flex-shrink-0">
                       <span className="text-indigo-600 text-sm font-bold">
@@ -1278,36 +1244,41 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         <p className="text-sm font-semibold text-gray-900">{s.full_name}</p>
-                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${ROLE_COLORS[s.role] ?? 'bg-gray-100 text-gray-600'}`}>
+                        <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${ROLE_COLORS[s.role] ?? 'bg-gray-100 text-gray-600'}`}>
                           {ROLE_LABELS[s.role] ?? s.role}
                         </span>
                         {s.first_login && (
-                          <span className="text-[10px] bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-medium">
+                          <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-medium">
                             Awaiting first login
                           </span>
                         )}
                         {s.status === 'inactive' && (
-                          <span className="text-[10px] bg-red-100 text-red-600 px-2 py-0.5 rounded-full font-medium">Deactivated</span>
+                          <span className="text-xs bg-red-100 text-red-600 px-2 py-0.5 rounded-full font-medium">Deactivated</span>
                         )}
 
                       </div>
-                      <p className="text-xs text-gray-400 truncate mt-0.5">{s.email}</p>
+                      <p className="text-xs text-muted-foreground truncate mt-0.5">{s.email}</p>
                     </div>
                     <div className="flex items-center gap-2 flex-shrink-0">
                       {s.status === 'active' ? (
                         <>
                           <button onClick={() => resendCredentials(s.id)} disabled={resendingId === s.id}
                             className="text-xs border border-indigo-200 text-indigo-600 hover:bg-indigo-50 px-2.5 py-1.5 rounded-lg disabled:opacity-50 transition-colors">
-                            {resendingId === s.id ? 'Sending…' : 'Resend Credentials'}
+                            {resendingId === s.id ? 'Sending…' : 'Resend Invite Link'}
                           </button>
-                          <button onClick={() => deactivateStaff(s.id)}
-                            className="text-xs border border-red-200 text-red-500 hover:bg-red-50 px-2.5 py-1.5 rounded-lg transition-colors">
-                            Deactivate
-                          </button>
+                          {/* You can never deactivate yourself — the server refuses it too, but showing a button
+                              that always fails is just confusing (issue: it appeared even with a single account). */}
+                          {canManageStaff && s.id !== myStaffId && (
+                            <button onClick={() => deactivateStaff(s.id)}
+                              className="text-xs border border-red-200 text-red-500 hover:bg-red-50 px-2.5 py-1.5 rounded-lg transition-colors">
+                              Deactivate
+                            </button>
+                          )}
                         </>
-                      ) : (
-                        <button onClick={() => reactivateStaff(s.id)}
-                          className="text-xs border border-green-200 text-green-600 hover:bg-green-50 px-2.5 py-1.5 rounded-lg transition-colors">
+                      ) : canManageStaff && (
+                        <button onClick={() => reactivateStaff(s.id)} disabled={staffSeatsFull}
+                          title={staffSeatsFull ? 'All staff seats on your plan are in use — deactivate another account or upgrade first' : undefined}
+                          className="text-xs border border-green-200 text-green-600 hover:bg-green-50 px-2.5 py-1.5 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
                           Reactivate
                         </button>
                       )}
@@ -1321,8 +1292,8 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
             </div>
           )}
 
-          {/* Add staff form */}
-          {(() => {
+          {/* Add staff form — School Administrators only (the server refuses everyone else) */}
+          {canManageStaff && (() => {
             const limit = subscription?.staff_limit ?? null
             const count = staffList.filter(s => s.status === 'active').length
             const atLimit = limit !== null && count >= limit
@@ -1332,7 +1303,7 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
                 {staffError && <div className="mb-3 bg-red-50 border border-red-200 text-red-700 px-3 py-2 rounded-lg text-sm">{staffError}</div>}
                 {staffSuccess && <div className="mb-3 bg-green-50 border border-green-200 text-green-700 px-3 py-2 rounded-lg text-sm">{staffSuccess}</div>}
                 {atLimit ? (
-                  <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-800">
+                  <div className="bg-amber-50 border border-amber-200 rounded-md px-4 py-3 text-sm text-amber-800">
                     You&apos;ve reached the staff limit for your plan ({limit} accounts). Upgrade to add more.
                   </div>
                 ) : (
@@ -1340,20 +1311,20 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
                     <div className="grid grid-cols-2 gap-3">
                       <input type="text" placeholder="Full name *" value={staffForm.full_name} required
                         onChange={e => setStaffForm(f => ({ ...f, full_name: e.target.value }))}
-                        className="border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300" />
+                        className="border border-gray-200 rounded-md px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300" />
                       <input type="email" placeholder="Email address *" value={staffForm.email} required
                         onChange={e => setStaffForm(f => ({ ...f, email: e.target.value }))}
-                        className="border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300" />
+                        className="border border-gray-200 rounded-md px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300" />
                     </div>
                     <div className="flex gap-3">
                       <select value={staffForm.role} onChange={e => setStaffForm(f => ({ ...f, role: e.target.value }))}
-                        className="flex-1 border border-gray-200 rounded-xl px-4 py-2.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300">
+                        className="flex-1 border border-gray-200 rounded-md px-4 py-2.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300">
                         <option value="principal">Principal</option>
                         <option value="vice_principal">Vice Principal</option>
                         <option value="school_admin">School Administrator</option>
                       </select>
                       <button type="submit" disabled={staffSaving}
-                        className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white font-semibold px-6 py-2.5 rounded-xl text-sm transition-colors whitespace-nowrap">
+                        className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white font-semibold px-6 py-2.5 rounded-md text-sm transition-colors whitespace-nowrap">
                         {staffSaving ? 'Sending…' : '+ Add & Send Email'}
                       </button>
                     </div>
@@ -1369,14 +1340,14 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
 
       {tab === 'security' && (
         <div className="space-y-4">
-          <div className="bg-white border border-gray-100 rounded-xl p-6 space-y-5">
+          <div className="bg-white border border-gray-100 rounded-md p-6 space-y-5">
             <div>
               <h3 className="text-sm font-semibold text-gray-700">Change Password</h3>
-              <p className="text-xs text-gray-400 mt-0.5">Use a strong password with uppercase letters and numbers</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Use a strong password with uppercase letters and numbers</p>
             </div>
 
             {pwdMsg && (
-              <div className={`px-4 py-3 rounded-xl text-sm border ${pwdMsg.ok ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-100 text-red-600'}`}>
+              <div className={`px-4 py-3 rounded-md text-sm border ${pwdMsg.ok ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-100 text-red-600'}`}>
                 {pwdMsg.text}
               </div>
             )}
@@ -1391,15 +1362,15 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
                   <label className="block text-xs font-semibold text-gray-500 mb-1.5">{label}</label>
                   <input type="password" value={val} onChange={e => set(e.target.value)}
                     placeholder={ph} autoComplete={auto} required
-                    className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" />
+                    className="w-full border border-gray-200 rounded-md px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" />
                 </div>
               ))}
 
               {/* Strength checks */}
               {newPwd && (
-                <div className="bg-gray-50 rounded-xl px-4 py-3 space-y-1.5">
+                <div className="bg-gray-50 rounded-md px-4 py-3 space-y-1.5">
                   {pwdChecks.map(c => (
-                    <div key={c.label} className={`flex items-center gap-2 text-xs ${c.ok ? 'text-green-600' : 'text-gray-400'}`}>
+                    <div key={c.label} className={`flex items-center gap-2 text-xs ${c.ok ? 'text-green-600' : 'text-muted-foreground'}`}>
                       <span>{c.ok ? '✓' : '○'}</span>{c.label}
                     </div>
                   ))}
@@ -1407,16 +1378,16 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
               )}
 
               <button type="submit" disabled={pwdSaving || !curPwd || !newPwd || !confirmPwd}
-                className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-xl transition-colors disabled:opacity-50">
+                className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-md transition-colors disabled:opacity-50">
                 {pwdSaving ? 'Changing…' : 'Change Password'}
               </button>
             </form>
           </div>
 
           {/* Session info */}
-          <div className="bg-white border border-gray-100 rounded-xl p-6">
+          <div className="bg-white border border-gray-100 rounded-md p-6">
             <h3 className="text-sm font-semibold text-gray-700 mb-1">Active Session</h3>
-            <p className="text-xs text-gray-400 mb-4">You are currently logged in on this device</p>
+            <p className="text-xs text-muted-foreground mb-4">You are currently logged in on this device</p>
             <a href="/api/auth/logout"
               className="inline-block text-sm font-medium text-red-600 hover:text-red-800 border border-red-200 hover:bg-red-50 px-4 py-2 rounded-lg transition-colors">
               Log Out
@@ -1425,60 +1396,6 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
         </div>
       )}
 
-      {/* ══ DANGER ZONE TAB ═══════════════════════════════════════════════════ */}
-      {tab === 'danger' && (
-        <div className="space-y-4">
-          {dangerMsg && (
-            <div className={`px-4 py-3 rounded-xl text-sm border ${dangerMsg.ok ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-100 text-red-600'}`}>
-              {dangerMsg.text}
-            </div>
-          )}
-
-          {/* Export data */}
-          <div className="bg-white border border-gray-200 rounded-xl p-6 space-y-3">
-            <div>
-              <h3 className="text-sm font-semibold text-gray-800">Export My Data</h3>
-              <p className="text-xs text-gray-500 mt-0.5">
-                Request a full export of your school data — students, teachers, fees, attendance records.
-                Our team will prepare and send it within 2 business days.
-              </p>
-            </div>
-            <button onClick={() => sendAccountRequest('export')} disabled={exportSending}
-              className="px-5 py-2 border border-gray-300 text-gray-700 hover:bg-gray-50 text-sm font-medium rounded-lg transition-colors disabled:opacity-50">
-              {exportSending ? 'Sending request…' : 'Request Data Export'}
-            </button>
-          </div>
-
-          {/* Account closure */}
-          <div className="bg-white border border-red-200 rounded-xl p-6 space-y-4">
-            <div>
-              <h3 className="text-sm font-semibold text-red-700">Request Account Closure</h3>
-              <p className="text-xs text-gray-500 mt-0.5">
-                This sends a closure request to our team. Your account will be reviewed and deactivated manually.
-                All data is preserved for 90 days before permanent deletion.
-              </p>
-            </div>
-            <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-xs text-red-700 space-y-1">
-              <p className="font-semibold">⚠ Before you request closure:</p>
-              <ul className="list-disc list-inside space-y-0.5 mt-1">
-                <li>All teachers and students will lose access immediately</li>
-                <li>Fee records and reports will be unavailable</li>
-                <li>Data is retained for 90 days then permanently deleted</li>
-              </ul>
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-gray-600 mb-1.5">Reason for closure *</label>
-              <textarea value={closureReason} onChange={e => setClosureReason(e.target.value)} rows={3}
-                placeholder="Please describe why you want to close your account…"
-                className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-red-400 resize-none" />
-            </div>
-            <button onClick={() => sendAccountRequest('closure')} disabled={closureSending || !closureReason.trim()}
-              className="px-5 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-semibold rounded-lg transition-colors disabled:opacity-50">
-              {closureSending ? 'Sending request…' : 'Send Closure Request'}
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   )
 }

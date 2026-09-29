@@ -21,7 +21,7 @@ export async function GET() {
 
     // Get parent info + all linked children
     const parentResult = await pool.query(
-      `SELECT p.id, p.name, p.email, p.phone, p.school_id, p.password_changed,
+      `SELECT p.id, p.name, p.email, p.phone, p.school_id, p.password_changed, p.date_of_birth,
               s.name AS school_name
        FROM parents p
        LEFT JOIN schools s ON s.id = p.school_id

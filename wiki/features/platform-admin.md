@@ -1,37 +1,35 @@
 # Platform Admin Portal
 
-**Status:** 7 Built
-**Last updated:** 2026-06-18
+**Route:** `/platform-admin` (admin subdomain only) · **Cookie:** `wlyl-platform` · **Status:** Built · **Last verified against the code:** 2026-09-21
 
----
+Full detail: [`docs/product/features/21-platform-admin-portal.md`](../../docs/product/features/21-platform-admin-portal.md).
 
-## Overview
+## What it does
 
-The Platform Admin portal manages all schools on the WLYL platform at `/platform-admin`. Covers school creation, subscriptions, feature gating, and audit logging.
+The WLYL team's console: create schools, set plans, switch features per plan and per school, manage the master syllabus and library, watch usage and API health, and keep an audit trail.
 
----
+| Section | Screen | Main API |
+|---|---|---|
+| Schools | `app/platform-admin/page.tsx`, `schools/[id]` | `/api/schools`, `/api/schools/{id}`, `/subscription`, `/ai-access`, `/api/platform/schools/{id}/feature-overrides`, `/api/platform/schools/reset-password` |
+| Master Syllabus | `curriculum/` | `/api/platform/subjects`, `/chapters`, `/topics`, `/tasks`, `/syllabus/bulk-import` |
+| Digital Library | `library/` | `/api/platform/library`, `/materials` |
+| Feature Plans | `features/` | `/api/platform/features` |
+| Usage Analytics | `usage-analytics/` | `/api/platform/usage-analytics` (+ growth, feature-adoption, school-health) |
+| Watchline | `logs/` | `/api/platform/watchline`, `/api/internal/*` |
+| Audit Log | `audit/` | `/api/platform/audit` |
+| Admins | — | `/api/platform/admins`, `/admins/{id}/reset` |
 
-## Features
+## Rules
 
-| Feature | Status | Description |
-|---------|--------|-------------|
-| School Directory | Built | List all schools (active/inactive/deleted). Search by name, city, code. Filter by tier |
-| Create School | Built | Full school creation. Auto-generates school_code and temp admin password. Sends onboarding email |
-| Subscription Management | Built | Set tier (none/basic/standard/premium), plan dates, billing amount. Audit logged |
-| Platform Statistics | Built | Total schools, teachers, students, subscription tier breakdown |
-| Audit Log | Built | Immutable log: create school, update subscription, delete school, reset password. Actor, entity, before/after snapshot |
-| Feature Configuration | Built | Enable/disable features per subscription tier. Changes reflect instantly |
-| School Admin Password Reset | Built | Reset any school admin's password. Sends email with new temp password |
+- Changing a school's plan, or lowering a plan's staff limit, asks for confirmation when it would leave schools with more active staff than the new limit (numbers shown; nobody is disabled). Both are recorded in the audit log with the admin and the seat numbers — see settings.md.
+- **Renewals** (`renewals/`, `/api/platform/renewals`): the queue of schools that asked to renew. Each request shows the school, plan, end date and status, who asked, and contact details; the admin can add notes, mark it contacted, dismiss/reopen it, or **Set next plan…** (plan + new end date, with a confirmation if it leaves the school over its staff limit). Applying a plan — here or on the school page — closes the school's waiting request as *Renewed* and records the agreed plan and end date. The nav item shows a badge with the number of new requests.
+- Assigning a plan takes an end date (default one year; presets; or *No expiry*). Renew 1 year and the status badges are on the school page and list.
+- Feature flags are two-layer: tier (`plan_features`) then per-school override (`school_feature_overrides`); Watchline is per school only.
+- The school page's Student/Parent Portal Access toggles (and the AI Access precondition on the same page) show the real gate: an explicit override, or else what the plan tier actually grants — mirroring `schoolHasFeature()`'s tier-inheritance. They used to default to "on" whenever no override existed, even on a plan that didn't include the portal, disagreeing with the school list (which was always correct) and with the login itself. (#251)
+- "Reset password" for a school resets only the owner account.
+- **Known security gap:** several `/api/platform/*` routes and `/api/schools/{id}/subscription` have no auth guard (see `docs/KNOWN_ISSUES.md`).
 
----
+## Related
 
-## Key API Endpoints
-
-| Endpoint | Purpose |
-|----------|---------|
-| `GET/POST /api/schools` | School CRUD |
-| `POST /api/schools/[id]/subscription` | Manage subscription |
-| `GET /api/platform/stats` | Platform statistics |
-| `GET /api/platform/audit-log` | Audit trail |
-| `GET/PUT /api/platform/features` | Feature configuration |
-| `POST /api/schools/[id]/reset-password` | Password reset |
+- Deep dossier: [Platform Admin](../../docs/product/features/21-platform-admin-portal.md)
+- [auth.md](auth.md)

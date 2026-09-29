@@ -9,8 +9,10 @@ import AdvancedFormTypeStep from './steps/AdvancedFormTypeStep'
 import AdvancedFormStep from './steps/AdvancedFormStep'
 import FollowupStep from './steps/FollowupStep'
 import ThankYouStep from './steps/ThankYouStep'
-import { AdvancedFormType, FeedbackCategory, FeedbackRole, WizardStep } from './types'
-import { TEAL, INK, CREAM, BORDER } from '@/app/components/ulearn/theme'
+import { AdvancedFormType, FeedbackCategory, FeedbackRole, QrPointPublic, WizardStep } from './types'
+import { TEAL, INK, CORAL } from '@/app/components/ulearn/theme'
+import { GZ_CARD_SHADOW, GzBrandPanel } from './genz'
+import { HeroIcon } from './CategoryIcon'
 
 const PROGRESS_STEPS: WizardStep[] = ['welcome', 'identity', 'categories', 'rating', 'followup']
 // advancedType/advancedForm occupy the same visual progress slots as
@@ -44,6 +46,10 @@ function initialState() {
 export default function FeedbackWizard({ code }: { code: string }) {
   const [loading, setLoading] = useState(true)
   const [notFound, setNotFound] = useState(false)
+  // Title of a paused/expired event or place QR (410 from resolve)
+  const [closedTitle, setClosedTitle] = useState<string | null>(null)
+  const [paused, setPaused] = useState(false)
+  const [qrPoint, setQrPoint] = useState<QrPointPublic | null>(null)
   const [schoolName, setSchoolName] = useState('')
   const [categories, setCategories] = useState<FeedbackCategory[]>([])
   const [s, setS] = useState(initialState())
@@ -51,14 +57,20 @@ export default function FeedbackWizard({ code }: { code: string }) {
   useEffect(() => {
     let cancelled = false
     fetch(`/api/feedback/resolve?code=${encodeURIComponent(code)}`)
-      .then(res => {
+      .then(async res => {
+        if (res.status === 410) {
+          const data = await res.json()
+          if (!cancelled) { setSchoolName(data.school_name); setClosedTitle(data.title); setPaused(!!data.paused); setLoading(false) }
+          return null
+        }
         if (!res.ok) throw new Error('not_found')
         return res.json()
       })
       .then(data => {
-        if (cancelled) return
+        if (cancelled || !data) return
         setSchoolName(data.school_name)
         setCategories(data.categories)
+        setQrPoint(data.qr_point ?? null)
         setLoading(false)
       })
       .catch(() => {
@@ -68,9 +80,41 @@ export default function FeedbackWizard({ code }: { code: string }) {
   }, [code])
 
   const roleCategories = s.role ? categories.filter(c => c.role === s.role) : []
+  // Audiences that can actually finish the form: rating forms need at least
+  // one active category for the role (otherwise the picker would be an empty
+  // dead end); Advanced Forms need none. 'other' only exists on the
+  // school-wide QR.
+  const rolesWithTopics = new Set(categories.map(c => c.role))
+  const availableRoles = (['parent', 'student', 'teacher', 'visitor', 'other'] as FeedbackRole[]).filter(r =>
+    r === 'other' ? !qrPoint : (qrPoint && qrPoint.form_type !== 'rating') || rolesWithTopics.has(r)
+  )
   const selectedCategories = roleCategories.filter(c => s.selectedKeys.includes(c.key))
   const givenRatings = selectedCategories.map(c => s.ratings[c.key]).filter((r): r is number => r !== undefined)
   const overallRating = givenRatings.length > 0 ? givenRatings.reduce((sum, r) => sum + r, 0) / givenRatings.length : 3
+
+  // Where "Continue" on the identity step goes. An event/place QR fixes the
+  // form: an Advanced Form jumps straight into it (Event form prefilled with
+  // the event's name/date), and pinned categories skip the picker.
+  function afterIdentity(prev: ReturnType<typeof initialState>): ReturnType<typeof initialState> {
+    if (qrPoint) {
+      if (qrPoint.form_type !== 'rating') {
+        const date = qrPoint.event_date
+        const prefill: Record<string, string> =
+          qrPoint.form_type === 'event' ? { event_name: qrPoint.title, ...(date ? { event_date: date } : {}) }
+          : qrPoint.form_type === 'staff_meeting' ? { topic: qrPoint.title, ...(date ? { meeting_date: date } : {}) }
+          : qrPoint.form_type === 'ptm' ? (date ? { meeting_date: date } : {})
+          : {}
+        return { ...prev, advancedFormType: qrPoint.form_type, advancedFormData: { ...prefill, ...prev.advancedFormData }, step: 'advancedForm' }
+      }
+      const forRole = categories.filter(c => c.role === prev.role)
+      if (qrPoint.fixed_categories && forRole.length > 0) {
+        return { ...prev, selectedKeys: forRole.map(c => c.key), ratingIndex: 0, step: 'rating' }
+      }
+      return { ...prev, step: 'categories' }
+    }
+    return { ...prev, step: prev.role === 'other' ? 'advancedType' : 'categories' }
+  }
+  const skipsCategoryPicker = !!qrPoint?.fixed_categories && roleCategories.length > 0
 
   async function submit(body: Record<string, unknown>) {
     setS(prev => ({ ...prev, submitting: true, submitError: null }))
@@ -81,6 +125,7 @@ export default function FeedbackWizard({ code }: { code: string }) {
         body: JSON.stringify(body),
       })
       if (res.status === 429) throw new Error('Too many submissions from this device — please try again later.')
+      if (res.status === 410) throw new Error('Sorry — this feedback form has just closed.')
       if (!res.ok) throw new Error('Something went wrong — please try again.')
       setS(prev => ({ ...prev, step: 'thankyou', submitting: false }))
     } catch (err) {
@@ -117,42 +162,80 @@ export default function FeedbackWizard({ code }: { code: string }) {
   const progressIndex = PROGRESS_INDEX[s.step] ?? -1
 
   return (
-    <div className="relative flex min-h-screen items-start justify-center overflow-hidden p-6" style={{ background: CREAM }}>
-      {/* Soft decorative shapes instead of a full-bleed gradient — quieter, less "generated hero" */}
-      <div className="pointer-events-none absolute -top-24 -right-24 h-72 w-72 rounded-full opacity-[0.07]" style={{ background: TEAL }} />
-      <div className="pointer-events-none absolute -bottom-28 -left-20 h-64 w-64 rounded-full opacity-[0.06]" style={{ background: '#D2603A' }} />
+    <div
+      className="relative min-h-screen overflow-hidden"
+      style={{
+        // Soft aurora glow in the brand greens + warm accents, behind the card
+        background: 'radial-gradient(60% 50% at 10% 0%, #DDF1E6 0%, transparent 60%), radial-gradient(45% 40% at 95% 10%, #FDE6DA 0%, transparent 60%), radial-gradient(50% 45% at 85% 100%, #E7E3FA 0%, transparent 60%), #F7F8F5',
+      }}
+    >
 
-      <div className="relative mt-8 w-full max-w-[390px] rounded-3xl border bg-white p-6 pb-5 shadow-sm" style={{ borderColor: BORDER }}>
+      <div className="relative mx-auto flex max-w-6xl items-start justify-center gap-16 px-4 py-5 sm:px-6 sm:py-10 lg:py-16">
+      {!loading && !notFound && !closedTitle && <GzBrandPanel schoolName={schoolName} />}
+
+      <main
+        className="relative w-full max-w-[480px] rounded-[32px] bg-white/85 p-5 pb-5 ring-1 ring-black/[0.05] backdrop-blur-xl sm:p-7"
+        style={{ boxShadow: GZ_CARD_SHADOW }}
+      >
         {loading && (
           <div className="py-24 text-center text-sm" style={{ color: '#9CA3AF' }}>Loading…</div>
         )}
 
+        {!loading && closedTitle && (
+          <div className="py-16 text-center" data-testid="feedback-closed">
+            <HeroIcon icon="🔒" size={80} motion="none" />
+            {paused ? (
+              <>
+                <h1 className="mb-1 text-lg font-bold" style={{ color: INK }}>Feedback is paused for now</h1>
+                <p className="text-sm" style={{ color: '#9CA3AF' }}>{schoolName} isn&apos;t collecting feedback at the moment. Please try again later or contact the school office.</p>
+              </>
+            ) : (
+              <>
+                <h1 className="mb-1 text-lg font-bold" style={{ color: INK }}>Feedback for {closedTitle} is closed</h1>
+                <p className="text-sm" style={{ color: '#9CA3AF' }}>Thank you for your interest! {schoolName} is no longer collecting feedback through this QR code.</p>
+              </>
+            )}
+          </div>
+        )}
+
         {!loading && notFound && (
           <div className="py-16 text-center" data-testid="feedback-not-found">
-            <div className="mb-3 text-5xl">🙈</div>
+            <HeroIcon icon="🙈" size={80} motion="sad" />
             <h1 className="mb-1 text-lg font-bold" style={{ color: INK }}>Feedback form not available</h1>
             <p className="text-sm" style={{ color: '#9CA3AF' }}>This link may be inactive or incorrect. Please check with the school office.</p>
           </div>
         )}
 
-        {!loading && !notFound && (
+        {!loading && !notFound && !closedTitle && (
           <>
+            {qrPoint && s.step !== 'welcome' && s.step !== 'thankyou' && (
+              <div className="mb-3 truncate text-center text-[11px] font-bold uppercase tracking-wide" style={{ color: CORAL }} data-testid="feedback-qr-point-chip">
+                {qrPoint.kind === 'event' ? '🎉' : '📍'} {qrPoint.title}
+              </div>
+            )}
             {progressIndex >= 0 && (
-              <div className="mb-5 flex gap-1.5">
-                {PROGRESS_STEPS.map((step, i) => (
-                  <span key={step} className="h-[5px] flex-1 overflow-hidden rounded" style={{ background: BORDER }}>
-                    <span
-                      className="block h-full rounded transition-all duration-300"
-                      style={{ width: i <= progressIndex ? '100%' : '0%', background: TEAL }}
-                    />
-                  </span>
-                ))}
+              <div className="mb-5" data-testid="feedback-progress">
+                <div className="mb-1.5 flex items-center justify-between text-[11px] font-extrabold uppercase tracking-wider" style={{ color: '#8A948E' }}>
+                  <span>Step {progressIndex + 1} of {PROGRESS_STEPS.length}</span>
+                </div>
+                <div className="flex gap-1.5">
+                  {PROGRESS_STEPS.map((step, i) => (
+                    <span key={step} className="h-1.5 flex-1 overflow-hidden rounded-full" style={{ background: '#E8EDE9' }}>
+                      <span
+                        className="block h-full rounded-full transition-all duration-300"
+                        style={{ width: i <= progressIndex ? '100%' : '0%', background: `linear-gradient(90deg, ${TEAL}, #3E9B74)` }}
+                      />
+                    </span>
+                  ))}
+                </div>
               </div>
             )}
 
             {s.step === 'welcome' && (
               <WelcomeStep
                 schoolName={schoolName}
+                qrPoint={qrPoint}
+                availableRoles={availableRoles}
                 onSelectRole={role => setS(prev => ({ ...prev, role, step: 'identity' }))}
               />
             )}
@@ -166,7 +249,7 @@ export default function FeedbackWizard({ code }: { code: string }) {
                 onPhoneChange={v => setS(prev => ({ ...prev, phone: v }))}
                 onAnonymousChange={v => setS(prev => ({ ...prev, isAnonymous: v }))}
                 onBack={() => setS(prev => ({ ...prev, step: 'welcome' }))}
-                onContinue={() => setS(prev => ({ ...prev, step: prev.role === 'other' ? 'advancedType' : 'categories' }))}
+                onContinue={() => setS(afterIdentity)}
               />
             )}
 
@@ -195,7 +278,7 @@ export default function FeedbackWizard({ code }: { code: string }) {
                 total={selectedCategories.length}
                 onBack={() => setS(prev => (
                   prev.ratingIndex === 0
-                    ? { ...prev, step: 'categories' }
+                    ? { ...prev, step: skipsCategoryPicker ? 'identity' : 'categories' }
                     : { ...prev, ratingIndex: prev.ratingIndex - 1 }
                 ))}
                 onNext={() => setS(prev => (
@@ -218,7 +301,7 @@ export default function FeedbackWizard({ code }: { code: string }) {
                 type={s.advancedFormType}
                 values={s.advancedFormData}
                 onChange={(key, value) => setS(prev => ({ ...prev, advancedFormData: { ...prev.advancedFormData, [key]: value } }))}
-                onBack={() => setS(prev => ({ ...prev, step: 'advancedType' }))}
+                onBack={() => setS(prev => ({ ...prev, step: qrPoint ? 'identity' : 'advancedType' }))}
                 onSubmit={handleAdvancedSubmit}
                 submitting={s.submitting}
                 error={s.submitError}
@@ -251,6 +334,7 @@ export default function FeedbackWizard({ code }: { code: string }) {
             )}
           </>
         )}
+      </main>
       </div>
     </div>
   )

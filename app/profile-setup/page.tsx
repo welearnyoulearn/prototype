@@ -2,6 +2,8 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
+import AuthShell, { AuthError, AuthInput, THEMES } from '@/app/components/AuthShell'
+import { ButtonLoader, FullPageLoader } from '@/components/loaders'
 
 type UserData = {
   role: string
@@ -52,89 +54,21 @@ export default function ProfileSetupPage() {
     }
   }
 
-  if (!user) return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900 flex items-center justify-center">
-      <p className="text-slate-400 text-sm">Loading…</p>
-    </div>
-  )
+  if (!user) return <FullPageLoader portal="school-admin" message="Preparing your profile" sub="Loading your account details…" />
+
+  const theme = user.role === 'platform_admin' ? THEMES.platform : THEMES.admin
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900 flex items-center justify-center p-4">
-      <div className="w-full max-w-md">
-
-        {/* Logo */}
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-14 h-14 bg-blue-600 rounded-2xl mb-4 shadow-lg">
-            <span className="text-white font-black text-xl">W</span>
-          </div>
-          <h1 className="text-xl font-bold text-white">WLYL School Portal</h1>
-          <p className="text-slate-400 text-sm mt-1">One last step before you begin</p>
-        </div>
-
-        <div className="bg-white rounded-2xl shadow-2xl overflow-hidden">
-
-          {/* Header */}
-          <div className="bg-blue-600 px-7 py-5">
-            <p className="text-white font-bold text-base">Complete Your Profile</p>
-            <p className="text-blue-200 text-xs mt-0.5">
-              {user.school_name ? `Setting up: ${user.school_name}` : 'Platform Admin'}
-            </p>
-          </div>
-
-          <div className="px-7 py-6">
-            {error && (
-              <div className="mb-4 bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-xl">
-                {error}
-              </div>
-            )}
-
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                  Your Full Name <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  value={fullName}
-                  onChange={e => setFullName(e.target.value)}
-                  required
-                  autoFocus
-                  placeholder="e.g. Rajesh Kumar"
-                  className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
-                />
-                <p className="text-xs text-gray-400 mt-1">This name appears in audit logs, receipts and staff lists</p>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                  Phone Number <span className="text-gray-400 font-normal">(optional)</span>
-                </label>
-                <input
-                  type="tel"
-                  value={phone}
-                  onChange={e => setPhone(e.target.value)}
-                  placeholder="+91 98765 43210"
-                  className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
-                />
-              </div>
-
-              <button
-                type="submit"
-                disabled={loading || !fullName.trim()}
-                className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-xl text-sm transition-all disabled:opacity-50 flex items-center justify-center gap-2 mt-2">
-                {loading
-                  ? <><svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>Saving…</>
-                  : 'Go to Dashboard →'
-                }
-              </button>
-            </form>
-          </div>
-        </div>
-
-        <p className="text-center text-slate-500 text-xs mt-4">
-          You can update these details anytime in School Settings
-        </p>
-      </div>
-    </div>
+    <AuthShell theme={theme} title="Complete your profile" subtitle={user.school_name ? `Set up your details for ${user.school_name}.` : 'Set up your platform administrator details.'}>
+      <AuthError message={error} />
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <AuthInput label="Full name" value={fullName} onChange={setFullName} placeholder="e.g. Rajesh Kumar" hint="Shown in audit logs, receipts and staff lists." ring={theme.ring} autoComplete="name" />
+        <AuthInput label="Phone number (optional)" type="tel" value={phone} onChange={setPhone} placeholder="+91 98765 43210" required={false} ring={theme.ring} autoComplete="tel" />
+        <button type="submit" disabled={loading || !fullName.trim()} className="auth-submit">
+          {loading ? <ButtonLoader label="Saving profile…" /> : 'Continue to dashboard'}
+        </button>
+      </form>
+      <p className="mt-5 border-t border-border pt-5 text-xs leading-5 text-muted-foreground">You can update these details later in School Settings.</p>
+    </AuthShell>
   )
 }

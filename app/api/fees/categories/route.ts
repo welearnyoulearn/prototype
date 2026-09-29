@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import pool from '@/lib/db'
+import pool, { ensureDB } from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
 
 // GET /api/fees/categories?school_id=X
@@ -57,29 +57,24 @@ export async function PUT(req: NextRequest) {
   try {
     const id = req.nextUrl.searchParams.get('id')
     if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 })
+    // Must run before pool.connect() below, not after — on Vercel's max:1 pool,
+    // ensureDB()'s own pool.query() calls would otherwise block waiting for a
+    // connection that `client` is already holding, and `client` can't be
+    // released until this call returns: a deadlock resolved only by
+    // connectionTimeoutMillis expiring into an error.
+    await ensureDB()
     const client = await pool.connect()
     try {
       const { name, description, frequency, is_active, category_type, changed_by: clientActor } = await req.json()
-
-      // Ensure changelog table exists
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS fee_category_changelog (
-          id            SERIAL PRIMARY KEY,
-          school_id     INTEGER NOT NULL,
-          category_id   INTEGER NOT NULL,
-          field_changed TEXT    NOT NULL,
-          old_value     TEXT,
-          new_value     TEXT,
-          changed_by    TEXT    NOT NULL DEFAULT 'Admin',
-          changed_at    TIMESTAMPTZ DEFAULT NOW()
-        )`)
 
       // Fetch current values before update
       const { rows: [current] } = await client.query(
         `SELECT school_id, name, frequency, is_active, category_type FROM fee_categories WHERE id = $1`, [id]
       )
       if (!current) return NextResponse.json({ error: 'Category not found' }, { status: 404 })
-      const access = await requireFeeAccess(current.school_id)
+      // Pass `client` — already held via pool.connect() above; the default
+      // `pool` here would deadlock requesting a second connection on Vercel's max:1 pool.
+      const access = await requireFeeAccess(current.school_id, client)
       if (!access) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
       const changed_by = clientActor || access.actor
 
@@ -156,7 +151,9 @@ export async function DELETE(req: NextRequest) {
     try {
       const { rows: [cat] } = await client.query(`SELECT school_id FROM fee_categories WHERE id = $1`, [id])
       if (!cat) return NextResponse.json({ error: 'Category not found' }, { status: 404 })
-      if (!await requireFeeAccess(cat.school_id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      // Pass `client` — already held via pool.connect() above; the default
+      // `pool` here would deadlock requesting a second connection on Vercel's max:1 pool.
+      if (!await requireFeeAccess(cat.school_id, client)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
       await client.query('BEGIN')
       const { rows: [{ cnt }] } = await client.query(
         `SELECT COUNT(*) AS cnt FROM student_fee_ledger WHERE fee_category_id = $1`, [id]

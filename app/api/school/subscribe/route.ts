@@ -169,7 +169,6 @@ export async function POST(req: NextRequest) {
           )
 
           invalidateCache(`subjects:class:${classObj.id}`)
-          invalidateCache(`timetable:class:${classObj.id}`)
         }
         invalidateCache(`health:${school_id}`)
       }

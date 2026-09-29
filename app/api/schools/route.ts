@@ -71,8 +71,9 @@ export async function POST(req: NextRequest) {
     if (phone && !/^\d{7,15}$/.test(phone.replace(/[\s\-\+\(\)]/g, ''))) {
       return NextResponse.json({ error: 'Phone number must be 7–15 digits' }, { status: 400 })
     }
-    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      return NextResponse.json({ error: 'Invalid email address' }, { status: 400 })
+    // Required: the school's first admin logs in with this email (the School ID is not a login).
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return NextResponse.json({ error: 'A valid admin email address is required' }, { status: 400 })
     }
 
     await client.query('BEGIN')
@@ -95,7 +96,7 @@ export async function POST(req: NextRequest) {
       `INSERT INTO users (email, school_code, password_hash, role, school_id, first_login)
        VALUES ($1, $2, $3, 'school_admin', $4, TRUE)
        ON CONFLICT (school_code) DO NOTHING`,
-      [email || null, schoolCode, passwordHash, school.id]
+      [email.trim().toLowerCase(), schoolCode, passwordHash, school.id]
     )
 
     await client.query(
@@ -121,14 +122,10 @@ export async function POST(req: NextRequest) {
 
     await client.query('COMMIT')
 
-    if (email) {
-      const loginUrl = `${process.env.APP_URL || 'https://welearnyoulearn.com'}/login`
-      sendOnboardingEmail({ to: email, schoolName: school.name, schoolCode, tempPassword, loginUrl })
-        .then(() => console.log(`[email/onboarding] Sent to ${email}`))
-        .catch(err => console.error('[email/onboarding] Failed:', err?.message || err))
-    } else {
-      console.log(`\n[SCHOOL CREATED] ${school.name}\n  School Code: ${schoolCode}\n  Temp Password: ${tempPassword}\n`)
-    }
+    const loginUrl = `${process.env.APP_URL || 'https://welearnyoulearn.com'}/login`
+    sendOnboardingEmail({ to: email.trim(), schoolName: school.name, tempPassword, loginUrl })
+      .then(() => console.log(`[email/onboarding] Sent to ${email}`))
+      .catch(err => console.error('[email/onboarding] Failed:', err?.message || err))
 
     return NextResponse.json({ ...school, school_code: schoolCode, temp_password: tempPassword }, { status: 201 })
   } catch (error) {

@@ -10,10 +10,22 @@ import { gradeOrderSql } from '@/lib/grades'
 export type Money = { billed: number; waived: number; net_demand: number; paid: number; balance: number }
 export type Meta = { school_name: string; academic_year: string; generated_by: string; generated_on: string; scope?: string }
 
+// The three things that reduce a bill's amount owed, broken apart instead of
+// folded into one "Waived" figure: a discretionary waiver is a fee reduction
+// the school actually chose to grant a student (scholarship, hardship case,
+// etc.); carried_forward is a bill whose balance moved to a new bill in
+// another year (bookkeeping, not forgiven); written_off is an admin giving up
+// on collecting uncollectable debt (bookkeeping, not a concession granted to
+// the student). Every "Waived" figure elsewhere in this report is
+// discretionary only — this breakdown is what makes that legible to an
+// auditor instead of requiring them to take it on faith.
+export type WaiverBreakdown = { discretionary: number; carried_forward: number; written_off: number; total: number }
+
 export type BulkReport = {
   kind: 'bulk'
   meta: Meta
   summary: Money & { students: number }
+  waiver_breakdown: WaiverBreakdown
   by_type: (Money & { fee_type: string })[]
   by_class: (Money & { class: string; fee_type: string })[]
   // Per-fee-type rows, one per student per fee type, followed by a subtotal row per student.
@@ -32,8 +44,15 @@ export type StudentReport = {
   waivers: { fee_type: string; period_label: string; waiver_type: string; waiver_amount: number; reason: string; granted_by_name: string | null; created_at: string; is_revoked: boolean; revoked_by: string | null; revoked_at: string | null; revoke_reason: string | null }[]
 }
 
-function money(billed: number, waived: number, paid: number): Money {
-  return { billed, waived, net_demand: billed - waived, paid, balance: (billed - waived) - paid }
+// balance must be the SUM of each bill's own floored balance
+// (GREATEST(amount_due - waiver_amount - amount_paid, 0)), never derived here
+// as (billed - waived) - paid on already-summed totals — a single
+// over-committed bill (amount_paid + waiver_amount > amount_due, e.g. from a
+// structure amendment that reduced amount_due after payment) produces a
+// negative per-bill balance that would otherwise net against, and understate,
+// every other bill's real balance in the same rollup.
+function money(billed: number, waived: number, paid: number, balance: number): Money {
+  return { billed, waived, net_demand: billed - waived, paid, balance }
 }
 
 export async function buildFeeAuditReport(opts: {
@@ -88,50 +107,106 @@ export async function buildFeeAuditReport(opts: {
        ORDER BY w.created_at`, [student_id, school_id, academic_year]
     ).catch(() => ({ rows: [] }))
 
-    const billed = bills.reduce((s, b) => s + Number(b.billed), 0)
-    const waived = bills.reduce((s, b) => s + Number(b.waived), 0)
-    const paid   = bills.reduce((s, b) => s + Number(b.paid), 0)
+    const billed  = bills.reduce((s, b) => s + Number(b.billed), 0)
+    const paid    = bills.reduce((s, b) => s + Number(b.paid), 0)
+    // bills.balance is already GREATEST(...)'d per row by the SQL above — sum
+    // those, don't re-derive from the (unfloored) billed/waived/paid totals.
+    const balance = bills.reduce((s, b) => s + Number(b.balance), 0)
+    // The headline "Waived" figure excludes 'carry_forward' (a bill's balance moved
+    // to a new bill, not forgiven) and 'writeoff' (an admin gave up collecting, not a
+    // fee reduction granted to the student) — same convention as every other fee
+    // screen. Computed from the waivers list (which carries waiver_type) rather than
+    // bills[].waived (which is the bill's own full, unfiltered waiver_amount — kept
+    // as-is per bill since that's an accurate per-bill figure, just not what belongs
+    // in a "discretionary waivers granted" headline). Revoked waivers are excluded —
+    // this list includes them for the audit trail, but they no longer reduce anything.
+    const discretionaryWaived = (waivers as Array<{ waiver_type: string; waiver_amount: string; is_revoked: boolean }>)
+      .filter(w => !w.is_revoked && w.waiver_type !== 'carry_forward' && w.waiver_type !== 'writeoff')
+      .reduce((s, w) => s + Number(w.waiver_amount), 0)
 
     return {
       kind: 'student',
       meta: { school_name: schoolName, academic_year, generated_by: actor, generated_on: new Date().toISOString() },
       student,
-      balance: money(billed, waived, paid),
+      balance: money(billed, discretionaryWaived, paid, balance),
       bills: bills.map(b => ({ ...b, billed: Number(b.billed), waived: Number(b.waived), paid: Number(b.paid), balance: Number(b.balance) })),
       payments: payments.map(p => ({ ...p, amount: Number(p.amount) })),
       waivers: waivers.map((w: Record<string, unknown>) => ({ ...w, waiver_amount: Number(w.waiver_amount) })) as StudentReport['waivers'],
     }
   }
 
+  // Per-bill floor, summed — see the comment on money() for why this can't be
+  // derived from SUM(billed)-SUM(waived)-SUM(paid) instead.
+  const BALANCE_SUM = `COALESCE(SUM(GREATEST(l.amount_due - COALESCE(l.waiver_amount,0) - l.amount_paid, 0)),0)`
+
+  // l.waiver_amount is a bill's FULL running waiver total — it doesn't distinguish a
+  // discretionary waiver (a fee reduction granted to the student) from 'carry_forward'
+  // (a bill's balance moved to a new bill elsewhere, not forgiven) or 'writeoff' (an
+  // admin giving up on uncollectable debt, not a concession granted to the student).
+  // Every other fee screen already excludes both from its "Waived" figure; this report
+  // is the one place that was still summing l.waiver_amount unfiltered. bk.amt is the
+  // per-bill sum of just the bookkeeping types (non-revoked), subtracted out below so
+  // "waived"/"net_demand" here mean the same thing they mean everywhere else.
+  const BOOKKEEPING_JOIN = `
+     LEFT JOIN (
+       SELECT ledger_id, SUM(waiver_amount) AS amt FROM fee_waivers
+       WHERE waiver_type IN ('carry_forward','writeoff') AND COALESCE(is_revoked,FALSE) = FALSE
+       GROUP BY ledger_id
+     ) bk ON bk.ledger_id = l.id`
+  const WAIVED_SUM = `COALESCE(SUM(COALESCE(l.waiver_amount,0) - COALESCE(bk.amt,0)),0)`
+
   // ── BULK ──
   const { rows: [sm] } = await pool.query(
     `SELECT COALESCE(SUM(l.amount_due),0) AS billed,
-            COALESCE(SUM(COALESCE(l.waiver_amount,0)),0) AS waived,
+            ${WAIVED_SUM} AS waived,
             COALESCE(SUM(l.amount_paid),0) AS paid,
+            ${BALANCE_SUM} AS balance,
             COUNT(DISTINCT l.student_id) AS students
-     FROM student_fee_ledger l JOIN students s ON s.id = l.student_id WHERE ${WHERE}`, vals
+     FROM student_fee_ledger l JOIN students s ON s.id = l.student_id
+     ${BOOKKEEPING_JOIN} WHERE ${WHERE}`, vals
   )
-  const summary = { ...money(Number(sm.billed), Number(sm.waived), Number(sm.paid)), students: Number(sm.students) }
+
+  const { rows: waiverBuckets } = await pool.query(
+    `SELECT
+       CASE WHEN w.waiver_type IN ('carry_forward','writeoff') THEN w.waiver_type ELSE 'discretionary' END AS bucket,
+       COALESCE(SUM(w.waiver_amount),0) AS total
+     FROM fee_waivers w
+     JOIN student_fee_ledger l ON l.id = w.ledger_id
+     JOIN students s ON s.id = l.student_id
+     WHERE ${WHERE} AND COALESCE(w.is_revoked,FALSE) = FALSE
+     GROUP BY bucket`, vals
+  )
+  const bucketAmt = (key: string) => Number(waiverBuckets.find(b => b.bucket === key)?.total ?? 0)
+  const waiver_breakdown: WaiverBreakdown = {
+    discretionary: bucketAmt('discretionary'),
+    carried_forward: bucketAmt('carry_forward'),
+    written_off: bucketAmt('writeoff'),
+    total: waiverBuckets.reduce((s, b) => s + Number(b.total), 0),
+  }
+  const summary = { ...money(Number(sm.billed), Number(sm.waived), Number(sm.paid), Number(sm.balance)), students: Number(sm.students) }
 
   const { rows: byType } = await pool.query(
     `SELECT fc.name AS fee_type, COALESCE(SUM(l.amount_due),0) AS billed,
-            COALESCE(SUM(COALESCE(l.waiver_amount,0)),0) AS waived, COALESCE(SUM(l.amount_paid),0) AS paid
+            ${WAIVED_SUM} AS waived, COALESCE(SUM(l.amount_paid),0) AS paid,
+            ${BALANCE_SUM} AS balance
      FROM student_fee_ledger l JOIN fee_categories fc ON fc.id = l.fee_category_id
-     JOIN students s ON s.id = l.student_id WHERE ${WHERE} GROUP BY fc.name ORDER BY billed DESC`, vals
+     JOIN students s ON s.id = l.student_id
+     ${BOOKKEEPING_JOIN} WHERE ${WHERE} GROUP BY fc.name ORDER BY billed DESC`, vals
   )
-  const by_type = byType.map(r => ({ fee_type: r.fee_type, ...money(Number(r.billed), Number(r.waived), Number(r.paid)) }))
+  const by_type = byType.map(r => ({ fee_type: r.fee_type, ...money(Number(r.billed), Number(r.waived), Number(r.paid), Number(r.balance)) }))
 
   const { rows: byClass } = await pool.query(
     `SELECT s.grade, COALESCE(s.section,'') AS section, fc.name AS fee_type,
-            COALESCE(SUM(l.amount_due),0) AS billed, COALESCE(SUM(COALESCE(l.waiver_amount,0)),0) AS waived,
-            COALESCE(SUM(l.amount_paid),0) AS paid
+            COALESCE(SUM(l.amount_due),0) AS billed, ${WAIVED_SUM} AS waived,
+            COALESCE(SUM(l.amount_paid),0) AS paid, ${BALANCE_SUM} AS balance
      FROM student_fee_ledger l JOIN fee_categories fc ON fc.id = l.fee_category_id
-     JOIN students s ON s.id = l.student_id WHERE ${WHERE}
+     JOIN students s ON s.id = l.student_id
+     ${BOOKKEEPING_JOIN} WHERE ${WHERE}
      GROUP BY s.grade, s.section, fc.name ORDER BY ${gradeOrderSql('s.grade')}, s.section, fc.name`, vals
   )
   const by_class = byClass.map(r => ({
     class: r.section ? `${r.grade}-${r.section}` : `Grade ${r.grade}`, fee_type: r.fee_type,
-    ...money(Number(r.billed), Number(r.waived), Number(r.paid)),
+    ...money(Number(r.billed), Number(r.waived), Number(r.paid), Number(r.balance)),
   }))
 
   // Student-wise, broken down per fee type, with a subtotal row per student.
@@ -140,23 +215,23 @@ export async function buildFeeAuditReport(opts: {
             COALESCE(s.school_roll_number::text, '') AS roll_number,
             s.parent_name, s.parent_phone,
             fc.name AS fee_type,
-            COALESCE(SUM(l.amount_due),0) AS billed, COALESCE(SUM(COALESCE(l.waiver_amount,0)),0) AS waived,
-            COALESCE(SUM(l.amount_paid),0) AS paid
+            COALESCE(SUM(l.amount_due),0) AS billed, ${WAIVED_SUM} AS waived,
+            COALESCE(SUM(l.amount_paid),0) AS paid, ${BALANCE_SUM} AS balance
      FROM student_fee_ledger l
      JOIN students s ON s.id = l.student_id
      JOIN fee_categories fc ON fc.id = l.fee_category_id
-     WHERE ${WHERE}
+     ${BOOKKEEPING_JOIN} WHERE ${WHERE}
      GROUP BY s.id, s.name, s.grade, s.section, s.school_roll_number, s.parent_name, s.parent_phone, fc.name
      ORDER BY ${gradeOrderSql('s.grade')}, s.section, s.name, fc.name`, vals
   )
   const by_student: BulkReport['by_student'] = []
   let curSid: number | null = null
-  let sub = { billed: 0, waived: 0, paid: 0, student: '', roll: '', cls: '', parent_name: null as string | null, parent_phone: null as string | null }
+  let sub = { billed: 0, waived: 0, paid: 0, balance: 0, student: '', roll: '', cls: '', parent_name: null as string | null, parent_phone: null as string | null }
   const flush = () => {
     if (curSid !== null) by_student.push({
       student: sub.student, roll_number: sub.roll, class: sub.cls, fee_type: '', is_subtotal: true,
       parent_name: sub.parent_name, parent_phone: sub.parent_phone,
-      ...money(sub.billed, sub.waived, sub.paid),
+      ...money(sub.billed, sub.waived, sub.paid, sub.balance),
     })
   }
   for (const r of byStudent) {
@@ -164,11 +239,11 @@ export async function buildFeeAuditReport(opts: {
     if (r.sid !== curSid) {
       flush()
       curSid = r.sid
-      sub = { billed: 0, waived: 0, paid: 0, student: r.student, roll: r.roll_number, cls, parent_name: r.parent_name || null, parent_phone: r.parent_phone || null }
+      sub = { billed: 0, waived: 0, paid: 0, balance: 0, student: r.student, roll: r.roll_number, cls, parent_name: r.parent_name || null, parent_phone: r.parent_phone || null }
     }
-    const b = Number(r.billed), w = Number(r.waived), pd = Number(r.paid)
-    by_student.push({ student: r.student, roll_number: r.roll_number, class: cls, fee_type: r.fee_type, is_subtotal: false, parent_name: r.parent_name || null, parent_phone: r.parent_phone || null, ...money(b, w, pd) })
-    sub.billed += b; sub.waived += w; sub.paid += pd
+    const b = Number(r.billed), w = Number(r.waived), pd = Number(r.paid), bal = Number(r.balance)
+    by_student.push({ student: r.student, roll_number: r.roll_number, class: cls, fee_type: r.fee_type, is_subtotal: false, parent_name: r.parent_name || null, parent_phone: r.parent_phone || null, ...money(b, w, pd, bal) })
+    sub.billed += b; sub.waived += w; sub.paid += pd; sub.balance += bal
   }
   flush()
 
@@ -246,6 +321,6 @@ export async function buildFeeAuditReport(opts: {
       school_name: schoolName, academic_year, generated_by: actor, generated_on: new Date().toISOString(),
       scope: grade ? (section && section !== 'all' ? `Class ${grade}-${section}` : `Grade ${grade}`) : 'Whole School',
     },
-    summary, by_type, by_class, by_student, change_log: log,
+    summary, waiver_breakdown, by_type, by_class, by_student, change_log: log,
   }
 }

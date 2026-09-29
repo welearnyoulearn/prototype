@@ -1,7 +1,11 @@
 ﻿'use client'
 
 import { useEffect, useState, useCallback, useMemo } from 'react'
+import dynamic from 'next/dynamic'
+import { Users } from 'lucide-react'
 import { isValidName, NAME_INVALID_MESSAGE } from '@/lib/nameValidation'
+import { EmptyState } from '@/components/ui/empty-state'
+import { useConfirm } from '@/components/ui/use-confirm'
 
 type Props = { schoolId: number; refreshKey?: number }
 
@@ -35,24 +39,11 @@ type DupGroup = {
 
 type EditForm = Partial<Student>
 
-type StudentPerf = {
-  attendance_pct: number | null
-  task_submission_rate: number | null
-  avg_score_pct: number | null
-  points: number
-  engagement: number
-  rank: number
-}
-type StudentRewards = {
-  total_points: number
-  badges: { badge_type: string; earned_at: string }[]
-  streak: { current_streak: number; longest_streak: number } | null
-}
-
 type DuplicatesPanelProps = {
   dupGroups: DupGroup[]
   dupLoading: boolean
   dupError: string
+  dupResult: { deleted: number; skipped: number; errors: Array<{ dup_id: number; reason: string }> } | null
   dupTotalCount: number
   selectedDupGroups: Set<number>
   dupDeleting: boolean
@@ -67,7 +58,7 @@ type DuplicatesPanelProps = {
 }
 
 function DuplicatesPanel({
-  dupGroups, dupLoading, dupError, dupTotalCount, selectedDupGroups,
+  dupGroups, dupLoading, dupError, dupResult, dupTotalCount, selectedDupGroups,
   dupDeleting, dupConfirm, onScan, onSelectGroup, onSelectAll,
   onDeleteSelected, onDeleteAll, onConfirmDelete, onCancelConfirm,
 }: DuplicatesPanelProps) {
@@ -99,7 +90,7 @@ function DuplicatesPanel({
             </p>
           )}
           {!dupLoading && dupTotalCount === 0 && dupGroups.length === 0 && (
-            <p className="text-sm text-gray-400">No duplicates found</p>
+            <p className="text-sm text-muted-foreground">No duplicates found</p>
           )}
         </div>
         <div className="flex gap-2">
@@ -129,6 +120,28 @@ function DuplicatesPanel({
         <div className="mb-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">{dupError}</div>
       )}
 
+      {dupResult && (dupResult.deleted > 0 || dupResult.skipped > 0) && (
+        <div className={`mb-4 border px-4 py-3 rounded-lg text-sm ${dupResult.skipped > 0 ? 'bg-amber-50 border-amber-200 text-amber-800' : 'bg-green-50 border-green-200 text-green-700'}`}>
+          <p className="font-medium">
+            {dupResult.deleted > 0 && `Merged and removed ${dupResult.deleted} duplicate${dupResult.deleted !== 1 ? 's' : ''}.`}
+            {dupResult.deleted > 0 && dupResult.skipped > 0 && ' '}
+            {dupResult.skipped > 0 && `${dupResult.skipped} left untouched — they still have payment or waiver history that conflicts with the record being kept.`}
+          </p>
+          {dupResult.errors.length > 0 && (
+            <ul className="mt-2 space-y-1 text-xs">
+              {dupResult.errors.map(e => {
+                const name = dupGroups.flatMap(g => g.duplicates).find(d => d.id === e.dup_id)?.name
+                return (
+                  <li key={e.dup_id}>
+                    <span className="font-medium">{name || `Student #${e.dup_id}`}:</span> {e.reason}
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+        </div>
+      )}
+
       {dupGroups.length > 0 && (
         <div className="mb-3 flex items-center gap-3">
           <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
@@ -151,22 +164,22 @@ function DuplicatesPanel({
       )}
 
       {dupLoading && (
-        <div className="py-12 text-center text-gray-400">
+        <div className="py-12 text-center text-muted-foreground">
           <div className="w-6 h-6 border-2 border-orange-400 border-t-transparent rounded-full animate-spin mx-auto mb-2" />
           Scanning for duplicates...
         </div>
       )}
 
       {!dupLoading && dupGroups.length === 0 && dupTotalCount === 0 && (
-        <div className="bg-white rounded-xl border border-gray-200 py-12 text-center">
-          <p className="text-gray-400 text-sm">Click "Scan for Duplicates" to check for duplicate students</p>
+        <div className="bg-white rounded-md border border-gray-200 py-12 text-center">
+          <p className="text-muted-foreground text-sm">Click "Scan for Duplicates" to check for duplicate students</p>
         </div>
       )}
 
       <div className="space-y-4">
         {dupGroups.map(group => (
           <div key={group.keep.id}
-            className={`bg-white rounded-xl border overflow-hidden ${selectedDupGroups.has(group.keep.id) ? 'border-orange-300' : 'border-gray-200'}`}>
+            className={`bg-white rounded-md border overflow-hidden ${selectedDupGroups.has(group.keep.id) ? 'border-orange-300' : 'border-gray-200'}`}>
             <div className="px-5 py-3 bg-orange-50 border-b border-orange-100 flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <input type="checkbox"
@@ -179,7 +192,7 @@ function DuplicatesPanel({
                     Grade {group.keep.grade}{group.keep.section ? ` · Section ${group.keep.section}` : ''}
                     {group.keep.school_roll_number != null ? ` · Roll ${group.keep.school_roll_number}` : ''}
                   </span>
-                  <span className="ml-2 text-xs text-gray-400">— {reasonLabel(group.reason)}</span>
+                  <span className="ml-2 text-xs text-muted-foreground">— {reasonLabel(group.reason)}</span>
                 </div>
               </div>
               <button
@@ -195,9 +208,9 @@ function DuplicatesPanel({
                 <span className="text-xs font-semibold text-green-700 w-14 flex-shrink-0">KEEP</span>
                 <div className="flex-1 min-w-0">
                   <span className="text-sm font-medium text-gray-900">{group.keep.name}</span>
-                  <span className="ml-2 text-xs text-gray-400 font-mono">{group.keep.roll_number}</span>
+                  <span className="ml-2 text-xs text-muted-foreground font-mono">{group.keep.roll_number}</span>
                 </div>
-                <span className="text-xs text-gray-400">Created {fmtTime(group.keep.created_at)}</span>
+                <span className="text-xs text-muted-foreground">Created {fmtTime(group.keep.created_at)}</span>
                 <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${group.keep.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
                   {group.keep.status}
                 </span>
@@ -208,9 +221,9 @@ function DuplicatesPanel({
                   <span className="text-xs font-semibold text-red-600 w-14 flex-shrink-0">DELETE</span>
                   <div className="flex-1 min-w-0">
                     <span className="text-sm font-medium text-gray-700">{dup.name}</span>
-                    <span className="ml-2 text-xs text-gray-400 font-mono">{dup.roll_number}</span>
+                    <span className="ml-2 text-xs text-muted-foreground font-mono">{dup.roll_number}</span>
                   </div>
-                  <span className="text-xs text-gray-400">Created {fmtTime(dup.created_at)}</span>
+                  <span className="text-xs text-muted-foreground">Created {fmtTime(dup.created_at)}</span>
                   <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${dup.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
                     {dup.status}
                   </span>
@@ -223,7 +236,7 @@ function DuplicatesPanel({
 
       {dupConfirm && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 px-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+          <div className="bg-white rounded-lg shadow-2xl w-full max-w-md p-6">
             <h3 className="text-base font-bold text-gray-900 mb-3">
               Delete {dupConfirm === 'all' ? dupTotalCount : selectedDupCount} duplicate record{(dupConfirm === 'all' ? dupTotalCount : selectedDupCount) !== 1 ? 's' : ''}?
             </h3>
@@ -258,9 +271,11 @@ function DuplicatesPanel({
   )
 }
 
+const StudentProfile = dynamic(() => import('./StudentProfile'), { ssr: false })
+
 export default function StudentsManagement({ schoolId, refreshKey }: Props) {
+  const { confirm, ConfirmDialog } = useConfirm()
   const [students, setStudents] = useState<Student[]>([])
-  const [classes, setClasses] = useState<{ id: number; grade: string; section: string }[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [gradeFilter, setGradeFilter] = useState('all')
@@ -271,17 +286,19 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
   const [dupTotalCount, setDupTotalCount] = useState(0)
   const [selectedDupGroups, setSelectedDupGroups] = useState<Set<number>>(new Set())
   const [dupError, setDupError] = useState('')
+  // Cleanup can now finish "successfully" (200 OK) while still SKIPPING some
+  // duplicates that have real financial history attached — dupError alone
+  // (a full-request failure banner) never covered that partial-success case,
+  // so an admin had no way to see which duplicates were left alone or why.
+  const [dupResult, setDupResult] = useState<{ deleted: number; skipped: number; errors: Array<{ dup_id: number; reason: string }> } | null>(null)
   const [dupConfirm, setDupConfirm] = useState<'selected' | 'all' | null>(null)
   const [dupDeleting, setDupDeleting] = useState(false)
   const [search, setSearch] = useState('')
   const [selected, setSelected] = useState<Student | null>(null)
+  const [profileId, setProfileId] = useState<number | null>(null)
   const [editing, setEditing] = useState(false)
   const [editForm, setEditForm] = useState<EditForm>({})
   const [saving, setSaving] = useState(false)
-  const [detailTab, setDetailTab] = useState<'info' | 'performance'>('info')
-  const [studentPerf, setStudentPerf] = useState<StudentPerf | null>(null)
-  const [studentRewards, setStudentRewards] = useState<StudentRewards | null>(null)
-  const [perfLoading, setPerfLoading] = useState(false)
 
   // Auto-scroll to top when this module opens
   useEffect(() => {
@@ -290,34 +307,12 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
 
   useEffect(() => {
     setLoading(true)
-    Promise.all([
-      fetch(`/api/students?school_id=${schoolId}`).then(r => r.json()),
-      fetch(`/api/classes?school_id=${schoolId}`).then(r => r.json()),
-    ]).then(([stu, cls]) => {
+    fetch(`/api/students?school_id=${schoolId}`).then(r => r.json()).then(stu => {
       // Normalise section to uppercase so "a" and "A" are the same class
       const normStu = Array.isArray(stu) ? stu.map((s: Student) => ({ ...s, section: s.section?.toUpperCase() ?? s.section })) : []
       setStudents(normStu)
-      setClasses(Array.isArray(cls) ? cls : [])
     }).catch(() => setError('Failed to load students')).finally(() => setLoading(false))
   }, [schoolId, refreshKey])
-
-  async function loadStudentPerformance(student: Student) {
-    setPerfLoading(true); setStudentPerf(null); setStudentRewards(null)
-    try {
-      const cls = classes.find(c => c.grade === student.grade && c.section === student.section)
-      const [rewards, perf] = await Promise.all([
-        fetch(`/api/students/${student.id}/rewards?school_id=${schoolId}`).then(r => r.json()).catch(() => null),
-        cls
-          ? fetch(`/api/classes/${cls.id}/performance?school_id=${schoolId}&days=30`).then(r => r.json()).catch(() => null)
-          : Promise.resolve(null),
-      ])
-      if (rewards) setStudentRewards({ total_points: rewards.total_points ?? 0, badges: rewards.badges ?? [], streak: rewards.streak ?? null })
-      if (perf && perf.students) {
-        const me = perf.students.find((s: { id: number }) => s.id === student.id)
-        if (me) setStudentPerf(me)
-      }
-    } finally { setPerfLoading(false) }
-  }
 
   async function reloadStudents() {
     setLoading(true)
@@ -330,7 +325,7 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
   }
 
   const loadDuplicates = useCallback(async () => {
-    setDupLoading(true); setDupError('')
+    setDupLoading(true); setDupError(''); setDupResult(null)
     try {
       const res = await fetch(`/api/students/duplicates?school_id=${schoolId}`)
       const data = await res.json()
@@ -344,7 +339,7 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
   }, [schoolId])
 
   async function handleDeleteDuplicates(mode: 'selected' | 'all') {
-    setDupDeleting(true); setDupConfirm(null); setDupError('')
+    setDupDeleting(true); setDupConfirm(null); setDupError(''); setDupResult(null)
     try {
       const body = mode === 'all'
         ? { school_id: schoolId, cleanup_all: true }
@@ -362,7 +357,13 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
+      // loadDuplicates() below resets dupResult (a fresh scan shouldn't carry
+      // a stale result banner) — set this AFTER it, or it would be wiped out
+      // immediately. A 200 response can still include per-duplicate skips
+      // (real financial history found); surface those explicitly rather than
+      // treating this as a silent, fully-successful cleanup.
       await loadDuplicates()
+      setDupResult({ deleted: data.deleted ?? 0, skipped: data.skipped ?? 0, errors: data.errors ?? [] })
       reloadStudents()
     } catch (err: unknown) {
       setDupError(err instanceof Error ? err.message : 'Cleanup failed')
@@ -409,7 +410,8 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
   }
 
   async function handleDelete(student: Student) {
-    if (!confirm(`Remove ${student.name}? They will be marked inactive and can be restored later.`)) return
+    const ok = await confirm(`Remove ${student.name}? They will be marked inactive and can be restored later.`, { title: 'Remove student?', confirmText: 'Remove', destructive: true })
+    if (!ok) return
     try {
       const res = await fetch(`/api/students/${student.id}`, { method: 'DELETE' })
       const data = await res.json()
@@ -491,16 +493,18 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
 
   const inputCls = 'w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-green-300'
 
-  if (loading) return <div className="py-12 text-center text-gray-400">Loading students...</div>
+  if (loading) return <div className="py-12 text-center text-muted-foreground">Loading students...</div>
 
   return (
     <div className="flex gap-6">
+      {ConfirmDialog}
+      {profileId !== null && <StudentProfile studentId={profileId} onClose={() => setProfileId(null)} />}
       {/* Left: List */}
       <div className="flex-1 min-w-0">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-xl font-bold text-gray-900">Students</h2>
           <div className="flex items-center gap-3">
-            <span className="text-sm text-gray-400">{students.length} total · {activeStudents.length} active · {inactiveStudents.length} removed</span>
+            <span className="text-sm text-muted-foreground">{students.length} total · {activeStudents.length} active · {inactiveStudents.length} removed</span>
             <button onClick={reloadStudents} disabled={loading}
               title="Refresh student list"
               className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 text-gray-500 rounded-lg text-xs hover:bg-gray-50 transition-colors disabled:opacity-40">
@@ -518,7 +522,7 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
             const labels: Record<string, string> = { active: 'Active', inactive: 'Removed', all: 'All' }
             return (
               <button key={key} onClick={() => { setStatusFilter(key); setGradeFilter('all'); setSectionFilter('all') }}
-                className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${statusFilter === key ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+                className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${statusFilter === key ? 'bg-white text-gray-900 ' : 'text-gray-500 hover:text-gray-700'}`}>
                 {labels[key]}
                 {key === 'inactive' && inactiveStudents.length > 0 && (
                   <span className="ml-1.5 bg-red-100 text-red-600 text-xs px-1.5 py-0.5 rounded-full">{inactiveStudents.length}</span>
@@ -529,7 +533,7 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
           <button
             data-testid="duplicates-tab-btn"
             onClick={() => { setStatusFilter('duplicates'); if (dupGroups.length === 0 && !dupLoading) loadDuplicates() }}
-            className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${statusFilter === 'duplicates' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+            className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${statusFilter === 'duplicates' ? 'bg-white text-gray-900 ' : 'text-gray-500 hover:text-gray-700'}`}>
             Duplicates
             {dupTotalCount > 0 && (
               <span className="ml-1.5 bg-orange-100 text-orange-600 text-xs px-1.5 py-0.5 rounded-full">{dupTotalCount}</span>
@@ -549,6 +553,7 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
             dupGroups={dupGroups}
             dupLoading={dupLoading}
             dupError={dupError}
+            dupResult={dupResult}
             dupTotalCount={dupTotalCount}
             selectedDupGroups={selectedDupGroups}
             dupDeleting={dupDeleting}
@@ -587,13 +592,16 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
         </div>
 
         {filtered.length === 0 ? (
-          <div className="bg-white rounded-xl border border-gray-200 py-12 text-center">
-            <p className="text-gray-400">No students found</p>
-          </div>
+          <EmptyState
+            icon={Users}
+            title="No students found"
+            description="Try adjusting your search or filters."
+            className="bg-white"
+          />
         ) : (
           <div className="space-y-4">
             {Object.entries(grouped).sort(([a], [b]) => sortGroupKey(a, b)).map(([group, members]) => (
-              <div key={group} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+              <div key={group} className="bg-white rounded-md border border-gray-200 overflow-hidden">
                 <div className="px-5 py-3 bg-green-50 border-b border-green-100 flex items-center justify-between">
                   <span className="font-semibold text-green-800 text-sm">{group}</span>
                   <span className="text-xs text-green-600 font-medium">{members.length} student{members.length !== 1 ? 's' : ''}</span>
@@ -616,12 +624,15 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
                       if (b.school_roll_number != null) return 1
                       return a.name.localeCompare(b.name)
                     }).map(s => (
-                      <tr key={s.id} onClick={() => { setSelected(s); setEditing(false); setEditForm({}); setDetailTab('info'); setStudentPerf(null); setStudentRewards(null) }}
+                      <tr key={s.id} onClick={() => { setSelected(s); setEditing(false); setEditForm({}); }}
                         className={`cursor-pointer transition-colors ${selected?.id === s.id ? 'bg-green-50' : 'hover:bg-gray-50'}`}>
                         <td className="px-3 py-3 text-center font-semibold text-sm text-amber-700 bg-amber-50/40">
                           {s.school_roll_number ?? <span className="text-gray-300 font-normal text-xs">—</span>}
                         </td>
-                        <td className="px-5 py-3 font-medium text-gray-900">{s.name}</td>
+                        <td className="px-5 py-3 font-medium text-gray-900">
+                          <button type="button" data-testid={`student-name-${s.id}`} aria-label={`Open full profile of ${s.name}`}
+                            onClick={e => { e.stopPropagation(); setProfileId(s.id) }} className="text-left text-violet-700 hover:underline">{s.name}</button>
+                        </td>
                         <td className="px-5 py-3 text-gray-600 text-xs">{s.parent_name || '—'}</td>
                         <td className="px-5 py-3 text-gray-500 text-xs">{s.parent_phone || s.phone || '—'}</td>
                         <td className="px-5 py-3">
@@ -655,7 +666,7 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
           })
           if (keys.length === 0) return null
           return (
-            <div className="mt-4 bg-white rounded-xl border border-red-100 overflow-hidden">
+            <div className="mt-4 bg-white rounded-md border border-red-100 overflow-hidden">
               <div className="px-5 py-3 bg-red-50 border-b border-red-100 flex items-center justify-between">
                 <span className="font-semibold text-red-700 text-sm">Removed Classes</span>
                 <span className="text-xs text-red-500">{keys.length} class{keys.length !== 1 ? 'es' : ''} · {inactiveStudents.length} students deactivated</span>
@@ -664,7 +675,7 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
                 {keys.map(k => (
                   <div key={k} className="flex items-center justify-between px-5 py-2.5">
                     <span className="text-sm font-medium text-gray-500 line-through">Grade {k.split('-')[0]} – Section {k.split('-')[1]}</span>
-                    <span className="text-xs text-gray-400">{removedGroups[k]} student{removedGroups[k] !== 1 ? 's' : ''}</span>
+                    <span className="text-xs text-muted-foreground">{removedGroups[k]} student{removedGroups[k] !== 1 ? 's' : ''}</span>
                   </div>
                 ))}
               </div>
@@ -678,105 +689,13 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
       {/* Right: Detail panel */}
       {selected && (
         <div className="w-72 flex-shrink-0">
-          <div className="bg-white rounded-xl border border-gray-200 sticky top-6 flex flex-col max-h-[calc(100vh-6rem)] overflow-hidden">
+          <div className="bg-white rounded-md border border-gray-200 sticky top-6 flex flex-col max-h-[calc(100vh-6rem)] overflow-hidden">
             <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
-              <div className="flex gap-1">
-                {(['info', 'performance'] as const).map(t => (
-                  <button key={t} onClick={() => {
-                    setDetailTab(t)
-                    if (t === 'performance' && !studentPerf && !perfLoading) loadStudentPerformance(selected)
-                  }}
-                    className={`px-3 py-1 rounded-md text-xs font-semibold capitalize transition-colors ${detailTab === t ? 'bg-green-600 text-white' : 'text-gray-500 hover:bg-gray-100'}`}>
-                    {t === 'info' ? 'Profile' : '360° View'}
-                  </button>
-                ))}
-              </div>
-              <button onClick={() => setSelected(null)} className="text-gray-400 hover:text-gray-600 text-lg leading-none">×</button>
+              <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Student</span>
+              <button onClick={() => setSelected(null)} className="text-muted-foreground hover:text-gray-600 text-lg leading-none">×</button>
             </div>
 
             <div className="overflow-y-auto flex-1">
-            {detailTab === 'performance' ? (
-              <div className="px-5 py-5">
-                {/* Avatar header */}
-                <div className="flex items-center gap-3 mb-4">
-                  <div className="w-10 h-10 rounded-full bg-green-600 flex items-center justify-center text-white font-bold flex-shrink-0">
-                    {selected.name.charAt(0).toUpperCase()}
-                  </div>
-                  <div>
-                    <p className="font-bold text-gray-900 text-sm">{selected.name}</p>
-                    <p className="text-xs text-gray-400">Grade {selected.grade} – Sec {selected.section} · {selected.roll_number}</p>
-                  </div>
-                </div>
-                {perfLoading ? (
-                  <div className="py-8 text-center"><div className="w-5 h-5 border-2 border-green-400 border-t-transparent rounded-full animate-spin mx-auto" /></div>
-                ) : (
-                  <div className="space-y-4">
-                    {/* Performance metrics */}
-                    {studentPerf ? (
-                      <div className="grid grid-cols-2 gap-2">
-                        {[
-                          { label: 'Attendance', value: studentPerf.attendance_pct, good: 80, warn: 60 },
-                          { label: 'Tasks Done', value: studentPerf.task_submission_rate, good: 70, warn: 50 },
-                          { label: 'Avg Score', value: studentPerf.avg_score_pct, good: 60, warn: 40 },
-                          { label: 'Engagement', value: studentPerf.engagement, good: 70, warn: 50 },
-                        ].map(({ label, value, good, warn }) => (
-                          <div key={label} className="bg-gray-50 rounded-xl p-3 text-center">
-                            <p className={`text-xl font-black ${value === null ? 'text-gray-300' : value >= good ? 'text-emerald-600' : value >= warn ? 'text-amber-500' : 'text-red-500'}`}>
-                              {value === null ? '—' : `${value}%`}
-                            </p>
-                            <p className="text-[10px] text-gray-500 mt-0.5">{label}</p>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <p className="text-xs text-gray-400 text-center">No performance data yet for this class.</p>
-                    )}
-                    {studentPerf && (
-                      <div className="bg-gray-50 rounded-xl px-3 py-2.5 flex items-center justify-between">
-                        <span className="text-xs text-gray-500">Class Rank</span>
-                        <span className="text-sm font-black text-violet-600">#{studentPerf.rank}</span>
-                      </div>
-                    )}
-                    {/* Rewards */}
-                    {studentRewards && (
-                      <div className="space-y-2">
-                        <div className="bg-amber-50 rounded-xl px-3 py-2.5 flex items-center justify-between">
-                          <span className="text-xs text-amber-700 font-semibold">Total Points</span>
-                          <span className="text-sm font-black text-amber-600">{studentRewards.total_points}</span>
-                        </div>
-                        {studentRewards.streak && studentRewards.streak.current_streak > 0 && (
-                          <div className="bg-orange-50 rounded-xl px-3 py-2.5 flex items-center justify-between">
-                            <span className="text-xs text-orange-700 font-semibold">Current Streak</span>
-                            <span className="text-sm font-black text-orange-500">{studentRewards.streak.current_streak} days</span>
-                          </div>
-                        )}
-                        {studentRewards.badges.length > 0 && (
-                          <div>
-                            <p className="text-xs font-semibold text-gray-500 mb-1.5">Badges Earned ({studentRewards.badges.length})</p>
-                            <div className="flex flex-wrap gap-1.5">
-                              {studentRewards.badges.map((b, i) => (
-                                <span key={i} className="text-[10px] bg-violet-100 text-violet-700 px-2 py-0.5 rounded-full font-medium capitalize">
-                                  {(b.badge_type ?? '').replace(/_/g, ' ')}
-                                </span>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                    {/* Parent info */}
-                    {(selected.parent_name || selected.parent_phone || selected.parent_email) && (
-                      <div className="bg-blue-50 rounded-xl px-3 py-2.5">
-                        <p className="text-[10px] font-semibold text-blue-500 uppercase tracking-wide mb-1">Parent</p>
-                        {selected.parent_name && <p className="text-xs font-semibold text-gray-800">{selected.parent_name}</p>}
-                        {selected.parent_phone && <p className="text-xs text-gray-500">{selected.parent_phone}</p>}
-                        {selected.parent_email && <p className="text-xs text-gray-400">{selected.parent_email}</p>}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            ) : (
             <><div className="px-5 py-5 border-b border-gray-100">
               <div className="flex items-center gap-3 mb-4">
                 <div className="w-12 h-12 rounded-full bg-green-600 flex items-center justify-center text-white font-bold text-lg flex-shrink-0">
@@ -784,10 +703,12 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
                 </div>
                 <div>
                   <p className="font-bold text-gray-900">{selected.name}</p>
-                  <p className="text-xs text-gray-400 font-mono mt-0.5">{selected.roll_number}</p>
+                  <p className="text-xs text-muted-foreground font-mono mt-0.5">{selected.roll_number}</p>
                   <p className="text-xs text-gray-500 mt-0.5">
                     {selected.grade && selected.section ? `Grade ${selected.grade} – Section ${selected.section}` : ''}
                   </p>
+                  <button type="button" onClick={() => setProfileId(selected.id)} data-testid="student-open-profile"
+                    className="mt-1.5 text-xs font-semibold text-violet-600 border border-violet-200 rounded-lg px-2.5 py-1 hover:bg-violet-50">Open full profile →</button>
                 </div>
               </div>
 
@@ -800,7 +721,7 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
                     { label: 'Parent Ph.', value: selected.parent_phone },
                   ].map(({ label, value }) => value ? (
                     <div key={label} className="flex gap-2">
-                      <span className="text-gray-400 w-20 flex-shrink-0 text-xs">{label}</span>
+                      <span className="text-muted-foreground w-20 flex-shrink-0 text-xs">{label}</span>
                       <span className="text-gray-700 text-xs break-all">{value}</span>
                     </div>
                   ) : null)}
@@ -859,7 +780,7 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
                 </button>
               )}
             </div>
-            </>) /* end info tab */}
+            </>
             </div> {/* end scroll wrapper */}
 
           </div>
