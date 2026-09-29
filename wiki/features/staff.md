@@ -17,7 +17,8 @@ School admin.
 
 ## How it works
 
-- Add a teacher with a form, or upload a CSV/Excel (`/api/teachers/parse-import`, `/api/teachers/bulk`; a template is downloadable).
+- Add a teacher with a form, or upload the controlled Excel `.xlsx` template (`/api/teachers/parse-import`, `/api/teachers/bulk`). Excel is intentional because Subject, Staff Type and Grades use dropdown validation.
+- The Subject dropdown always contains the full master syllabus and only the current school's custom subjects. The UI, Excel template and backend use the same canonical list.
 - The system creates an employee id and a temporary password; the teacher signs in with email + password and must change it.
 - Edit, search, filter by department/staff type; removing a teacher is a soft delete (they stop being able to mark attendance).
 - School-admin-level staff (principal, vice principal, more admins) are invited from **School Settings → Staff accounts** with a one-time set-password link — see settings.md.
@@ -26,6 +27,7 @@ School admin.
 
 - Plan limits (staff_limit) are enforced when school-level accounts are created **and when they are reactivated** (No plan 1 · Basic 2 · Standard 5 · Premium unlimited) — see settings.md.
 - Teachers are scoped to their school; a deactivated teacher cannot mark attendance.
+- Arbitrary subjects and another school's custom subjects are rejected even through a direct API request.
 
 ## Code evidence
 

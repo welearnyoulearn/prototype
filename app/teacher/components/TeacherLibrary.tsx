@@ -15,6 +15,7 @@ type ClassOption = {
   grade: string
   section: string
   student_count: number
+  class_teacher_id: number | null
 }
 
 type ClassSubjectAssignment = {
@@ -52,10 +53,9 @@ export default function TeacherLibrary({ teacher, schoolId }: Props) {
     ]).then(([classSubjects, allClasses]: [ClassSubjectAssignment[], ClassOption[]]) => {
       const classMap = new Map<string, ClassEntry>()
 
-      if (teacher.class_teacher_grade && teacher.class_teacher_section) {
-        const cls = allClasses.find(c => c.grade === teacher.class_teacher_grade && c.section === teacher.class_teacher_section)
-        if (cls) classMap.set(`${cls.grade}-${cls.section}`, { cls, subjects: [], isOwn: true })
-      }
+      allClasses.filter(c => c.class_teacher_id === teacher.id).forEach(cls => {
+        classMap.set(`${cls.grade}-${cls.section}`, { cls, subjects: [], isOwn: true })
+      })
 
       classSubjects.forEach((a: ClassSubjectAssignment) => {
         if (!a.grade || !a.section) return
@@ -70,7 +70,7 @@ export default function TeacherLibrary({ teacher, schoolId }: Props) {
 
       setEntries(Array.from(classMap.values()))
     }).finally(() => setLoading(false))
-  }, [teacher, schoolId])
+  }, [teacher.id, schoolId])
 
   if (loading) {
     return (

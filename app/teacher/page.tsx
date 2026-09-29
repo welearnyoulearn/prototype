@@ -55,6 +55,7 @@ type Teacher = {
   teaches_grades: string | null
   class_teacher_grade: string | null
   class_teacher_section: string | null
+  class_teacher_assignments: { id: number; grade: string; section: string }[]
   status: string
   school_id: number
   school_name: string
@@ -114,10 +115,13 @@ function TeacherPortal() {
   const { current: activeNav, navigate: navigateSection } = useSectionNav<string>('snapshot')
   const [visitedNav, setVisitedNav] = useState<Set<string>>(new Set([activeNav]))
   useEffect(() => {
-    setVisitedNav(prev => (prev.has(activeNav) ? prev : new Set([...prev, activeNav])))
+    const update = window.setTimeout(() => {
+      setVisitedNav(prev => (prev.has(activeNav) ? prev : new Set([...prev, activeNav])))
+    }, 0)
+    return () => window.clearTimeout(update)
   }, [activeNav])
   const [sidebarOpen, setSidebarOpen] = useState(false)
-  const [selectedClass, setSelectedClass] = useState<{ id: number; grade: string; section: string; class_teacher_name: string | null } | null>(null)
+  const [selectedClass, setSelectedClass] = useState<{ id: number; grade: string; section: string; class_teacher_name: string | null; class_teacher_id?: number | null } | null>(null)
   const [classViewInitialTab, setClassViewInitialTab] = useState<string | undefined>(undefined)
   const [classViewOpenExamId, setClassViewOpenExamId] = useState<number | undefined>(undefined)
 
@@ -318,8 +322,8 @@ function TeacherPortal() {
               <div className="min-w-0">
                 <p className="truncate text-sm font-medium text-[#202a25]">{teacher.name}</p>
                 <p className="mt-0.5 text-xs text-[#647068]">
-                  {teacher.class_teacher_grade && teacher.class_teacher_section
-                    ? `Class teacher · Grade ${teacher.class_teacher_grade}`
+                  {teacher.class_teacher_assignments?.length
+                    ? `Class teacher · ${teacher.class_teacher_assignments.length} class${teacher.class_teacher_assignments.length === 1 ? '' : 'es'}`
                     : teacher.department || 'Teacher'}
                 </p>
               </div>
@@ -330,7 +334,7 @@ function TeacherPortal() {
         <main id="teacher-content" tabIndex={-1} className="portal-main">
           <div className="mx-auto w-full max-w-7xl">
           {visitedNav.has('snapshot')       && <div hidden={activeNav !== 'snapshot'}><SmartSnapshot teacher={teacher} schoolId={teacher.school_id} onNavigate={navigateTo} onViewClass={cls => { setSelectedClass(cls); navigateTo('class-view') }} /></div>}
-          {visitedNav.has('class-view') && selectedClass && <div hidden={activeNav !== 'class-view'}><ClassView key={selectedClass.id} classId={selectedClass.id} grade={selectedClass.grade} section={selectedClass.section} schoolId={teacher.school_id} teacherName={teacher.name} teacherId={teacher.id} isClassTeacher={teacher.class_teacher_grade === selectedClass.grade && teacher.class_teacher_section === selectedClass.section} teacher={{ id: teacher.id, name: teacher.name, subject: teacher.subject, department: teacher.department, class_teacher_grade: teacher.class_teacher_grade, class_teacher_section: teacher.class_teacher_section }} onBack={() => navigateTo('snapshot')} initialTab={classViewInitialTab} openExamId={classViewOpenExamId} /></div>}
+          {visitedNav.has('class-view') && selectedClass && <div hidden={activeNav !== 'class-view'}><ClassView key={selectedClass.id} classId={selectedClass.id} grade={selectedClass.grade} section={selectedClass.section} schoolId={teacher.school_id} teacherName={teacher.name} teacherId={teacher.id} isClassTeacher={selectedClass.class_teacher_id === teacher.id || teacher.class_teacher_assignments?.some(c => c.id === selectedClass.id)} teacher={{ id: teacher.id, name: teacher.name, subject: teacher.subject, department: teacher.department, class_teacher_grade: teacher.class_teacher_grade, class_teacher_section: teacher.class_teacher_section }} onBack={() => navigateTo('snapshot')} initialTab={classViewInitialTab} openExamId={classViewOpenExamId} /></div>}
           {visitedNav.has('attendance')     && <div hidden={activeNav !== 'attendance'}><Attendance teacherId={teacher.id} schoolId={teacher.school_id} /></div>}
           {visitedNav.has('calendar')       && <div hidden={activeNav !== 'calendar'}><SchoolCalendarView /></div>}
           {visitedNav.has('profile')        && <div hidden={activeNav !== 'profile'}><TeacherProfile teacher={teacher} onUpdate={setTeacher as (t: unknown) => void} availableYears={availableYears} selectedAcademicYear={selectedAcademicYear} schoolCurrentYear={schoolCurrentYear} onSelectYear={setSelectedAcademicYear} /></div>}

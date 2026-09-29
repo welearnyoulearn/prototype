@@ -26,7 +26,7 @@ export function matchTeacher(
 // this ONE subject name match this ONE teacher's subject? Used by
 // autoAssignNewTeacher() to check a teacher against every unfilled subject
 // row instead of one subject against a pool of teachers.
-function subjectMatchesTeacher(subjectName: string, teacherSubject: string): boolean {
+export function teacherMatchesSubject(subjectName: string, teacherSubject: string): boolean {
   const sn = subjectName.trim().toLowerCase()
   const ts = teacherSubject.trim().toLowerCase()
   if (sn === ts) return true
@@ -61,6 +61,6 @@ export function findAutoAssignableSubjects(
   if (!teacher.subject?.trim()) return []
   return unfilledSubjects.filter(s =>
     gradeInRange(teacher.teaches_grades, s.grade) &&
-    subjectMatchesTeacher(s.subject_name, teacher.subject as string)
+    teacherMatchesSubject(s.subject_name, teacher.subject as string)
   )
 }

@@ -2,11 +2,13 @@
 
 import { useEffect, useState, useMemo } from 'react'
 import { Users } from 'lucide-react'
-import { isValidName, NAME_INVALID_MESSAGE } from '@/lib/nameValidation'
 import { EmptyState } from '@/components/ui/empty-state'
 import { GradesMultiSelect } from '@/components/ui/grades-multiselect'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { normalizeStaffInput } from '@/lib/staffValidation'
 
 type Props = { schoolId: number; refreshKey?: number }
+type SubjectOption = { name: string; source: 'master' | 'custom' }
 
 type Teacher = {
   id: number
@@ -59,42 +61,26 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
   const [loadingConsequences, setLoadingConsequences] = useState(false)
   const [removing, setRemoving] = useState(false)
   const [removeToast, setRemoveToast] = useState<{ name: string; summary: string[] } | null>(null)
+  const [credential, setCredential] = useState<{ email: string; temp_password: string } | null>(null)
+  const [resettingCredential, setResettingCredential] = useState(false)
 
-  // Primary/core subject dropdown — same source and fallback as
-  // StaffOnboarding's Subject field, so editing a teacher's core subject
-  // stays in sync with the same catalog they were onboarded against, instead
-  // of drifting into free-typed spelling variants over time. This is
-  // teachers.subject only — the per-class assignments made in Class
-  // Management (class_subjects) are a separate, free-text "other subjects
-  // taught" record and are never affected by this dropdown.
-  const [subscribedSubjectNames, setSubscribedSubjectNames] = useState<string[]>([])
-  const [subjectInputMode, setSubjectInputMode] = useState<'dropdown' | 'manual'>('dropdown')
+  // The same canonical catalog drives onboarding, editing, Excel and API
+  // validation: every master subject plus only this school's custom subjects.
+  const [subjectOptions, setSubjectOptions] = useState<SubjectOption[]>([])
 
   useEffect(() => { loadTeachers() }, [schoolId, refreshKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch(`/api/school/subjects?school_id=${schoolId}`)
-        if (res.ok) {
-          const d = await res.json()
-          const rows: { subject_name: string }[] = Array.isArray(d.subjects) ? d.subjects : []
-          const names = Array.from(new Set(rows.map(r => r.subject_name))).sort()
-          if (names.length > 0) {
-            setSubscribedSubjectNames(names)
-            return
-          }
-        }
-        // No subscribed subjects — same fallback as onboarding: use the full
-        // platform master catalog rather than forcing free text.
-        const masterRes = await fetch('/api/platform/subjects')
-        if (masterRes.ok) {
-          const d = await masterRes.json()
-          const rows: { subject_name: string }[] = Array.isArray(d.subjects) ? d.subjects : []
-          const names = Array.from(new Set(rows.map(r => r.subject_name))).sort()
-          setSubscribedSubjectNames(names)
-        }
-      } catch { /* non-critical — falls back to free text */ }
+        const res = await fetch(`/api/teachers/subject-options?school_id=${schoolId}`)
+        const data = await res.json()
+        if (!res.ok) throw new Error(data.error || 'Failed to load subjects')
+        setSubjectOptions(Array.isArray(data.subjects) ? data.subjects : [])
+      } catch (err) {
+        setSubjectOptions([])
+        setError(err instanceof Error ? err.message : 'Failed to load subjects')
+      }
     })()
   }, [schoolId])
 
@@ -103,23 +89,29 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
     try {
       const res = await fetch(`/api/teachers?school_id=${schoolId}`)
       const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Failed to load teachers')
       setTeachers(Array.isArray(data) ? data : [])
-    } catch {
-      setError('Failed to load teachers')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load teachers')
     } finally {
       setLoading(false)
     }
   }
 
   function validateSave(): string | null {
-    const name = (editForm.name ?? selected?.name ?? '').trim()
-    const phone = (editForm.phone ?? selected?.phone ?? '').trim()
-    const email = (editForm.email ?? selected?.email ?? '').trim()
-    if (!name) return 'Name is required'
-    if (!isValidName(name)) return `Name: ${NAME_INVALID_MESSAGE}`
-    if (phone && !/^\+?[\d\s\-()\[\]]{7,15}$/.test(phone)) return 'Phone must be 7–15 digits'
-    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return 'Enter a valid email address'
-    return null
+    if (!selected) return 'Select a staff member'
+    const result = normalizeStaffInput({
+      name: editForm.name ?? selected.name,
+      email: editForm.email ?? selected.email,
+      phone: editForm.phone ?? selected.phone,
+      subject: editForm.subject ?? selected.subject,
+      department: editForm.department ?? selected.department,
+      qualification: editForm.qualification ?? selected.qualification,
+      date_of_joining: editForm.date_of_joining ?? selected.date_of_joining,
+      staff_type: editForm.staff_type ?? selected.staff_type,
+      teaches_grades: editForm.teaches_grades ?? selected.teaches_grades,
+    })
+    return result.errors[0] ?? null
   }
 
   async function handleSave() {
@@ -157,8 +149,24 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
       if (!res.ok) throw new Error(data.error)
       setTeachers(prev => prev.map(t => t.id === teacher.id ? { ...t, status: newStatus } : t))
       if (selected?.id === teacher.id) setSelected(s => s ? { ...s, status: newStatus } : s)
-    } catch {
-      setError('Failed to update status')
+      if (data.temporary_credential) setCredential(data.temporary_credential)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update status')
+    }
+  }
+
+  async function handleResetCredential() {
+    if (!selected || resettingCredential) return
+    setResettingCredential(true); setError('')
+    try {
+      const res = await fetch(`/api/teachers/${selected.id}/reset-credentials`, { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Failed to reset credentials')
+      setCredential({ email: selected.email, temp_password: data.temp_password })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to reset credentials')
+    } finally {
+      setResettingCredential(false)
     }
   }
 
@@ -169,12 +177,13 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
     try {
       const res = await fetch(`/api/teachers/${teacher.id}?consequences=true`)
       const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Failed to fetch removal consequences')
       setRemoveConsequences({
         subjects_teaching: data.subjects_teaching ?? [],
         class_teacher_of:  data.class_teacher_of  ?? [],
       })
-    } catch {
-      setError('Failed to fetch removal consequences')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to fetch removal consequences')
       setShowRemoveDialog(false)
     } finally {
       setLoadingConsequences(false)
@@ -188,7 +197,8 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
     setRemoving(true)
     try {
       const res = await fetch(`/api/teachers/${selected.id}`, { method: 'DELETE' })
-      if (!res.ok) throw new Error()
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Failed to remove teacher')
       setTeachers(prev => prev.map(t => t.id === selected.id ? { ...t, status: 'removed' } : t))
       setShowRemoveDialog(false)
       setSelected(null)
@@ -202,8 +212,8 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
       }
       setRemoveToast({ name: teacherName, summary })
       setTimeout(() => setRemoveToast(null), 6000)
-    } catch {
-      setError('Failed to remove teacher')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to remove teacher')
       setShowRemoveDialog(false)
     } finally {
       setRemoving(false)
@@ -251,7 +261,7 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-4">
+      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h2 className="text-xl font-bold text-gray-900">Staff Directory</h2>
         <div className="flex items-center gap-3">
           <span className="text-sm text-muted-foreground">{teachers.length} total staff</span>
@@ -268,7 +278,7 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
       </div>
 
       {error && (
-        <div className="mb-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex justify-between text-sm">
+        <div role="alert" aria-live="assertive" className="mb-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex justify-between text-sm">
           <span>{error}</span>
           <button onClick={() => setError('')} className="text-red-400 hover:text-red-600 ml-4">✕</button>
         </div>
@@ -342,8 +352,7 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
                 {members.map(t => (
                   <TeacherCard key={t.id} teacher={t}
                     onClick={() => openDetail(t)}
-                    onToggle={() => handleToggleStatus(t)}
-                    onDelete={() => handleDelete(t)} />
+                    onToggle={() => handleToggleStatus(t)} />
                 ))}
               </div>
             </div>
@@ -355,24 +364,23 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
             {filtered.map(t => (
               <TeacherCard key={t.id} teacher={t}
                 onClick={() => openDetail(t)}
-                onToggle={() => handleToggleStatus(t)}
-                onDelete={() => handleDelete(t)} />
+                onToggle={() => handleToggleStatus(t)} />
             ))}
           </div>
         </div>
       )}
 
-      {/* ── Full-screen Detail Modal ── */}
-      {selected && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-start justify-center p-4 overflow-y-auto">
-          <div className="bg-white rounded-lg w-full max-w-3xl my-6 shadow-2xl">
+      {/* ── Staff detail dialog ── */}
+      <Dialog open={Boolean(selected)} onOpenChange={open => { if (!open) { setSelected(null); setEditing(false) } }}>
+        {selected && (
+          <DialogContent className="gap-0 overflow-hidden p-0 sm:max-w-3xl">
 
             {/* Modal header */}
             <div className="flex items-center gap-4 px-6 py-4 border-b border-gray-100">
               <Avatar name={selected.name} size="lg" />
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-3 flex-wrap">
-                  <h3 className="font-bold text-gray-900 text-lg">{selected.name}</h3>
+                  <DialogTitle className="font-bold text-gray-900 text-lg">{selected.name}</DialogTitle>
                   <span className={`px-2.5 py-0.5 rounded-full text-xs font-medium ${selected.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
                     {selected.status}
                   </span>
@@ -384,8 +392,6 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
                 </div>
                 <p className="text-sm text-muted-foreground mt-0.5">{selected.employee_id}</p>
               </div>
-              <button onClick={() => { setSelected(null); setEditing(false) }}
-                className="text-muted-foreground hover:text-gray-600 text-2xl leading-none flex-shrink-0 ml-2">×</button>
             </div>
 
             {/* Sub-tabs */}
@@ -404,7 +410,7 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
               {detailTab === 'info' && (
                 <>
                   {!editing ? (
-                    <div className="grid grid-cols-2 gap-x-8 gap-y-4 text-sm">
+                    <div className="grid grid-cols-1 gap-x-8 gap-y-4 text-sm sm:grid-cols-2">
                       {[
                         { label: 'Subject', value: selected.subject },
                         { label: 'Department', value: selected.department },
@@ -422,61 +428,60 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
                       ) : null)}
                     </div>
                   ) : (
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                       {[
                         { field: 'name', label: 'Name *', type: 'text', placeholder: 'Full name' },
-                        { field: 'email', label: 'Email', type: 'email', placeholder: 'teacher@school.com' },
-                        { field: 'phone', label: 'Phone', type: 'tel', placeholder: '10-digit number' },
+                        { field: 'email', label: 'Email *', type: 'email', placeholder: 'teacher@school.com' },
+                        { field: 'phone', label: 'Phone *', type: 'tel', placeholder: '10-digit number' },
                         { field: 'department', label: 'Department', type: 'text', placeholder: 'e.g. Science' },
                         { field: 'qualification', label: 'Qualification', type: 'text', placeholder: 'e.g. B.Ed, M.Sc' },
+                        { field: 'date_of_joining', label: 'Date of Joining', type: 'date', placeholder: '' },
                       ].map(({ field, label, type, placeholder }) => (
                         <div key={field}>
-                          <label className="block text-xs text-gray-500 mb-1">{label}</label>
-                          <input type={type} placeholder={placeholder}
+                          <label htmlFor={`staff-edit-${field}`} className="block text-xs text-gray-500 mb-1">{label}</label>
+                          <input id={`staff-edit-${field}`} type={type} placeholder={placeholder}
                             value={(editForm as Record<string, unknown>)[field] as string ?? (selected as Record<string, unknown>)[field] as string ?? ''}
                             onChange={e => setEditForm(f => ({ ...f, [field]: e.target.value }))}
                             className={inputCls} />
                         </div>
                       ))}
                       <div>
-                        <label className="block text-xs text-gray-500 mb-1">Subject</label>
-                        {subscribedSubjectNames.length > 0 && subjectInputMode !== 'manual' ? (
-                          <select
-                            data-testid="staff-edit-subject-select"
-                            value={subscribedSubjectNames.includes((editForm.subject ?? selected.subject) as string) ? (editForm.subject ?? selected.subject) : ''}
-                            onChange={e => {
-                              if (e.target.value === '__other__') {
-                                setSubjectInputMode('manual')
-                                setEditForm(f => ({ ...f, subject: '' }))
-                              } else {
-                                setEditForm(f => ({ ...f, subject: e.target.value }))
-                              }
-                            }}
-                            className={inputCls}>
-                            <option value="">Select subject</option>
-                            {subscribedSubjectNames.map(name => (
-                              <option key={name} value={name}>{name}</option>
-                            ))}
-                            <option value="__other__">Other (type manually)…</option>
-                          </select>
-                        ) : (
-                          <div className="flex items-center gap-1">
-                            <input type="text" placeholder="e.g. Mathematics" data-testid="staff-edit-subject-input"
-                              value={editForm.subject ?? selected.subject ?? ''}
-                              onChange={e => setEditForm(f => ({ ...f, subject: e.target.value }))}
-                              className={inputCls} />
-                            {subscribedSubjectNames.length > 0 && (
-                              <button type="button" title="Pick from the subject list"
-                                onClick={() => setSubjectInputMode('dropdown')}
-                                className="text-xs text-blue-500 hover:text-blue-700 flex-shrink-0">↺</button>
-                            )}
-                          </div>
-                        )}
+                        <label className="block text-xs text-gray-500 mb-1">Subject <span className="text-red-500">*</span> <span className="text-muted-foreground">(teaching only)</span></label>
+                        <select
+                          data-testid="staff-edit-subject-select"
+                          required={(editForm.staff_type ?? selected.staff_type) === 'teaching'}
+                          aria-required={(editForm.staff_type ?? selected.staff_type) === 'teaching'}
+                          disabled={(editForm.staff_type ?? selected.staff_type) !== 'teaching'}
+                          value={editForm.subject ?? selected.subject ?? ''}
+                          onChange={e => setEditForm(f => ({ ...f, subject: e.target.value }))}
+                          className={inputCls}>
+                          <option value="">Select subject</option>
+                          {!!(editForm.subject ?? selected.subject)
+                            && !subjectOptions.some(option => option.name.toLowerCase() === String(editForm.subject ?? selected.subject).toLowerCase())
+                            && <option value={editForm.subject ?? selected.subject}>Current legacy value — choose a catalog subject</option>}
+                          {subjectOptions.some(option => option.source === 'master') && (
+                            <optgroup label="Master syllabus">
+                              {subjectOptions.filter(option => option.source === 'master').map(option => (
+                                <option key={`master-${option.name}`} value={option.name}>{option.name}</option>
+                              ))}
+                            </optgroup>
+                          )}
+                          {subjectOptions.some(option => option.source === 'custom') && (
+                            <optgroup label="This school’s custom subjects">
+                              {subjectOptions.filter(option => option.source === 'custom').map(option => (
+                                <option key={`custom-${option.name}`} value={option.name}>{option.name}</option>
+                              ))}
+                            </optgroup>
+                          )}
+                        </select>
                       </div>
                       <div>
                         <label className="block text-xs text-gray-500 mb-1">Staff Type</label>
                         <select value={editForm.staff_type ?? selected.staff_type ?? 'teaching'}
-                          onChange={e => setEditForm(f => ({ ...f, staff_type: e.target.value }))}
+                          onChange={e => {
+                            const staffType = e.target.value
+                            setEditForm(f => ({ ...f, staff_type: staffType, ...(staffType === 'non_teaching' ? { subject: '', teaches_grades: '' } : {}) }))
+                          }}
                           className={inputCls}>
                           <option value="teaching">Teaching</option>
                           <option value="non_teaching">Non-Teaching</option>
@@ -501,7 +506,7 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
 
               {detailTab === 'analytics' && (
                   <div className="space-y-4">
-                    <div className="bg-gray-50 rounded-md p-4 grid grid-cols-2 gap-3 text-sm">
+                    <div className="bg-gray-50 rounded-md p-4 grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
                       {[
                         { label: 'Subject', value: selected.subject },
                         { label: 'Department', value: selected.department },
@@ -528,10 +533,12 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
                       method: 'PUT', headers: { 'Content-Type': 'application/json' },
                       body: JSON.stringify({ status: 'active' }),
                     })
+                    const data = await res.json()
                     if (res.ok) {
                       setTeachers(prev => prev.map(t => t.id === selected.id ? { ...t, status: 'active' } : t))
                       setSelected(s => s ? { ...s, status: 'active' } : s)
-                    }
+                      if (data.temporary_credential) setCredential(data.temporary_credential)
+                    } else setError(data.error || 'Failed to restore teacher')
                   }} className="border border-green-300 text-green-700 hover:bg-green-50 px-5 py-2 rounded-lg text-sm font-medium transition-colors">
                     Restore Teacher
                   </button>
@@ -563,6 +570,12 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
                     className={`px-5 py-2 rounded-lg text-sm font-medium transition-colors border ${selected.status === 'active' ? 'border-orange-200 text-orange-600 hover:bg-orange-50' : 'border-green-200 text-green-600 hover:bg-green-50 font-semibold'}`}>
                     {selected.status === 'active' ? 'Deactivate' : 'Reactivate'}
                   </button>
+                  {selected.status === 'active' && !editing && (
+                    <button onClick={handleResetCredential} disabled={resettingCredential}
+                      className="border border-blue-200 text-blue-700 px-5 py-2 rounded-lg text-sm font-medium hover:bg-blue-50 disabled:opacity-50">
+                      {resettingCredential ? 'Resetting…' : 'Reset Login'}
+                    </button>
+                  )}
                   <button onClick={() => handleDelete(selected)}
                     data-testid="staff-remove"
                     className="ml-auto border border-red-200 text-red-600 px-5 py-2 rounded-lg text-sm font-medium hover:bg-red-50 transition-colors">
@@ -571,9 +584,9 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
                 </>
               )}
             </div>
-          </div>
-        </div>
-      )}
+          </DialogContent>
+        )}
+      </Dialog>
 
       {/* ── Remove impact toast ── */}
       {removeToast && (
@@ -600,14 +613,13 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
       )}
 
       {/* ── Remove Consequences Dialog ── */}
-      {showRemoveDialog && (
-        <div className="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-4">
-          <div className="bg-white rounded-lg w-full max-w-md shadow-2xl">
-            <div className="px-6 py-4 border-b border-gray-100">
-              <h3 className="font-bold text-gray-900">Remove {selected?.name}?</h3>
-              <p className="text-xs text-gray-500 mt-0.5">Their record is kept for history. All assignments will be unlinked.</p>
-            </div>
-            <div className="px-6 py-4 space-y-3 max-h-80 overflow-y-auto">
+      <Dialog open={showRemoveDialog} onOpenChange={open => { if (!removing) setShowRemoveDialog(open) }}>
+        <DialogContent className="sm:max-w-md" showCloseButton={!removing}>
+          <DialogHeader>
+            <DialogTitle>Remove {selected?.name}?</DialogTitle>
+            <DialogDescription>Their record is kept for history. All assignments will be unlinked.</DialogDescription>
+          </DialogHeader>
+            <div className="space-y-3 max-h-80 overflow-y-auto">
               {loadingConsequences ? (
                 <div className="py-6 text-center text-muted-foreground text-sm">Checking impact...</div>
               ) : removeConsequences ? (
@@ -634,7 +646,7 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
                 </>
               ) : null}
             </div>
-            <div className="flex gap-3 px-6 py-4 border-t border-gray-100">
+            <DialogFooter>
               <button onClick={() => setShowRemoveDialog(false)}
                 className="flex-1 border border-gray-200 text-gray-600 px-4 py-2 rounded-lg text-sm hover:bg-gray-50">
                 Cancel
@@ -644,20 +656,37 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
                 className="flex-1 bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50">
                 {removing ? 'Removing…' : 'Yes, Remove'}
               </button>
-            </div>
+            </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(credential)} onOpenChange={open => { if (!open) setCredential(null) }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Temporary teacher login</DialogTitle>
+            <DialogDescription>The previous password and all earlier sessions are invalid. Share this password securely; it is shown only now.</DialogDescription>
+          </DialogHeader>
+          <div className="rounded-md border bg-muted/30 p-4 text-sm">
+            <p><span className="text-muted-foreground">Email:</span> <span className="font-medium">{credential?.email}</span></p>
+            <p className="mt-2"><span className="text-muted-foreground">Temporary password:</span> <span className="font-mono font-semibold">{credential?.temp_password}</span></p>
           </div>
-        </div>
-      )}
+          <DialogFooter>
+            <button type="button" onClick={() => credential && navigator.clipboard.writeText(`${credential.email}\t${credential.temp_password}`)} className="border rounded-md px-4 py-2 text-sm">Copy</button>
+            <button type="button" onClick={() => setCredential(null)} className="bg-primary text-white rounded-md px-4 py-2 text-sm">Done</button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
 
-function TeacherCard({ teacher, onClick, onToggle, onDelete }:
-  { teacher: Teacher; onClick: () => void; onToggle: () => void; onDelete: () => void }) {
+function TeacherCard({ teacher, onClick, onToggle }:
+  { teacher: Teacher; onClick: () => void; onToggle: () => void }) {
   const isInactive = teacher.status === 'inactive'
   const isRemoved = teacher.status === 'removed'
   return (
-    <div onClick={onClick}
+    <div onClick={onClick} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onClick() } }}
+      role="button" tabIndex={0} aria-label={`Open ${teacher.name} staff details`}
       data-testid={`staff-card-${teacher.id}`}
       className={`flex items-center gap-4 px-5 py-3.5 cursor-pointer transition-colors hover:bg-gray-50 ${isInactive || isRemoved ? 'opacity-60' : ''}`}>
       <div className={`w-9 h-9 rounded-full flex items-center justify-center text-white font-bold text-sm flex-shrink-0 ${

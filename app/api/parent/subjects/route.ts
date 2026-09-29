@@ -26,7 +26,7 @@ export async function GET(req: NextRequest) {
     if (!student) return NextResponse.json({ error: 'Student not found' }, { status: 404 })
 
     const { rows: [cls] } = await pool.query<{ id: number }>(
-      `SELECT id FROM classes WHERE school_id = $1 AND grade = $2 AND section = $3`,
+      `SELECT id FROM classes WHERE school_id = $1 AND grade = $2 AND section = $3 AND deleted_at IS NULL`,
       [session.schoolId, student.grade, student.section]
     )
 
