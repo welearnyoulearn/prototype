@@ -37,10 +37,12 @@ Screens: `app/school-admin/components/ExamSchedule.tsx`, `app/teacher/components
 API routes these screens call (all exist):
 - `GET/POST` /api/classes
 - `DELETE/GET/PUT` /api/classes/{}
+- `GET/PUT` /api/exam-notification-settings
 - `GET` /api/exams
 - `POST` /api/exams/schedule
 - `DELETE/GET/PUT` /api/exams/{}
 - `GET` /api/exams/{}/acknowledgements
+- `POST` /api/exams/{}/cancel
 - `GET/POST` /api/exams/{}/marks
 - `POST` /api/exams/{}/nudge-parent
 - `POST` /api/exams/{}/release
@@ -49,6 +51,7 @@ API routes these screens call (all exist):
 - `POST` /api/exams/{}/subjects/{}/reopen
 - `GET/POST` /api/students
 - `GET` /api/students/{}/exams
+- `GET` /api/teachers
 
 ✅ Every API route the screens call exists.
 <!-- AUTO:evidence:exam-marks:end -->
