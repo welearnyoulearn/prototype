@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
-import { requireSyllabusWriteAccess } from '@/lib/auth'
+import { requireFeeAccess } from '@/lib/auth'
 
 async function schoolIdForChapter(chapterId: number): Promise<number | null> {
   const { rows } = await pool.query(
@@ -34,7 +34,7 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: 'Topic not found' }, { status: 404 })
       }
       const ownerSchoolId = await schoolIdForTopic(id)
-      if (!await requireSyllabusWriteAccess(ownerSchoolId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      if (!await requireFeeAccess(ownerSchoolId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
       // Allow editing of both custom and global board-mandated topics (relaxation for school admins)
 
       const res = await pool.query(
@@ -70,7 +70,7 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: 'school_chapter_id and topic_name are required' }, { status: 400 })
       }
       const ownerSchoolId = await schoolIdForChapter(school_chapter_id)
-      if (!await requireSyllabusWriteAccess(ownerSchoolId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      if (!await requireFeeAccess(ownerSchoolId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
       const res = await pool.query(
         `INSERT INTO school_topics (school_chapter_id, topic_name, topic_order, content_text, content_pdf_url, is_custom)
@@ -121,7 +121,7 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ error: 'Cannot delete global board-mandated topics' }, { status: 403 })
     }
     const ownerSchoolId = await schoolIdForTopic(Number(id))
-    if (!await requireSyllabusWriteAccess(ownerSchoolId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    if (!await requireFeeAccess(ownerSchoolId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
     await pool.query('DELETE FROM school_topics WHERE id = $1', [id])
     return NextResponse.json({ ok: true })

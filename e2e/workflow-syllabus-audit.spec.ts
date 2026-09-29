@@ -418,29 +418,28 @@ test.describe.serial('Syllabus UX — Full Audit', () => {
     expect(subRes.status).toBe(200)
   })
 
-  // ── AUTH/TENANT GAP — the core security finding ──────────────────────────
+  // ── AUTH/TENANT ISOLATION REGRESSION ─────────────────────────────────────
   test.describe('11. SECURITY — /api/syllabus auth & tenant isolation', () => {
-    test('11a. Unauthenticated GET /api/syllabus returns real cross-tenant data', async () => {
+    test('11a. Unauthenticated GET /api/syllabus is rejected', async () => {
       const res = await fetch(`${BASE}/api/syllabus?school_id=${schoolId}&class_id=${classId}`)
       const data = await res.json()
       console.log('[SECURITY] Unauthenticated GET /api/syllabus status:', res.status)
       console.log('[SECURITY] Unauthenticated GET /api/syllabus body (truncated):', JSON.stringify(data).slice(0, 500))
-      expect(res.status).toBe(200)
-      expect(Array.isArray(data.subjects)).toBe(true)
-      expect(data.subjects.length).toBeGreaterThan(0)
+      expect(res.status).toBe(403)
+      expect(data.error).toBe('Forbidden')
     })
 
-    test('11b. School B admin can read School A syllabus data by passing School A ids (cross-tenant, authenticated as wrong tenant)', async () => {
+    test('11b. School B admin cannot read School A syllabus data by manipulating ids', async () => {
       const res = await fetch(`${BASE}/api/syllabus?school_id=${schoolId}&class_id=${classId}`, {
         headers: { Cookie: otherAdminCookie },
       })
       const data = await res.json()
       console.log('[SECURITY] School B admin reading School A syllabus — status:', res.status)
-      expect(res.status).toBe(200)
-      expect(data.subjects.length).toBeGreaterThan(0)
+      expect(res.status).toBe(403)
+      expect(data.error).toBe('Forbidden')
     })
 
-    test('11c. Unauthenticated PATCH /api/syllabus/:id can mutate another school\'s progress data', async () => {
+    test('11c. Unauthenticated PATCH /api/syllabus/:id cannot mutate progress', async () => {
       // Fetch a real topic id belonging to School A first (as admin, legitimately).
       const listRes = await api(`/api/syllabus?school_id=${schoolId}&class_id=${classId}&subject=${encodeURIComponent(SUBJECT_NAME)}`, 'GET', undefined, adminCookie)
       const subj = (listRes.data as any).subjects[0]
@@ -455,21 +454,16 @@ test.describe.serial('Syllabus UX — Full Audit', () => {
       })
       const patchData = await patchRes.json()
       console.log('[SECURITY] Unauthenticated PATCH /api/syllabus/:id status:', patchRes.status, JSON.stringify(patchData))
-      expect(patchRes.status).toBe(200)
+      expect(patchRes.status).toBe(403)
 
       // Verify the mutation actually landed.
       const verify = await api(`/api/syllabus?school_id=${schoolId}&class_id=${classId}&subject=${encodeURIComponent(SUBJECT_NAME)}`, 'GET', undefined, adminCookie)
       const verifiedTopic = (verify.data as any).subjects[0].chapters[0].topics.find((t: any) => t.id === topic.id)
       console.log('[SECURITY] Topic status after unauthenticated PATCH:', verifiedTopic.status)
-      expect(verifiedTopic.status).toBe('covered')
-
-      // Revert so later tests (teacher marking taught) start clean.
-      await api(`/api/syllabus/${topic.id}`, 'PATCH', {
-        school_id: schoolId, class_id: classId, status: 'pending',
-      }, adminCookie)
+      expect(verifiedTopic.status).toBe('pending')
     })
 
-    test('11d. Unauthenticated POST /api/syllabus can inject a custom topic into another school\'s chapter', async () => {
+    test('11d. Unauthenticated POST /api/syllabus cannot inject a custom topic', async () => {
       const res = await fetch(`${BASE}/api/syllabus`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -481,8 +475,8 @@ test.describe.serial('Syllabus UX — Full Audit', () => {
       })
       const data = await res.json()
       console.log('[SECURITY] Unauthenticated POST /api/syllabus status:', res.status, JSON.stringify(data))
-      expect(res.status).toBe(200)
-      expect(data.inserted?.[0]?.topic_name).toBe(`Injected Unauthenticated Topic ${ts}`)
+      expect(res.status).toBe(403)
+      expect(data.error).toBe('Forbidden')
     })
 
     test('11e. Compare: /api/syllabus/analytics correctly rejects unauthenticated + cross-tenant requests', async () => {

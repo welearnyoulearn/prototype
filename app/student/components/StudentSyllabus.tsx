@@ -59,6 +59,8 @@ type Props = {
 export default function StudentSyllabus({ schoolId, classId, grade }: Props) {
   const [subjects, setSubjects] = useState<Subject[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [retryKey, setRetryKey] = useState(0)
   const [activeSubject, setActiveSubject] = useState('')
   // Which of this class's own Semester 1/2/... splits is showing — from the
   // teacher's Setup screen.
@@ -72,17 +74,26 @@ export default function StudentSyllabus({ schoolId, classId, grade }: Props) {
   const reduceMotion = useReducedMotion()
 
   useEffect(() => {
-    setLoading(true)
-    fetch(`/api/syllabus?school_id=${schoolId}&class_id=${classId}`)
-      .then(r => r.json())
+    const controller = new AbortController()
+    fetch(`/api/syllabus?school_id=${schoolId}&class_id=${classId}`, { signal: controller.signal })
+      .then(async r => {
+        const data = await r.json()
+        if (!r.ok) throw new Error(data.error || 'Failed to load syllabus')
+        return data
+      })
       .then(d => {
         const subs: Subject[] = d.subjects || []
         setSubjects(subs)
         setActiveSubject(prev => (prev && subs.some(s => s.subject === prev)) ? prev : (subs[0]?.subject ?? ''))
         setLoading(false)
       })
-      .catch(() => setLoading(false))
-  }, [schoolId, classId])
+      .catch(err => {
+        if (err instanceof DOMException && err.name === 'AbortError') return
+        setError(err instanceof Error ? err.message : 'Failed to load syllabus')
+        setLoading(false)
+      })
+    return () => controller.abort()
+  }, [schoolId, classId, retryKey])
 
   useEffect(() => {
     fetch('/api/student/subjects')
@@ -114,6 +125,15 @@ export default function StudentSyllabus({ schoolId, classId, grade }: Props) {
           {[1, 2, 3].map(i => <Skeleton key={i} className="h-12 w-32 rounded-t-2xl" />)}
         </div>
         <Skeleton className="h-80 rounded-[22px]" />
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div role="alert" className="mx-auto max-w-4xl rounded-2xl border border-red-200 bg-white p-8 text-center">
+        <p className="text-sm text-red-600">{error}</p>
+        <button type="button" onClick={() => { setLoading(true); setError(''); setRetryKey(k => k + 1) }} className="mt-4 rounded-lg border px-4 py-2 text-sm">Try again</button>
       </div>
     )
   }

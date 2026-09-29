@@ -84,7 +84,7 @@ const BOOTSTRAP_MARKER_KEY   = 'initial_schema_bootstrap'
 // silently never runs anywhere, and you will chase a "column does not exist" 500
 // that reproduces on production but never locally against a fresh DB.
 // Adding a migration statement and bumping this number is ONE change, not two.
-const SCHEMA_VERSION = 45
+const SCHEMA_VERSION = 46
 
 // Records the schema level this build finished applying, on the same row as the
 // bootstrap marker (no extra row, no extra round-trip to read it back).
@@ -3652,4 +3652,19 @@ async function runIncrementalMigrations() {
     UPDATE users SET is_primary_admin = TRUE
     WHERE role = 'school_admin' AND school_code IS NOT NULL AND is_primary_admin = FALSE
   `)
+
+  // Syllabus integrity hardening: reject invalid future progress values and
+  // retain the same chapter-weighted percentage in historical snapshots that
+  // the live analytics UI displays (including partial chapter completion).
+  await pool.query(`ALTER TABLE syllabus_coverage_snapshots ADD COLUMN IF NOT EXISTS weighted_coverage_pct NUMERIC(5,2)`)
+  await pool.query(`
+    DO $$ BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'school_topic_progress_status_chk') THEN
+        ALTER TABLE school_topic_progress ADD CONSTRAINT school_topic_progress_status_chk
+          CHECK (status IN ('pending', 'covered')) NOT VALID;
+      END IF;
+    END $$
+  `)
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_school_chapters_name_ci ON school_chapters(school_subject_id, LOWER(TRIM(chapter_name)))`)
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_school_topics_name_ci ON school_topics(school_chapter_id, LOWER(TRIM(topic_name)))`)
 }

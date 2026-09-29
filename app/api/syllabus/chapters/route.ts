@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 import { resolveAcademicYear } from '@/lib/academicYear'
-import { requireSyllabusWriteAccess } from '@/lib/auth'
+import { canWriteSyllabusClass, requireSyllabusWriteAccess } from '@/lib/auth'
 
 // POST /api/syllabus/chapters — create a bare chapter (no topic required).
 // Body: { school_id, class_id, subject, chapter_name, chapter_order?,
@@ -30,7 +30,10 @@ export async function POST(req: NextRequest) {
     if (!school_id || !class_id || !subject || !chapter_name || !String(chapter_name).trim()) {
       return NextResponse.json({ error: 'school_id, class_id, subject, chapter_name required' }, { status: 400 })
     }
-    if (!await requireSyllabusWriteAccess(school_id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    const writeSession = await requireSyllabusWriteAccess(school_id)
+    if (!writeSession || !await canWriteSyllabusClass(writeSession, class_id, subject)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
 
     const classRes = await pool.query(
       'SELECT grade FROM classes WHERE id = $1 AND school_id = $2',
@@ -48,7 +51,7 @@ export async function POST(req: NextRequest) {
     // any content existed).
     let school_subject_id: number
     const subjectRes = await pool.query(
-      'SELECT id FROM school_subjects WHERE school_id = $1 AND grade = $2 AND subject_name = $3 AND academic_year = $4',
+      'SELECT id FROM school_subjects WHERE school_id = $1 AND grade = $2 AND LOWER(TRIM(subject_name)) = LOWER(TRIM($3)) AND academic_year = $4',
       [school_id, grade, subject, academic_year]
     )
     if (subjectRes.rows.length === 0) {

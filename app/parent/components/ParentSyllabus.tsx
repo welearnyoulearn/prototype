@@ -54,6 +54,8 @@ type Props = {
 export default function ParentSyllabus({ schoolId, classId, studentId, studentName, grade, section }: Props) {
   const [subjects, setSubjects] = useState<Subject[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [retryKey, setRetryKey] = useState(0)
   const [activeSubject, setActiveSubject] = useState('')
   const [activeClassSemester, setActiveClassSemester] = useState('')
   // subject name -> who teaches it (class_subjects) — separate from the syllabus/topics
@@ -61,17 +63,26 @@ export default function ParentSyllabus({ schoolId, classId, studentId, studentNa
   const [teacherOf, setTeacherOf] = useState<Record<string, string>>({})
 
   useEffect(() => {
-    setLoading(true)
-    fetch(`/api/syllabus?school_id=${schoolId}&class_id=${classId}`)
-      .then(r => r.json())
+    const controller = new AbortController()
+    fetch(`/api/syllabus?school_id=${schoolId}&class_id=${classId}`, { signal: controller.signal })
+      .then(async r => {
+        const data = await r.json()
+        if (!r.ok) throw new Error(data.error || 'Failed to load syllabus')
+        return data
+      })
       .then(d => {
         const list: Subject[] = d.subjects || []
         setSubjects(list)
         setActiveSubject(prev => (prev && list.some(s => s.subject === prev)) ? prev : (list[0]?.subject ?? ''))
       })
-      .catch(() => setSubjects([]))
-      .finally(() => setLoading(false))
-  }, [schoolId, classId])
+      .catch(err => {
+        if (err instanceof DOMException && err.name === 'AbortError') return
+        setSubjects([])
+        setError(err instanceof Error ? err.message : 'Failed to load syllabus')
+      })
+      .finally(() => { if (!controller.signal.aborted) setLoading(false) })
+    return () => controller.abort()
+  }, [schoolId, classId, retryKey])
 
   useEffect(() => {
     fetch(`/api/parent/subjects?student_id=${studentId}`)
@@ -94,6 +105,17 @@ export default function ParentSyllabus({ schoolId, classId, studentId, studentNa
         <Skeleton className="h-20" />
         <Skeleton className="h-32" />
       </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <UlearnCard className="max-w-2xl p-10 text-center">
+        <div role="alert">
+          <p className="text-sm text-red-600">{error}</p>
+          <button type="button" onClick={() => { setLoading(true); setError(''); setRetryKey(k => k + 1) }} className="mt-4 rounded-lg border px-4 py-2 text-sm">Try again</button>
+        </div>
+      </UlearnCard>
     )
   }
 

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 import { resolveAcademicYear } from '@/lib/academicYear'
-import { requireSyllabusAccess } from '@/lib/auth'
+import { canAccessSyllabusClass, requireSyllabusAccess } from '@/lib/auth'
 
 // GET /api/syllabus/setup?school_id=&class_id=&subject=&academic_year=
 //
@@ -21,7 +21,10 @@ export async function GET(req: NextRequest) {
   if (!school_id || !class_id || !subject) {
     return NextResponse.json({ error: 'school_id, class_id, subject required' }, { status: 400 })
   }
-  if (!await requireSyllabusAccess(school_id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const access = await requireSyllabusAccess(school_id)
+  if (!access || !await canAccessSyllabusClass(access, class_id, subject)) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
 
   try {
     await ensureDB()
