@@ -574,6 +574,33 @@ export async function schoolHasFeature(schoolId: number, featureKey: string, db:
   return tierRes.rows[0]?.enabled === true
 }
 
+export async function schoolHasAnyFeature(schoolId: number, featureKeys: readonly string[], db: PgPool | PoolClient = pool): Promise<boolean> {
+  for (const featureKey of featureKeys) if (await schoolHasFeature(schoolId, featureKey, db)) return true
+  return false
+}
+
+// Resolve portal navigation in bounded queries using the same override and
+// inherited-tier rules as API authorization.
+export async function enabledFeaturesForSchool(schoolId: number, featureKeys: readonly string[], db: PgPool | PoolClient = pool): Promise<string[]> {
+  if (featureKeys.length === 0) return []
+  const overrideRes = await db.query<{ feature_key: string; enabled: boolean }>(
+    `SELECT feature_key, enabled FROM school_feature_overrides WHERE school_id=$1 AND feature_key=ANY($2)`,
+    [schoolId, featureKeys],
+  )
+  const overrides = new Map(overrideRes.rows.map(row => [row.feature_key, row.enabled]))
+  const subRes = await db.query<{ tier: string }>('SELECT tier FROM school_subscriptions WHERE school_id=$1', [schoolId])
+  const tier = subRes.rows[0]?.tier
+  if (!tier) return featureKeys.filter(key => overrides.get(key) === true)
+  const tiers = TIER_INCLUDES[tier] ?? [tier]
+  const planRes = await db.query<{ feature_key: string }>(
+    `SELECT feature_key FROM plan_features WHERE tier=ANY($1) AND feature_key=ANY($2)
+     GROUP BY feature_key HAVING bool_or(enabled)=TRUE`,
+    [tiers, featureKeys],
+  )
+  const planEnabled = new Set(planRes.rows.map(row => row.feature_key))
+  return featureKeys.filter(key => overrides.has(key) ? overrides.get(key) === true : planEnabled.has(key))
+}
+
 // schoolHasFeature for every school at once, inverted: school id → the given feature keys it
 // does NOT have. Same resolution as above (override, else tier plus inherited tiers, else
 // disabled), in three queries instead of three per school per key. Used by proxy.ts, through

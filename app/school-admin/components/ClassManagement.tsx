@@ -94,7 +94,7 @@ export default function ClassManagement({ schoolId, onNavigate }: Props) {
     try {
       const [cls, tch, removed] = await Promise.all([
         fetchJson<unknown>(`/api/classes?school_id=${schoolId}`),
-        fetchJson<unknown>(`/api/teachers?school_id=${schoolId}`),
+        fetchJson<unknown>(`/api/teachers?school_id=${schoolId}&view=class-assignment-options`),
         fetchJson<unknown>(`/api/classes?school_id=${schoolId}&removed=true`),
       ])
       setClasses(Array.isArray(cls) ? cls : [])

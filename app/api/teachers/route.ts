@@ -30,6 +30,7 @@ export async function GET(req: NextRequest) {
       const school_id = searchParams.get('school_id')
       const staff_type = searchParams.get('staff_type')
       const department = searchParams.get('department')
+      const assignmentOptions = searchParams.get('view') === 'class-assignment-options'
 
       if (!platform && school_id && Number(school_id) !== Number(admin?.schoolId)) {
         return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
@@ -39,8 +40,22 @@ export async function GET(req: NextRequest) {
       if (!Number.isInteger(scopedSchoolId) || scopedSchoolId <= 0) {
         return NextResponse.json({ error: 'Invalid school_id' }, { status: 400 })
       }
-      if (!platform && !(await schoolHasFeature(scopedSchoolId, 'staff'))) {
+      const staffEnabled = platform ? true : await schoolHasFeature(scopedSchoolId, 'staff')
+      const classManagementEnabled = !platform && assignmentOptions
+        ? await schoolHasFeature(scopedSchoolId, 'class-management')
+        : false
+      if (!platform && !staffEnabled && !classManagementEnabled) {
         return NextResponse.json({ error: 'Staff Management is not enabled for this school', code: 'FEATURE_DISABLED', feature: 'staff' }, { status: 403 })
+      }
+
+      if (assignmentOptions) {
+        const result = await pool.query(
+          `SELECT id, name, subject, employee_id, department, teaches_grades, staff_type
+           FROM teachers WHERE school_id=$1 AND status='active' AND removed_at IS NULL AND staff_type='teaching'
+           ORDER BY name`,
+          [scopedSchoolId],
+        )
+        return NextResponse.json(result.rows)
       }
 
       // school_id is seeded as $1 rather than pushed conditionally, so there is no
