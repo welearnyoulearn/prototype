@@ -195,6 +195,31 @@ test.describe('Feature gate in proxy.ts', () => {
     expect((await call('GET', '/api/expenses')).blocked).toBe(false)
   })
 
+  // Regression for a live bug: the proxy used to collect the school_id from
+  // EVERY portal cookie present (admin + teacher + student + parent) and
+  // require all of them entitled, so a leftover cookie from testing a
+  // different role/school — never logged out, unrelated to the request being
+  // made — could block an otherwise fully-entitled session. Only the
+  // identity the route itself will actually resolve to (admin, else teacher,
+  // else student, else parent — first cookie present wins) should matter.
+  test('a stale cookie from an unrelated role/school does not block an entitled session', async () => {
+    const entitledAdminPlusStaleTeacher = {
+      [COOKIE_ADMIN]: token('school_admin', 8),   // school 8 has everything
+      [COOKIE_TEACHER]: token('teacher', 7),      // school 7 lacks 'expenses' — must not matter
+    }
+    expect((await call('GET', '/api/expenses', entitledAdminPlusStaleTeacher)).blocked).toBe(false)
+
+    // And the reverse still protects: the identity that actually resolves
+    // (admin takes precedence over teacher) is the one checked, so an
+    // unentitled admin cookie still blocks even with an entitled teacher
+    // cookie sitting alongside it.
+    const unentitledAdminPlusEntitledTeacher = {
+      [COOKIE_ADMIN]: token('school_admin', 7),
+      [COOKIE_TEACHER]: token('teacher', 8),
+    }
+    expect((await call('GET', '/api/expenses', unentitledAdminPlusEntitledTeacher)).blocked).toBe(true)
+  })
+
   test('allows dependent reads but keeps writes owned by their module', async () => {
     const classOnly = { [COOKIE_ADMIN]: token('school_admin', 70) }
     expect((await call('GET', '/api/teachers?school_id=70&view=class-assignment-options', classOnly)).blocked).toBe(false)
