@@ -266,11 +266,8 @@ function SchoolAdmin() {
   const [enabledFeatures, setEnabledFeatures] = useState<Set<string>>(new Set())
   // Sidebar section nav lives in the URL's `tab` param — real navigation, so
   // the browser/phone Back button moves through the portal's own screens.
-  const { current: activeNav, navigate: navigateSection } = useSectionNav<string>('overview')
-  const [visited, setVisited] = useState<Set<string>>(new Set([activeNav]))
-  useEffect(() => {
-    setVisited(prev => (prev.has(activeNav) ? prev : new Set([...prev, activeNav])))
-  }, [activeNav])
+  const { current: requestedNav, navigate: navigateSection, reset: resetSection } = useSectionNav<string>('overview')
+  const [visited, setVisited] = useState<Set<string>>(new Set([requestedNav]))
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
   const [myRole, setMyRole] = useState<string>('school_admin')
@@ -280,6 +277,27 @@ function SchoolAdmin() {
   const [studentsSubTab, setStudentsSubTab] = useState<'list' | 'onboard'>('list')
   const [staffRefreshKey, setStaffRefreshKey] = useState(0)
   const [studentRefreshKey, setStudentRefreshKey] = useState(0)
+
+  const requestedFeatureKey = PORTAL_NAV_KEY_ALIASES[requestedNav] ?? requestedNav
+  const requestedFeature = ALL_FEATURES.find(feature => feature.key === requestedFeatureKey)
+  const requestedAllowed = requestedNav === 'profile'
+    ? myRole === 'principal' || myRole === 'vice_principal'
+    : enabledFeatures.has(requestedFeatureKey) && (!requestedFeature || requestedFeature.portals.includes('school-admin'))
+  const fallbackNav = NAV_ITEMS.find(item => {
+    const key = PORTAL_NAV_KEY_ALIASES[item.key] ?? item.key
+    const feature = ALL_FEATURES.find(candidate => candidate.key === key)
+    return enabledFeatures.has(key) && (!feature || feature.portals.includes('school-admin'))
+  })?.key ?? 'overview'
+  const activeNav = loading || tier === 'none' || requestedAllowed ? requestedNav : fallbackNav
+
+  useEffect(() => {
+    // Persist already-opened lazy modules so tab state survives portal navigation.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setVisited(prev => (prev.has(activeNav) ? prev : new Set([...prev, activeNav])))
+  }, [activeNav])
+  useEffect(() => {
+    if (!loading && tier !== 'none' && activeNav !== requestedNav) resetSection(activeNav)
+  }, [activeNav, loading, requestedNav, resetSection, tier])
 
   const trackOpen = useFeatureTracking('school-admin')
 
@@ -352,14 +370,11 @@ function SchoolAdmin() {
           const t: Tier = subData.tier || 'none'
           setTier(t)
           if (t !== 'none') {
-            const featRes = await fetch(`/api/platform/features?tier=${t}`)
-            if (featRes.ok) {
-              const fd = await featRes.json()
-              setEnabledFeatures(new Set(fd.enabled || []))
-            } else {
-              setEnabledFeatures(new Set(NAV_ITEMS.map(n => n.key)))
-            }
-          }
+            const featRes = await fetch(`/api/school/enabled-features?school_id=${school.id}&portal=school-admin`, { cache: 'no-store' })
+            if (!featRes.ok) throw new Error('Failed to load feature access')
+            const fd = await featRes.json()
+            setEnabledFeatures(new Set(fd.enabled || []))
+          } else setEnabledFeatures(new Set())
         } catch {
           setTier('none')
         }

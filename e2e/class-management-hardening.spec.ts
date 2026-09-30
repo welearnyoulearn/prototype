@@ -43,9 +43,15 @@ test.describe.serial('Class Management security, lifecycle, and data-flow regres
     schoolA = schools.rows[0].id
     schoolB = schools.rows[1].id
     await pool.query(`INSERT INTO school_subscriptions (school_id,tier) VALUES ($1,'premium'),($2,'premium')`, [schoolA, schoolB])
+    await pool.query(`INSERT INTO academic_years (school_id,label,start_date,end_date,is_current) VALUES ($1,'2026-27','2026-06-01','2027-05-31',TRUE)`, [schoolA])
+    await pool.query(
+      `INSERT INTO school_subjects (school_id,subject_name,grade,academic_year)
+       SELECT $1, 'Mathematics', grade, '2026-27' FROM unnest($2::text[]) AS grade`,
+      [schoolA, ['Nursery', 'LKG', '6', '7', '8', '9']],
+    )
     await pool.query(
       `INSERT INTO school_feature_overrides (school_id,feature_key,enabled)
-       VALUES ($1,'class-management',TRUE),($1,'students',TRUE),($1,'student-portal',FALSE),($1,'parent-portal',FALSE),
+       VALUES ($1,'class-management',TRUE),($1,'staff',FALSE),($1,'fee-management',FALSE),($1,'students',TRUE),($1,'student-portal',FALSE),($1,'parent-portal',FALSE),
               ($2,'class-management',TRUE)`,
       [schoolA, schoolB],
     )
@@ -94,6 +100,31 @@ test.describe.serial('Class Management security, lifecycle, and data-flow regres
     expect(body.subjects_assigned).toBeGreaterThanOrEqual(0)
   })
 
+  test('class management gets minimal teacher options while Staff Management is disabled', async () => {
+    const options = await adminA.get(`/api/teachers?school_id=${schoolA}&view=class-assignment-options`)
+    expect(options.status()).toBe(200)
+    const rows = await options.json() as Record<string, unknown>[]
+    expect(rows.some(row => row.id === teacherA)).toBe(true)
+    expect(rows[0]).not.toHaveProperty('email')
+    expect(rows[0]).not.toHaveProperty('phone')
+    expect((await adminA.get(`/api/teachers?school_id=${schoolA}`)).status()).toBe(403)
+    expect((await teacherClient.get(`/api/teachers/${teacherA}/class-subjects`)).status()).toBe(200)
+  })
+
+  test('disabled deep links are redirected before their module can issue forbidden requests', async ({ page }) => {
+    await page.setViewportSize({ width: 400, height: 642 })
+    await page.context().addCookies([{ name: COOKIE_ADMIN, value: adminAToken, url: process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:3000' }])
+    const forbidden: string[] = []
+    page.on('response', response => { if (response.status() === 403) forbidden.push(response.url()) })
+
+    for (const tab of ['staff', 'fee-management']) {
+      await page.goto(`/school-admin?tab=${tab}`)
+      await expect(page).not.toHaveURL(new RegExp(`tab=${tab}`), { timeout: 60_000 })
+      await expect(page.getByText('Feature not enabled')).toHaveCount(0)
+    }
+    expect(forbidden.filter(url => /\/api\/(teachers|fees)/.test(url))).toEqual([])
+  })
+
   test('mobile admin UI exposes accessible pre-primary class creation controls', async ({ page }) => {
     test.setTimeout(120_000)
     await page.setViewportSize({ width: 390, height: 844 })
@@ -129,7 +160,13 @@ test.describe.serial('Class Management security, lifecycle, and data-flow regres
   test('rejects cross-school and subject-incompatible subject teachers', async () => {
     let cls = (await pool.query(`SELECT id FROM classes WHERE school_id=$1 AND grade='6' AND section='A'`, [schoolA])).rows[0]
     if (!cls) cls = await adminA.post('/api/classes', { data: { school_id: schoolA, grade: '6', section: 'A' } }).then(response => response.json())
-    const subject = (await adminA.get(`/api/classes/${cls.id}/subjects`).then(response => response.json()))[0]
+    let subject = (await adminA.get(`/api/classes/${cls.id}/subjects`).then(response => response.json()))[0]
+    if (!subject) {
+      subject = (await pool.query(
+        `INSERT INTO class_subjects (class_id,subject_name,periods_per_week)
+         VALUES ($1,'Science',4) RETURNING id,subject_name,teacher_id,periods_per_week`, [cls.id],
+      )).rows[0]
+    }
     expect(subject).toBeTruthy()
     expect((await adminA.patch(`/api/classes/${cls.id}/subjects`, { data: { subject_id: subject.id, teacher_id: teacherB } })).status()).toBe(403)
     if (subject.subject_name !== 'Mathematics') {

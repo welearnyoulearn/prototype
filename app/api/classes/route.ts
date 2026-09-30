@@ -4,8 +4,9 @@ import { getCache, setCache, invalidateCache } from '@/lib/responseCache'
 import { gradeOrderSql } from '@/lib/grades'
 import {
   getPlatformSession, getSession, getTeacherSession, getStudentSession, getParentSession,
-  requireFeeAccess, schoolHasFeature,
+  requireFeeAccess, schoolHasAnyFeature,
 } from '@/lib/auth'
+import { CLASS_READ_FEATURES } from '@/lib/featureRoutes'
 import { ClassWorkflowError, ensureClassWithSetup, validateTeacherForClass } from '@/lib/classManagement'
 import { normalizeClassIdentity, parseOptionalTeacherId } from '@/lib/classValidation'
 
@@ -29,7 +30,7 @@ export async function GET(req: NextRequest) {
     }
     const removed = req.nextUrl.searchParams.get('removed') === 'true'
     if (removed && !platform && !admin) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-    if (admin && !(await schoolHasFeature(requestedSchoolId, 'class-management'))) {
+    if (admin && !(await schoolHasAnyFeature(requestedSchoolId, CLASS_READ_FEATURES))) {
       return NextResponse.json({ error: 'Feature not enabled' }, { status: 403 })
     }
 

@@ -4,7 +4,7 @@ import jwt from 'jsonwebtoken'
 import { config as loadDotenv } from 'dotenv'
 import { proxy } from '../proxy'
 import { JWT_SECRET, INGEST_SECRET, COOKIE_ADMIN, COOKIE_PLATFORM, COOKIE_TEACHER, COOKIE_STUDENT, COOKIE_PARENT } from '../lib/auth-constants'
-import { featureForApiPath, GATED_FEATURE_KEYS } from '../lib/featureRoutes'
+import { featureForApiPath, featureRequirementForApiPath, GATED_FEATURE_KEYS } from '../lib/featureRoutes'
 import { ALL_FEATURES } from '../lib/features'
 import { BASE, platformAdminCookie, createSchool, setSubscription } from './fixtures/platform-admin'
 
@@ -119,7 +119,12 @@ test.describe('Feature API map (pure)', () => {
     expect(featureForApiPath('/api/fees/ledger')).toBe('fee-management')
     expect(featureForApiPath('/api/feesx')).toBeNull()
     expect(featureForApiPath('/api/expenses/3/attachments')).toBe('expenses')
-    expect(featureForApiPath('/api/students')).toBeNull()
+    expect(featureForApiPath('/api/students')).toBe('students')
+    expect(featureRequirementForApiPath('/api/classes', 'GET')?.anyOf).toContain('curriculum')
+    expect(featureRequirementForApiPath('/api/classes', 'POST')?.anyOf).toEqual(['class-management'])
+    expect(featureRequirementForApiPath('/api/teachers/9/class-subjects', 'GET')?.anyOf).toContain('library')
+    expect(featureRequirementForApiPath('/api/teachers/9/change-password', 'POST')).toBeNull()
+    expect(featureRequirementForApiPath('/api/school/subjects/materials', 'GET')?.anyOf).toEqual(['curriculum', 'library'])
   })
 
   test('every gated key is a real plan feature', () => {
@@ -137,7 +142,15 @@ test.describe('Feature gate in proxy.ts', () => {
     global.fetch = (async (input: RequestInfo | URL) => {
       if (String(input).includes('/api/internal/feature-entitlement')) {
         const url = new URL(String(input))
-        const enabled = !(url.searchParams.get('school_id') === '7' && url.searchParams.get('feature') === 'expenses')
+        const school = url.searchParams.get('school_id')
+        const feature = url.searchParams.get('feature')
+        const enabled = !(
+          (school === '7' && feature === 'expenses') ||
+          (school === '70' && feature === 'staff') ||
+          (school === '71' && ['staff', 'class-management'].includes(feature || '')) ||
+          (school === '72' && feature === 'students') ||
+          (school === '73' && feature === 'class-management')
+        )
         return new Response(JSON.stringify({ enabled }), { status: 200 })
       }
       if (String(input).includes('/api/internal/plan-locked')) return new Response(JSON.stringify({ school_ids: [] }), { status: 200 })
@@ -180,6 +193,19 @@ test.describe('Feature gate in proxy.ts', () => {
 
   test('leaves requests without a school session to the route itself', async () => {
     expect((await call('GET', '/api/expenses')).blocked).toBe(false)
+  })
+
+  test('allows dependent reads but keeps writes owned by their module', async () => {
+    const classOnly = { [COOKIE_ADMIN]: token('school_admin', 70) }
+    expect((await call('GET', '/api/teachers?school_id=70&view=class-assignment-options', classOnly)).blocked).toBe(false)
+    expect((await call('POST', '/api/teachers/bulk', classOnly)).blocked).toBe(true)
+    expect((await call('GET', '/api/teachers?school_id=71&view=class-assignment-options', { [COOKIE_ADMIN]: token('school_admin', 71) })).blocked).toBe(true)
+    const feesOnly = { [COOKIE_ADMIN]: token('school_admin', 72) }
+    expect((await call('GET', '/api/students?school_id=72', feesOnly)).blocked).toBe(false)
+    expect((await call('POST', '/api/students', feesOnly)).blocked).toBe(true)
+    const curriculumOnly = { [COOKIE_ADMIN]: token('school_admin', 73) }
+    expect((await call('GET', '/api/classes?school_id=73', curriculumOnly)).blocked).toBe(false)
+    expect((await call('POST', '/api/classes', curriculumOnly)).blocked).toBe(true)
   })
 
   test('ignores a forged token', async () => {
