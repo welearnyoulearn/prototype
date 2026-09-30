@@ -198,21 +198,31 @@ async function requestHasFeature(req: NextRequest, origin: string, feature: stri
   const platform = platformToken ? await getTokenPayload(platformToken) : null
   if (platform?.role === 'platform_admin') return true
 
-  const schoolIds = new Set<number>()
+  // Same precedence every route handler already uses to resolve "who is
+  // actually making this request" (admin, else teacher, else student, else
+  // parent — first cookie present wins, see e.g. GET /api/classes). This
+  // used to instead collect the school_id from EVERY portal cookie present
+  // in the browser and require all of them entitled — so a leftover cookie
+  // from testing a different role or school (never logged out, unrelated to
+  // this request) could block a perfectly entitled admin/teacher/student/
+  // parent session from ever reaching the route. Checking only the one
+  // identity this request will actually resolve to matches reality and
+  // still stops a forged/irrelevant cookie from mattering, since the route
+  // itself never looks at it either.
+  let schoolId: number | null = null
   for (const cookie of [COOKIE_ADMIN, COOKIE_TEACHER, COOKIE_STUDENT, COOKIE_PARENT]) {
     const token = req.cookies.get(cookie)?.value
     if (!token) continue
     const payload = await getTokenPayload(token)
-    const schoolId = Number(payload?.schoolId)
-    if (Number.isInteger(schoolId) && schoolId > 0) schoolIds.add(schoolId)
+    const id = Number(payload?.schoolId)
+    if (Number.isInteger(id) && id > 0) { schoolId = id; break }
   }
 
-  // Authentication remains the route handler's responsibility. When valid
-  // school sessions are present, every one must be entitled, preventing a
-  // second cookie from another school being used to piggy-back on access.
-  if (schoolIds.size === 0) return true
-  const checks = await Promise.all([...schoolIds].map(id => schoolFeatureEnabled(origin, id, feature)))
-  return checks.every(Boolean)
+  // Authentication remains the route handler's responsibility — if no
+  // recognizable session cookie is present at all, let the request through
+  // and let the handler return its own 401.
+  if (schoolId === null) return true
+  return schoolFeatureEnabled(origin, schoolId, feature)
 }
 
 function extractSchoolId(req: NextRequest): number | null {

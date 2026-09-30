@@ -16,6 +16,12 @@ function ChangePasswordForm() {
   const [confirm, setConfirm]     = useState('')
   const [loading, setLoading]     = useState(false)
   const [error, setError]         = useState('')
+  // `?first=1` is only a hint from the login redirect, not a live truth — if
+  // the server ever disagrees (a reused link, a second submit after the
+  // first already cleared first-login, two tabs racing each other) it comes
+  // back asking for the current password with nowhere on screen to type it.
+  // Once that happens, show the field instead of leaving the admin stuck.
+  const [needsCurrent, setNeedsCurrent] = useState(!isFirst)
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -29,7 +35,11 @@ function ChangePasswordForm() {
         body: JSON.stringify({ currentPassword: current, newPassword: password }),
       })
       const data = await res.json()
-      if (!res.ok) { setError(data.error || 'Failed'); return }
+      if (!res.ok) {
+        if (data.error === 'Current password required' || data.error === 'Current password is incorrect') setNeedsCurrent(true)
+        setError(data.error || 'Failed')
+        return
+      }
       router.push(data.role === 'platform_admin' ? '/platform-admin' : (data.profileCompleted ? '/school-admin' : '/profile-setup'))
     } catch {
       setError('Connection error. Please try again.')
@@ -64,7 +74,7 @@ function ChangePasswordForm() {
       <AuthError message={error} />
 
       <form onSubmit={handleSubmit} className="space-y-4">
-        {!isFirst && (
+        {needsCurrent && (
           <PasswordField label="Current Password" value={current} onChange={setCurrent}
             placeholder="Your current password" ring={theme.ring} autoComplete="current-password" />
         )}
