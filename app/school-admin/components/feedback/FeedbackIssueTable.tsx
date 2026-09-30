@@ -105,7 +105,7 @@ export default function FeedbackIssueTable({ schoolId, source }: { schoolId: num
       ) : rows.length === 0 ? (
         <EmptyState icon={Inbox} title="No issues here." className="border-0 py-16" />
       ) : (
-        <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
+        <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
           <Table>
             <TableHeader>
               <TableRow>

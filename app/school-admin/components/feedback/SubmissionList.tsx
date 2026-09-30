@@ -182,7 +182,7 @@ export default function SubmissionList({ schoolId, source }: { schoolId: number;
               value={query}
               onChange={e => setQuery(e.target.value)}
               placeholder="Search comments, names, categories, answers…"
-              className="w-full rounded-md border border-gray-200 py-2 pl-8 pr-3 text-sm focus:border-[#245b46] focus:outline-none focus:ring-2 focus:ring-[#245b46]/20"
+              className="w-full rounded-md border border-gray-200 py-2 pl-8 pr-3 text-base sm:text-sm focus:border-[#245b46] focus:outline-none focus:ring-2 focus:ring-[#245b46]/20"
             />
           </label>
           <select
@@ -190,7 +190,7 @@ export default function SubmissionList({ schoolId, source }: { schoolId: number;
             onChange={e => setSort(e.target.value as Sort)}
             data-testid="feedback-submissions-sort"
             aria-label="Sort"
-            className="rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-[#245b46] focus:outline-none"
+            className="rounded-md border border-gray-200 bg-white px-3 py-2 text-base sm:text-sm text-gray-700 focus:border-[#245b46] focus:outline-none"
           >
             <option value="newest">Newest first</option>
             <option value="oldest">Oldest first</option>

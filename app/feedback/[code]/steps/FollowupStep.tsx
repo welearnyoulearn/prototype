@@ -41,7 +41,7 @@ export default function FollowupStep({
               type="button"
               data-testid={`feedback-quickpick-${tag.toLowerCase().replace(/\s+/g, '-')}-btn`}
               onClick={() => onToggleQuickPick(tag)}
-              className="rounded-xl border px-3.5 py-2 text-xs font-semibold transition"
+              className="min-h-[44px] rounded-xl border px-3.5 py-2.5 text-sm font-semibold transition active:scale-95"
               style={isSelected
                 ? { borderColor: TEAL, background: TEAL, color: '#fff' }
                 : { borderColor: BORDER, background: SURFACE, color: INK }}
@@ -64,13 +64,13 @@ export default function FollowupStep({
 
       <VoiceRecorder code={code} onVoiceKeyChange={onVoiceKeyChange} />
 
-      <label className="mt-3.5 flex items-center gap-2 text-xs font-semibold" style={{ color: '#6B7280' }}>
+      <label className="mt-3.5 flex min-h-[44px] cursor-pointer items-center gap-2.5 text-sm font-semibold" style={{ color: '#6B7280' }}>
         <input
           type="checkbox"
           data-testid="feedback-followup-anonymous-checkbox"
           checked={isAnonymous}
           onChange={e => onAnonymousChange(e.target.checked)}
-          className="h-4 w-4"
+          className="h-5 w-5 shrink-0"
           style={{ accentColor: TEAL }}
         />
         🔒 Submit anonymously

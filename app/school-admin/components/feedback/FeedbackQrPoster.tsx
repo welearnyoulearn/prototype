@@ -156,7 +156,7 @@ export default function FeedbackQrPoster({ schoolId }: { schoolId: number }) {
                 rows={3}
                 onChange={e => setQuoteDraft(e.target.value)}
                 placeholder="e.g. Every voice matters. Help us make our school better!"
-                className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-[#245b46] focus:outline-none"
+                className="w-full rounded-lg border border-gray-200 px-3 py-2 text-base sm:text-sm focus:border-[#245b46] focus:outline-none"
               />
               <div className="mt-1 mb-3 text-right text-[10px] text-gray-400">{quoteDraft.length}/{POSTER_QUOTE_MAX}</div>
               <div className="flex flex-wrap gap-2">
