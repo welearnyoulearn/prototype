@@ -155,7 +155,7 @@ export default function Home() {
 
             {/* Footer note */}
             <p className="text-center text-white/25 text-xs mt-8">
-              © 2025 WeLearnYouLearn · Built for Indian Schools
+              © 2025 WeLearnYouLearn · Built for Indian Schools · <Link href="/privacy" data-testid="privacy-link" className="underline hover:text-white/60">Privacy</Link>
             </p>
           </div>
         </main>
