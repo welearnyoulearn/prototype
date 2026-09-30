@@ -1,5 +1,4 @@
 import type { PoolClient } from 'pg'
-import { getSubjectsForGrade } from '@/lib/curricula'
 import { matchTeacher, teacherMatchesSubject } from '@/lib/matchTeacher'
 import { normalizeClassIdentity } from '@/lib/classValidation'
 
@@ -102,15 +101,9 @@ async function setupSubjects(client: PoolClient, cls: ManagedClass) {
       )
     : { rows: [] as { subject_name: string }[] }
 
-  let subjectNames = subscribed.rows.map(row => row.subject_name)
-  if (subjectNames.length === 0) {
-    const { rows: curricula } = await client.query<{ curriculum_type: string }>(
-      `SELECT curriculum_type FROM curriculum_assignments
-       WHERE school_id = $1 AND grade = $2 LIMIT 1`,
-      [cls.school_id, cls.grade],
-    )
-    subjectNames = getSubjectsForGrade(curricula[0]?.curriculum_type ?? 'CBSE', cls.grade).map(subject => subject.name)
-  }
+  // A class only gets subjects once the school has subscribed to that grade's
+  // curriculum via the Syllabus Customizer — no default curriculum fallback here.
+  const subjectNames = subscribed.rows.map(row => row.subject_name)
 
   const { rows: staff } = await client.query<{
     id: number

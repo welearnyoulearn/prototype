@@ -6,6 +6,7 @@ import dynamic from 'next/dynamic'
 import { motion, MotionConfig } from 'framer-motion'
 import { FeaturesProvider } from '@/lib/features-context'
 import NotificationBell from '../components/NotificationBell'
+import CommandBar from './components/CommandBar'
 import { useRouter } from 'next/navigation'
 import { FullPageLoader } from '@/components/loaders'
 import { useUsageHeartbeat } from '@/lib/useUsageHeartbeat'
@@ -442,7 +443,10 @@ function SchoolAdmin() {
             </span>
           )}
           {selectedSchool && (
-            <NotificationBell schoolId={selectedSchool.id} onNavigate={navigateSection} />
+            <>
+              <NotificationBell schoolId={selectedSchool.id} onNavigate={navigateSection} />
+              <CommandBar schoolId={selectedSchool.id} onNavigate={navigateTo} />
+            </>
           )}
           <motion.button
             whileHover={{ y: -1 }}
