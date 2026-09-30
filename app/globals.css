@@ -570,11 +570,17 @@ input, select, textarea {
 .pl-slide[data-offset="-1"]:hover { transform: translateX(-58%) translateZ(-120px) rotateY(30deg); opacity: 1; }
 .pl-slide[data-offset="0"]:hover, .pl-slide[data-offset="0"]:focus-visible { box-shadow: 0 32px 70px color-mix(in srgb, var(--slide-accent) 28%, transparent), 0 2px 6px rgb(23 35 29 / .06); }
 .pl-slide:focus-visible { outline: 3px solid color-mix(in srgb, var(--slide-accent) 50%, transparent); outline-offset: 4px; }
-.pl-slide-top { position: relative; display: flex; align-items: center; gap: 14px; padding: 24px 22px 22px; background: linear-gradient(135deg, var(--slide-accent), var(--deep)); color: white; overflow: hidden; }
+.pl-slide-top { position: relative; display: flex; align-items: flex-end; gap: 14px; min-height: 168px; padding: 24px 22px 20px; background: linear-gradient(180deg, color-mix(in srgb, var(--deep) 10%, transparent) 0%, color-mix(in srgb, var(--deep) 88%, transparent) 100%), var(--photo, none) center 30% / cover no-repeat, linear-gradient(135deg, var(--slide-accent), var(--deep)); color: white; overflow: hidden; }
+.pl-slide[data-portal="student"] .pl-slide-top { --photo: url('/landing/student.jpg'); }
+.pl-slide[data-portal="teacher"] .pl-slide-top { --photo: url('/landing/teacher.jpg'); }
+.pl-slide[data-portal="parent"] .pl-slide-top { --photo: url('/landing/parent.jpg'); }
+.pl-slide[data-portal="admin"] .pl-slide-top { --photo: url('/landing/school.jpg'); }
+.pl-slide[data-portal="teacher"] .pl-slide-top { background-position: 0 0, center 52%, 0 0; }
+.pl-slide[data-portal="parent"] .pl-slide-top { background-position: 0 0, center 72%, 0 0; }
 .pl-slide-top::before { content: ''; position: absolute; inset: 0; background-image: radial-gradient(rgb(255 255 255 / .16) 1.2px, transparent 1.4px); background-size: 14px 14px; mask-image: linear-gradient(120deg, transparent 30%, black 90%); }
 .pl-slide-top::after { content: ''; position: absolute; width: 180px; height: 180px; right: -60px; top: -90px; border-radius: 50%; border: 1px solid rgb(255 255 255 / .18); box-shadow: 0 0 0 26px rgb(255 255 255 / .05); }
 .pl-slide-icon { position: relative; display: grid; place-items: center; width: 56px; height: 56px; border-radius: 16px; background: rgb(255 255 255 / .96); color: var(--slide-accent); box-shadow: 0 10px 22px rgb(0 0 0 / .18); }
-.pl-slide-icon svg { width: 26px; height: 26px; }
+.pl-slide-icon svg { width: 32px; height: 32px; }
 .pl-slide-title { position: relative; display: flex; flex-direction: column; }
 .pl-slide-title strong { font-size: 26px; font-weight: 700; letter-spacing: -.035em; line-height: 1.1; }
 .pl-slide-title small { color: rgb(255 255 255 / .7); font-size: 11px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; }
@@ -601,7 +607,7 @@ input, select, textarea {
 .pl-switch a[data-portal="teacher"] { --tab: #21686a; --tab-soft: #dcebea; }
 .pl-switch a[data-portal="parent"] { --tab: #a44f3c; --tab-soft: #f2dfd9; }
 .pl-switch a[data-portal="admin"] { --tab: #245b46; --tab-soft: #dfeade; }
-.pl-switch a svg { width: 17px; height: 17px; }
+.pl-switch a svg { width: 20px; height: 20px; }
 .pl-switch a[data-active] { background: var(--tab-soft); color: var(--tab); }
 .pl-switch a:hover { color: var(--tab); }
 .pl-switch a:active { transform: scale(.97); }

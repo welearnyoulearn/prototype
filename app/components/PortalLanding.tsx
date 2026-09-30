@@ -8,22 +8,22 @@ import {
   type CSSProperties, type MouseEvent, type PointerEvent,
 } from 'react'
 import {
-  ArrowRight, BarChart3, Bell, BookOpen, Building2, CalendarCheck, ChevronLeft, ChevronRight, ClipboardCheck,
-  IndianRupee, ListChecks, LockKeyhole, Moon, PenLine, Presentation, Sun, Sunrise, TrendingUp, Trophy, Users,
-  UsersRound, Wallet,
+  ArrowRight, BarChart3, Bell, BookOpen, CalendarCheck, ChevronLeft, ChevronRight, ClipboardCheck,
+  IndianRupee, ListChecks, LockKeyhole, Moon, PenLine, Sun, Sunrise, TrendingUp, Trophy, Users, Wallet,
 } from 'lucide-react'
+import { ParentIcon, SchoolIcon, StudentIcon, TeacherIcon } from './PortalIcons'
 
 type PortalId = 'student' | 'teacher' | 'parent' | 'admin'
 type DayPart = 'morning' | 'afternoon' | 'evening'
-type Icon = typeof BookOpen
+type Icon = typeof BookOpen | typeof StudentIcon
 
 const portals: Array<{
   id: PortalId; testId: string; title: string; verb: string; description: string; href: string; icon: Icon; features: Array<[string, Icon]>
 }> = [
-  { id: 'student', testId: 'student', title: 'Student', verb: 'learn.', description: 'Your lessons, attendance, results and achievements.', href: '/student/login', icon: BookOpen, features: [['Lessons', BookOpen], ['Attendance', CalendarCheck], ['Achievements', Trophy]] },
-  { id: 'teacher', testId: 'teacher', title: 'Teacher', verb: 'teach.', description: 'Your classes, attendance, marks and syllabus.', href: '/teacher/login', icon: Presentation, features: [['Attendance', ClipboardCheck], ['Marks', PenLine], ['Syllabus', ListChecks]] },
-  { id: 'parent', testId: 'parent', title: 'Parent', verb: 'stay close.', description: "Your child's progress, school notices and fees.", href: '/parent/login', icon: UsersRound, features: [['Progress', TrendingUp], ['Notices', Bell], ['Fees', Wallet]] },
-  { id: 'admin', testId: 'school-admin', title: 'School', verb: 'lead.', description: 'Staff, students, fees and daily operations.', href: '/login?role=school', icon: Building2, features: [['People', Users], ['Fees', IndianRupee], ['Reports', BarChart3]] },
+  { id: 'student', testId: 'student', title: 'Student', verb: 'learn.', description: 'Your lessons, attendance, results and achievements.', href: '/student/login', icon: StudentIcon, features: [['Lessons', BookOpen], ['Attendance', CalendarCheck], ['Achievements', Trophy]] },
+  { id: 'teacher', testId: 'teacher', title: 'Teacher', verb: 'teach.', description: 'Your classes, attendance, marks and syllabus.', href: '/teacher/login', icon: TeacherIcon, features: [['Attendance', ClipboardCheck], ['Marks', PenLine], ['Syllabus', ListChecks]] },
+  { id: 'parent', testId: 'parent', title: 'Parent', verb: 'stay close.', description: "Your child's progress, school notices and fees.", href: '/parent/login', icon: ParentIcon, features: [['Progress', TrendingUp], ['Notices', Bell], ['Fees', Wallet]] },
+  { id: 'admin', testId: 'school-admin', title: 'School', verb: 'lead.', description: 'Staff, students, fees and daily operations.', href: '/login?role=school', icon: SchoolIcon, features: [['People', Users], ['Fees', IndianRupee], ['Reports', BarChart3]] },
 ]
 
 const COUNT = portals.length
