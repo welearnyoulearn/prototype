@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import type { PoolClient } from 'pg'
 import pool, { ensureDB } from '@/lib/db'
-import { getSession, hashPassword, generateTempPassword, generateResetToken } from '@/lib/auth'
+import { getSession, hashPassword, generateTempPassword, generateResetToken, hashResetToken } from '@/lib/auth'
 import { sendStaffInviteEmail } from '@/lib/email'
 import { INVITE_LINK_HOURS } from '@/lib/staffInvite'
 import { STAFF_ROLES, lockStaffSeats, getStaffLimit, countActiveStaff, logStaffEvent } from '@/lib/staffAccounts'
@@ -44,7 +44,7 @@ export async function GET(req: NextRequest) {
 
     const result = await pool.query(
       `SELECT u.id, u.full_name, u.email, u.role, COALESCE(u.status, 'active') AS status,
-              u.first_login, u.created_at, up.phone, up.designation
+              u.first_login, u.created_at, u.is_primary_admin, up.phone, up.designation
        FROM users u
        LEFT JOIN user_profiles up ON up.user_id = u.id
        WHERE u.school_id = $1 AND u.role = ANY($2)
@@ -145,7 +145,7 @@ export async function POST(req: NextRequest) {
       await client.query(
         `INSERT INTO password_reset_tokens (user_id, token, expires_at)
          VALUES ($1, $2, NOW() + make_interval(hours => $3))`,
-        [user.id, token, INVITE_LINK_HOURS]
+        [user.id, hashResetToken(token), INVITE_LINK_HOURS]
       )
       await logStaffEvent(client, {
         schoolId, userId: user.id, action: 'created', actorUserId: session.userId,
@@ -184,8 +184,8 @@ export async function POST(req: NextRequest) {
 // Finds a staff account of this school and locks the row. Scoped to the staff roles so
 // this route can never be used to change any other kind of user.
 async function lockStaffRow(client: PoolClient, id: number, schoolId: number) {
-  const { rows: [row] } = await client.query<{ id: number; role: string; status: string }>(
-    `SELECT id, role, COALESCE(status, 'active') AS status
+  const { rows: [row] } = await client.query<{ id: number; role: string; status: string; is_primary_admin: boolean }>(
+    `SELECT id, role, COALESCE(status, 'active') AS status, is_primary_admin
      FROM users WHERE id = $1 AND school_id = $2 AND role = ANY($3) FOR UPDATE`,
     [id, schoolId, STAFF_ROLES]
   )
@@ -291,6 +291,14 @@ export async function DELETE(req: NextRequest) {
       if (target.status === 'inactive') {
         await client.query('ROLLBACK')
         return NextResponse.json({ success: true })
+      }
+
+      // The onboarding admin is the school's recovery path — the only account
+      // /api/platform/schools/reset-password recovers. Nobody, including another
+      // school_admin, can deactivate it from here.
+      if (target.is_primary_admin) {
+        await client.query('ROLLBACK')
+        return NextResponse.json({ error: 'This is the school’s setup account and cannot be deactivated.' }, { status: 403 })
       }
 
       // Never leave a school with nobody able to sign in as administrator. With the

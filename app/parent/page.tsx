@@ -15,10 +15,11 @@ import { useSectionNav } from '@/lib/useSectionNav'
 import { getUsageSessionId, clearUsageSessionId } from '@/lib/usageSession'
 import { PORTAL_NAV_KEY_ALIASES } from '@/lib/features'
 import NotificationBell from '../components/NotificationBell'
+import TestCalendar from '../components/TestCalendar'
 import AttendanceCalendar from '../components/AttendanceCalendar'
 import SchoolCalendarView from '../components/SchoolCalendarView'
 import PortalSidebar from '@/components/portal/PortalSidebar'
-import { CalendarDays } from 'lucide-react'
+import { CalendarDays, Phone } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 
 // Used by printParentReceipt below — fee category names (admin-set),
@@ -31,6 +32,12 @@ function escHtml(s: unknown): string {
   return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string))
 }
 
+// tel: only wants digits (and a leading +) — the stored number may have spaces/dashes for
+// readability, so strip everything else before building the link.
+function telHref(phone: string): string {
+  return `tel:${phone.replace(/[^\d+]/g, '')}`
+}
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 type Child = { id: number; name: string; grade: string; section: string; roll_number: string; school_id: number }
 type Student = {
@@ -39,6 +46,11 @@ type Student = {
   parent_name: string | null; parent_phone: string | null
 }
 type ParentInfo = { id: number; name: string; email: string; school_id: number; school_name: string; children: Child[]; date_of_birth?: string | null }
+
+type SubjectMark = {
+  subject_name: string; max_marks: number; marks_obtained: number | null
+  is_absent: boolean; percentage: number | null; pass: boolean | null
+}
 
 type Summary = {
   upcoming_exams: Array<{
@@ -139,6 +151,12 @@ function ParentDashboard() {
   const [showChildPicker, setShowChildPicker] = useState(false)
   const [student, setStudent] = useState<Student | null>(null)
   const [summary, setSummary] = useState<Summary | null>(null)
+  // Who to call: the class teacher and the school's own administration line/address —
+  // shown on Overview so a parent doesn't need to hunt for a separate screen.
+  const [contact, setContact] = useState<{
+    class_teacher: { name: string; phone: string | null } | null
+    school: { name: string; phone: string | null; email: string | null; address: string | null } | null
+  } | null>(null)
   // Sidebar section nav lives in the URL's `tab` param — real navigation, so
   // the browser/phone Back button moves through the portal's own screens.
   // resetNav replaces instead of pushing, used when switching between
@@ -201,6 +219,26 @@ function ParentDashboard() {
   const [ackingId, setAckingId] = useState<number | null>(null)
   const [ackSaving, setAckSaving] = useState(false)
   const [ackError, setAckError]   = useState('')
+
+  // Per-subject breakdown for a result card, loaded on demand when the
+  // parent expands it — the summary list only ever carried the overall
+  // total, never a subject-by-subject view.
+  const [expandedResultId, setExpandedResultId] = useState<number | null>(null)
+  const [resultSubjects, setResultSubjects] = useState<Record<number, SubjectMark[] | 'loading' | 'error'>>({})
+
+  async function toggleResultDetail(examId: number) {
+    if (expandedResultId === examId) { setExpandedResultId(null); return }
+    setExpandedResultId(examId)
+    if (resultSubjects[examId] || !student) return
+    setResultSubjects(prev => ({ ...prev, [examId]: 'loading' }))
+    try {
+      const data = await fetch(`/api/students/${student.id}/exams?school_id=${student.school_id}&class_id=${student.class_id}`).then(r => r.json())
+      const exam = Array.isArray(data) ? data.find((e: { exam_id: number }) => e.exam_id === examId) : null
+      setResultSubjects(prev => ({ ...prev, [examId]: exam?.subjects ?? 'error' }))
+    } catch {
+      setResultSubjects(prev => ({ ...prev, [examId]: 'error' }))
+    }
+  }
 
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
@@ -266,7 +304,13 @@ function ParentDashboard() {
     setStudent(s)
     setShowChildPicker(false)
     setSummary(null); setFeeLedger([]); setFeePayments([]); setFeeWaivers([]); setFeeSummary(null)
+    setContact(null)
     resetNav('overview'); setVisited(new Set(['overview']))
+
+    fetch(`/api/parent/subjects?student_id=${child.id}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => setContact(d ? { class_teacher: d.class_teacher ?? null, school: d.school ?? null } : null))
+      .catch(() => setContact(null))
 
     await loadSummary(s)
     Promise.all([
@@ -680,6 +724,45 @@ function ParentDashboard() {
               )}
             </div>
 
+            {/* Contact & Support — who to call, right from Overview */}
+            {contact && (contact.class_teacher || contact.school) && (
+              <section className="border-b border-border pb-6" aria-labelledby="parent-contact">
+                <p id="parent-contact" className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">Contact &amp; Support</p>
+                <div className="flex flex-wrap gap-3">
+                  {contact.class_teacher && (
+                    <div className="flex items-center justify-between gap-3 flex-1 min-w-64 rounded-lg border border-border bg-white px-4 py-3">
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-gray-800 truncate">{contact.class_teacher.name}</p>
+                        <p className="text-xs text-muted-foreground">Class teacher</p>
+                      </div>
+                      {contact.class_teacher.phone && (
+                        <a href={telHref(contact.class_teacher.phone)} data-testid="call-class-teacher"
+                          className="inline-flex items-center justify-center w-10 h-10 shrink-0 rounded-full bg-primary/10 text-primary hover:bg-primary/20 transition-colors" title={`Call ${contact.class_teacher.name}`}>
+                          <Phone size={17} aria-hidden="true" />
+                        </a>
+                      )}
+                    </div>
+                  )}
+                  {contact.school && (
+                    <div className="flex items-center justify-between gap-3 flex-1 min-w-64 rounded-lg border border-border bg-white px-4 py-3">
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-gray-800 truncate">{contact.school.name}</p>
+                        <p className="text-xs text-muted-foreground">School administration</p>
+                      </div>
+                      {contact.school.phone && (
+                        <a href={telHref(contact.school.phone)} data-testid="call-administration"
+                          className="inline-flex items-center justify-center w-10 h-10 shrink-0 rounded-full bg-primary/10 text-primary hover:bg-primary/20 transition-colors" title={`Call ${contact.school.name}`}>
+                          <Phone size={17} aria-hidden="true" />
+                        </a>
+                      )}
+                    </div>
+                  )}
+                </div>
+                {contact.school?.address && (
+                  <p className="mt-3 text-xs text-muted-foreground whitespace-pre-line">{contact.school.address}</p>
+                )}
+              </section>
+            )}
 
             {/* Latest result */}
             {isNavItemVisible('results') && latestResult && (
@@ -756,6 +839,7 @@ function ParentDashboard() {
             <ParentSyllabus
               schoolId={student.school_id}
               classId={student.class_id}
+              studentId={student.id}
               studentName={student.name}
               grade={student.grade}
               section={student.section}
@@ -1231,6 +1315,7 @@ function ParentDashboard() {
           {visited.has('exams') && (
           <div hidden={activeNav !== 'exams'} className="max-w-3xl space-y-4">
             <h2 className="text-base font-bold text-gray-800">{T.examCalendar}</h2>
+            <TestCalendar mode="parent" schoolId={student.school_id} studentId={student.id} />
             {summary?.upcoming_exams && summary.upcoming_exams.length > 0 ? (
               <div className="space-y-3">
                 {summary.upcoming_exams.map(e => {
@@ -1295,6 +1380,46 @@ function ParentDashboard() {
                       )}
                     </div>
                   </div>
+                  <button onClick={() => toggleResultDetail(r.id)}
+                    className="w-full flex items-center justify-between px-4 py-2 text-xs font-semibold text-blue-600 border-b border-gray-100 hover:bg-blue-50/50 transition-colors">
+                    {expandedResultId === r.id ? 'Hide subject-wise marks' : 'View subject-wise marks'}
+                    <span className={`transition-transform ${expandedResultId === r.id ? 'rotate-180' : ''}`}>⌄</span>
+                  </button>
+                  {expandedResultId === r.id && (
+                    <div className="px-4 py-3 border-b border-gray-100 bg-gray-50/50">
+                      {resultSubjects[r.id] === 'loading' ? (
+                        <p className="text-xs text-muted-foreground text-center py-2">Loading subjects…</p>
+                      ) : resultSubjects[r.id] === 'error' || !resultSubjects[r.id] ? (
+                        <p className="text-xs text-red-500 text-center py-2">Couldn&rsquo;t load subject marks.</p>
+                      ) : (
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className="text-left text-muted-foreground">
+                              <th className="font-semibold pb-1.5">Subject</th>
+                              <th className="font-semibold pb-1.5 text-right">Marks</th>
+                              <th className="font-semibold pb-1.5 text-right pl-3">Result</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-100">
+                            {(resultSubjects[r.id] as SubjectMark[]).map(sub => (
+                              <tr key={sub.subject_name}>
+                                <td className="py-1.5 text-gray-700">{sub.subject_name}</td>
+                                <td className="py-1.5 text-right tabular-nums text-gray-700">
+                                  {sub.is_absent ? 'Absent' : sub.marks_obtained !== null ? `${sub.marks_obtained}/${sub.max_marks}` : '—'}
+                                </td>
+                                <td className="py-1.5 text-right pl-3">
+                                  {sub.pass === null ? <span className="text-gray-300">—</span> :
+                                    <span className={`font-bold px-1.5 py-0.5 rounded-full ${sub.pass ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'}`}>
+                                      {sub.pass ? 'Pass' : 'Fail'}
+                                    </span>}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      )}
+                    </div>
+                  )}
                   <div className="px-4 py-3">
                     {r.parent_acknowledged ? (
                       <div className="flex items-center gap-2 text-xs text-green-700 bg-green-50 rounded-lg px-3 py-2">

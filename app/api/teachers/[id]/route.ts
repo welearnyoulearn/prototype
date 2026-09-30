@@ -1,15 +1,35 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
-import { hashPassword, generateTempPassword, requireFeeAccess } from '@/lib/auth'
+import {
+  generateTempPassword, getPlatformSession, hashPortalPassword, requireFeeAccess, requireSchoolAdmin,
+  revokePortalSessions, schoolHasFeature,
+} from '@/lib/auth'
 import {
   sendStaffRemovedEmail, sendStaffReactivatedEmail, sendStaffContactChangedEmail,
 } from '@/lib/email'
 import { sendWhatsappMessage } from '@/lib/whatsapp'
 import { findAutoAssignableSubjects, type ClassSubjectRow } from '@/lib/matchTeacher'
-import { isValidName, NAME_INVALID_MESSAGE } from '@/lib/nameValidation'
+import { normalizeStaffInput, validateStaffStatus } from '@/lib/staffValidation'
+import { invalidateCache } from '@/lib/responseCache'
+import { canonicalStaffSubject, getStaffSubjectOptions } from '@/lib/staffSubjectOptions'
+
+const EDITABLE_FIELDS = new Set([
+  'name', 'email', 'subject', 'phone', 'department', 'qualification',
+  'date_of_joining', 'staff_type', 'status', 'teaches_grades',
+])
+const UNIQUE_VIOLATION = '23505'
+type TeacherRecord = {
+  id: number; school_id: number; name: string; email: string; phone: string; subject: string | null
+  department: string | null; qualification: string | null; date_of_joining: string | null
+  staff_type: string; status: string; teaches_grades: string | null; employee_id?: string
+  password_changed?: boolean; removed_at?: string | null; created_at?: string
+}
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    if (!await getPlatformSession() && !await requireSchoolAdmin()) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
     const { id } = await params
     try {
       // Fetch the teacher's own school first so the tenant check can run
@@ -19,6 +39,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       if (ownerRes.rowCount === 0) return NextResponse.json({ error: 'Teacher not found' }, { status: 404 })
       const access = await requireFeeAccess(ownerRes.rows[0].school_id)
       if (!access) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      if (access.role !== 'platform_admin' && !(await schoolHasFeature(access.schoolId, 'staff'))) {
+        return NextResponse.json({ error: 'Staff Management is not enabled for this school', code: 'FEATURE_DISABLED' }, { status: 403 })
+      }
 
       const result = await pool.query(
         `SELECT id, school_id, name, email, phone, subject, department, qualification, date_of_joining,
@@ -39,199 +62,184 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 }
 
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  if (!await getPlatformSession() && !await requireSchoolAdmin()) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+  const { id: rawId } = await params
+  const id = Number(rawId)
+  if (!Number.isInteger(id) || id <= 0) return NextResponse.json({ error: 'Invalid teacher ID' }, { status: 400 })
+
+  let body: Record<string, unknown>
+  try { body = await req.json() } catch {
+    return NextResponse.json({ error: 'Request body must be valid JSON' }, { status: 400 })
+  }
+  const unknown = Object.keys(body).filter(key => !EDITABLE_FIELDS.has(key))
+  if (unknown.length) return NextResponse.json({ error: `Unsupported fields: ${unknown.join(', ')}` }, { status: 400 })
+  if (Object.keys(body).length === 0) return NextResponse.json({ error: 'No changes supplied' }, { status: 400 })
+  const statusError = validateStaffStatus(body.status)
+  if (statusError) return NextResponse.json({ error: statusError }, { status: 422 })
+
+  const client = await pool.connect()
+  let teacher!: TeacherRecord
+  let existing!: TeacherRecord
+  let tempPassword: string | null = null
+  let schoolName = 'Your School'
   try {
-    const { id } = await params
-    try {
-      const existingRes = await pool.query('SELECT email, phone, school_id, status, subject, teaches_grades, staff_type FROM teachers WHERE id = $1', [id])
-      if (existingRes.rowCount === 0) return NextResponse.json({ error: 'Teacher not found' }, { status: 404 })
-      const existing = existingRes.rows[0]
-      const access = await requireFeeAccess(existing.school_id)
-      if (!access) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-
-      const body = await req.json()
-      const { name, email, subject, phone, department, qualification, date_of_joining, staff_type, status, teaches_grades } = body
-      if (typeof name === 'string' && name.trim() && !isValidName(name)) {
-        return NextResponse.json({ error: `Name: ${NAME_INVALID_MESSAGE}` }, { status: 400 })
-      }
-      const becomingInactive = status === 'inactive' && existing.status !== 'inactive'
-      // Restoring from EITHER the lighter inactive↔active pause or a full
-      // removal — both count as "was logged out, needs a fresh credential to
-      // get back in", per the same rule applied to reactivation after removal.
-      const becomingActive = status === 'active' && existing.status !== 'active'
-
-      const trimmedEmail = typeof email === 'string' ? email.trim() : email
-      const emailChanged = !becomingActive && trimmedEmail && trimmedEmail.toLowerCase() !== (existing.email || '').toLowerCase()
-      const trimmedPhone = typeof phone === 'string' ? phone.trim() : phone
-      const phoneChanged = !becomingActive && trimmedPhone && trimmedPhone !== (existing.phone || '')
-
-      if (emailChanged) {
-        // Email is the teacher login identifier and must be globally unique —
-        // checked with NO school_id filter (a same-school duplicate is just
-        // as broken as a cross-school one: the login query picks one row by
-        // recency and the other becomes permanently unreachable).
-        const emailDup = await pool.query(
-          `SELECT t.name, s.name AS school_name, t.school_id = $2 AS same_school FROM teachers t
-           JOIN schools s ON s.id = t.school_id
-           WHERE LOWER(t.email) = LOWER($1) AND t.id != $3 AND t.removed_at IS NULL`,
-          [trimmedEmail, existing.school_id, id]
-        )
-        if (emailDup.rows.length > 0) {
-          const dup = emailDup.rows[0]
-          const error = dup.same_school
-            ? `${trimmedEmail} is already used by ${dup.name} at this school.`
-            : `${trimmedEmail} is already registered to ${dup.name} at ${dup.school_name}. That school must remove them before this email can be reused here.`
-          return NextResponse.json({ error }, { status: 409 })
-        }
-      }
-
-      if (phoneChanged) {
-        const phoneDup = await pool.query(
-          `SELECT name FROM teachers WHERE school_id = $1 AND phone = $2 AND id != $3 AND removed_at IS NULL`,
-          [existing.school_id, trimmedPhone, id]
-        )
-        if (phoneDup.rows.length > 0) {
-          return NextResponse.json({ error: `Phone ${trimmedPhone} already exists (${phoneDup.rows[0].name})` }, { status: 409 })
-        }
-      }
-
-      // A new password is only issued on reactivation (login was actually
-      // revoked) — a routine email/phone correction keeps the existing
-      // password working and just notifies both people that the login
-      // identifier changed, matching the same decision made for parents.
-      const tempPassword = becomingActive ? generateTempPassword(10) : null
-      const passwordHash = tempPassword ? await hashPassword(tempPassword) : null
-
-      const result = await pool.query(
-        `UPDATE teachers SET
-          name          = COALESCE($1,  name),
-          email         = COALESCE($2,  email),
-          subject       = COALESCE($3,  subject),
-          phone         = COALESCE($4,  phone),
-          department    = COALESCE($5,  department),
-          qualification = COALESCE($6,  qualification),
-          date_of_joining = COALESCE($7, date_of_joining),
-          staff_type    = COALESCE($8,  staff_type),
-          status        = COALESCE($9,  status),
-          teaches_grades = COALESCE($10, teaches_grades),
-          password_hash   = COALESCE($12, password_hash),
-          password_changed = CASE WHEN $12 IS NOT NULL THEN FALSE ELSE password_changed END,
-          removed_at = CASE WHEN $9 = 'active' THEN NULL ELSE removed_at END
-         WHERE id = $11
-         RETURNING id, school_id, name, email, phone, subject, department, qualification,
-                   date_of_joining, staff_type, status, teaches_grades, employee_id,
-                   password_changed, removed_at, created_at`,
-        [name, email, subject, phone, department, qualification, date_of_joining, staff_type, status, teaches_grades ?? null, id, passwordHash]
-      )
-      if (result.rowCount === 0) return NextResponse.json({ error: 'Teacher not found' }, { status: 404 })
-
-      const teacher = result.rows[0]
-      const subjectChanged = subject !== undefined && (subject?.trim() || null) !== (existing.subject || null)
-      const teachesGradesChanged = teaches_grades !== undefined && (teaches_grades?.trim() || null) !== (existing.teaches_grades || null)
-      const loginUrl = `${process.env.APP_URL || 'http://localhost:3000'}/teacher/login`
-
-      // A deactivated teacher can't log in, so Class Management showing them
-      // as still "assigned" to a subject is misleading — unlink them the same
-      // way removal already does, so the subject correctly shows as needing a
-      // teacher again. Reversible: Reactivate just flips status back; the
-      // school admin re-assigns the subject explicitly.
-      if (becomingInactive) {
-        await pool.query('UPDATE class_subjects SET teacher_id = NULL WHERE teacher_id = $1', [id])
-        await pool.query('UPDATE classes SET class_teacher_id = NULL WHERE class_teacher_id = $1', [id])
-      }
-
-      let cachedSchoolName = ''
-      const getSchoolName = async (): Promise<string> => {
-        if (cachedSchoolName) return cachedSchoolName
-        const r = await pool.query('SELECT name FROM schools WHERE id = $1', [teacher.school_id])
-        cachedSchoolName = (r.rows[0]?.name as string | undefined) || 'Your School'
-        return cachedSchoolName
-      }
-
-      if (becomingActive && tempPassword) {
-        if (teacher.email) {
-          const name_ = await getSchoolName()
-          sendStaffReactivatedEmail({ to: teacher.email, name: teacher.name, schoolName: name_, tempPassword, loginUrl }).catch(console.error)
-        }
-        if (teacher.phone) {
-          const name_ = await getSchoolName()
-          sendWhatsappMessage({
-            schoolId: teacher.school_id, to: teacher.phone, templateName: 'staff_reactivated', recipientName: teacher.name,
-            templateParams: { staff_name: teacher.name, school_name: name_, login: teacher.email || teacher.phone, temp_password: tempPassword, login_url: loginUrl },
-          }).catch(console.error)
-        }
-      } else {
-        // Routine contact-info correction — notify, don't reset. Sent to
-        // BOTH the old and new address/number when changing that field, same
-        // pattern as the parent contact-edit flow, since a login-identifier
-        // change is security-relevant even without a password reset.
-        if (emailChanged) {
-          const name_ = await getSchoolName()
-          const notify = (addr: string) =>
-            sendStaffContactChangedEmail({ to: addr, name: teacher.name, schoolName: name_, field: 'email', newValue: teacher.email }).catch(console.error)
-          notify(teacher.email)
-          if (existing.email && existing.email.toLowerCase() !== teacher.email.toLowerCase()) notify(existing.email)
-        }
-        if (phoneChanged) {
-          const name_ = await getSchoolName()
-          const notifyPhone = (num: string) =>
-            sendWhatsappMessage({
-              schoolId: teacher.school_id, to: num, templateName: 'contact_info_changed', recipientName: teacher.name,
-              templateParams: { name: teacher.name, school_name: name_, field: 'phone', new_value: teacher.phone },
-            }).catch(console.error)
-          notifyPhone(teacher.phone)
-          if (existing.phone && existing.phone !== teacher.phone) notifyPhone(existing.phone)
-        }
-      }
-
-      // Invalidate teacher list cache for this school
-      const { invalidateCache } = await import('@/lib/responseCache')
-      const schoolId = teacher.school_id
-      invalidateCache(`teachers:${schoolId}:all`)
-      invalidateCache(`teachers:${schoolId}:teaching`)
-      invalidateCache(`teachers:${schoolId}:non_teaching`)
-
-      // Re-run the same auto-assign scan onboarding does whenever the field
-      // it matches on actually changed — a corrected subject spelling or a
-      // widened grade range can newly match class subjects that sat
-      // unassigned since class creation, same as a brand-new teacher would.
-      if ((subjectChanged || teachesGradesChanged) && teacher.staff_type === 'teaching' && teacher.status === 'active' && teacher.subject) {
-        const { rows: unfilled } = await pool.query<ClassSubjectRow>(
-          `SELECT cs.id, cs.class_id, cs.subject_name, c.grade
-           FROM class_subjects cs
-           JOIN classes c ON c.id = cs.class_id
-           WHERE c.school_id = $1 AND c.deleted_at IS NULL AND cs.teacher_id IS NULL`,
-          [schoolId]
-        )
-        const matches = findAutoAssignableSubjects(
-          { subject: teacher.subject, teaches_grades: teacher.teaches_grades },
-          unfilled
-        )
-        for (const m of matches) {
-          await pool.query('UPDATE class_subjects SET teacher_id = $1 WHERE id = $2', [teacher.id, m.id])
-          invalidateCache(`subjects:class:${m.class_id}`)
-        }
-        if (matches.length > 0) invalidateCache(`health:${schoolId}`)
-      }
-
-      return NextResponse.json(teacher)
-    } catch (error) {
-      console.error(error)
-      return NextResponse.json({ error: 'Failed to update teacher' }, { status: 500 })
+    await client.query('BEGIN')
+    const existingRes = await client.query(
+      `SELECT id, school_id, name, email, phone, subject, department, qualification, date_of_joining,
+              staff_type, status, teaches_grades FROM teachers WHERE id = $1 FOR UPDATE`, [id],
+    )
+    if (!existingRes.rows[0]) {
+      await client.query('ROLLBACK')
+      return NextResponse.json({ error: 'Teacher not found' }, { status: 404 })
     }
-} catch (err: unknown) {
-    console.error('[API]', err)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    existing = existingRes.rows[0]
+    const access = await requireFeeAccess(existing.school_id, client)
+    if (!access) {
+      await client.query('ROLLBACK')
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
+    if (access.role !== 'platform_admin' && !(await schoolHasFeature(access.schoolId, 'staff', client))) {
+      await client.query('ROLLBACK')
+      return NextResponse.json({ error: 'Staff Management is not enabled for this school', code: 'FEATURE_DISABLED' }, { status: 403 })
+    }
+
+    const merged = normalizeStaffInput({
+      name: body.name ?? existing.name,
+      email: body.email ?? existing.email,
+      subject: body.subject ?? existing.subject,
+      phone: body.phone ?? existing.phone,
+      department: body.department ?? existing.department,
+      qualification: body.qualification ?? existing.qualification,
+      date_of_joining: body.date_of_joining ?? existing.date_of_joining,
+      staff_type: body.staff_type ?? existing.staff_type,
+      teaches_grades: body.teaches_grades ?? existing.teaches_grades,
+    })
+    if (!merged.data) {
+      await client.query('ROLLBACK')
+      return NextResponse.json({ error: merged.errors.join('; ') }, { status: 422 })
+    }
+    const data = merged.data
+    if (body.subject !== undefined && data.staff_type === 'teaching' && data.subject) {
+      const canonical = canonicalStaffSubject(data.subject, await getStaffSubjectOptions(existing.school_id, client))
+      if (!canonical) {
+        await client.query('ROLLBACK')
+        return NextResponse.json({ error: 'Subject must be selected from the master syllabus or this school’s custom subjects' }, { status: 422 })
+      }
+      data.subject = canonical
+    }
+    const nextStatus = (body.status as 'active' | 'inactive' | undefined) ?? existing.status
+    const becomingInactive = nextStatus === 'inactive' && existing.status !== 'inactive'
+    const becomingActive = nextStatus === 'active' && existing.status !== 'active'
+    const emailChanged = data.email !== String(existing.email || '').toLowerCase()
+    const phoneChanged = data.phone !== String(existing.phone || '')
+    const subjectChanged = data.subject !== (existing.subject || null)
+    const gradesChanged = data.teaches_grades !== (existing.teaches_grades || null)
+
+    const emailDup = await client.query(
+      `SELECT t.name, s.name AS school_name FROM teachers t JOIN schools s ON s.id=t.school_id
+       WHERE LOWER(t.email)=LOWER($1) AND t.id<>$2 AND t.removed_at IS NULL LIMIT 1`, [data.email, id],
+    )
+    if (emailDup.rows[0]) {
+      await client.query('ROLLBACK')
+      return NextResponse.json({ error: `${data.email} is already registered to ${emailDup.rows[0].name} at ${emailDup.rows[0].school_name}` }, { status: 409 })
+    }
+    const phoneDup = await client.query(
+      `SELECT name FROM teachers WHERE school_id=$1 AND phone=$2 AND id<>$3 AND removed_at IS NULL LIMIT 1`,
+      [existing.school_id, data.phone, id],
+    )
+    if (phoneDup.rows[0]) {
+      await client.query('ROLLBACK')
+      return NextResponse.json({ error: `Phone already belongs to ${phoneDup.rows[0].name}` }, { status: 409 })
+    }
+
+    if (becomingActive) tempPassword = generateTempPassword(10)
+    const passwordHash = tempPassword ? await hashPortalPassword(tempPassword) : null
+    const result = await client.query(
+      `UPDATE teachers SET name=$1, email=$2, subject=$3, phone=$4, department=$5,
+         qualification=$6, date_of_joining=$7, staff_type=$8, status=$9::varchar, teaches_grades=$10,
+         password_hash=COALESCE($11,password_hash),
+         password_changed=CASE WHEN $11 IS NOT NULL THEN FALSE ELSE password_changed END,
+         removed_at=CASE WHEN $9::varchar='active' THEN NULL ELSE removed_at END
+       WHERE id=$12
+       RETURNING id, school_id, name, email, phone, subject, department, qualification,
+                 date_of_joining, staff_type, status, teaches_grades, employee_id,
+                 password_changed, removed_at, created_at`,
+      [data.name, data.email, data.subject, data.phone, data.department, data.qualification,
+        data.date_of_joining, data.staff_type, nextStatus, data.teaches_grades, passwordHash, id],
+    )
+    teacher = result.rows[0]
+
+    if (becomingInactive) {
+      await client.query('UPDATE class_subjects SET teacher_id=NULL WHERE teacher_id=$1', [id])
+      await client.query('UPDATE classes SET class_teacher_id=NULL WHERE class_teacher_id=$1', [id])
+    }
+    if (becomingInactive || becomingActive) await revokePortalSessions('teacher', id, undefined, client)
+
+    if ((subjectChanged || gradesChanged) && teacher.staff_type === 'teaching' && teacher.status === 'active' && teacher.subject) {
+      const { rows: unfilled } = await client.query<ClassSubjectRow>(
+        `SELECT cs.id, cs.class_id, cs.subject_name, c.grade FROM class_subjects cs
+         JOIN classes c ON c.id=cs.class_id
+         WHERE c.school_id=$1 AND c.deleted_at IS NULL AND cs.teacher_id IS NULL`, [teacher.school_id],
+      )
+      const matches = findAutoAssignableSubjects({ subject: teacher.subject, teaches_grades: teacher.teaches_grades }, unfilled)
+      for (const match of matches) {
+        await client.query('UPDATE class_subjects SET teacher_id=$1 WHERE id=$2 AND teacher_id IS NULL', [id, match.id])
+        invalidateCache(`subjects:class:${match.class_id}`)
+      }
+      if (matches.length) invalidateCache(`health:${teacher.school_id}`)
+    }
+    const school = await client.query<{ name: string }>('SELECT name FROM schools WHERE id=$1', [teacher.school_id])
+    schoolName = school.rows[0]?.name || schoolName
+    await client.query('COMMIT')
+
+    invalidateCache(`teachers:${teacher.school_id}:all`)
+    invalidateCache(`teachers:${teacher.school_id}:teaching`)
+    invalidateCache(`teachers:${teacher.school_id}:non_teaching`)
+
+    const loginUrl = `${process.env.APP_URL || 'http://localhost:3000'}/teacher/login`
+    if (becomingActive && tempPassword) {
+      sendStaffReactivatedEmail({ to: teacher.email, name: teacher.name, schoolName, tempPassword, loginUrl }).catch(console.error)
+      sendWhatsappMessage({ schoolId: teacher.school_id, to: teacher.phone, templateName: 'staff_reactivated', recipientName: teacher.name,
+        templateParams: { staff_name: teacher.name, school_name: schoolName, login: teacher.email, temp_password: tempPassword, login_url: loginUrl } }).catch(console.error)
+    } else {
+      if (emailChanged) {
+        sendStaffContactChangedEmail({ to: teacher.email, name: teacher.name, schoolName, field: 'email', newValue: teacher.email }).catch(console.error)
+        if (existing.email && existing.email !== teacher.email) sendStaffContactChangedEmail({ to: existing.email, name: teacher.name, schoolName, field: 'email', newValue: teacher.email }).catch(console.error)
+      }
+      if (phoneChanged) {
+        for (const phone of new Set([teacher.phone, existing.phone].filter(Boolean))) {
+          sendWhatsappMessage({ schoolId: teacher.school_id, to: phone, templateName: 'contact_info_changed', recipientName: teacher.name,
+            templateParams: { name: teacher.name, school_name: schoolName, field: 'phone', new_value: teacher.phone } }).catch(console.error)
+        }
+      }
+    }
+    return NextResponse.json({ ...teacher, ...(tempPassword ? { temporary_credential: { email: teacher.email, temp_password: tempPassword } } : {}) })
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {})
+    if ((error as { code?: string }).code === UNIQUE_VIOLATION) return NextResponse.json({ error: 'Email or phone is already in use' }, { status: 409 })
+    console.error('[teachers/id PUT]', error)
+    return NextResponse.json({ error: 'Failed to update teacher' }, { status: 500 })
+  } finally {
+    client.release()
   }
 }
 
 // GET /api/teachers/[id]?consequences=true  → preview impact before removal
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    if (!await getPlatformSession() && !await requireSchoolAdmin()) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
     const { id } = await params
     const ownerRes = await pool.query('SELECT school_id FROM teachers WHERE id = $1', [id])
     if (ownerRes.rowCount === 0) return NextResponse.json({ error: 'Teacher not found' }, { status: 404 })
     const access = await requireFeeAccess(ownerRes.rows[0].school_id)
     if (!access) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    if (access.role !== 'platform_admin' && !(await schoolHasFeature(access.schoolId, 'staff'))) {
+      return NextResponse.json({ error: 'Staff Management is not enabled for this school', code: 'FEATURE_DISABLED' }, { status: 403 })
+    }
 
     const url = new URL(req.url)
 
@@ -282,6 +290,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
       // purposes, not be destroyed just because this table alone used DELETE.
       await client.query('UPDATE notifications SET recipient_teacher_id = NULL WHERE recipient_teacher_id = $1', [id])
       await client.query('UPDATE notifications SET sender_teacher_id = NULL WHERE sender_teacher_id = $1', [id])
+      await revokePortalSessions('teacher', Number(id), undefined, client)
 
       // Soft-delete: mark as removed (keeps record in DB)
       const result = await client.query(

@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import TestCalendar from '../../components/TestCalendar'
 import { motion, useMotionValue, useTransform, animate, useReducedMotion } from 'framer-motion'
 import { ChevronDown, Printer } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -14,7 +15,6 @@ type SubjectResult = {
   marks_obtained: number | null
   is_absent: boolean
   percentage: number | null
-  grade: string | null
   pass: boolean | null
 }
 
@@ -29,7 +29,6 @@ type ExamResult = {
   total_obtained: number | null
   total_max: number
   percentage: number | null
-  grade: string | null
   pass: boolean | null
   parent_acknowledged: boolean
   parent_ack_name: string | null
@@ -90,6 +89,7 @@ const EXAM_TYPE_LABELS: Record<string, string> = {
 }
 
 export default function StudentMarks({ studentId, schoolId, classId }: Props) {
+  const [tab, setTab] = useState<'schedule' | 'results'>('schedule')
   const [exams, setExams] = useState<ExamResult[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -116,41 +116,47 @@ export default function StudentMarks({ studentId, schoolId, classId }: Props) {
     }
   }
 
-  if (loading) {
-    return (
-      <div className="space-y-6" role="status" aria-live="polite" aria-busy="true">
-        <span className="sr-only">Preparing your released results…</span>
-        <Skeleton className="h-28 rounded-[22px]" />
-        <Skeleton className="h-56 rounded-[22px]" />
-        {[1, 2].map(i => <Skeleton key={i} className="h-20 rounded-[14px]" />)}
-      </div>
-    )
-  }
-
-  if (error) {
-    return (
-      <div className="space-y-6">
-        <StudentPageIntro {...PAGE_INTRO} />
-        <StudentAlert onRetry={fetchExams}>We couldn’t load your released results. {error}</StudentAlert>
-      </div>
-    )
-  }
-
-  if (exams.length === 0) {
-    return (
-      <div className="space-y-6">
-        <StudentPageIntro {...PAGE_INTRO} />
-        <StudentEmptyState sticker="hourglass" tone="yellow" title="No released results yet" description="Your exam results will appear here after your school releases them." />
-      </div>
-    )
-  }
-
-  const latestExam = exams[0]
-  const latestTone: Tone = latestExam.pass === true ? 'mint' : latestExam.pass === false ? 'orange' : 'paper'
-
   return (
-    <div className="space-y-10">
-      <StudentPageIntro {...PAGE_INTRO} />
+    <div className="space-y-6">
+      <div className="flex gap-2" data-testid="student-exams-tabs">
+        {([
+          { key: 'schedule', label: 'Upcoming Exams' },
+          { key: 'results',  label: 'Results' },
+        ] as const).map(({ key, label }) => (
+          <button key={key} onClick={() => setTab(key)} data-testid={`student-exam-tab-${key}`}
+            className={`px-4 py-2 rounded-xl text-sm font-semibold transition-colors ${tab === key ? 'bg-blue-600 text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'schedule' && (
+        <TestCalendar mode="student" schoolId={schoolId} studentId={studentId} />
+      )}
+
+      {tab === 'results' && (loading ? (
+        <div className="space-y-6" role="status" aria-live="polite" aria-busy="true">
+          <span className="sr-only">Preparing your released results…</span>
+          <Skeleton className="h-28 rounded-[22px]" />
+          <Skeleton className="h-56 rounded-[22px]" />
+          {[1, 2].map(i => <Skeleton key={i} className="h-20 rounded-[14px]" />)}
+        </div>
+      ) : error ? (
+        <div className="space-y-6">
+          <StudentPageIntro {...PAGE_INTRO} />
+          <StudentAlert onRetry={fetchExams}>We couldn’t load your released results. {error}</StudentAlert>
+        </div>
+      ) : exams.length === 0 ? (
+        <div className="space-y-6">
+          <StudentPageIntro {...PAGE_INTRO} />
+          <StudentEmptyState sticker="hourglass" tone="yellow" title="No released results yet" description="Your exam results will appear here after your school releases them." />
+        </div>
+      ) : (() => {
+        const latestExam = exams[0]
+        const latestTone: Tone = latestExam.pass === true ? 'mint' : latestExam.pass === false ? 'orange' : 'paper'
+        return (
+        <div className="space-y-10">
+          <StudentPageIntro {...PAGE_INTRO} />
 
       {latestExam.percentage !== null && (
         <motion.section
@@ -175,7 +181,7 @@ export default function StudentMarks({ studentId, schoolId, classId }: Props) {
               <div className="sb-score-badge">
                 <span>
                   <strong><CountUpPercent value={latestExam.percentage} />%</strong>
-                  <span className="mt-1 block text-xs font-extrabold">{latestExam.grade} · {latestExam.pass ? 'PASS' : 'FAIL'}</span>
+                  <span className="mt-1 block text-xs font-extrabold">{latestExam.pass ? 'PASS' : 'FAIL'}</span>
                 </span>
               </div>
               <button onClick={() => setScoreCardExam(latestExam)} data-testid="view-score-card" className="sb-btn" data-variant="dark">
@@ -201,7 +207,7 @@ export default function StudentMarks({ studentId, schoolId, classId }: Props) {
             className="sb-index-card" data-testid={`exam-card-${exam.exam_id}`}>
             <button aria-expanded={expanded === exam.exam_id} onClick={() => setExpanded(expanded === exam.exam_id ? null : exam.exam_id)}>
               <span className="flex min-w-0 items-center gap-3">
-                <span className="sb-grade-dot" data-tone={passTone(exam.pass)}>{exam.grade || '—'}</span>
+                <span className="sb-grade-dot" data-tone={passTone(exam.pass)}>{exam.pass === null ? '—' : exam.pass ? '✓' : '✗'}</span>
                 <span className="min-w-0">
                   <span className="block truncate text-[15px] font-extrabold">{exam.exam_name}</span>
                   <span className="block text-xs font-semibold text-[#6b604f]">{EXAM_TYPE_LABELS[exam.exam_type] || exam.exam_type} · {fmtDate(exam.exam_date)}</span>
@@ -232,7 +238,7 @@ export default function StudentMarks({ studentId, schoolId, classId }: Props) {
                       </span>
                       <span className="flex items-center gap-2 text-right">
                         <span className="text-sm font-extrabold tabular-nums">{sub.is_absent ? '—' : sub.marks_obtained !== null ? `${sub.marks_obtained}/${sub.max_marks}` : '—'}</span>
-                        {sub.grade && <span className="sb-chip" data-tone={passTone(sub.pass)}>{sub.grade}</span>}
+                        {sub.pass !== null && <span className="sb-chip" data-tone={passTone(sub.pass)}>{sub.pass ? 'Pass' : 'Fail'}</span>}
                       </span>
                     </li>
                   ))}
@@ -242,7 +248,7 @@ export default function StudentMarks({ studentId, schoolId, classId }: Props) {
                     <span className="text-sm font-extrabold uppercase tracking-[.08em]">Total</span>
                     <span className="flex items-center gap-3 font-extrabold tabular-nums">
                       {exam.total_obtained}/{exam.total_max} · {exam.percentage}%
-                      {exam.grade && <span className="sb-chip" data-tone={passTone(exam.pass)}>{exam.grade}</span>}
+                      {exam.pass !== null && <span className="sb-chip" data-tone={passTone(exam.pass)}>{exam.pass ? 'Pass' : 'Fail'}</span>}
                     </span>
                   </div>
                 )}
@@ -268,6 +274,9 @@ export default function StudentMarks({ studentId, schoolId, classId }: Props) {
       </section>
 
       {scoreCardExam && <ScoreCardModal exam={scoreCardExam} onClose={() => setScoreCardExam(null)} />}
+        </div>
+        )
+      })())}
     </div>
   )
 }
@@ -287,7 +296,6 @@ function ScoreCardModal({ exam, onClose }: { exam: ExamResult; onClose: () => vo
           <DialogDescription className="text-sm text-white/70">{EXAM_TYPE_LABELS[exam.exam_type] || exam.exam_type} · {fmtDate(exam.exam_date)}</DialogDescription>
           <div className="mt-5 flex flex-wrap gap-3">
             <span className="sb-note px-4 py-2" data-tone="yellow" style={{ '--tilt': '-3deg' } as React.CSSProperties}><span className="sb-display block text-3xl">{exam.percentage}%</span><span className="text-[11px] font-extrabold uppercase">Overall</span></span>
-            <span className="sb-note px-4 py-2" data-tone="blue" style={{ '--tilt': '2deg' } as React.CSSProperties}><span className="sb-display block text-3xl">{exam.grade}</span><span className="text-[11px] font-extrabold uppercase">Grade</span></span>
             <span className="sb-note px-4 py-2" data-tone={passTone(exam.pass)} style={{ '--tilt': '-1.5deg' } as React.CSSProperties}><span className="sb-display block text-3xl">{exam.pass ? 'PASS' : 'FAIL'}</span><span className="text-[11px] font-extrabold uppercase">Result</span></span>
           </div>
         </DialogHeader>
@@ -298,7 +306,7 @@ function ScoreCardModal({ exam, onClose }: { exam: ExamResult; onClose: () => vo
               <span className="truncate text-sm font-extrabold">{sub.subject_name}</span>
               <span className="flex items-center gap-2 text-sm font-extrabold tabular-nums">
                 {sub.is_absent ? 'Absent' : sub.marks_obtained !== null ? `${sub.marks_obtained}/${sub.max_marks}` : '—'}
-                {sub.grade && <span className="sb-chip" data-tone={passTone(sub.pass)}>{sub.grade}</span>}
+                {sub.pass !== null && <span className="sb-chip" data-tone={passTone(sub.pass)}>{sub.pass ? 'Pass' : 'Fail'}</span>}
               </span>
             </div>
           ))}

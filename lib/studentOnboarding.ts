@@ -1,6 +1,7 @@
 import { PoolClient } from 'pg'
+import { randomBytes } from 'crypto'
 import pool from './db'
-import { hashPassword, generateTempPassword } from './auth'
+import { hashPortalPassword, generateTempPassword } from './auth'
 import { sendStudentWelcomeEmail, sendParentWelcomeEmail, sendChildCredentialsToParentEmail } from './email'
 import { sendWhatsappMessage } from './whatsapp'
 
@@ -10,8 +11,10 @@ import { sendWhatsappMessage } from './whatsapp'
 // explicit roll_number: bulk import, single-add, and the backfill flow.
 export function generateStudentId(schoolName: string): string {
   const slug = schoolName.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 10)
-  const num = Math.floor(10000 + Math.random() * 90000)
-  return `wlyl-stu-${slug}-${num}`
+  // 48 bits of cryptographic randomness plus the database collision guard.
+  // The former five-digit Math.random suffix had only 90,000 possibilities.
+  const suffix = randomBytes(6).toString('hex')
+  return `wlyl-stu-${slug}-${suffix}`
 }
 
 export type ParentInfo = {
@@ -126,7 +129,7 @@ export async function backfillPortalCredentials({
 
       if (wantStudent) {
         studentTempPassword = generateTempPassword(8)
-        const passwordHash = await hashPassword(studentTempPassword)
+        const passwordHash = await hashPortalPassword(studentTempPassword)
         await client.query(`UPDATE students SET password_hash = $1 WHERE id = $2`, [passwordHash, student.id])
 
         studentCredentials.push({
@@ -179,7 +182,7 @@ export async function backfillPortalCredentials({
         let parentHash: string | null = null
         if (wantParent && isNewLookup) {
           parentTempPassword = generateTempPassword(10)
-          parentHash = await hashPassword(parentTempPassword)
+          parentHash = await hashPortalPassword(parentTempPassword)
         }
 
         const match = await findOrCreateParent(

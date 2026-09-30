@@ -18,7 +18,7 @@ export default function StudentChangePasswordPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (newPw !== confirm) { setError('Passwords do not match'); return }
-    if (newPw.length < 6)  { setError('Password must be at least 6 characters'); return }
+    if (newPw.length < 8)  { setError('Password must be at least 8 characters'); return }
     setError(''); setLoading(true)
     try {
       const res = await fetch('/api/student/auth/change-password', {
@@ -62,7 +62,7 @@ export default function StudentChangePasswordPage() {
           label="New Password"
           value={newPw}
           onChange={setNewPw}
-          placeholder="At least 6 characters"
+          placeholder="At least 8 characters"
           ring={theme.ring}
           autoComplete="new-password"
         />

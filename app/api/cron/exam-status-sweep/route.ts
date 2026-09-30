@@ -28,11 +28,13 @@ export async function POST(req: NextRequest) {
 
 async function run(req: NextRequest) {
   const cronSecret = process.env.CRON_SECRET
-  if (cronSecret) {
-    const auth = req.headers.get('authorization') ?? ''
-    if (auth.replace('Bearer ', '') !== cronSecret) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
+  if (!cronSecret) {
+    console.error('[cron/exam-status-sweep] CRON_SECRET is not configured')
+    return NextResponse.json({ error: 'Cron is not configured' }, { status: 503 })
+  }
+  const auth = req.headers.get('authorization') ?? ''
+  if (auth !== `Bearer ${cronSecret}`) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
   try {

@@ -52,8 +52,8 @@ export default function SmartSnapshot({ teacher, schoolId, onNavigate, onViewCla
   const [loading, setLoading] = useState(true)
 
   // Class health state — only fetched for class teachers
-  const [classHealthLoading, setClassHealthLoading] = useState(false)
-  const [classHealth, setClassHealth] = useState<{
+  const [classHealthLoading] = useState(false)
+  const [classHealth] = useState<{
     total_students: number
     attendance_rate: number | null
     task_completion_rate: number | null
@@ -74,15 +74,16 @@ export default function SmartSnapshot({ teacher, schoolId, onNavigate, onViewCla
 
   // Class health endpoint not available in wlylV1 — section stays hidden
 
-  const isClassTeacher = !!(teacher.class_teacher_grade && teacher.class_teacher_section)
+  const ownClasses = classes.filter(c => c.class_teacher_id === teacher.id)
+  const primaryOwnClass = ownClasses[0] ?? null
+  const isClassTeacher = ownClasses.length > 0
 
   // Build My Classes list
   const classSet = new Map<string, { grade: string; section: string; subjects: string[]; classInfo: ClassInfo | null }>()
-  if (isClassTeacher) {
-    const key = `${teacher.class_teacher_grade}-${teacher.class_teacher_section}`
-    const info = classes.find(c => c.grade === teacher.class_teacher_grade && c.section === teacher.class_teacher_section) || null
-    classSet.set(key, { grade: teacher.class_teacher_grade!, section: teacher.class_teacher_section!, subjects: [], classInfo: info })
-  }
+  ownClasses.forEach(info => {
+    const key = `${info.grade}-${info.section}`
+    classSet.set(key, { grade: info.grade, section: info.section, subjects: [], classInfo: info })
+  })
   // Class Management assignments: which (class, subject) pairs this teacher is assigned to.
   classSubjects.forEach(a => {
     if (!a.grade || !a.section) return
@@ -106,7 +107,7 @@ export default function SmartSnapshot({ teacher, schoolId, onNavigate, onViewCla
         <h1 className="text-2xl font-semibold leading-tight tracking-tight text-[#202a25] sm:text-3xl">Welcome, {teacher.name.split(' ')[0]}.</h1>
         <p className="mt-2 max-w-xl text-sm leading-relaxed text-[#647068]">Open a class to review its students, attendance, and learning progress.</p>
         <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-[#647068]">
-          <span className="font-medium text-[#235b46]">{isClassTeacher ? `Class teacher · Grade ${teacher.class_teacher_grade}, Section ${teacher.class_teacher_section}` : 'Subject teacher'}</span>
+          <span className="font-medium text-[#235b46]">{isClassTeacher ? `Class teacher · ${ownClasses.length} class${ownClasses.length === 1 ? '' : 'es'}` : 'Subject teacher'}</span>
           {teacher.subject && <span>{teacher.subject}</span>}
           {teacher.department && <span>{teacher.department}</span>}
           {teacher.employee_id && <span>Staff ID {teacher.employee_id}</span>}
@@ -118,7 +119,7 @@ export default function SmartSnapshot({ teacher, schoolId, onNavigate, onViewCla
         <div>
           <div className="flex items-center justify-between mb-3">
             <h3 className="text-base font-bold text-gray-900">
-              Class Health — {teacher.class_teacher_grade}-{teacher.class_teacher_section}
+              Class Health — {primaryOwnClass?.grade}-{primaryOwnClass?.section}
             </h3>
             <button onClick={() => onNavigate('doubts')} className="text-xs text-blue-500 hover:underline">view doubts →</button>
           </div>
@@ -216,9 +217,7 @@ export default function SmartSnapshot({ teacher, schoolId, onNavigate, onViewCla
               <span>Class</span><span>Your subjects</span><span>Your role</span><span />
             </div>
             {myClasses.map(cls => {
-              const isClassTeacherFor = isClassTeacher &&
-                cls.grade === teacher.class_teacher_grade &&
-                cls.section === teacher.class_teacher_section
+              const isClassTeacherFor = cls.classInfo?.class_teacher_id === teacher.id
               return (
                 <button key={`${cls.grade}-${cls.section}`} disabled={!cls.classInfo}
                   onClick={() => {

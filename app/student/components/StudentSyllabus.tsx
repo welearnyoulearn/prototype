@@ -59,26 +59,51 @@ type Props = {
 export default function StudentSyllabus({ schoolId, classId, grade }: Props) {
   const [subjects, setSubjects] = useState<Subject[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [retryKey, setRetryKey] = useState(0)
   const [activeSubject, setActiveSubject] = useState('')
   // Which of this class's own Semester 1/2/... splits is showing — from the
   // teacher's Setup screen.
   const [activeClassSemester, setActiveClassSemester] = useState('')
   const [activeTopic, setActiveTopic] = useState<Topic | null>(null)
   const [materials, setMaterials] = useState<Material[]>([])
+  // subject name -> who teaches it (class_subjects, via /api/student/subjects) — a
+  // separate assignment from the syllabus/topics data above, so it's fetched separately
+  // and just looked up by name when rendering each subject's header.
+  const [teacherOf, setTeacherOf] = useState<Record<string, string>>({})
   const reduceMotion = useReducedMotion()
 
   useEffect(() => {
-    setLoading(true)
-    fetch(`/api/syllabus?school_id=${schoolId}&class_id=${classId}`)
-      .then(r => r.json())
+    const controller = new AbortController()
+    fetch(`/api/syllabus?school_id=${schoolId}&class_id=${classId}`, { signal: controller.signal })
+      .then(async r => {
+        const data = await r.json()
+        if (!r.ok) throw new Error(data.error || 'Failed to load syllabus')
+        return data
+      })
       .then(d => {
         const subs: Subject[] = d.subjects || []
         setSubjects(subs)
         setActiveSubject(prev => (prev && subs.some(s => s.subject === prev)) ? prev : (subs[0]?.subject ?? ''))
         setLoading(false)
       })
-      .catch(() => setLoading(false))
-  }, [schoolId, classId])
+      .catch(err => {
+        if (err instanceof DOMException && err.name === 'AbortError') return
+        setError(err instanceof Error ? err.message : 'Failed to load syllabus')
+        setLoading(false)
+      })
+    return () => controller.abort()
+  }, [schoolId, classId, retryKey])
+
+  useEffect(() => {
+    fetch('/api/student/subjects')
+      .then(r => r.json())
+      .then(d => {
+        const rows: { subject_name: string; teacher_name: string | null }[] = Array.isArray(d.subjects) ? d.subjects : []
+        setTeacherOf(Object.fromEntries(rows.filter(r => r.teacher_name).map(r => [r.subject_name, r.teacher_name as string])))
+      })
+      .catch(() => setTeacherOf({}))
+  }, [])
 
   // Textbooks uploaded once per subject on the platform side — students only
   // ever see the 'textbook' type, never handbooks.
@@ -100,6 +125,15 @@ export default function StudentSyllabus({ schoolId, classId, grade }: Props) {
           {[1, 2, 3].map(i => <Skeleton key={i} className="h-12 w-32 rounded-t-2xl" />)}
         </div>
         <Skeleton className="h-80 rounded-[22px]" />
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div role="alert" className="mx-auto max-w-4xl rounded-2xl border border-red-200 bg-white p-8 text-center">
+        <p className="text-sm text-red-600">{error}</p>
+        <button type="button" onClick={() => { setLoading(true); setError(''); setRetryKey(k => k + 1) }} className="mt-4 rounded-lg border px-4 py-2 text-sm">Try again</button>
       </div>
     )
   }
@@ -165,6 +199,9 @@ export default function StudentSyllabus({ schoolId, classId, grade }: Props) {
             <Sticker name={subjectSticker(subject.subject)} size="hero" tilt={-8} className="hidden sm:inline-block" />
             <div className="min-w-0">
               <h2 className="sb-display truncate text-3xl sm:text-4xl">{subject.subject}</h2>
+              {teacherOf[subject.subject] && (
+                <span className="sb-chip mt-2" data-tone="paper" data-testid="syllabus-subject-teacher">Taught by {teacherOf[subject.subject]}</span>
+              )}
               <div className="mt-3 max-w-md"><StudentProgressTrack value={subject.completion_pct} tone={meterTone} label={`${subject.covered} of ${subject.total} topics taught`} /></div>
             </div>
             <div className="sb-score-badge" data-testid="syllabus-coverage">

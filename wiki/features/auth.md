@@ -42,7 +42,7 @@ each API route re-checks the session in Node (lib/auth.ts)
 
 ## Known gaps
 
-- Several state-changing API routes have no session check — see `docs/KNOWN_ISSUES.md` (#131) and the architecture dossier §12.1.
+- Every protected API checks the session on the server and plan features are enforced in `proxy.ts` (#253) — see the architecture dossier §12.1 and `docs/KNOWN_ISSUES.md` for what remains.
 - No 2FA or SSO. Two parallel teacher-auth route sets exist (`/api/teacher-auth/*`, `/api/teacher/auth/*`).
 
 ## Related

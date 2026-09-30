@@ -1,20 +1,30 @@
 import { NextRequest, NextResponse } from 'next/server'
-import pool from '@/lib/db'
-import { generateResetToken } from '@/lib/auth'
+import pool, { ensureDB } from '@/lib/db'
 import { sendPasswordResetEmail } from '@/lib/email'
 import { sendWhatsappMessage } from '@/lib/whatsapp'
+import { issueResetToken } from '@/lib/passwordReset'
+import { checkAuthRateLimit, RECOVERY_LIMIT } from '@/lib/authRateLimit'
 
 export async function POST(req: NextRequest) {
   try {
+    await ensureDB()
     const { rollNumber, email } = await req.json()
     if (!rollNumber && !email) return NextResponse.json({ success: true })
+    const recoveryId = String(rollNumber || email)
+    if (!await checkAuthRateLimit(req, 'student-recovery', recoveryId, RECOVERY_LIMIT)) return NextResponse.json({ success: true })
 
-    const q = rollNumber
-      ? `SELECT id, school_id, name, email, phone FROM students WHERE LOWER(roll_number) = LOWER($1) AND status = 'active' LIMIT 1`
-      : `SELECT id, school_id, name, email, phone FROM students WHERE LOWER(email) = LOWER($1) AND status = 'active' LIMIT 1`
+    const both = Boolean(rollNumber && email)
+    const q = both
+      ? `SELECT id, school_id, name, email, phone FROM students
+         WHERE LOWER(roll_number) = LOWER($1) AND LOWER(email) = LOWER($2) AND status = 'active'`
+      : rollNumber
+        ? `SELECT id, school_id, name, email, phone FROM students WHERE LOWER(roll_number) = LOWER($1) AND status = 'active'`
+        : `SELECT id, school_id, name, email, phone FROM students WHERE LOWER(email) = LOWER($1) AND status = 'active'`
 
-    const result = await pool.query(q, [rollNumber || email])
-    if (result.rows.length === 0) return NextResponse.json({ success: true })
+    const result = await pool.query(q, both ? [rollNumber, email] : [rollNumber || email])
+    // Never choose an arbitrary account when legacy data contains a collision.
+    // Supplying both system id and registered email safely disambiguates it.
+    if (result.rows.length !== 1) return NextResponse.json({ success: true })
 
     const student = result.rows[0]
     // A reset link is only useful if there's somewhere to send it — but that
@@ -22,13 +32,7 @@ export async function POST(req: NextRequest) {
     // file can still get the link via WhatsApp; only bail if neither exists.
     if (!student.email && !student.phone) return NextResponse.json({ success: true })
 
-    const token = generateResetToken()
-    const expiresAt = new Date(Date.now() + 60 * 60 * 1000)
-
-    await pool.query(
-      `INSERT INTO password_reset_tokens (token, expires_at, role, reference_id) VALUES ($1, $2, 'student', $3)`,
-      [token, expiresAt, student.id]
-    )
+    const token = await issueResetToken('student', student.id)
 
     const resetUrl = `${process.env.APP_URL || 'http://localhost:3000'}/student/reset-password?token=${token}`
     if (student.email) {

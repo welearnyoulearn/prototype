@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
+import { requirePlatformAdmin } from '@/lib/auth'
 
 // GET /api/platform/subjects/[id]/full
 //
@@ -13,6 +14,7 @@ export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  if (!await requirePlatformAdmin()) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   const { id } = await params
   try {
     const { rows: chapters } = await pool.query(

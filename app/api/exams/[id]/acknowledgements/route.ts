@@ -49,8 +49,11 @@ export async function GET(
         WHERE exam_id = $1 AND student_id = s.id
       ) nudge ON TRUE
       WHERE s.school_id = $2 AND s.grade = $3 AND s.section = $4 AND s.status = 'active'
+        AND ($5 = 'all' OR EXISTS (
+          SELECT 1 FROM exam_applicable_students eas WHERE eas.exam_id = $1 AND eas.student_id = s.id
+        ))
       ORDER BY s.roll_number NULLS LAST, s.name
-    `, [exam_id, actor.schoolId, exam.grade, exam.section])
+    `, [exam_id, actor.schoolId, exam.grade, exam.section, exam.student_scope])
 
     const acknowledged = rows.filter(r => r.acknowledged_at).length
 

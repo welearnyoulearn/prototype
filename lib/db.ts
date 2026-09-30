@@ -29,6 +29,7 @@ const poolConfig = (process.env.PGHOST)
       user:     process.env.PGUSER,
       password: process.env.PGPASSWORD,
       ssl: { rejectUnauthorized: false },
+      options: '-c timezone=Asia/Kolkata',
       max: isVercel ? 1 : 10,
       idleTimeoutMillis: 10000,
       connectionTimeoutMillis: 10000,
@@ -39,6 +40,7 @@ const poolConfig = (process.env.PGHOST)
       idleTimeoutMillis: isVercel ? 10000 : 30000,
       connectionTimeoutMillis: isVercel ? 10000 : 5000,
       ssl: isLocalDb ? false : { rejectUnauthorized: false },
+      options: '-c timezone=Asia/Kolkata',
     }
 
 const pool = new Pool(poolConfig)
@@ -53,8 +55,9 @@ const pool = new Pool(poolConfig)
 // the DATE-column half of this exact IST/UTC mismatch once (see the
 // setTypeParser comment above) — this closes the other half, at the
 // connection level, so every existing and future CURRENT_DATE/NOW() query is
-// correct without having to patch each one individually.
-pool.on('connect', client => { client.query(`SET TIME ZONE 'Asia/Kolkata'`).catch(() => {}) })
+// correct without having to patch each one individually. Supplying it in the
+// startup options also avoids racing a connect-event query with the first
+// application query on that client.
 
 export default pool
 
@@ -84,7 +87,7 @@ const BOOTSTRAP_MARKER_KEY   = 'initial_schema_bootstrap'
 // silently never runs anywhere, and you will chase a "column does not exist" 500
 // that reproduces on production but never locally against a fresh DB.
 // Adding a migration statement and bumping this number is ONE change, not two.
-const SCHEMA_VERSION = 43
+const SCHEMA_VERSION = 50
 
 // Records the schema level this build finished applying, on the same row as the
 // bootstrap marker (no extra row, no extra round-trip to read it back).
@@ -3188,6 +3191,72 @@ async function runIncrementalMigrations() {
     )
   `).catch(() => {})
 
+  // ── Exam Management v3 — schedule detail, targeting, cancellation, reminders ──
+  // Extends exam_records with the fields the v2 schema never carried (time,
+  // room, syllabus, instructions, an invigilator distinct from the marks-entry
+  // subject teacher, academic year) and adds a real 'cancelled' terminal
+  // status alongside hard DELETE (cancel keeps history + notifies; delete
+  // removes the row outright and stays restricted to pre-review exams).
+  // student_scope + exam_applicable_students let an exam target specific
+  // students instead of always "every active student in the class" — default
+  // 'all' preserves every existing exam's behavior unchanged.
+  await pool.query(`ALTER TABLE exam_records ADD COLUMN IF NOT EXISTS academic_year VARCHAR(20)`).catch(() => {})
+  await pool.query(`ALTER TABLE exam_records ADD COLUMN IF NOT EXISTS start_time TIME`).catch(() => {})
+  await pool.query(`ALTER TABLE exam_records ADD COLUMN IF NOT EXISTS end_time TIME`).catch(() => {})
+  await pool.query(`ALTER TABLE exam_records ADD COLUMN IF NOT EXISTS duration_minutes INTEGER`).catch(() => {})
+  await pool.query(`ALTER TABLE exam_records ADD COLUMN IF NOT EXISTS room VARCHAR(100)`).catch(() => {})
+  await pool.query(`ALTER TABLE exam_records ADD COLUMN IF NOT EXISTS syllabus TEXT`).catch(() => {})
+  await pool.query(`ALTER TABLE exam_records ADD COLUMN IF NOT EXISTS instructions TEXT`).catch(() => {})
+  await pool.query(`ALTER TABLE exam_records ADD COLUMN IF NOT EXISTS assigned_teacher_id INTEGER REFERENCES teachers(id) ON DELETE SET NULL`).catch(() => {})
+  await pool.query(`ALTER TABLE exam_records ADD COLUMN IF NOT EXISTS student_scope VARCHAR(20) NOT NULL DEFAULT 'all'`).catch(() => {})
+  await pool.query(`ALTER TABLE exam_records ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMPTZ`).catch(() => {})
+  await pool.query(`ALTER TABLE exam_records ADD COLUMN IF NOT EXISTS cancelled_by_admin_id INTEGER REFERENCES users(id) ON DELETE SET NULL`).catch(() => {})
+  await pool.query(`ALTER TABLE exam_records ADD COLUMN IF NOT EXISTS cancellation_reason TEXT`).catch(() => {})
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS exam_applicable_students (
+      id SERIAL PRIMARY KEY,
+      exam_id INTEGER NOT NULL REFERENCES exam_records(id) ON DELETE CASCADE,
+      student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+      UNIQUE(exam_id, student_id)
+    )
+  `).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_exam_applicable_students_exam ON exam_applicable_students(exam_id)`).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_exam_applicable_students_student ON exam_applicable_students(student_id)`).catch(() => {})
+
+  // Dedup log for the 7-day / 1-day / exam-day reminder cron — without this,
+  // a cron re-run on the same day (a manual trigger, a retry after a
+  // transient failure) would re-send the same reminder to every recipient.
+  // One row per (exam_id, reminder_type); the cron INSERTs before it sends
+  // and skips any exam already logged for that reminder type.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS exam_reminders_sent (
+      id SERIAL PRIMARY KEY,
+      exam_id INTEGER NOT NULL REFERENCES exam_records(id) ON DELETE CASCADE,
+      reminder_type VARCHAR(20) NOT NULL,
+      sent_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE(exam_id, reminder_type)
+    )
+  `).catch(() => {})
+
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_exam_records_date_time ON exam_records(school_id, exam_date, start_time, end_time) WHERE status != 'cancelled'`).catch(() => {})
+
+  // Per-school reminder toggles (spec section 11) — one row per school,
+  // defaults all-on so existing schools keep getting every reminder they
+  // already implicitly got, until an admin turns one off.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS exam_notification_settings (
+      school_id INTEGER PRIMARY KEY REFERENCES schools(id) ON DELETE CASCADE,
+      remind_7_day BOOLEAN NOT NULL DEFAULT TRUE,
+      remind_1_day BOOLEAN NOT NULL DEFAULT TRUE,
+      remind_exam_day BOOLEAN NOT NULL DEFAULT TRUE,
+      notify_schedule_change BOOLEAN NOT NULL DEFAULT TRUE,
+      notify_cancelled BOOLEAN NOT NULL DEFAULT TRUE,
+      notify_marks_published BOOLEAN NOT NULL DEFAULT TRUE,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `).catch(() => {})
+
   // ── Fee tables that were previously only self-healed inline in their own
   // route files (categories/PUT, day-close, payments/cancel, structures/POST),
   // each hit lazily via its own local `CREATE TABLE IF NOT EXISTS` with no
@@ -3415,6 +3484,70 @@ async function runIncrementalMigrations() {
   `)
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_user_sessions_user ON user_sessions(user_id) WHERE revoked_at IS NULL`)
 
+  // Revocable sessions for teacher, student and parent portals.  A generic
+  // actor key is used because those identities live in three separate tables.
+  // The JWT only carries this row's UUID; deleting a cookie is therefore not
+  // the security boundary and copied cookies stop working after revocation.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS portal_sessions (
+      id UUID PRIMARY KEY,
+      actor_type VARCHAR(10) NOT NULL CHECK (actor_type IN ('teacher', 'student', 'parent')),
+      actor_id INTEGER NOT NULL,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      expires_at TIMESTAMPTZ NOT NULL,
+      revoked_at TIMESTAMPTZ,
+      user_agent VARCHAR(300)
+    )
+  `)
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_portal_sessions_actor ON portal_sessions(actor_type, actor_id) WHERE revoked_at IS NULL`)
+
+  // Shared, database-backed throttling works across serverless instances. Keys
+  // are SHA-256 digests, so email addresses, phone numbers and IPs are not kept
+  // in this operational table.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS auth_rate_limits (
+      key_hash VARCHAR(64) PRIMARY KEY,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      window_started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      blocked_until TIMESTAMPTZ,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `)
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_auth_rate_limits_cleanup ON auth_rate_limits(updated_at)`)
+
+  // roll_number is the globally unique WLYL student login id (not the class
+  // roll number). Legacy rows may already contain a collision, so a normal
+  // unique index cannot always be installed safely. This serialized trigger
+  // rejects every future duplicate without rewriting an existing student's
+  // login behind their back.
+  await pool.query(`
+    CREATE OR REPLACE FUNCTION enforce_unique_student_login_id()
+    RETURNS trigger AS $$
+    BEGIN
+      IF NEW.roll_number IS NULL OR BTRIM(NEW.roll_number) = '' THEN
+        RETURN NEW;
+      END IF;
+      PERFORM pg_advisory_xact_lock(hashtext(LOWER(NEW.roll_number)));
+      IF EXISTS (
+        SELECT 1 FROM students
+         WHERE LOWER(roll_number) = LOWER(NEW.roll_number)
+           AND id IS DISTINCT FROM NEW.id
+      ) THEN
+        RAISE EXCEPTION 'student login id already exists' USING ERRCODE = '23505';
+      END IF;
+      RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql
+  `)
+  await pool.query(`DROP TRIGGER IF EXISTS trg_unique_student_login_id ON students`)
+  await pool.query(`
+    CREATE TRIGGER trg_unique_student_login_id
+    BEFORE INSERT OR UPDATE OF roll_number ON students
+    FOR EACH ROW EXECUTE FUNCTION enforce_unique_student_login_id()
+  `)
+
   // School ID is no longer a login credential, so every onboarding admin needs an email.
   // Older schools were created with the school's contact email optional — backfill the
   // owner account from it where that is unambiguous (skips addresses already used by
@@ -3512,4 +3645,91 @@ async function runIncrementalMigrations() {
   `)
   // 0 = Sunday … 6 = Saturday. Weekly-off days are not working days (no marking, not counted).
   await pool.query(`ALTER TABLE schools ADD COLUMN IF NOT EXISTS weekly_off_days SMALLINT[] NOT NULL DEFAULT '{0}'`)
+
+  // The onboarding admin (school_code IS NOT NULL) is the school's recovery path — the
+  // only account /api/platform/schools/reset-password recovers. Marked explicitly so it
+  // can never be deactivated, even by another school_admin, regardless of what happens
+  // to school_code later.
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_primary_admin BOOLEAN NOT NULL DEFAULT FALSE`)
+  await pool.query(`
+    UPDATE users SET is_primary_admin = TRUE
+    WHERE role = 'school_admin' AND school_code IS NOT NULL AND is_primary_admin = FALSE
+  `)
+
+  // Per-subject pass mark — exam_subjects already had max_marks (defaulted
+  // to 100 at creation, editable via PATCH /api/exams/[id]/subjects/[subjectId]).
+  // pass_marks stays NULL until a teacher explicitly configures it right
+  // before entering marks for that subject; NULL means "not configured yet"
+  // and callers fall back to exam_records.passing_pct (the old exam-wide
+  // percentage) so existing exams keep working unchanged.
+  await pool.query(`ALTER TABLE exam_subjects ADD COLUMN IF NOT EXISTS pass_marks INTEGER`)
+  await pool.query(`
+    DO $$ BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'exam_records_status_chk') THEN
+        ALTER TABLE exam_records ADD CONSTRAINT exam_records_status_chk
+          CHECK (status IN ('scheduled', 'collecting', 'teacher_reviewed', 'released', 'cancelled')) NOT VALID;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'exam_records_passing_pct_chk') THEN
+        ALTER TABLE exam_records ADD CONSTRAINT exam_records_passing_pct_chk
+          CHECK (passing_pct BETWEEN 0 AND 100) NOT VALID;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'exam_records_student_scope_chk') THEN
+        ALTER TABLE exam_records ADD CONSTRAINT exam_records_student_scope_chk
+          CHECK (student_scope IN ('all', 'specific')) NOT VALID;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'exam_records_duration_chk') THEN
+        ALTER TABLE exam_records ADD CONSTRAINT exam_records_duration_chk
+          CHECK (duration_minutes IS NULL OR duration_minutes BETWEEN 1 AND 1440) NOT VALID;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'exam_records_time_range_chk') THEN
+        ALTER TABLE exam_records ADD CONSTRAINT exam_records_time_range_chk
+          CHECK (start_time IS NULL OR end_time IS NULL OR end_time > start_time) NOT VALID;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'exam_subjects_marks_chk') THEN
+        ALTER TABLE exam_subjects ADD CONSTRAINT exam_subjects_marks_chk
+          CHECK (max_marks > 0 AND (pass_marks IS NULL OR pass_marks BETWEEN 0 AND max_marks)) NOT VALID;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'exam_subjects_status_chk') THEN
+        ALTER TABLE exam_subjects ADD CONSTRAINT exam_subjects_status_chk
+          CHECK (status IN ('pending', 'submitted')) NOT VALID;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'exam_marks_value_chk') THEN
+        ALTER TABLE exam_marks ADD CONSTRAINT exam_marks_value_chk
+          CHECK (marks_obtained IS NULL OR marks_obtained >= 0) NOT VALID;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'exam_marks_absence_chk') THEN
+        ALTER TABLE exam_marks ADD CONSTRAINT exam_marks_absence_chk
+          CHECK (NOT is_absent OR marks_obtained IS NULL) NOT VALID;
+      END IF;
+    END $$
+  `)
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_exam_applicable_students_student_exam ON exam_applicable_students(student_id, exam_id)`)
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_exam_marks_exam_student ON exam_marks(exam_id, student_id)`)
+  // A school or staff account must remain deletable after marks have been
+  // entered. The original FK used the implicit NO ACTION policy, leaving
+  // exam_marks as an unexpected blocker even though entered_by is nullable.
+  await pool.query(`
+    DO $$ BEGIN
+      IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'exam_marks_entered_by_fkey') THEN
+        ALTER TABLE exam_marks DROP CONSTRAINT exam_marks_entered_by_fkey;
+      END IF;
+      ALTER TABLE exam_marks ADD CONSTRAINT exam_marks_entered_by_fkey
+        FOREIGN KEY (entered_by) REFERENCES teachers(id) ON DELETE SET NULL;
+    END $$
+  `)
+
+  // Syllabus integrity hardening: reject invalid future progress values and
+  // retain the same chapter-weighted percentage in historical snapshots that
+  // the live analytics UI displays (including partial chapter completion).
+  await pool.query(`ALTER TABLE syllabus_coverage_snapshots ADD COLUMN IF NOT EXISTS weighted_coverage_pct NUMERIC(5,2)`)
+  await pool.query(`
+    DO $$ BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'school_topic_progress_status_chk') THEN
+        ALTER TABLE school_topic_progress ADD CONSTRAINT school_topic_progress_status_chk
+          CHECK (status IN ('pending', 'covered')) NOT VALID;
+      END IF;
+    END $$
+  `)
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_school_chapters_name_ci ON school_chapters(school_subject_id, LOWER(TRIM(chapter_name)))`)
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_school_topics_name_ci ON school_topics(school_chapter_id, LOWER(TRIM(topic_name)))`)
 }

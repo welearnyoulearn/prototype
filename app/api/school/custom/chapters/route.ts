@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
-import { requireSyllabusWriteAccess } from '@/lib/auth'
+import { requireFeeAccess } from '@/lib/auth'
 
 // Resolve the school_id that owns a school_chapters/school_subjects row, so
 // callers can be tenant-checked before any write — these routes only ever
@@ -32,7 +32,7 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: 'Chapter not found' }, { status: 404 })
       }
       const ownerSchoolId = await schoolIdForChapter(id)
-      if (!await requireSyllabusWriteAccess(ownerSchoolId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      if (!await requireFeeAccess(ownerSchoolId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
       // Allow editing of both custom and global board chapters (relaxation for school admins)
 
       const res = await pool.query(
@@ -49,7 +49,7 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: 'school_subject_id and chapter_name are required' }, { status: 400 })
       }
       const ownerSchoolId = await schoolIdForSubject(school_subject_id)
-      if (!await requireSyllabusWriteAccess(ownerSchoolId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      if (!await requireFeeAccess(ownerSchoolId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
       const res = await pool.query(
         `INSERT INTO school_chapters (school_subject_id, chapter_name, chapter_order, is_custom)
@@ -81,7 +81,7 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ error: 'Cannot delete global board-mandated chapters' }, { status: 403 })
     }
     const ownerSchoolId = await schoolIdForChapter(Number(id))
-    if (!await requireSyllabusWriteAccess(ownerSchoolId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    if (!await requireFeeAccess(ownerSchoolId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
     await pool.query('DELETE FROM school_chapters WHERE id = $1', [id])
     return NextResponse.json({ ok: true })

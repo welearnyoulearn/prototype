@@ -37,6 +37,7 @@ API routes these screens call (all exist):
 - `GET/PATCH/POST/PUT` /api/academic-years
 - `GET/POST` /api/classes
 - `POST` /api/notifications/nudge-teacher
+- `GET` /api/parent/subjects
 - `DELETE/GET/POST` /api/platform/subjects
 - `GET` /api/school/subjects
 - `POST` /api/school/subjects/copy-from-year
@@ -46,6 +47,7 @@ API routes these screens call (all exist):
 - `POST` /api/school/subjects/{}/resync
 - `POST` /api/school/subscribe
 - `DELETE/GET/PUT` /api/schools/{}
+- `GET` /api/student/subjects
 - `DELETE/GET/POST` /api/syllabus
 - `GET` /api/syllabus/analytics
 - `GET` /api/syllabus/analytics/trend

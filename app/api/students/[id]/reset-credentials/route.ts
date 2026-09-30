@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
-import { requireSchoolAdmin, generateTempPassword, hashPassword } from '@/lib/auth'
+import { requireSchoolAdmin, generateTempPassword, hashPassword, revokePortalSessions } from '@/lib/auth'
 import { sendStudentWelcomeEmail, sendChildCredentialsToParentEmail } from '@/lib/email'
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -36,6 +36,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     `UPDATE students SET password_hash = $1, password_changed = FALSE WHERE id = $2`,
     [passwordHash, studentId]
   )
+  await revokePortalSessions('student', studentId)
 
   const appUrl = process.env.APP_URL || 'http://localhost:3000'
 

@@ -1,24 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
-import { requireSyllabusWriteAccess, getTeacherSession } from '@/lib/auth'
-
-// Same reasoning as the chapter-delete route (app/api/syllabus/route.ts) —
-// deleting a custom topic cascades away its school_topic_progress history,
-// so it's scoped tighter than add/mark-covered: only the class's own
-// assigned teacher for that topic's subject, or the class teacher.
-async function assertAssignedTeacherForDelete(role: string, classId: string, subject: string): Promise<NextResponse | null> {
-  if (role !== 'teacher') return null
-  const session = await getTeacherSession()
-  if (!session) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-  const { rows: [cls] } = await pool.query('SELECT class_teacher_id FROM classes WHERE id = $1', [classId])
-  if (cls?.class_teacher_id === session.teacherId) return null
-  const { rows: [assignment] } = await pool.query(
-    'SELECT 1 FROM class_subjects WHERE class_id = $1 AND subject_name = $2 AND teacher_id = $3',
-    [classId, subject, session.teacherId]
-  )
-  if (assignment) return null
-  return NextResponse.json({ error: 'Only this class’s assigned teacher for this subject can delete custom content' }, { status: 403 })
-}
+import { canWriteSyllabusClass, requireSyllabusWriteAccess } from '@/lib/auth'
 
 // PATCH /api/syllabus/[id] — update status, target dates, delay reasons, topic details
 // Body: { school_id, class_id?, status?, covered_by?, topic_name?, topic_order?,
@@ -36,8 +18,9 @@ export async function PATCH(
     target_date, delay_reason,
   } = body
 
-  if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
-  if (!await requireSyllabusWriteAccess(school_id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  if (!school_id || !class_id) return NextResponse.json({ error: 'school_id and class_id required' }, { status: 400 })
+  const writeSession = await requireSyllabusWriteAccess(school_id)
+  if (!writeSession) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   try {
     const isUpdatingProgress = (
@@ -46,8 +29,45 @@ export async function PATCH(
       delay_reason !== undefined
     )
 
-    if (isUpdatingProgress && !class_id) {
-      return NextResponse.json({ error: 'class_id required to update topic progress status' }, { status: 400 })
+    if (status !== undefined && !['pending', 'covered'].includes(status)) {
+      return NextResponse.json({ error: 'status must be pending or covered' }, { status: 400 })
+    }
+    if (topic_name !== undefined && (typeof topic_name !== 'string' || !topic_name.trim() || topic_name.trim().length > 300)) {
+      return NextResponse.json({ error: 'topic_name must be 1-300 characters' }, { status: 400 })
+    }
+    if (topic_order !== undefined && (!Number.isInteger(topic_order) || topic_order < 0 || topic_order > 10000)) {
+      return NextResponse.json({ error: 'topic_order must be an integer between 0 and 10000' }, { status: 400 })
+    }
+    if (target_date !== undefined && target_date !== null && target_date !== '') {
+      const parsedDate = typeof target_date === 'string' ? new Date(`${target_date}T00:00:00Z`) : null
+      if (!parsedDate || !/^\d{4}-\d{2}-\d{2}$/.test(target_date) || Number.isNaN(parsedDate.getTime()) || parsedDate.toISOString().slice(0, 10) !== target_date) {
+        return NextResponse.json({ error: 'target_date must be a valid YYYY-MM-DD date' }, { status: 400 })
+      }
+    }
+    if (delay_reason !== undefined && delay_reason !== null && (typeof delay_reason !== 'string' || delay_reason.length > 2000)) {
+      return NextResponse.json({ error: 'delay_reason must be 2000 characters or fewer' }, { status: 400 })
+    }
+
+    // Resolve the target from the server. Never trust a caller-supplied school,
+    // class or subject when authorizing a topic mutation.
+    const { rows: [target] } = await pool.query(
+      `SELECT st.id, ss.school_id, ss.subject_name, ss.grade
+         FROM school_topics st
+         JOIN school_chapters sc ON sc.id = st.school_chapter_id
+         JOIN school_subjects ss ON ss.id = sc.school_subject_id
+        WHERE st.id = $1`,
+      [id],
+    )
+    if (!target) return NextResponse.json({ error: 'Topic not found' }, { status: 404 })
+    if (Number(target.school_id) !== Number(writeSession.schoolId)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
+    const { rows: [targetClass] } = await pool.query(
+      `SELECT grade FROM classes WHERE id = $1 AND school_id = $2 AND deleted_at IS NULL`,
+      [class_id, writeSession.schoolId],
+    )
+    if (!targetClass || targetClass.grade !== target.grade || !await canWriteSyllabusClass(writeSession, class_id, target.subject_name)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
     let progressResult = null
@@ -69,7 +89,19 @@ export async function PATCH(
       if (status !== undefined) {
         if (status === 'covered') {
           newCoveredDate = current.covered_date || new Date().toISOString().slice(0, 10)
-          newCoveredBy = covered_by !== undefined ? covered_by : (current.covered_by || null)
+          if (writeSession.role === 'teacher') {
+            newCoveredBy = writeSession.actorId ?? null
+          } else if (covered_by !== undefined && covered_by !== null) {
+            const { rows: [validTeacher] } = await pool.query(
+              `SELECT id FROM teachers
+                WHERE id = $1 AND school_id = $2 AND status = 'active' AND removed_at IS NULL`,
+              [covered_by, writeSession.schoolId],
+            )
+            if (!validTeacher) return NextResponse.json({ error: 'covered_by must be an active teacher in this school' }, { status: 400 })
+            newCoveredBy = validTeacher.id
+          } else {
+            newCoveredBy = current.covered_by || null
+          }
         } else {
           newCoveredDate = null
           newCoveredBy = null
@@ -106,15 +138,6 @@ export async function PATCH(
     const isUpdatingTopic = (topic_name !== undefined || topic_order !== undefined)
 
     if (isUpdatingTopic) {
-      const { rows: [topicRow] } = await pool.query(
-        'SELECT * FROM school_topics WHERE id = $1',
-        [id]
-      )
-
-      if (!topicRow) {
-        return NextResponse.json({ error: 'Topic not found' }, { status: 404 })
-      }
-
       // A teacher can rename any topic in their school's own copy —
       // board-mandated or custom. This only ever touches school_topics,
       // never master_topics, so it can never leak across schools or affect
@@ -123,7 +146,7 @@ export async function PATCH(
       const args: (string | number)[] = []
 
       if (topic_name !== undefined) {
-        args.push(topic_name)
+        args.push(topic_name.trim())
         setClauses.push(`topic_name = $${args.length}`)
       }
       if (topic_order !== undefined) {
@@ -179,7 +202,7 @@ export async function DELETE(
   try {
     // 1. Fetch topic (joined up to its subject name for the scope check)
     const { rows: [topicRow] } = await pool.query(
-      `SELECT st.*, ss.subject_name
+      `SELECT st.*, ss.subject_name, ss.school_id, ss.grade
        FROM school_topics st
        JOIN school_chapters sc ON sc.id = st.school_chapter_id
        JOIN school_subjects ss ON ss.id = sc.school_subject_id
@@ -191,14 +214,21 @@ export async function DELETE(
       return NextResponse.json({ error: 'Topic not found' }, { status: 404 })
     }
 
+    const { rows: [targetClass] } = await pool.query(
+      `SELECT grade FROM classes WHERE id = $1 AND school_id = $2 AND deleted_at IS NULL`,
+      [class_id, writeSession.schoolId],
+    )
+    if (Number(topicRow.school_id) !== Number(writeSession.schoolId) ||
+        !targetClass || targetClass.grade !== topicRow.grade ||
+        !await canWriteSyllabusClass(writeSession, class_id, topicRow.subject_name)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
+
     // A teacher can delete any topic in their school's own copy —
     // board-mandated or custom. This only ever removes the school's own
     // school_topics row (and cascades away only that class's own progress
     // history against it); the platform-wide master_topics catalog other
     // schools draw from is completely untouched either way.
-    const scopeError = await assertAssignedTeacherForDelete(writeSession.role, class_id, topicRow.subject_name)
-    if (scopeError) return scopeError
-
     // 2. Perform delete
     await pool.query(
       'DELETE FROM school_topics WHERE id = $1',

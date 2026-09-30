@@ -1,8 +1,8 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
-import { Bell, CalendarDays, Check, ClipboardList, Clock, RefreshCw, UserRound, type LucideIcon } from 'lucide-react'
+import { Bell, CalendarDays, Check, ClipboardList, Clock, Megaphone, RefreshCw, UserRound, XCircle, type LucideIcon } from 'lucide-react'
 
 type Notification = {
   id: number
@@ -28,6 +28,7 @@ const TYPE_ICONS: Record<string, LucideIcon> = {
   substitute_needed: RefreshCw,
   substitute_assigned: UserRound,
   marks_entry_required: ClipboardList,
+  marks_entry_nudge: Bell,
   marks_submitted: Check,
   marks_published: ClipboardList,
   exam_scheduled: CalendarDays,
@@ -36,6 +37,12 @@ const TYPE_ICONS: Record<string, LucideIcon> = {
   marks_released: ClipboardList,
   ack_nudge: Bell,
   ack_completed: Check,
+  exam_updated: RefreshCw,
+  exam_cancelled: XCircle,
+  exam_reminder_7day: CalendarDays,
+  exam_reminder_1day: Bell,
+  exam_reminder_today: Clock,
+  teacher_broadcast: Megaphone,
 }
 
 function NotificationTypeIcon({ type }: { type: string }) {
@@ -48,6 +55,7 @@ const TYPE_COLORS: Record<string, string> = {
   substitute_needed: 'text-orange-600 bg-orange-50',
   substitute_assigned: 'text-teal-600 bg-teal-50',
   marks_entry_required: 'text-orange-700 bg-orange-50',
+  marks_entry_nudge: 'text-amber-700 bg-amber-50',
   marks_submitted: 'text-green-700 bg-green-50',
   marks_published: 'text-blue-700 bg-blue-50',
   exam_scheduled: 'text-indigo-700 bg-indigo-50',
@@ -56,18 +64,44 @@ const TYPE_COLORS: Record<string, string> = {
   marks_released: 'text-blue-700 bg-blue-50',
   ack_nudge: 'text-amber-700 bg-amber-50',
   ack_completed: 'text-green-700 bg-green-50',
+  exam_updated: 'text-amber-700 bg-amber-50',
+  exam_cancelled: 'text-red-700 bg-red-50',
+  exam_reminder_7day: 'text-indigo-700 bg-indigo-50',
+  exam_reminder_1day: 'text-amber-700 bg-amber-50',
+  exam_reminder_today: 'text-red-700 bg-red-50',
+  teacher_broadcast: 'text-teal-700 bg-teal-50',
 }
 
 const TYPE_NAV: Record<string, string> = {
   marks_entry_required: 'class-view',  // teacher: open class's marks tab
+  marks_entry_nudge: 'class-view',      // subject teacher: reminded to enter marks
   marks_submitted: 'class-view',        // class teacher: see marks submission
   marks_published: 'my-marks',          // student: go to marks page
-  exam_scheduled: 'weekly-test',        // student: go to test calendar
+  exam_scheduled: 'my-marks',           // student: go to Upcoming Exams tab (was 'weekly-test', a dead nav key)
   exam_entry_open: 'class-view',        // subject teacher: marks entry now open
   exam_reviewed: 'exam-schedule',       // school admin: exam awaiting release
   marks_released: 'my-marks',           // student: results are visible
   ack_nudge: 'results',                 // parent: acknowledge a result
   ack_completed: 'class-view',          // class teacher: a parent signed off
+  exam_updated: 'my-marks',             // student: see the updated schedule (parent/teacher use their own exam-calendar nav keys, 'exams'/'exam-schedule', not this shared map)
+  exam_cancelled: 'my-marks',
+  exam_reminder_7day: 'my-marks',
+  exam_reminder_1day: 'my-marks',
+  exam_reminder_today: 'my-marks',
+}
+
+function notificationDestination(
+  type: string,
+  portal: 'teacher' | 'admin' | 'student' | 'parent',
+): string | undefined {
+  const scheduleTypes = new Set(['exam_scheduled', 'exam_updated', 'exam_cancelled', 'exam_reminder_7day', 'exam_reminder_1day', 'exam_reminder_today'])
+  if (scheduleTypes.has(type)) {
+    if (portal === 'parent') return 'exams'
+    if (portal === 'teacher' || portal === 'admin') return 'exam-schedule'
+    return 'my-marks'
+  }
+  if (type === 'marks_released') return portal === 'parent' ? 'results' : 'my-marks'
+  return TYPE_NAV[type]
 }
 
 function timeAgo(dateStr: string) {
@@ -96,19 +130,20 @@ export default function NotificationBell({ teacherId, schoolId, studentId, paren
         ? `/api/notifications?parent_id=${parentId}`
         : `/api/notifications?recipient_school_id=${schoolId}`
 
-  async function fetchNotifications() {
+  const fetchNotifications = useCallback(async () => {
     try {
       const res = await fetch(apiUrl)
+      if (!res.ok) throw new Error(`Notifications request failed (${res.status})`)
       const data = await res.json()
       setNotifications(Array.isArray(data) ? data : [])
-    } catch { /* silent */ }
-  }
+    } catch (error) { console.error(error) }
+  }, [apiUrl])
 
   useEffect(() => {
-    fetchNotifications()
+    const initial = setTimeout(() => { void fetchNotifications() }, 0)
     const timer = setInterval(fetchNotifications, 30000)
-    return () => clearInterval(timer)
-  }, [teacherId, schoolId, studentId, parentId])
+    return () => { clearTimeout(initial); clearInterval(timer) }
+  }, [fetchNotifications])
 
 
   async function markAllRead() {
@@ -141,7 +176,8 @@ export default function NotificationBell({ teacherId, schoolId, studentId, paren
 
   function handleClick(n: Notification) {
     markOneRead(n.id)
-    const navKey = TYPE_NAV[n.type]
+    const portal = parentId ? 'parent' : teacherId ? 'teacher' : studentId ? 'student' : 'admin'
+    const navKey = notificationDestination(n.type, portal)
     if (navKey && onNavigate) {
       let payload: NavPayload | undefined
       if (n.data) {
@@ -151,7 +187,7 @@ export default function NotificationBell({ teacherId, schoolId, studentId, paren
             examId: parsed.exam_id,
             classId: parsed.class_id,
             subjectName: parsed.subject_name,
-            tab: (n.type === 'marks_entry_required' || n.type === 'marks_submitted') ? 'Marks & Results' : undefined,
+            tab: (n.type === 'marks_entry_required' || n.type === 'marks_entry_nudge' || n.type === 'marks_submitted') ? 'Marks & Results' : undefined,
           }
         } catch { /* malformed data */ }
       }

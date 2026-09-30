@@ -12,6 +12,14 @@ Non-obvious technical decisions and their reasoning for the WLYL School prototyp
 -->
 
 
+## 2026-09-28 — Plan features are enforced centrally in proxy.ts (#253)
+
+**Context:** Plan features only hid navigation tabs. Of roughly 95 feature API routes, only the fee and portal-access ones called `schoolHasFeature`, so a school on a lower plan could use any feature by calling its API directly. Adding a check to every handler would be easy to forget on the next new route.
+
+**Decision:** `proxy.ts` maps protected API areas to canonical feature keys and refuses a school-side session's request when its school lacks that feature (`403 FEATURE_DISABLED`). It resolves one school/feature pair through `/api/internal/feature-entitlement`, backed by `schoolHasFeature`, and caches the answer for 15 seconds. The gate fails closed when entitlement cannot be verified. Requests without a valid school session are left to route authentication; Platform Admin bypasses school plan gating.
+
+**Consequences:** a new API area for a plan feature must be added to `FEATURE_API_PREFIXES`. Screens that embed another feature's data (class management's attendance strip, the teacher class view's exams/syllabus) show empty when that feature is off, which matches the hidden tab.
+
 ## 2026-09-21 — One central Year Rollover, gated by fee year-end (#199)
 
 **Context:** Fee Year-End could create the next academic year and switch the current year on its own ("Start Year Rollover"), while the Year Rollover tab promoted students. The two did not know about each other, so a school could end up on the new year with students not promoted, and the year could be created or switched from three places.

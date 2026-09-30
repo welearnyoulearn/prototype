@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { isSchoolLocked, LOCKED_MESSAGE_PORTAL } from '@/lib/planAccess'
 import pool, { ensureDB } from '@/lib/db'
-import { verifyPassword, signTeacherToken, setTeacherAuthCookie, TeacherJWTPayload } from '@/lib/auth'
+import { verifyPasswordForLogin, setTeacherAuthCookie, TeacherJWTPayload, createPortalSession } from '@/lib/auth'
 import { recordSessionStart } from '@/lib/usageTracking'
+import { checkAuthRateLimit, clearAuthRateLimit, LOGIN_LIMIT } from '@/lib/authRateLimit'
 
 export async function POST(req: NextRequest) {
   try {
@@ -10,6 +11,10 @@ export async function POST(req: NextRequest) {
     const { email, password } = await req.json()
     if (!email || !password) {
       return NextResponse.json({ error: 'Email and password are required' }, { status: 400 })
+    }
+    const normalizedEmail = String(email).trim().toLowerCase()
+    if (!await checkAuthRateLimit(req, 'teacher-login', normalizedEmail, LOGIN_LIMIT)) {
+      return NextResponse.json({ error: 'Too many login attempts. Please try again later.' }, { status: 429, headers: { 'Retry-After': '900' } })
     }
 
     // Legacy/seed data can have more than one active teacher sharing an email
@@ -24,27 +29,21 @@ export async function POST(req: NextRequest) {
        WHERE LOWER(t.email) = LOWER($1) AND t.removed_at IS NULL
        ORDER BY t.id DESC
        LIMIT 1`,
-      [email.trim()]
+      [normalizedEmail]
     )
 
     if (result.rows.length === 0) {
+      await verifyPasswordForLogin(password)
       return NextResponse.json({ error: 'Invalid email or password' }, { status: 401 })
     }
 
     const teacher = result.rows[0]
 
-    if (!teacher.password_hash) {
-      return NextResponse.json({ error: 'Account not activated. Please contact your school admin.' }, { status: 401 })
-    }
-
-    if (teacher.status !== 'active') {
-      return NextResponse.json({ error: 'Your account has been deactivated. Contact your school admin.' }, { status: 403 })
-    }
-
-    const valid = await verifyPassword(password, teacher.password_hash)
-    if (!valid) {
+    const valid = await verifyPasswordForLogin(password, teacher.password_hash)
+    if (!valid || teacher.status !== 'active') {
       return NextResponse.json({ error: 'Invalid email or password' }, { status: 401 })
     }
+    await clearAuthRateLimit(req, 'teacher-login', normalizedEmail)
 
     const payload: TeacherJWTPayload = {
       teacherId: teacher.id,
@@ -63,6 +62,7 @@ export async function POST(req: NextRequest) {
 
     }
 
+    payload.sid = await createPortalSession('teacher', teacher.id, teacher.school_id)
     await setTeacherAuthCookie(payload)
 
     const usageSessionId = await recordSessionStart({

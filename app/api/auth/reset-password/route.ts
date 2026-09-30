@@ -1,35 +1,36 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
-import { hashPassword, revokeUserSessions } from '@/lib/auth'
+import { hashPassword, revokeUserSessions, validateNewPassword } from '@/lib/auth'
+import { invalidateActorResetTokens, isResetTokenValid, lockResetToken } from '@/lib/passwordReset'
+import { checkAuthRateLimit, LOGIN_LIMIT } from '@/lib/authRateLimit'
 
 export async function POST(req: NextRequest) {
   try {
     const { token, newPassword } = await req.json()
     if (!token || !newPassword) return NextResponse.json({ error: 'Token and new password required' }, { status: 400 })
-    if (newPassword.length < 8) return NextResponse.json({ error: 'Password must be at least 8 characters' }, { status: 400 })
+    if (!await checkAuthRateLimit(req, 'staff-reset', String(token), LOGIN_LIMIT)) return NextResponse.json({ error: 'Too many attempts. Please try again later.' }, { status: 429 })
+    const policyError = validateNewPassword(newPassword)
+    if (policyError) return NextResponse.json({ error: policyError }, { status: 400 })
 
-    // A deactivated account can't use any set-password link, even an unused one
-    // issued before it was deactivated (deactivation also voids them, this is the
-    // backstop for links created any other way).
-    const result = await pool.query(
-      `SELECT t.* FROM password_reset_tokens t
-       JOIN users u ON u.id = t.user_id
-       WHERE t.token = $1 AND t.used = FALSE AND t.expires_at > NOW()
-         AND COALESCE(u.status, 'active') <> 'inactive'`,
-      [token]
-    )
-
-    if (result.rows.length === 0) {
-      return NextResponse.json({ error: 'Invalid or expired reset link' }, { status: 400 })
+    const client = await pool.connect()
+    try {
+      await client.query('BEGIN')
+      const resetRecord = await lockResetToken(client, token, 'user')
+      if (!resetRecord) {
+        await client.query('ROLLBACK')
+        return NextResponse.json({ error: 'Invalid or expired reset link' }, { status: 400 })
+      }
+      const newHash = await hashPassword(newPassword)
+      await client.query('UPDATE users SET password_hash = $1, first_login = FALSE WHERE id = $2', [newHash, resetRecord.user_id])
+      await invalidateActorResetTokens(client, 'user', resetRecord.user_id)
+      await revokeUserSessions(resetRecord.user_id, undefined, client)
+      await client.query('COMMIT')
+    } catch (error) {
+      await client.query('ROLLBACK')
+      throw error
+    } finally {
+      client.release()
     }
-
-    const resetRecord = result.rows[0]
-    const newHash = await hashPassword(newPassword)
-
-    await pool.query('UPDATE users SET password_hash = $1, first_login = FALSE WHERE id = $2', [newHash, resetRecord.user_id])
-    await pool.query('UPDATE password_reset_tokens SET used = TRUE WHERE id = $1', [resetRecord.id])
-    // Whoever knew the old password (or held a stolen session) is signed out.
-    await revokeUserSessions(resetRecord.user_id)
 
     return NextResponse.json({ success: true })
   } catch (error) {
@@ -44,11 +45,7 @@ export async function GET(req: NextRequest) {
     const token = req.nextUrl.searchParams.get('token')
     if (!token) return NextResponse.json({ valid: false })
 
-    const result = await pool.query(
-      `SELECT id FROM password_reset_tokens WHERE token = $1 AND used = FALSE AND expires_at > NOW()`,
-      [token]
-    )
-    return NextResponse.json({ valid: result.rows.length > 0 })
+    return NextResponse.json({ valid: await isResetTokenValid(token, 'user') })
 } catch (err: unknown) {
     console.error('[API]', err)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })

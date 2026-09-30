@@ -1,13 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
-import pool from '@/lib/db'
-import { generateResetToken } from '@/lib/auth'
+import pool, { ensureDB } from '@/lib/db'
 import { sendPasswordResetEmail } from '@/lib/email'
 import { sendWhatsappMessage } from '@/lib/whatsapp'
+import { issueResetToken } from '@/lib/passwordReset'
+import { checkAuthRateLimit, RECOVERY_LIMIT } from '@/lib/authRateLimit'
 
 export async function POST(req: NextRequest) {
   try {
+    await ensureDB()
     const { email } = await req.json()
     if (!email) return NextResponse.json({ success: true }) // prevent enumeration
+    if (!await checkAuthRateLimit(req, 'teacher-recovery', String(email), RECOVERY_LIMIT)) return NextResponse.json({ success: true })
 
     const result = await pool.query(
       `SELECT t.id, t.school_id, t.name, t.email, t.phone FROM teachers t
@@ -18,14 +21,7 @@ export async function POST(req: NextRequest) {
     if (result.rows.length === 0) return NextResponse.json({ success: true })
 
     const teacher = result.rows[0]
-    const token = generateResetToken()
-    const expiresAt = new Date(Date.now() + 60 * 60 * 1000)
-
-    await pool.query(
-      `INSERT INTO password_reset_tokens (token, expires_at, role, reference_id)
-       VALUES ($1, $2, 'teacher', $3)`,
-      [token, expiresAt, teacher.id]
-    )
+    const token = await issueResetToken('teacher', teacher.id)
 
     const resetUrl = `${process.env.APP_URL || 'http://localhost:3000'}/teacher/reset-password?token=${token}`
     sendPasswordResetEmail({ to: teacher.email, name: teacher.name, resetUrl, role: 'teacher' }).catch(console.error)

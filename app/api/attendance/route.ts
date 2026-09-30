@@ -26,6 +26,7 @@ import {
 // GET  ?view=class-month&class_id&month=   every student's month %, by the shared rules
 // GET  ?class_id&date[&session]      raw records for one day
 // GET  ?class_id&date&summary=true   per-session counts + who marked
+// GET  ?class_id&view=recent-summary&days=7  recent morning totals in one call
 // GET  ?class_id&month=YYYY-MM       a month of records
 // GET  ?class_id&previous=true[&session]  the last recorded day (for "copy last day")
 // POST {class_id,date,session,records}   claim + save a session (409 if already marked / holiday)
@@ -121,6 +122,34 @@ export async function GET(req: NextRequest) {
     if (!Number.isInteger(classId) || classId <= 0) return json('class_id required', 400)
     const cls = await getClassForSchool(schoolId, classId)
     if (!cls) return json('Class not found', 404)
+
+    // ── Recent overview used by Class Management. One bounded query replaces
+    // seven per-day requests and keeps the snapshot internally consistent.
+    if (view === 'recent-summary') {
+      const days = Number(p.get('days') ?? '7')
+      if (!Number.isInteger(days) || days < 1 || days > 31) return json('days must be between 1 and 31', 400)
+      const { rows } = await pool.query<{
+        date: string; present: string; absent: string; late: string
+      }>(
+        `SELECT a.date::text AS date,
+                SUM(CASE WHEN a.status = 'present' THEN 1 ELSE 0 END) AS present,
+                SUM(CASE WHEN a.status = 'absent' THEN 1 ELSE 0 END) AS absent,
+                SUM(CASE WHEN a.status = 'late' THEN 1 ELSE 0 END) AS late
+         FROM attendance a
+         WHERE a.class_id = $1 AND a.school_id = $2 AND a.session = 'morning'
+           AND a.date BETWEEN ($3::date - ($4::int - 1)) AND $3::date
+         GROUP BY a.date ORDER BY a.date`,
+        [classId, schoolId, todayIST(), days],
+      )
+      return NextResponse.json({
+        days: rows.map(row => ({
+          date: row.date,
+          present: Number(row.present),
+          absent: Number(row.absent),
+          late: Number(row.late),
+        })),
+      })
+    }
 
     // ── Mark sheet: roster + lock + holiday + what this person may do, in one round trip
     if (view === 'sheet') {

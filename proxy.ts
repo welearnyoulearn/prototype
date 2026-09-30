@@ -49,6 +49,19 @@ function isPublic(pathname: string): boolean {
   return PUBLIC_PREFIXES.some(p => pathname.startsWith(p))
 }
 
+function isCrossSiteAuthMutation(req: NextRequest, pathname: string): boolean {
+  if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) return false
+  if (!/^\/api\/(auth|teacher\/auth|student\/auth|parent\/auth|teacher-auth)(\/|$)/.test(pathname)) return false
+  if (req.headers.get('sec-fetch-site') === 'cross-site') return true
+  const origin = req.headers.get('origin')
+  if (!origin) return false // non-browser clients do not always send Origin
+  try {
+    return new URL(origin).host !== req.headers.get('host')
+  } catch {
+    return true
+  }
+}
+
 // ── Watchline constants ───────────────────────────────────────────────────────
 // INGEST_SECRET now comes from lib/auth-constants too — it had a third hardcoded copy
 // of the same default here and in both internal routes. In production without the env
@@ -58,6 +71,7 @@ const SKIP_ROUTES   = new Set([
   '/api/internal/log-ingest',
   '/api/internal/log-cleanup',
   '/api/internal/watchline-flags',
+  '/api/internal/feature-entitlement',
 ])
 
 const monitored: Set<number> = new Set()
@@ -137,6 +151,70 @@ async function isLockedRequest(req: NextRequest, pathname: string, origin: strin
   return false
 }
 
+// ── API feature entitlements ─────────────────────────────────────────────────
+// Navigation flags are presentation only. These mappings enforce the same plan
+// decisions before a protected API reaches its handler, including direct calls.
+function apiFeature(pathname: string): string | null {
+  if (pathname.startsWith('/api/teachers')) return 'staff'
+  if (pathname.startsWith('/api/fees/') || pathname === '/api/fees' || pathname.startsWith('/api/parent/fees')) return 'fee-management'
+  if (pathname.startsWith('/api/expenses')) return 'expenses'
+  if (pathname.startsWith('/api/attendance') || pathname.startsWith('/api/parent/attendance') || pathname.startsWith('/api/student/attendance')) return 'attendance'
+  if (pathname.startsWith('/api/exams') || /^\/api\/students\/[^/]+\/exams(?:\/|$)/.test(pathname)) return 'exam-marks'
+  if (pathname.startsWith('/api/syllabus') || pathname.startsWith('/api/school/custom/') || pathname.startsWith('/api/school/subjects')) return 'curriculum'
+  if (pathname.startsWith('/api/school/library') || pathname.startsWith('/api/textbooks') || pathname.startsWith('/api/materials/')) return 'library'
+  if (pathname.startsWith('/api/school-calendar')) return 'calendar'
+  if (pathname.startsWith('/api/data-export')) return 'export'
+  if (pathname.startsWith('/api/feedback/') && !pathname.startsWith('/api/feedback/resolve') && !pathname.startsWith('/api/feedback/submit') && !pathname.startsWith('/api/feedback/voice-upload-url')) return 'feedback-management'
+  if (pathname.startsWith('/api/announcements')) return 'announcements'
+  if (pathname.startsWith('/api/academic-years/rollover') || pathname.startsWith('/api/students/promote')) return 'year-rollover'
+  return null
+}
+
+const entitlementCache = new Map<string, { enabled: boolean; fetchedAt: number }>()
+const ENTITLEMENT_TTL = 15_000
+
+async function schoolFeatureEnabled(origin: string, schoolId: number, feature: string): Promise<boolean> {
+  const key = `${schoolId}:${feature}`
+  const cached = entitlementCache.get(key)
+  if (cached && Date.now() - cached.fetchedAt < ENTITLEMENT_TTL) return cached.enabled
+
+  try {
+    const url = new URL('/api/internal/feature-entitlement', origin)
+    url.searchParams.set('school_id', String(schoolId))
+    url.searchParams.set('feature', feature)
+    const res = await fetch(url, { headers: { 'x-ingest-secret': INGEST_SECRET } })
+    if (!res.ok) return false
+    const body = await res.json() as { enabled?: boolean }
+    const enabled = body.enabled === true
+    entitlementCache.set(key, { enabled, fetchedAt: Date.now() })
+    return enabled
+  } catch {
+    return false
+  }
+}
+
+async function requestHasFeature(req: NextRequest, origin: string, feature: string): Promise<boolean> {
+  const platformToken = req.cookies.get(COOKIE_PLATFORM)?.value
+  const platform = platformToken ? await getTokenPayload(platformToken) : null
+  if (platform?.role === 'platform_admin') return true
+
+  const schoolIds = new Set<number>()
+  for (const cookie of [COOKIE_ADMIN, COOKIE_TEACHER, COOKIE_STUDENT, COOKIE_PARENT]) {
+    const token = req.cookies.get(cookie)?.value
+    if (!token) continue
+    const payload = await getTokenPayload(token)
+    const schoolId = Number(payload?.schoolId)
+    if (Number.isInteger(schoolId) && schoolId > 0) schoolIds.add(schoolId)
+  }
+
+  // Authentication remains the route handler's responsibility. When valid
+  // school sessions are present, every one must be entitled, preventing a
+  // second cookie from another school being used to piggy-back on access.
+  if (schoolIds.size === 0) return true
+  const checks = await Promise.all([...schoolIds].map(id => schoolFeatureEnabled(origin, id, feature)))
+  return checks.every(Boolean)
+}
+
 function extractSchoolId(req: NextRequest): number | null {
   const sid = req.nextUrl.searchParams.get('school_id')
   const n = Number(sid)
@@ -159,6 +237,10 @@ export async function proxy(req: NextRequest) {
   const isAdminSubdomain = host.startsWith('admin.')
   const origin       = req.nextUrl.origin
 
+  if (isCrossSiteAuthMutation(req, pathname)) {
+    return NextResponse.json({ error: 'Cross-site request rejected' }, { status: 403 })
+  }
+
   // ── admin.welearnyoulearn.com — Platform Admin only ──────────────────────
   if (isAdminSubdomain) {
     if (pathname.startsWith('/_next/') || pathname.startsWith('/api/') || pathname.startsWith('/favicon')) {
@@ -170,12 +252,13 @@ export async function proxy(req: NextRequest) {
     if (pathname.startsWith('/platform-admin')) {
       const token = req.cookies.get(COOKIE_PLATFORM)?.value
       const payload = token ? await getTokenPayload(token) : null
-      if (!payload || payload.role !== 'platform_admin') {
+      if (!payload || !payload.sid || payload.role !== 'platform_admin') {
         return NextResponse.redirect(new URL('/login?role=platform', req.url))
       }
+      if (payload.firstLogin) return NextResponse.redirect(new URL('/change-password?first=1&portal=platform', req.url))
       return watchlineAndNext(req, origin, pathname)
     }
-    if (pathname.startsWith('/login') || pathname.startsWith('/forgot-password') || pathname.startsWith('/reset-password')) {
+    if (pathname.startsWith('/login') || pathname.startsWith('/forgot-password') || pathname.startsWith('/reset-password') || pathname.startsWith('/change-password')) {
       return NextResponse.next()
     }
     return NextResponse.redirect(new URL('/login?role=platform', req.url))
@@ -185,9 +268,10 @@ export async function proxy(req: NextRequest) {
   if (pathname.startsWith('/platform-admin')) {
     const token = req.cookies.get(COOKIE_PLATFORM)?.value
     const payload = token ? await getTokenPayload(token) : null
-    if (!payload || payload.role !== 'platform_admin') {
+    if (!payload || !payload.sid || payload.role !== 'platform_admin') {
       return NextResponse.redirect(new URL('/admin', req.url))
     }
+    if (payload.firstLogin) return NextResponse.redirect(new URL('/change-password?first=1&portal=platform', req.url))
     return watchlineAndNext(req, origin, pathname)
   }
 
@@ -196,6 +280,11 @@ export async function proxy(req: NextRequest) {
       error: "Your school's plan has ended, so access is paused. School administrators can still export their data and request a renewal.",
       code: 'PLAN_EXPIRED',
     }, { status: 403 })
+  }
+
+  const requiredFeature = apiFeature(pathname)
+  if (requiredFeature && !await requestHasFeature(req, origin, requiredFeature)) {
+    return NextResponse.json({ error: 'Feature not enabled', code: 'FEATURE_DISABLED', feature: requiredFeature }, { status: 403 })
   }
 
   if (isPublic(pathname) || pathname === '/') return NextResponse.next()
@@ -222,7 +311,7 @@ export async function proxy(req: NextRequest) {
   if (pathname.startsWith('/teacher')) {
     const token = req.cookies.get(COOKIE_TEACHER)?.value
     const payload = token ? await getTokenPayload(token) : null
-    if (!payload || payload.role !== 'teacher') {
+    if (!payload || !payload.sid || payload.role !== 'teacher') {
       return NextResponse.redirect(new URL('/teacher/login', req.url))
     }
     if (!payload.passwordChanged && pathname === '/teacher') {
@@ -235,7 +324,7 @@ export async function proxy(req: NextRequest) {
   if (pathname.startsWith('/student')) {
     const token = req.cookies.get(COOKIE_STUDENT)?.value
     const payload = token ? await getTokenPayload(token) : null
-    if (!payload || payload.role !== 'student') {
+    if (!payload || !payload.sid || payload.role !== 'student') {
       return NextResponse.redirect(new URL('/student/login', req.url))
     }
     if (!payload.passwordChanged && pathname === '/student') {
@@ -248,7 +337,7 @@ export async function proxy(req: NextRequest) {
   if (pathname.startsWith('/parent')) {
     const token = req.cookies.get(COOKIE_PARENT)?.value
     const payload = token ? await getTokenPayload(token) : null
-    if (!payload || payload.role !== 'parent') {
+    if (!payload || !payload.sid || payload.role !== 'parent') {
       return NextResponse.redirect(new URL('/parent/login', req.url))
     }
     if (!payload.passwordChanged && pathname === '/parent') {

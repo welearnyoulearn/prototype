@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
-import { hashPassword, generateTempPassword, generateSchoolCode, requirePlatformAdmin } from '@/lib/auth'
-import { sendOnboardingEmail } from '@/lib/email'
+import { hashPassword, generateTempPassword, generateSchoolCode, requirePlatformAdmin, generateResetToken, hashResetToken } from '@/lib/auth'
+import { sendPasswordResetEmail } from '@/lib/email'
 import { buildFeedbackCategorySeedQuery } from '@/lib/feedback-defaults'
 
 export async function GET(req: NextRequest) {
@@ -89,15 +89,15 @@ export async function POST(req: NextRequest) {
     await client.query('UPDATE schools SET school_code = $1 WHERE id = $2', [schoolCode, school.id])
     school.school_code = schoolCode
 
-    const tempPassword = generateTempPassword()
-    const passwordHash = await hashPassword(tempPassword)
+    const passwordHash = await hashPassword(generateTempPassword(32))
 
-    await client.query(
-      `INSERT INTO users (email, school_code, password_hash, role, school_id, first_login)
-       VALUES ($1, $2, $3, 'school_admin', $4, TRUE)
-       ON CONFLICT (school_code) DO NOTHING`,
+    const ownerRes = await client.query(
+      `INSERT INTO users (email, school_code, password_hash, role, school_id, first_login, is_primary_admin)
+       VALUES ($1, $2, $3, 'school_admin', $4, TRUE, TRUE)
+       ON CONFLICT (school_code) DO NOTHING RETURNING id`,
       [email.trim().toLowerCase(), schoolCode, passwordHash, school.id]
     )
+    if (!ownerRes.rows[0]?.id) throw new Error('School owner account could not be created')
 
     await client.query(
       `INSERT INTO school_subscriptions (school_id, tier) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
@@ -120,14 +120,25 @@ export async function POST(req: NextRequest) {
     const feedbackSeed = buildFeedbackCategorySeedQuery(school.id)
     await client.query(feedbackSeed.sql, feedbackSeed.params)
 
+    const token = generateResetToken()
+    await client.query(
+      `INSERT INTO password_reset_tokens (user_id, token, expires_at)
+       VALUES ($1, $2, NOW() + INTERVAL '1 hour')`,
+      [ownerRes.rows[0].id, hashResetToken(token)],
+    )
+
     await client.query('COMMIT')
 
-    const loginUrl = `${process.env.APP_URL || 'https://welearnyoulearn.com'}/login`
-    sendOnboardingEmail({ to: email.trim(), schoolName: school.name, tempPassword, loginUrl })
-      .then(() => console.log(`[email/onboarding] Sent to ${email}`))
-      .catch(err => console.error('[email/onboarding] Failed:', err?.message || err))
+    const resetUrl = `${process.env.APP_URL || 'https://welearnyoulearn.com'}/reset-password?token=${token}`
+    let setupEmailSent = false
+    try {
+      await sendPasswordResetEmail({ to: email.trim(), name: school.name, resetUrl })
+      setupEmailSent = true
+    } catch (err) {
+      console.error('[email/onboarding] Failed:', err instanceof Error ? err.message : err)
+    }
 
-    return NextResponse.json({ ...school, school_code: schoolCode, temp_password: tempPassword }, { status: 201 })
+    return NextResponse.json({ ...school, school_code: schoolCode, setup_email_sent: setupEmailSent }, { status: 201 })
   } catch (error) {
     await client.query('ROLLBACK')
     console.error('[POST /api/schools]', error)
