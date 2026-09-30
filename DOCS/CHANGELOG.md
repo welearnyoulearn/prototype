@@ -19,3 +19,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ### Removed
 - Removed feature description (#issue-number)
 -->
+
+## [Unreleased]
+
+### Added
+- Public `/privacy` page, linked from the landing footer; canonical privacy policy URL for the WLYL Parent store listing (#269)
