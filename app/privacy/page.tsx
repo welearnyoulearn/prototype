@@ -77,7 +77,7 @@ function Section({ id, n, title, children }: { id: string; n: number; title: str
   return (
     <section id={id} className="scroll-mt-24 space-y-4">
       <h2 className="flex items-center gap-3 text-xl font-semibold tracking-tight text-slate-900">
-        <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-indigo-600 text-sm font-bold text-white">{n}</span>
+        <span aria-hidden className="grid size-8 shrink-0 place-items-center rounded-lg bg-indigo-600 text-sm font-bold text-white">{n}</span>
         {title}
       </h2>
       <div className="space-y-4 text-[15px] leading-7 text-slate-700">{children}</div>
