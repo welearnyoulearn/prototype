@@ -139,7 +139,7 @@ export default function FeedbackDashboardTab({
             aria-selected={period === p.key}
             data-testid={`feedback-dashboard-period-${p.key}`}
             onClick={() => setPeriod(p.key)}
-            className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${period === p.key ? 'bg-[#245b46] text-white' : 'text-gray-600 hover:bg-gray-50'}`}
+            className={`whitespace-nowrap rounded-md px-3 py-1.5 text-xs max-[380px]:px-2 font-semibold transition-colors ${period === p.key ? 'bg-[#245b46] text-white' : 'text-gray-600 hover:bg-gray-50'}`}
           >
             {p.label}
           </button>
@@ -176,11 +176,11 @@ export default function FeedbackDashboardTab({
           type="button"
           onClick={() => onNavigate('issues')}
           data-testid="feedback-high-priority-alert"
-          className="flex w-full items-center gap-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-left text-sm text-rose-800 transition hover:bg-rose-100"
+          className="flex w-full flex-wrap items-center gap-x-3 gap-y-1.5 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-left text-sm text-rose-800 transition hover:bg-rose-100"
         >
           <AlertTriangle size={18} className="shrink-0 text-rose-600" aria-hidden="true" />
-          <span className="flex-1"><b>{stats.high_priority_open_count} high-priority issue{stats.high_priority_open_count === 1 ? '' : 's'}</b> still open — people rated something 😭 Terrible.</span>
-          <span className="inline-flex shrink-0 items-center gap-1 text-xs font-bold">Open Issue Pipeline<ArrowRight size={13} aria-hidden="true" /></span>
+          <span className="min-w-[200px] flex-1"><b>{stats.high_priority_open_count} high-priority issue{stats.high_priority_open_count === 1 ? '' : 's'}</b> still open — people rated something 😭 Terrible.</span>
+          <span className="ml-auto inline-flex shrink-0 items-center gap-1 text-xs font-bold">Open Issue Pipeline<ArrowRight size={13} aria-hidden="true" /></span>
         </button>
       )}
 

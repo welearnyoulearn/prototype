@@ -94,7 +94,7 @@ async function patchCategory(id: number, body: Record<string, unknown>) {
   if (!res.ok) throw new Error('Could not save — please try again')
 }
 
-const inputCls = 'w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm transition-colors focus:border-[#245b46] focus:outline-none focus:ring-2 focus:ring-[#245b46]/20'
+const inputCls = 'w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-base sm:text-sm transition-colors focus:border-[#245b46] focus:outline-none focus:ring-2 focus:ring-[#245b46]/20'
 
 function EmojiPicker({ value, onChange, testId }: { value: string; onChange: (e: string) => void; testId?: string }) {
   const [open, setOpen] = useState(false)
@@ -249,17 +249,18 @@ export default function FeedbackCategoryEditor({ schoolId, points = [] }: { scho
             {c.rating_count > 0 && <p className="text-[11px] text-gray-400">Renaming only changes new feedback — past ratings keep the name they were given under.</p>}
           </div>
         ) : (
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 sm:gap-3">
             {c.is_active && (
               <div className="flex shrink-0 flex-col">
-                <button type="button" onClick={() => move(c, -1)} disabled={busy || index === 0} aria-label={`Move ${c.label} up`} className="rounded p-0.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700 disabled:opacity-25"><ArrowUp size={13} /></button>
-                <button type="button" onClick={() => move(c, 1)} disabled={busy || index === live.length - 1} aria-label={`Move ${c.label} down`} className="rounded p-0.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700 disabled:opacity-25"><ArrowDown size={13} /></button>
+                <button type="button" onClick={() => move(c, -1)} disabled={busy || index === 0} aria-label={`Move ${c.label} up`} className="rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700 disabled:opacity-25"><ArrowUp size={15} /></button>
+                <button type="button" onClick={() => move(c, 1)} disabled={busy || index === live.length - 1} aria-label={`Move ${c.label} down`} className="rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700 disabled:opacity-25"><ArrowDown size={15} /></button>
               </div>
             )}
-            <CategoryIcon icon={c.icon} size={44} />
+            <span className="hidden shrink-0 min-[400px]:inline-flex"><CategoryIcon icon={c.icon} size={40} /></span>
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-1.5">
-                <span className={`truncate text-sm font-bold ${c.is_active ? 'text-gray-900' : 'text-gray-500'}`}>{c.label}</span>
+                <span className="inline-flex min-[400px]:hidden"><CategoryIcon icon={c.icon} size={22} /></span>
+                <span className={`max-w-full break-words text-sm font-bold ${c.is_active ? 'text-gray-900' : 'text-gray-500'}`}>{c.label}</span>
                 {c.department && <span className="rounded-md bg-gray-100 px-1.5 py-0.5 text-[10px] font-semibold text-gray-600">{c.department}</span>}
                 {pins.length > 0 && (
                   <span className="inline-flex items-center gap-0.5 rounded-md bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800" title={pins.map(p => p.title).join(', ')}>
@@ -286,7 +287,7 @@ export default function FeedbackCategoryEditor({ schoolId, points = [] }: { scho
                 onCheckedChange={v => { void setLive(c, v) }}
                 className="data-[state=checked]:bg-[#245b46]"
               />
-              <span className="w-10">{c.is_active ? 'Live' : 'Hidden'}</span>
+              <span className="hidden w-10 sm:inline">{c.is_active ? 'Live' : 'Hidden'}</span>
             </label>
           </div>
         )}

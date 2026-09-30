@@ -275,7 +275,7 @@ h1.portal-section-heading { margin-bottom: 8px; font-size: 26px; line-height: 1.
   .portal-panel { padding: 16px; }
   .portal-nav-item { min-height: 46px; font-size: 14px; }
   .portal-metric { padding: 16px; }
-  .portal-main :where(button, input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="hidden"]), select) { min-height: 44px; }
+  .portal-main :where(button:not([role="switch"]), input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="hidden"]), select) { min-height: 44px; }
   .auth-header { width: calc(100% - 32px); min-height: 64px; }
   .auth-secure { font-size: 0; }
   .auth-secure svg { width: 16px; height: 16px; }

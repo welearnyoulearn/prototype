@@ -147,7 +147,7 @@ export default function DeleteQrPointDialog({
             value={typed}
             onChange={e => setTyped(e.target.value)}
             autoComplete="off"
-            className="w-full rounded-md border border-gray-200 px-3 py-2 text-sm focus:border-rose-400 focus:outline-none focus:ring-2 focus:ring-rose-200"
+            className="w-full rounded-md border border-gray-200 px-3 py-2 text-base sm:text-sm focus:border-rose-400 focus:outline-none focus:ring-2 focus:ring-rose-200"
           />
           {!empty && live > 0 && !downloaded && ready && (
             <p className="mt-1.5 text-[11px] font-semibold text-amber-700">Tip: you haven&apos;t downloaded a copy — once deleted, these reviews can&apos;t be recovered.</p>

@@ -21,19 +21,19 @@ type TabKey = 'dashboard' | 'submissions' | 'issues' | 'qr-points' | 'categories
 type BadgeKey = 'submissions' | 'issues' | 'qrs'
 
 // Two groups: reading feedback (Insights) vs configuring how it's collected (Setup)
-const TAB_GROUPS: { label: string; tabs: { key: TabKey; label: string; Icon: typeof Inbox; badge?: BadgeKey }[] }[] = [
+const TAB_GROUPS: { label: string; tabs: { key: TabKey; label: string; short?: string; Icon: typeof Inbox; badge?: BadgeKey }[] }[] = [
   {
     label: 'Insights',
     tabs: [
       { key: 'dashboard', label: 'Dashboard', Icon: LayoutDashboard },
       { key: 'submissions', label: 'Submissions', Icon: Inbox, badge: 'submissions' },
-      { key: 'issues', label: 'Issue Pipeline', Icon: Siren, badge: 'issues' },
+      { key: 'issues', label: 'Issue Pipeline', short: 'Issues', Icon: Siren, badge: 'issues' },
     ],
   },
   {
     label: 'Setup',
     tabs: [
-      { key: 'qr-points', label: 'Event & Place QRs', Icon: QrCode, badge: 'qrs' },
+      { key: 'qr-points', label: 'Event & Place QRs', short: 'Event QRs', Icon: QrCode, badge: 'qrs' },
       { key: 'categories', label: 'Categories', Icon: Tags },
       { key: 'settings', label: 'Settings & QR', Icon: Settings },
     ],
@@ -42,7 +42,7 @@ const TAB_GROUPS: { label: string; tabs: { key: TabKey; label: string; Icon: typ
 
 // Brand-green active pill; overrides the shadcn defaults via tailwind-merge
 const TRIGGER_CLS =
-  'group h-9 flex-none gap-2 rounded-lg px-3.5 text-sm font-semibold text-gray-600 transition-colors ' +
+  'group h-9 flex-none min-w-0 max-sm:justify-start max-sm:gap-1.5 max-sm:px-2 max-sm:text-[13px] gap-2 rounded-lg px-3.5 text-sm font-semibold text-gray-600 transition-colors ' +
   'hover:bg-[#edf2eb] hover:text-[#245b46] ' +
   'focus-visible:ring-2 focus-visible:ring-[#245b46]/40 ' +
   'data-[state=active]:bg-[#245b46] data-[state=active]:text-white data-[state=active]:shadow-sm data-[state=active]:hover:bg-[#245b46]'
@@ -91,22 +91,22 @@ export default function FeedbackManagement({ schoolId }: { schoolId: number }) {
 
       <Tabs value={tab} onValueChange={setTab}>
         <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-          {/* Scrolls sideways on narrow screens instead of squashing the labels */}
-          <div className="-mx-1 max-w-full overflow-x-auto overflow-y-hidden px-1 py-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          {/* Wraps onto more rows instead of scrolling, so no tab is ever hidden off-screen */}
+          <div className="max-w-full max-sm:w-full">
             <TabsList
               data-testid="feedback-admin-tabs"
-              className="h-auto gap-1 rounded-xl border border-gray-200 bg-white p-1.5 shadow-sm group-data-[orientation=horizontal]/tabs:h-auto"
+              className="h-auto gap-1 rounded-xl flex-wrap justify-start max-sm:grid max-sm:w-full max-sm:grid-cols-2 border border-gray-200 bg-white p-1.5 shadow-sm group-data-[orientation=horizontal]/tabs:h-auto"
             >
               {TAB_GROUPS.map((group, gi) => (
                 <Fragment key={group.label}>
-                  {gi > 0 && <span className="mx-1.5 h-6 w-px shrink-0 bg-gray-200" aria-hidden="true" />}
+                  {gi > 0 && <span className="mx-1.5 h-6 w-px shrink-0 bg-gray-200 max-sm:hidden" aria-hidden="true" />}
                   <span className="hidden px-1.5 text-[10px] font-bold uppercase tracking-wider text-gray-400 xl:inline" aria-hidden="true">{group.label}</span>
-                  {group.tabs.map(({ key, label, Icon, badge }) => {
+                  {group.tabs.map(({ key, label, short, Icon, badge }) => {
                     const b = badge ? badges[badge] : null
                     return (
                       <TabsTrigger key={key} value={key} data-testid={`feedback-tab-${key}`} className={TRIGGER_CLS}>
-                        <Icon size={16} aria-hidden="true" className="opacity-80 group-data-[state=active]:opacity-100" />
-                        {label}
+                        <Icon size={16} aria-hidden="true" className="opacity-80 group-data-[state=active]:opacity-100 max-[380px]:hidden" />
+                        {short ? <><span className="max-[380px]:hidden">{label}</span><span className="min-[381px]:hidden">{short}</span></> : label}
                         {b && b.value > 0 && (
                           <span
                             className={`min-w-[20px] rounded-full px-1.5 py-px text-center text-[11px] font-bold leading-4 ${
@@ -128,10 +128,10 @@ export default function FeedbackManagement({ schoolId }: { schoolId: number }) {
           </div>
 
           {SOURCE_TABS.has(tab) && (
-            <div className="flex items-center gap-1.5">
+            <div className="flex min-w-0 max-w-full items-center gap-1.5">
               <Select value={liveSource} onValueChange={setSource}>
                 <SelectTrigger
-                  className={`h-11 w-72 rounded-xl bg-white shadow-sm ${filtered ? 'border-[#245b46] ring-2 ring-[#245b46]/15' : 'border-gray-200'}`}
+                  className={`h-11 w-full min-w-0 rounded-xl sm:w-72 bg-white shadow-sm ${filtered ? 'border-[#245b46] ring-2 ring-[#245b46]/15' : 'border-gray-200'}`}
                   data-testid="feedback-source-filter"
                 >
                   <span className="flex min-w-0 items-center gap-2">
@@ -157,7 +157,7 @@ export default function FeedbackManagement({ schoolId }: { schoolId: number }) {
                   title="Show all feedback"
                   aria-label="Clear filter"
                   data-testid="feedback-source-clear"
-                  className="flex h-11 w-11 items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-500 shadow-sm transition-colors hover:bg-gray-50 hover:text-gray-800"
+                  className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-500 shadow-sm transition-colors hover:bg-gray-50 hover:text-gray-800"
                 >
                   <X size={16} aria-hidden="true" />
                 </button>
