@@ -137,7 +137,7 @@ async function handleGET(req: NextRequest) {
       // students aren't silently excluded (they still owe money). Matches the Defaulters
       // CSV export's definition.
       const { rows: top_defaulters } = await pool.query(
-        `SELECT s.id AS student_id, s.name AS student_name, s.grade, s.section, s.roll_number,
+        `SELECT s.id AS student_id, s.name AS student_name, s.grade, s.section, s.roll_number, s.school_roll_number,
                 SUM(GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0)) AS outstanding,
                 COUNT(*) FILTER (WHERE l.status = 'overdue') AS overdue_entries
          FROM student_fee_ledger l
@@ -145,7 +145,7 @@ async function handleGET(req: NextRequest) {
          WHERE l.school_id = $1 AND l.academic_year = $2
            AND l.status NOT IN ('paid', 'waived')
            AND GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0) > 0
-         GROUP BY s.id, s.name, s.grade, s.section, s.roll_number
+         GROUP BY s.id, s.name, s.grade, s.section, s.roll_number, s.school_roll_number
          ORDER BY outstanding DESC
          LIMIT 10`,
         [school_id, academic_year]

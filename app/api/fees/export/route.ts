@@ -44,7 +44,7 @@ async function handleGET(req: NextRequest) {
         }
 
         const { rows } = await pool.query(
-          `SELECT s.name AS student_name, s.roll_number, s.grade, s.section,
+          `SELECT s.name AS student_name, s.roll_number, s.school_roll_number, s.grade, s.section,
                   s.parent_name, s.parent_phone,
                   fc.name AS category_name, l.period_label, l.amount_due,
                   l.amount_paid,
@@ -61,7 +61,8 @@ async function handleGET(req: NextRequest) {
 
         const cols = [
           { key: 'student_name',  label: 'Student Name' },
-          { key: 'roll_number',   label: 'Roll Number' },
+          { key: 'school_roll_number', label: 'Roll Number' },
+          { key: 'roll_number',   label: 'System ID' },
           { key: 'grade',         label: 'Grade' },
           { key: 'section',       label: 'Section' },
           { key: 'parent_name',   label: 'Parent Name' },
@@ -97,7 +98,7 @@ async function handleGET(req: NextRequest) {
         // record of why. The full audit-report already surfaces cancellations; this
         // day-collection/reconciliation export should too.
         const { rows } = await pool.query(
-          `SELECT s.name AS student_name, s.roll_number, s.grade, s.section,
+          `SELECT s.name AS student_name, s.roll_number, s.school_roll_number, s.grade, s.section,
                   s.parent_name, s.parent_phone,
                   fc.name AS category_name, l.period_label,
                   fp.receipt_number, fp.amount, fp.payment_mode, fp.payment_status,
@@ -116,7 +117,8 @@ async function handleGET(req: NextRequest) {
 
         const cols = [
           { key: 'student_name',     label: 'Student Name' },
-          { key: 'roll_number',      label: 'Roll Number' },
+          { key: 'school_roll_number', label: 'Roll Number' },
+          { key: 'roll_number',      label: 'System ID' },
           { key: 'grade',            label: 'Grade' },
           { key: 'section',          label: 'Section' },
           { key: 'parent_name',      label: 'Parent Name' },

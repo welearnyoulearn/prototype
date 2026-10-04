@@ -56,15 +56,15 @@ function buildAuditPdfHtml(rep: Record<string, unknown>): string {
   const moneyHead = `<tr><th>Billed</th><th class="r">Waived</th><th class="r">Net Demand</th><th class="r">Paid</th><th class="r">Balance</th></tr>`
 
   if (rep.kind === 'student') {
-    const s = rep.student as { name: string; roll_number: string; grade: string; section: string; parent_name: string | null; parent_phone: string | null }
+    const s = rep.student as { name: string; roll_number: string; school_roll_number: number | null; grade: string; section: string; parent_name: string | null; parent_phone: string | null }
     const bal = rep.balance as { billed: number; waived: number; net_demand: number; paid: number; balance: number }
     const bills = rep.bills as Array<{ fee_type: string; period_label: string; billed: number; waived: number; paid: number; balance: number; status: string }>
     const pays = rep.payments as Array<{ receipt_number: string; paid_date: string; fee_type: string; period_label: string; amount: number; payment_mode: string; payment_status: string }>
     const wvs = rep.waivers as Array<{ fee_type: string; period_label: string; waiver_amount: number; reason: string; granted_by_name: string | null; is_revoked: boolean; revoked_by: string | null; revoked_at: string | null; revoke_reason: string | null }>
     return `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Student Fee Report</title>${style}</head><body>${head}
       <h3>Student Profile</h3>
-      <table><tr><td><b>Name</b></td><td>${esc(s.name)}</td><td><b>Roll No</b></td><td>${esc(s.roll_number)}</td><td><b>Class</b></td><td>${esc(s.grade)}${esc(s.section || '')}</td></tr>
-      <tr><td><b>Parent</b></td><td>${esc(s.parent_name) || '—'}</td><td><b>Phone</b></td><td colspan="3">${esc(s.parent_phone) || '—'}</td></tr></table>
+      <table><tr><td><b>Name</b></td><td>${esc(s.name)}</td><td><b>Roll No</b></td><td>${esc(s.school_roll_number ?? '')}</td><td><b>Class</b></td><td>${esc(s.grade)}${esc(s.section || '')}</td></tr>
+      <tr><td><b>Parent</b></td><td>${esc(s.parent_name) || '—'}</td><td><b>Phone</b></td><td>${esc(s.parent_phone) || '—'}</td><td><b>System ID</b></td><td>${esc(s.roll_number)}</td></tr></table>
       <h3>Fee Balance</h3>
       <table><thead>${moneyHead}</thead><tbody><tr class="tot"><td class="r">${RUPEE(bal.billed)}</td><td class="r">${RUPEE(bal.waived)}</td><td class="r">${RUPEE(bal.net_demand)}</td><td class="r">${RUPEE(bal.paid)}</td><td class="r">${RUPEE(bal.balance)}</td></tr></tbody></table>
       <h3>Fee Structure</h3>
@@ -187,7 +187,7 @@ export default function FeeReportsTab({
   const [arGrade, setArGrade]                   = useState('')
   const [arSection, setArSection]               = useState('all')
   const [arStudentSearch, setArStudentSearch]   = useState('')
-  const [arStudentResults, setArStudentResults] = useState<{ id: number; name: string; grade: string; section: string; roll_number: string }[]>([])
+  const [arStudentResults, setArStudentResults] = useState<{ id: number; name: string; grade: string; section: string; school_roll_number?: number | null; roll_number: string }[]>([])
   const [arBusy, setArBusy]                     = useState(false)
   const [arMsg, setArMsg]                       = useState('')
 
@@ -296,7 +296,7 @@ export default function FeeReportsTab({
               <div className="absolute z-20 mt-1 left-0 right-0 bg-white border border-gray-200 rounded-lg shadow-lg max-h-64 overflow-y-auto">
                 {arStudentResults.map(s => (
                   <div key={s.id} className="px-3 py-2 hover:bg-gray-50 flex items-center justify-between gap-2 border-b border-gray-50 last:border-0">
-                    <span className="text-sm text-gray-800">{s.name} <span className="text-xs text-gray-400">Gr.{s.grade}{s.section} · #{s.roll_number}</span></span>
+                    <span className="text-sm text-gray-800">{s.name} <span className="text-xs text-gray-400">Gr.{s.grade}{s.section}{rollLabel(s.school_roll_number) ? ` · ${rollLabel(s.school_roll_number)}` : ''}</span></span>
                     <span className="flex gap-1.5 flex-shrink-0">
                       <button data-testid={`btn-audit-student-excel-${s.id}`} onClick={() => { downloadAuditExcel({ student_id: String(s.id) }); setArStudentResults([]); setArStudentSearch('') }}
                         className="text-xs bg-green-600 text-white px-2 py-0.5 rounded hover:bg-green-700">Excel</button>

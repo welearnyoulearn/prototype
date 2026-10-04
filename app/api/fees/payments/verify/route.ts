@@ -14,7 +14,7 @@ async function handleGET(req: NextRequest) {
     if (!await requireFeeAccess(school_id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     try {
       const { rows } = await pool.query(
-        `SELECT fp.*, s.name AS student_name, s.roll_number, s.grade, s.section,
+        `SELECT fp.*, s.name AS student_name, s.roll_number, s.school_roll_number, s.grade, s.section,
                 fc.name AS category_name, l.period_label, l.amount_due, l.amount_paid,
                 GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0) AS ledger_balance
          FROM fee_payments fp

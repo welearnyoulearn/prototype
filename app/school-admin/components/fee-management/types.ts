@@ -9,7 +9,7 @@ export type FeeCategory = {
   is_system?: boolean
 }
 
-export type ApplStudent = { id: number; name: string; roll_number: string; section: string }
+export type ApplStudent = { id: number; name: string; roll_number: string; school_roll_number?: number | null; section: string }
 export type ApplCategory = { id: number; name: string; frequency: string }
 
 export type FeeStructure = {
@@ -52,14 +52,14 @@ export type FeeStats = {
   }
   by_category: Array<{ category_name: string; frequency: string; total_due: number; total_collected: number; total_waived?: number; total_outstanding?: number; overdue_count: number }>
   monthly_trend: Array<{ month: string; collected: number }>
-  top_defaulters: Array<{ student_id: number; student_name: string; grade: string; section: string; roll_number: string; outstanding: number; overdue_entries: number }>
+  top_defaulters: Array<{ student_id: number; student_name: string; grade: string; section: string; roll_number: string; school_roll_number?: number | null; outstanding: number; overdue_entries: number }>
   by_payment_mode: Array<{ payment_mode: string; count: number; total: number }>
   by_class?: Array<{ grade: string; section?: string; students: number; total_due: number; total_collected: number; outstanding: number; fully_paid_students?: number; defaulter_students?: number }>
   unbilled_students?: number
 }
 
 export type PendingPayment = {
-  id: number; student_id: number; student_name: string; roll_number: string
+  id: number; student_id: number; student_name: string; roll_number: string; school_roll_number?: number | null
   grade: string; section: string; category_name: string; period_label: string
   amount: number; payment_mode: string; transaction_ref: string | null
   receipt_number: string; paid_date: string; notes: string | null
@@ -211,7 +211,7 @@ export type GradeStat = {
 }
 
 export type PassoutStudent = {
-  student_id: number; student_name: string; roll_number: string
+  student_id: number; student_name: string; roll_number: string; school_roll_number?: number | null
   grade: string; section: string; passout_year: string
   outstanding: number; total_collected: number
 }
@@ -233,7 +233,8 @@ export type ReceiptCardData = {
   logo_align: 'left' | 'center' | 'right'
   header_blocks: ReceiptHeaderBlock[]
   student_name: string
-  roll_number: string
+  roll_number: string          // class roll number ("" when none)
+  system_id?: string           // internal student id (wlyl-stu-…)
   grade: string
   section: string
   parent_name: string | null

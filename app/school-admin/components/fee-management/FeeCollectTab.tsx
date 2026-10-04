@@ -8,7 +8,7 @@ import { printDualCopyReceipt } from './receipts'
 import { useFeeStore } from '@/lib/stores/feeStore'
 import { LoadErrorBanner } from './LoadErrorBanner'
 import FeeDayClosePanel from './FeeDayClosePanel'
-import { fmt, fmtDate, todayLocal } from './format'
+import { fmt, fmtDate, todayLocal, rollLabel } from './format'
 
 const GRADES = GRADE_SEQUENCE
 function gradeLabel(g: string): string { return /^\d+$/.test(g) ? `Grade ${g}` : g }
@@ -463,7 +463,7 @@ export default function FeeCollectTab({
       setPaySuccess({
         receipt_number: d.receipt_number, student_name: d.student_name || openStudent.student_name,
         amount: d.total_paid ?? enteredAmount,
-        school_name: d.school_name || '', roll_number: openStudent.roll_number,
+        school_name: d.school_name || '', roll_number: openStudent.school_roll_number ? String(openStudent.school_roll_number) : '',
         grade: openStudent.grade, section: openStudent.section, parent_name: d.parent_name || null,
         category_name: d.category_name || 'Multiple fees', period_label: d.period_label || '',
         amount_due: d.amount_due || checkedTotal,
@@ -491,7 +491,7 @@ export default function FeeCollectTab({
   function printCounterReceipt(row: StudentRow, paid: PaySuccess, lines: { cat: string; period: string; amount: number }[]) {
     printDualCopyReceipt({
       school_name: paid.school_name || 'School', logo_url: branding.logo_url, logo_align: branding.logo_align, header_blocks: branding.receipt_header_blocks,
-      student_name: row.student_name, roll_number: row.roll_number, grade: row.grade, section: row.section,
+      student_name: row.student_name, roll_number: row.school_roll_number ? String(row.school_roll_number) : '', system_id: row.roll_number, grade: row.grade, section: row.section,
       parent_name: paid.parent_name, receipt_number: paid.receipt_number,
       lines: lines.map(l => ({ label: l.cat, period: l.period, amount: l.amount })),
       total_paid: paid.amount, payment_mode: paid.payment_mode, paid_date: paid.paid_date,
@@ -1031,7 +1031,7 @@ export default function FeeCollectTab({
                     <div className="flex-1">
                       <div className="flex items-center gap-2 mb-1">
                         <p className="text-sm font-semibold text-gray-800">{pmt.student_name}</p>
-                        <span className="text-xs text-gray-400">Gr.{pmt.grade}{pmt.section} · #{pmt.roll_number}</span>
+                        <span className="text-xs text-gray-400">Gr.{pmt.grade}{pmt.section}{rollLabel(pmt.school_roll_number) ? ` · ${rollLabel(pmt.school_roll_number)}` : ''}</span>
                       </div>
                       <p className="text-xs text-gray-500">{pmt.category_name} · {pmt.period_label}</p>
                       <div className="flex items-center gap-3 mt-2 text-xs text-gray-400 flex-wrap">
@@ -1134,7 +1134,7 @@ export default function FeeCollectTab({
                         <tr key={r.student_id} className="border-b border-gray-50 hover:bg-gray-50">
                           <td className="px-4 py-2.5">
                             <p className="font-medium text-gray-800">{r.student_name}</p>
-                            <p className="text-xs text-gray-400">#{r.roll_number}</p>
+                            {rollLabel(r.school_roll_number) && <p className="text-xs text-gray-400">{rollLabel(r.school_roll_number)}</p>}
                           </td>
                           <td className="px-4 py-2.5 text-gray-600">Gr.{r.grade}{r.section}</td>
                           <td className="px-4 py-2.5 text-right font-bold text-red-600">{fmt(r.outstanding)}</td>

@@ -32,6 +32,7 @@ export async function GET(req: NextRequest) {
            l.student_id,
            s.name AS student_name,
            s.roll_number,
+           s.school_roll_number,
            s.grade,
            s.section,
            s.status AS student_status,
@@ -47,7 +48,7 @@ export async function GET(req: NextRequest) {
            AND s.status IS NOT NULL AND s.status != 'active'
            AND l.status IN ('pending', 'partial', 'overdue')
            AND GREATEST(l.amount_due - COALESCE(l.waiver_amount,0) - l.amount_paid, 0) > 0
-         GROUP BY l.student_id, s.name, s.roll_number, s.grade, s.section, s.status, ps.passout_year
+         GROUP BY l.student_id, s.name, s.roll_number, s.school_roll_number, s.grade, s.section, s.status, ps.passout_year
          ORDER BY outstanding DESC`,
         [school_id]
       )
