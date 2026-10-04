@@ -5,16 +5,22 @@ type SyncParams = {
   schoolId: number | string; academicYear: string; amount: string | number
   reason: string; actor: string
 }
-type AffectedBill = { id: number; student_id: number; amount_due: string; over_covered: boolean }
+type AffectedBill = {
+  id: number; student_id: number; amount_due: string; over_covered: boolean
+  student_name: string | null; period_label: string; amount_paid: string; waiver_amount: string | null
+}
+export type BlockedBill = { student: string; period: string; covered: number }
+type SyncResult = { updated: number; blocked: number; blockedBills: BlockedBill[] }
 
 // Caller holds the year's advisory lock inside a transaction. Share the same
 // ledger update and audit behavior for unlocked-plan saves and amendments.
 export async function syncStructureBills(
   client: PoolClient,
   params: SyncParams & { structureId: number }
-): Promise<{ updated: number; blocked: number }> {
-  const { rows: affected } = await client.query(
-    `SELECT id, student_id, amount_due,
+): Promise<SyncResult> {
+  const { rows: affected } = await client.query<AffectedBill>(
+    `SELECT id, student_id, amount_due, period_label, amount_paid, waiver_amount,
+            (SELECT name FROM students WHERE id = student_id) AS student_name,
             amount_paid + COALESCE(waiver_amount, 0) > $4::numeric AS over_covered
      FROM student_fee_ledger
      WHERE school_id = $1 AND academic_year = $2 AND fee_structure_id = $3
@@ -33,9 +39,10 @@ export async function syncStructureBills(
 export async function syncGeneratedBill(
   client: PoolClient,
   params: SyncParams & { studentId: number; categoryId: number; periodLabel: string; structureId: number | null }
-): Promise<{ updated: number; blocked: number }> {
+): Promise<SyncResult> {
   const { rows: affected } = await client.query<AffectedBill>(
-    `SELECT id, student_id, amount_due,
+    `SELECT id, student_id, amount_due, period_label, amount_paid, waiver_amount,
+            (SELECT name FROM students WHERE id = student_id) AS student_name,
             amount_paid + COALESCE(waiver_amount, 0) > $6::numeric AS over_covered
      FROM student_fee_ledger
      WHERE school_id = $1 AND academic_year = $2 AND student_id = $3
@@ -53,10 +60,18 @@ export async function syncGeneratedBill(
 
 async function applyBillChanges(
   client: PoolClient, params: SyncParams, affected: AffectedBill[], targetStructureId?: number | null
-): Promise<{ updated: number; blocked: number }> {
-  const blocked = affected.filter(r => r.over_covered).length
-  if (blocked > 0) return { updated: 0, blocked }
-  if (affected.length === 0) return { updated: 0, blocked: 0 }
+): Promise<SyncResult> {
+  const blockedRows = affected.filter(r => r.over_covered)
+  if (blockedRows.length > 0) {
+    return {
+      updated: 0, blocked: blockedRows.length,
+      blockedBills: blockedRows.slice(0, 5).map(r => ({
+        student: r.student_name ?? `student #${r.student_id}`, period: r.period_label,
+        covered: parseFloat(r.amount_paid) + parseFloat(r.waiver_amount ?? '0'),
+      })),
+    }
+  }
+  if (affected.length === 0) return { updated: 0, blocked: 0, blockedBills: [] }
 
   await client.query(
     `UPDATE student_fee_ledger l
@@ -74,5 +89,5 @@ async function applyBillChanges(
       [bill.id, params.schoolId, bill.student_id, bill.amount_due, params.amount, params.reason, params.actor]
     )
   }
-  return { updated: affected.length, blocked: 0 }
+  return { updated: affected.length, blocked: 0, blockedBills: [] }
 }

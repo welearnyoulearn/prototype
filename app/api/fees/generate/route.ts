@@ -2,7 +2,12 @@ import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
 import { lockYearClose } from '@/lib/feeRollover'
-import { syncGeneratedBill } from '@/lib/feeStructureSync'
+import { syncGeneratedBill, type BlockedBill } from '@/lib/feeStructureSync'
+
+function blockedMessage(bills: BlockedBill[], total: number): string {
+  const list = bills.map(b => `${b.student} (${b.period}, ₹${b.covered} already paid/waived)`).join('; ')
+  return `Cannot regenerate: ${total} bill(s) already have more paid + waived than the new amount — ${list}${total > bills.length ? '; …' : ''}. Cancel/correct those payments or waivers, then try again.`
+}
 
 // POST /api/fees/generate
 // Generates ledger entries for all students in a grade/all grades for an academic year
@@ -156,7 +161,7 @@ export async function POST(req: NextRequest) {
                 })
                 if (synced.blocked > 0) {
                   await client.query('ROLLBACK')
-                  return NextResponse.json({ error: 'Cannot regenerate bills below amounts already paid + waived. Correct payments or waivers first.' }, { status: 409 })
+                  return NextResponse.json({ error: blockedMessage(synced.blockedBills, synced.blocked), blocked_bills: synced.blockedBills }, { status: 409 })
                 }
                 updated += synced.updated
                 if (synced.updated === 0) skipped++
@@ -186,7 +191,7 @@ export async function POST(req: NextRequest) {
               })
               if (synced.blocked > 0) {
                 await client.query('ROLLBACK')
-                return NextResponse.json({ error: 'Cannot regenerate bills below amounts already paid + waived. Correct payments or waivers first.' }, { status: 409 })
+                return NextResponse.json({ error: blockedMessage(synced.blockedBills, synced.blocked), blocked_bills: synced.blockedBills }, { status: 409 })
               }
               updated += synced.updated
               if (synced.updated === 0) skipped++

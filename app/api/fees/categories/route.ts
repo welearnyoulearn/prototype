@@ -65,7 +65,7 @@ export async function PUT(req: NextRequest) {
     await ensureDB()
     const client = await pool.connect()
     try {
-      const { name, description, frequency, is_active, category_type, changed_by: clientActor } = await req.json()
+      const { name, description, frequency, is_active, category_type } = await req.json()
 
       // Fetch current values before update
       const { rows: [current] } = await client.query(
@@ -76,7 +76,7 @@ export async function PUT(req: NextRequest) {
       // `pool` here would deadlock requesting a second connection on Vercel's max:1 pool.
       const access = await requireFeeAccess(current.school_id, client)
       if (!access) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-      const changed_by = clientActor || access.actor
+      const changed_by = access.actor
 
       // Switching fixed<->variable or changing frequency after bills already exist for this
       // category silently desyncs billing: generate/route.ts filters fixed structures by
