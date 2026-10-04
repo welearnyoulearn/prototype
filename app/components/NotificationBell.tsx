@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
-import { Bell, CalendarDays, Check, ClipboardList, Clock, Megaphone, RefreshCw, UserRound, XCircle, type LucideIcon } from 'lucide-react'
+import { Bell, CalendarDays, Check, ChevronLeft, ChevronRight, ClipboardList, Clock, Megaphone, RefreshCw, UserRound, XCircle, type LucideIcon } from 'lucide-react'
+import { buildGroups, groupOf, NOTIFICATION_GROUP_LABELS, type NotificationGroupId } from './notificationGroups'
 
 type Notification = {
   id: number
@@ -17,11 +18,15 @@ type Notification = {
 
 type NavPayload = { examId?: number; classId?: number; tab?: string; subjectName?: string }
 
-type Props =
-  | { teacherId: number; schoolId?: never; studentId?: never; parentId?: never; onNavigate?: (key: string, payload?: NavPayload) => void }
-  | { schoolId: number; teacherId?: never; studentId?: never; parentId?: never; onNavigate?: (key: string, payload?: NavPayload) => void }
-  | { studentId: number; teacherId?: never; schoolId?: never; parentId?: never; onNavigate?: (key: string, payload?: NavPayload) => void }
-  | { parentId: number; teacherId?: never; schoolId?: never; studentId?: never; onNavigate?: (key: string, payload?: NavPayload) => void }
+// `group` turns the bell into a feature bell: it only shows (and counts) that feature's
+// notifications, so a page like Exam Schedule can drop one in its header.
+type Common = { onNavigate?: (key: string, payload?: NavPayload) => void; group?: NotificationGroupId }
+type Props = Common & (
+  | { teacherId: number; schoolId?: never; studentId?: never; parentId?: never }
+  | { schoolId: number; teacherId?: never; studentId?: never; parentId?: never }
+  | { studentId: number; teacherId?: never; schoolId?: never; parentId?: never }
+  | { parentId: number; teacherId?: never; schoolId?: never; studentId?: never }
+)
 
 const TYPE_ICONS: Record<string, LucideIcon> = {
   period_delay: Clock,
@@ -114,21 +119,25 @@ function timeAgo(dateStr: string) {
   return `${Math.floor(hrs / 24)}d ago`
 }
 
-export default function NotificationBell({ teacherId, schoolId, studentId, parentId, onNavigate }: Props) {
+export default function NotificationBell({ teacherId, schoolId, studentId, parentId, onNavigate, group }: Props) {
   const [notifications, setNotifications] = useState<Notification[]>([])
   const [open, setOpen] = useState(false)
+  // Which feature group is expanded (null = the grouped overview).
+  const [activeGroup, setActiveGroup] = useState<NotificationGroupId | null>(null)
 
   // These query params are not actually consulted server-side — GET
   // /api/notifications derives the recipient purely from the session cookie
   // (see that route's own comment). Kept here only so the URL documents
   // intent per-portal; the value has no effect on which rows come back.
+  // unread_only: once a notification is read it leaves the bell — otherwise it
+  // would reappear on the next 30s poll even after "Mark all read".
   const apiUrl = teacherId
-    ? `/api/notifications?teacher_id=${teacherId}`
+    ? `/api/notifications?teacher_id=${teacherId}&unread_only=true`
     : studentId
-      ? `/api/notifications?student_id=${studentId}`
+      ? `/api/notifications?student_id=${studentId}&unread_only=true`
       : parentId
-        ? `/api/notifications?parent_id=${parentId}`
-        : `/api/notifications?recipient_school_id=${schoolId}`
+        ? `/api/notifications?parent_id=${parentId}&unread_only=true`
+        : `/api/notifications?recipient_school_id=${schoolId}&unread_only=true`
 
   const fetchNotifications = useCallback(async () => {
     try {
@@ -158,7 +167,20 @@ export default function NotificationBell({ teacherId, schoolId, studentId, paren
           : { school_id: schoolId }
         ),
       })
-      setNotifications(prev => prev.map(n => ({ ...n, is_read: true })))
+      setNotifications([])
+    } catch { /* silent */ }
+  }
+
+  async function markIdsRead(ids: number[]) {
+    if (ids.length === 0) return
+    try {
+      await fetch('/api/notifications', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ notification_ids: ids.slice(0, 200) }),
+      })
+      const done = new Set(ids)
+      setNotifications(prev => prev.filter(n => !done.has(n.id)))
     } catch { /* silent */ }
   }
 
@@ -169,7 +191,7 @@ export default function NotificationBell({ teacherId, schoolId, studentId, paren
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ notification_id: id }),
       })
-      setNotifications(prev => prev.map(n => n.id === id ? { ...n, is_read: true } : n))
+      setNotifications(prev => prev.filter(n => n.id !== id))
     } catch { /* silent */ }
   }
 
@@ -196,10 +218,23 @@ export default function NotificationBell({ teacherId, schoolId, studentId, paren
     }
   }
 
-  const unread = notifications.filter(n => !n.is_read).length
+  // A feature bell only ever sees its own feature's notifications.
+  const scoped = group ? notifications.filter(n => groupOf(n.type) === group) : notifications
+  const unread = scoped.filter(n => !n.is_read).length
+  const groups = buildGroups(scoped)
+  // The overview only helps when there is more than one feature to choose between.
+  const current = !group && activeGroup && groups.some(g => g.id === activeGroup) ? activeGroup : null
+  const showGroups = !group && !current && groups.length > 1
+  const visible = current ? scoped.filter(n => groupOf(n.type) === current) : scoped
+  const scopedBell = !!group || !!current
+
+  function handleOpenChange(next: boolean) {
+    setOpen(next)
+    if (!next) setActiveGroup(null)
+  }
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover open={open} onOpenChange={handleOpenChange}>
       <PopoverTrigger asChild>
       <button
         className="portal-icon-button relative"
@@ -221,19 +256,45 @@ export default function NotificationBell({ teacherId, schoolId, studentId, paren
       {open && (
         <PopoverContent align="end" collisionPadding={12} aria-label="Notifications" className="w-80 max-w-[calc(100vw-24px)] overflow-hidden p-0">
           <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
-            <span className="font-semibold text-gray-900 text-sm">Notifications</span>
+            {current ? (
+              <button onClick={() => setActiveGroup(null)} className="min-h-10 -ml-1 flex items-center gap-1 font-semibold text-gray-900 text-sm" aria-label="Back to all notifications">
+                <ChevronLeft size={16} aria-hidden="true" />{NOTIFICATION_GROUP_LABELS[current]}
+              </button>
+            ) : (
+              <span className="font-semibold text-gray-900 text-sm">{group ? NOTIFICATION_GROUP_LABELS[group] : 'Notifications'}</span>
+            )}
             {unread > 0 && (
-              <button onClick={markAllRead} className="min-h-10 text-xs text-primary hover:underline font-medium">
-                Mark all read
+              <button
+                onClick={() => (scopedBell ? markIdsRead(visible.map(n => n.id)) : markAllRead())}
+                className="min-h-10 text-xs text-primary hover:underline font-medium"
+              >
+                Mark {scopedBell ? 'these' : 'all'} read
               </button>
             )}
           </div>
 
           <div className="max-h-80 overflow-y-auto">
-            {notifications.length === 0 ? (
-              <div className="py-10 text-center text-muted-foreground text-sm">No notifications</div>
+            {showGroups ? (
+              groups.map(g => (
+                <button
+                  key={g.id}
+                  onClick={() => setActiveGroup(g.id)}
+                  className="w-full text-left px-4 py-3 border-b border-gray-50 hover:bg-gray-50 transition-colors flex gap-3 items-center"
+                >
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-semibold text-gray-900">{g.label}</p>
+                      <span className="text-xs font-bold bg-red-500 text-white rounded-full px-1.5 min-w-5 text-center leading-5">{g.unread}</span>
+                    </div>
+                    <p className="text-xs text-gray-500 mt-0.5 line-clamp-1">{g.summary}</p>
+                  </div>
+                  <ChevronRight size={16} className="text-gray-400 flex-shrink-0" aria-hidden="true" />
+                </button>
+              ))
+            ) : visible.length === 0 ? (
+              <div className="py-10 text-center text-muted-foreground text-sm">{group ? 'Nothing new here' : 'No notifications'}</div>
             ) : (
-              notifications.map(n => (
+              visible.map(n => (
                 <button
                   key={n.id}
                   onClick={() => handleClick(n)}
@@ -264,9 +325,9 @@ export default function NotificationBell({ teacherId, schoolId, studentId, paren
             )}
           </div>
 
-          {notifications.length > 0 && (
+          {visible.length > 0 && (
             <div className="px-4 py-2 border-t border-gray-100 text-center">
-              <span className="text-xs text-muted-foreground">{notifications.length} notification{notifications.length !== 1 ? 's' : ''}</span>
+              <span className="text-xs text-muted-foreground">{visible.length} notification{visible.length !== 1 ? 's' : ''}</span>
             </div>
           )}
         </PopoverContent>

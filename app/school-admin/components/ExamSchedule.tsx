@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import TestCalendar from '../../components/TestCalendar'
+import NotificationBell from '../../components/NotificationBell'
 
 type ClassOption = { id: number; grade: string; section: string }
 type ClassSubject = { id: number; subject_name: string; teacher_name: string | null }
@@ -79,7 +80,8 @@ export default function ExamSchedule({ schoolId }: Props) {
           <h2 className="text-lg font-bold text-gray-900">Exam Schedule</h2>
           <p className="text-sm text-gray-500">Schedule exams and automatically notify students, class teachers, and parents</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 items-center">
+          <NotificationBell schoolId={schoolId} group="exams" />
           {([
             { key: 'calendar',  label: 'Calendar' },
             { key: 'manage',    label: 'Manage Exams' },
