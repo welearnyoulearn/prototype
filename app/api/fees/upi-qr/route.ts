@@ -6,34 +6,7 @@ import { getAnySession, schoolHasFeature } from '@/lib/auth'
 // GET /api/fees/upi-qr?amount=1000&school_id=X — returns PNG QR code for school's UPI ID
 // Callable by any logged-in user (admin records; parent pays) but only for THEIR school.
 //
-// ============================================================================
-// FUTURE: Payment Gateway Integration (Cashfree)
-// ----------------------------------------------------------------------------
-// Today: this route only ever builds a static `upi://pay` deep link against
-// the school's own UPI ID (schools.upi_id) — no gateway involved. The parent
-// scans it, pays in their own UPI app, then self-reports the transaction ID
-// via POST /api/parent/fees for a school admin to manually verify.
-//
-// Planned: once Cashfree goes live (schema already scaffolded —
-// school_payment_config, payment_transactions, payment_webhook_log in
-// lib/db.ts), this manual QR path is replaced end-to-end by:
-//   1. Parent taps "Pay" → server creates a Cashfree order
-//      (POST to Cashfree's Orders API using the school's own
-//      school_payment_config credentials, decrypted via lib/encryption.ts
-//      the same way Cashfree secrets are already handled elsewhere) and
-//      stores it in payment_transactions with a fresh idempotency_key.
-//   2. Parent is redirected to Cashfree's hosted checkout (or shown Cashfree's
-//      own dynamic UPI-intent QR) instead of this static deep link.
-//   3. Cashfree calls back on completion; the webhook handler verifies the
-//      payload signature, logs it to payment_webhook_log, and — on success —
-//      automatically marks the matching student_fee_ledger row(s) paid,
-//      inserts the fee_payments row itself (no admin verification step),
-//      and generates + delivers the receipt (email/WhatsApp) automatically.
-//   4. School admin's Collect → Online queue becomes a real-time settled-
-//      payments feed instead of a manual pending_verification review queue.
-// No caller of this route needs to change shape when that lands — only the
-// QR-generation internals here get replaced by a gateway-order redirect.
-// ============================================================================
+// FUTURE: Cashfree gateway will replace this manual flow — see docs/DECISIONS.md ("Online payments: Cashfree gateway plan").
 export async function GET(req: NextRequest) {
   const session = await getAnySession()
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
