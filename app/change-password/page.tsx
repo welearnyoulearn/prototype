@@ -3,6 +3,8 @@
 import { useState, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import AuthShell, { THEMES, AuthError, PasswordField } from '@/app/components/AuthShell'
+import PasswordStrengthChecklist from '@/app/components/PasswordStrengthChecklist'
+import { isPasswordStrong } from '@/lib/passwordPolicy'
 import { ButtonLoader } from '@/components/loaders'
 
 function ChangePasswordForm() {
@@ -11,35 +13,24 @@ function ChangePasswordForm() {
   const isFirst = params.get('first') === '1'
   const theme   = THEMES.admin
 
-  const [current, setCurrent]     = useState('')
   const [password, setPassword]   = useState('')
   const [confirm, setConfirm]     = useState('')
   const [loading, setLoading]     = useState(false)
   const [error, setError]         = useState('')
-  // `?first=1` is only a hint from the login redirect, not a live truth — if
-  // the server ever disagrees (a reused link, a second submit after the
-  // first already cleared first-login, two tabs racing each other) it comes
-  // back asking for the current password with nowhere on screen to type it.
-  // Once that happens, show the field instead of leaving the admin stuck.
-  const [needsCurrent, setNeedsCurrent] = useState(!isFirst)
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (password !== confirm) { setError('Passwords do not match'); return }
-    if (password.length < 8)  { setError('Password must be at least 8 characters'); return }
+    if (!isPasswordStrong(password)) { setError('Password does not meet all the requirements below'); return }
     setError(''); setLoading(true)
     try {
       const res = await fetch('/api/auth/change-password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ currentPassword: current, newPassword: password }),
+        body: JSON.stringify({ newPassword: password }),
       })
       const data = await res.json()
-      if (!res.ok) {
-        if (data.error === 'Current password required' || data.error === 'Current password is incorrect') setNeedsCurrent(true)
-        setError(data.error || 'Failed')
-        return
-      }
+      if (!res.ok) { setError(data.error || 'Failed'); return }
       router.push(data.role === 'platform_admin' ? '/platform-admin' : (data.profileCompleted ? '/school-admin' : '/profile-setup'))
     } catch {
       setError('Connection error. Please try again.')
@@ -48,17 +39,11 @@ function ChangePasswordForm() {
     }
   }
 
-  const strengthChecks = [
-    { label: 'At least 8 characters', ok: password.length >= 8 },
-    { label: 'One uppercase letter',  ok: /[A-Z]/.test(password) },
-    { label: 'One number',            ok: /\d/.test(password) },
-  ]
-
   return (
     <AuthShell
       theme={theme}
       title={isFirst ? 'Set Your Password' : 'Change Password'}
-      subtitle={isFirst ? 'Replace the temporary password before continuing' : 'Enter your current and new password'}
+      subtitle={isFirst ? 'Replace the temporary password before continuing' : 'Choose a new password'}
     >
       {isFirst && (
         <div className="mb-5 flex items-start gap-3 bg-blue-50 border border-blue-200 rounded-xl px-4 py-3">
@@ -74,26 +59,12 @@ function ChangePasswordForm() {
       <AuthError message={error} />
 
       <form onSubmit={handleSubmit} className="space-y-4">
-        {needsCurrent && (
-          <PasswordField label="Current Password" value={current} onChange={setCurrent}
-            placeholder="Your current password" ring={theme.ring} autoComplete="current-password" />
-        )}
         <PasswordField label="New Password" value={password} onChange={setPassword}
           placeholder="At least 8 characters" ring={theme.ring} autoComplete="new-password" />
         <PasswordField label="Confirm New Password" value={confirm} onChange={setConfirm}
           placeholder="Repeat your new password" ring={theme.ring} autoComplete="new-password" />
 
-        {/* Strength indicator */}
-        <div className="bg-gray-50 rounded-xl px-4 py-3 space-y-1.5">
-          {strengthChecks.map(c => (
-            <div key={c.label} className={`flex items-center gap-2 text-xs transition ${c.ok ? 'text-green-600' : 'text-gray-400'}`}>
-              {c.ok
-                ? <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
-                : <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" /></svg>}
-              {c.label}
-            </div>
-          ))}
-        </div>
+        <PasswordStrengthChecklist password={password} />
 
         <button type="submit" disabled={loading}
           className="auth-submit">

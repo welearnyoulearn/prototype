@@ -3,13 +3,14 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import AuthShell, { THEMES, AuthError, PasswordField } from '@/app/components/AuthShell'
+import PasswordStrengthChecklist from '@/app/components/PasswordStrengthChecklist'
+import { isPasswordStrong } from '@/lib/passwordPolicy'
 import { ButtonLoader } from '@/components/loaders'
 
 export default function ParentChangePasswordPage() {
   const router = useRouter()
   const theme = THEMES.parent
 
-  const [current, setCurrent]     = useState('')
   const [newPw, setNewPw]         = useState('')
   const [confirm, setConfirm]     = useState('')
   const [loading, setLoading]     = useState(false)
@@ -18,13 +19,13 @@ export default function ParentChangePasswordPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (newPw !== confirm) { setError('Passwords do not match'); return }
-    if (newPw.length < 8)  { setError('Password must be at least 8 characters'); return }
+    if (!isPasswordStrong(newPw)) { setError('Password does not meet all the requirements below'); return }
     setError(''); setLoading(true)
     try {
       const res = await fetch('/api/parent/auth/change-password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ currentPassword: current || undefined, newPassword: newPw }),
+        body: JSON.stringify({ newPassword: newPw }),
       })
       const data = await res.json()
       if (!res.ok) { setError(data.error || 'Failed to change password'); return }
@@ -53,15 +54,6 @@ export default function ParentChangePasswordPage() {
 
       <form onSubmit={handleSubmit} className="space-y-4">
         <PasswordField
-          label="Temporary Password (from welcome email)"
-          value={current}
-          onChange={setCurrent}
-          placeholder="Paste from your welcome email"
-          ring={theme.ring}
-          autoComplete="current-password"
-          required={false}
-        />
-        <PasswordField
           label="New Password"
           value={newPw}
           onChange={setNewPw}
@@ -77,6 +69,8 @@ export default function ParentChangePasswordPage() {
           ring={theme.ring}
           autoComplete="new-password"
         />
+
+        <PasswordStrengthChecklist password={newPw} />
 
         <button
           type="submit"

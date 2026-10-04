@@ -38,13 +38,13 @@ Screens: `app/school-admin/components/StaffOnboarding.tsx`, `app/school-admin/co
 
 API routes these screens call (all exist):
 - `GET` /api/admin/overview
-- `DELETE/GET/POST` /api/platform/subjects
-- `GET` /api/school/subjects
 - `GET` /api/teachers
 - `POST` /api/teachers/bulk
 - `POST` /api/teachers/parse-import
+- `GET` /api/teachers/subject-options
 - `GET` /api/teachers/template
 - `DELETE/GET/PUT` /api/teachers/{}
+- `POST` /api/teachers/{}/reset-credentials
 
 ✅ Every API route the screens call exists.
 <!-- AUTO:evidence:staff:end -->
