@@ -4,7 +4,7 @@ import { todayIST } from '@/lib/istDate'
 import pool, { ensureDB } from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
 import { withWatchline } from '@/lib/logger'
-import { lockYearClose } from '@/lib/feeRollover'
+import { lockYearClose, isYearClosed } from '@/lib/feeRollover'
 
 // POST /api/fees/payments/cancel
 // Cancel (reverse) a completed payment, OR correct it (cancel + re-record with new values).
@@ -48,10 +48,7 @@ async function handlePOST(req: NextRequest) {
       // guaranteed to exist (see lib/db.ts), so a query error here is a real
       // failure, not a missing table; let it propagate to the outer catch
       // rather than silently failing this guard open.
-      const { rows: [locked] } = await client.query(
-        `SELECT 1 FROM fee_year_close WHERE school_id = $1 AND academic_year = $2 AND is_reopened = FALSE LIMIT 1`,
-        [pmtPreview.school_id, pmtPreview.academic_year]
-      )
+      const locked = await isYearClosed(client, pmtPreview.school_id, pmtPreview.academic_year)
       if (locked) {
         return NextResponse.json({ error: 'This academic year is closed. Reopen it to cancel/correct payments.' }, { status: 409 })
       }
@@ -100,10 +97,7 @@ async function handlePOST(req: NextRequest) {
       // ours) sees it — the earlier pre-BEGIN check above could be stale by
       // exactly this race, since it ran before either transaction touched the
       // ledger row and gave no ordering guarantee against a concurrent year-end.
-      const { rows: [lockedNow] } = await client.query(
-        `SELECT 1 FROM fee_year_close WHERE school_id = $1 AND academic_year = $2 AND is_reopened = FALSE LIMIT 1`,
-        [pmtPreview.school_id, pmt.academic_year]
-      )
+      const lockedNow = await isYearClosed(client, pmtPreview.school_id, pmt.academic_year)
       if (lockedNow) {
         await client.query('ROLLBACK')
         return NextResponse.json({ error: 'This academic year was closed by a year-end run while this request was in progress. Reopen it to cancel/correct payments.' }, { status: 409 })
@@ -187,8 +181,8 @@ async function handlePOST(req: NextRequest) {
            VALUES ($1,$2,$3,$4,$5,'completed',$6,$7,$8,$9,$10)
            RETURNING id`,
           [pmt.school_id, pmt.student_id, pmt.ledger_id, newAmount, newMode,
-           newReceipt, newRef || null, newDate, done_by,
-           `Correction of ${pmt.receipt_number}: ${reason}`]
+           newReceipt, newRef || null, newDate, pmt.collected_by_name || done_by,
+           `Correction of ${pmt.receipt_number} by ${done_by}: ${reason}`]
         )
         newPaymentId = created.id
 
