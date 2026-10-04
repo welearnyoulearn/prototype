@@ -18,12 +18,12 @@ type DayPart = 'morning' | 'afternoon' | 'evening'
 type Icon = typeof BookOpen | typeof StudentIcon
 
 const portals: Array<{
-  id: PortalId; testId: string; title: string; verb: string; description: string; href: string; icon: Icon; features: Array<[string, Icon]>
+  id: PortalId; testId: string; title: string; verb: string; description: string; href: string; icon: Icon; features: Array<[string, Icon]>; art: [string, string]
 }> = [
-  { id: 'student', testId: 'student', title: 'Student', verb: 'learn.', description: 'Your lessons, attendance, results and achievements.', href: '/student/login', icon: StudentIcon, features: [['Lessons', BookOpen], ['Attendance', CalendarCheck], ['Achievements', Trophy]] },
-  { id: 'teacher', testId: 'teacher', title: 'Teacher', verb: 'teach.', description: 'Your classes, attendance, marks and syllabus.', href: '/teacher/login', icon: TeacherIcon, features: [['Attendance', ClipboardCheck], ['Marks', PenLine], ['Syllabus', ListChecks]] },
-  { id: 'parent', testId: 'parent', title: 'Parent', verb: 'stay close.', description: "Your child's progress, school notices and fees.", href: '/parent/login', icon: ParentIcon, features: [['Progress', TrendingUp], ['Notices', Bell], ['Fees', Wallet]] },
-  { id: 'admin', testId: 'school-admin', title: 'School', verb: 'lead.', description: 'Staff, students, fees and daily operations.', href: '/login?role=school', icon: SchoolIcon, features: [['People', Users], ['Fees', IndianRupee], ['Reports', BarChart3]] },
+  { id: 'student', testId: 'student', title: 'Student', verb: 'learn.', description: 'Your lessons, attendance, results and every win along the way.', href: '/student/login', icon: StudentIcon, art: ['/landing/student-3d.png', '/student-icons/books.png'], features: [['Lessons', BookOpen], ['Attendance', CalendarCheck], ['Achievements', Trophy]] },
+  { id: 'teacher', testId: 'teacher', title: 'Teacher', verb: 'teach.', description: 'Your classes, attendance, marks and syllabus, all in one calm place.', href: '/teacher/login', icon: TeacherIcon, art: ['/landing/teacher-3d.png', '/student-icons/light-bulb.png'], features: [['Attendance', ClipboardCheck], ['Marks', PenLine], ['Syllabus', ListChecks]] },
+  { id: 'parent', testId: 'parent', title: 'Parent', verb: 'stay close.', description: "Your child's progress, school notices and fees, always within reach.", href: '/parent/login', icon: ParentIcon, art: ['/landing/parent-3d.png', '/landing/heart-3d.png'], features: [['Progress', TrendingUp], ['Notices', Bell], ['Fees', Wallet]] },
+  { id: 'admin', testId: 'school-admin', title: 'School', verb: 'lead.', description: 'Staff, students, fees and the everyday running of your school.', href: '/login?role=school', icon: SchoolIcon, art: ['/landing/school-3d.png', '/student-icons/trophy.png'], features: [['People', Users], ['Fees', IndianRupee], ['Reports', BarChart3]] },
 ]
 
 const COUNT = portals.length
@@ -181,6 +181,8 @@ export default function PortalLanding() {
           <p className="pl-greeting" data-part={dayPart ?? undefined}>
             <GreetingIcon aria-hidden="true" />
             {dayPart ? `Good ${dayPart}` : 'Welcome'}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img className="pl-wave" src="/student-icons/waving-hand.png" alt="" width={18} height={18} draggable={false} />
           </p>
           <h1>
             A place to{' '}
@@ -198,7 +200,7 @@ export default function PortalLanding() {
               </AnimatePresence>
             </span>
           </h1>
-          <p>Choose your portal and sign in with the account your school gave you.</p>
+          <p>Pick your portal and sign in with the account your school gave you.</p>
         </motion.div>
 
         <motion.div
@@ -237,6 +239,14 @@ export default function PortalLanding() {
                     <span className="pl-slide-title">
                       <strong>{portal.title}</strong>
                       <small>Portal</small>
+                    </span>
+                    <span className="pl-art" aria-hidden="true">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img className="pl-art-main" src={portal.art[0]} alt="" width={104} height={104} draggable={false} />
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img className="pl-art-accent" src={portal.art[1]} alt="" width={36} height={36} draggable={false} />
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img className="pl-art-spark" src="/student-icons/sparkles.png" alt="" width={22} height={22} draggable={false} />
                     </span>
                   </span>
                   <span className="pl-slide-body">
@@ -277,7 +287,7 @@ export default function PortalLanding() {
 
         <p className="pl-help">
           <span className="pl-help-keys">Use <kbd>←</kbd> <kbd>→</kbd> to browse, <kbd>1</kbd>–<kbd>4</kbd> to jump in. </span>
-          No account yet? Your school office can set one up for you.
+          New here? Your school office will happily set up an account for you.
         </p>
       </main>
 
