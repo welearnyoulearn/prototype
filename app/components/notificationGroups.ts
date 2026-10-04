@@ -2,13 +2,16 @@
 // The bell groups by this so "12 notifications" reads as "Exams · 7, Marks & Results · 5".
 // One primary group per type, so nothing is ever counted twice.
 
-export type NotificationGroupId = 'exams' | 'marks' | 'messages' | 'cover' | 'other'
+export type NotificationGroupId = 'exams' | 'marks' | 'messages' | 'timetable' | 'syllabus' | 'attendance' | 'birthdays' | 'other'
 
 export const NOTIFICATION_GROUP_LABELS: Record<NotificationGroupId, string> = {
   exams: 'Exams',
   marks: 'Marks & Results',
   messages: 'Messages',
-  cover: 'Timetable & Cover',
+  timetable: 'Timetable & Cover',
+  syllabus: 'Syllabus',
+  attendance: 'Attendance',
+  birthdays: 'Birthdays',
   other: 'Other',
 }
 
@@ -30,9 +33,13 @@ const TYPES: Record<string, [NotificationGroupId, string]> = {
   ack_nudge: ['marks', 'Sign-off needed'],
   ack_completed: ['marks', 'Signed off'],
   teacher_broadcast: ['messages', 'Message'],
-  period_delay: ['cover', 'Delay'],
-  substitute_needed: ['cover', 'Cover needed'],
-  substitute_assigned: ['cover', 'Cover assigned'],
+  timetable: ['timetable', 'Timetable'],
+  syllabus_behind_nudge: ['syllabus', 'Behind schedule'],
+  attendance_reminder: ['attendance', 'Reminder'],
+  birthday: ['birthdays', 'Birthday'],
+  period_delay: ['timetable', 'Delay'],
+  substitute_needed: ['timetable', 'Cover needed'],
+  substitute_assigned: ['timetable', 'Cover assigned'],
 }
 
 export function groupOf(type: string): NotificationGroupId {

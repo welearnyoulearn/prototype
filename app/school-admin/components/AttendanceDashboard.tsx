@@ -8,6 +8,7 @@ import { todayIST } from '@/lib/attendanceRules'
 import { EmptyState } from '@/components/ui/empty-state'
 import AttendanceOverviewDashboard from './AttendanceOverviewDashboard'
 import AttendanceAbsentees from './AttendanceAbsentees'
+import NotificationBell from '../../components/NotificationBell'
 
 type Props = { schoolId: number; onNavigate?: (key: string) => void }
 
@@ -208,7 +209,7 @@ export default function AttendanceDashboard({ schoolId, onNavigate }: Props) {
       {/* Header — hidden when viewing class detail */}
       <div className={`flex items-center justify-between mb-5 flex-wrap gap-3 ${modalClass ? 'hidden' : ''}`}>
         <div>
-          <h2 className="text-xl font-bold text-gray-900">Attendance</h2>
+          <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">Attendance <NotificationBell schoolId={schoolId} group="attendance" /></h2>
           <p className="text-sm text-gray-500 mt-0.5">School overview, class and student attendance, and the daily register</p>
         </div>
         <div className="flex items-center gap-2">
