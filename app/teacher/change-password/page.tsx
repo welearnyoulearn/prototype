@@ -4,13 +4,14 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import AuthShell, { THEMES, AuthError } from '@/app/components/AuthShell'
 import { PasswordField } from '@/app/components/AuthShell'
+import PasswordStrengthChecklist from '@/app/components/PasswordStrengthChecklist'
+import { isPasswordStrong } from '@/lib/passwordPolicy'
 import { ButtonLoader } from '@/components/loaders'
 
 export default function TeacherChangePasswordPage() {
   const router = useRouter()
   const theme = THEMES.teacher
 
-  const [current, setCurrent]     = useState('')
   const [newPw, setNewPw]         = useState('')
   const [confirm, setConfirm]     = useState('')
   const [loading, setLoading]     = useState(false)
@@ -19,13 +20,13 @@ export default function TeacherChangePasswordPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (newPw !== confirm) { setError('Passwords do not match'); return }
-    if (newPw.length < 8)  { setError('Password must be at least 8 characters'); return }
+    if (!isPasswordStrong(newPw)) { setError('Password does not meet all the requirements below'); return }
     setError(''); setLoading(true)
     try {
       const res = await fetch('/api/teacher/auth/change-password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ currentPassword: current || undefined, newPassword: newPw }),
+        body: JSON.stringify({ newPassword: newPw }),
       })
       const data = await res.json()
       if (!res.ok) { setError(data.error || 'Failed to change password'); return }
@@ -52,15 +53,6 @@ export default function TeacherChangePasswordPage() {
 
       <form onSubmit={handleSubmit} className="space-y-4">
         <PasswordField
-          label="Current / Temporary Password"
-          value={current}
-          onChange={setCurrent}
-          placeholder="Paste the temporary password from email"
-          ring={theme.ring}
-          autoComplete="current-password"
-          required={false}
-        />
-        <PasswordField
           label="New Password"
           value={newPw}
           onChange={setNewPw}
@@ -77,9 +69,7 @@ export default function TeacherChangePasswordPage() {
           autoComplete="new-password"
         />
 
-        <div className="rounded-md bg-muted px-3 py-2 text-xs leading-5 text-muted-foreground">
-          Password must be at least 8 characters. Use a mix of letters, numbers, and symbols for best security.
-        </div>
+        <PasswordStrengthChecklist password={newPw} />
 
         <button
           type="submit"

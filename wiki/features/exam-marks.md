@@ -48,10 +48,11 @@ API routes these screens call (all exist):
 - `POST` /api/exams/{}/release
 - `POST` /api/exams/{}/review
 - `POST` /api/exams/{}/subjects
+- `PATCH` /api/exams/{}/subjects/{}
+- `POST` /api/exams/{}/subjects/{}/nudge
 - `POST` /api/exams/{}/subjects/{}/reopen
 - `GET/POST` /api/students
 - `GET` /api/students/{}/exams
-- `GET` /api/teachers
 
 ✅ Every API route the screens call exists.
 <!-- AUTO:evidence:exam-marks:end -->
