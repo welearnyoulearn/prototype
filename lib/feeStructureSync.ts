@@ -1,4 +1,5 @@
 import type { PoolClient } from 'pg'
+import { ledgerStatusSql } from '@/lib/feeLedgerStatus'
 
 type SyncParams = {
   schoolId: number | string; academicYear: string; amount: string | number
@@ -76,15 +77,7 @@ async function applyBillChanges(
     `UPDATE student_fee_ledger l
      SET amount_due = $1,
          fee_structure_id = CASE WHEN $3::boolean THEN $4::int ELSE fee_structure_id END,
-         status = CASE
-           WHEN amount_paid + COALESCE(waiver_amount, 0) >= $1::numeric
-             THEN CASE WHEN COALESCE(waiver_amount, 0) > 0 THEN 'waived' ELSE 'paid' END
-           WHEN amount_paid > 0 OR COALESCE(waiver_amount, 0) > 0 THEN 'partial'
-           WHEN EXISTS (SELECT 1 FROM academic_years ay
-                        WHERE ay.school_id = l.school_id AND ay.label = l.academic_year
-                          AND ay.end_date < CURRENT_DATE) THEN 'overdue'
-           ELSE 'pending'
-         END
+         status = ${ledgerStatusSql({ due: '$1::numeric', paid: 'amount_paid', waiver: 'waiver_amount', ledger: 'l' })}
      WHERE id = ANY($2::int[])`,
     [params.amount, affected.map(r => r.id), targetStructureId !== undefined, targetStructureId ?? null]
   )

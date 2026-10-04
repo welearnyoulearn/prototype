@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { ledgerStatusSql } from '@/lib/feeLedgerStatus'
 import pool, { ensureDB } from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
 import { lockYearClose } from '@/lib/feeRollover'
@@ -257,12 +258,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       const { rows: [updated] } = await client.query(
         `UPDATE student_fee_ledger
          SET amount_due = $1,
-             status = CASE
-               WHEN COALESCE(waiver_amount,0) + amount_paid >= $1  THEN 'paid'
-               WHEN amount_paid > 0 AND amount_paid < $1            THEN 'partial'
-               WHEN $1 > 0 AND EXISTS (SELECT 1 FROM academic_years ay WHERE ay.school_id = student_fee_ledger.school_id AND ay.label = student_fee_ledger.academic_year AND ay.end_date < CURRENT_DATE) THEN 'overdue'
-               ELSE 'pending'
-             END
+             status = ${ledgerStatusSql({ due: '$1', paid: 'amount_paid', waiver: 'waiver_amount' })}
          WHERE id = $2
          RETURNING *`,
         [parsedAmount, id]

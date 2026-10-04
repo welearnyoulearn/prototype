@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { ledgerStatusSql } from '@/lib/feeLedgerStatus'
 import pool from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
 import { withWatchline } from '@/lib/logger'
@@ -271,11 +272,7 @@ async function handlePOST(req: NextRequest) {
           await client.query(
             `UPDATE student_fee_ledger
              SET amount_paid = LEAST(amount_due - COALESCE(waiver_amount,0), amount_paid + $1),
-                 status = CASE
-                   WHEN COALESCE(waiver_amount,0) + LEAST(amount_due - COALESCE(waiver_amount,0), amount_paid + $1) >= amount_due THEN 'paid'
-                   WHEN amount_paid + $1 > 0 THEN 'partial'
-                   ELSE status
-                 END
+                 status = ${ledgerStatusSql({ due: 'amount_due', paid: 'LEAST(amount_due - COALESCE(waiver_amount,0), amount_paid + $1)', waiver: 'waiver_amount' })}
              WHERE id = $2`,
             [amount, ledger_id]
           )
@@ -339,11 +336,7 @@ async function handlePOST(req: NextRequest) {
             await client.query(
               `UPDATE student_fee_ledger
                SET amount_paid = LEAST(amount_due - COALESCE(waiver_amount,0), amount_paid + $1),
-                   status = CASE
-                     WHEN COALESCE(waiver_amount,0) + LEAST(amount_due - COALESCE(waiver_amount,0), amount_paid + $1) >= amount_due THEN 'paid'
-                     WHEN amount_paid + $1 > 0 THEN 'partial'
-                     ELSE status
-                   END
+                   status = ${ledgerStatusSql({ due: 'amount_due', paid: 'LEAST(amount_due - COALESCE(waiver_amount,0), amount_paid + $1)', waiver: 'waiver_amount' })}
                WHERE id = $2`,
               [allocate, entry.id]
             )
