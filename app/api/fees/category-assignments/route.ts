@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
 import { lockYearClose } from '@/lib/feeRollover'
+import { syncGeneratedBill } from '@/lib/feeStructureSync'
 
 // student_fee_category_assignments / student_fee_assignment_history table
 // creation lives in lib/db.ts's ensureDB() now (single source of truth); this
@@ -258,24 +259,26 @@ export async function POST(req: NextRequest) {
         }, { status: 409 })
       }
 
-      // Sync existing ledger entries for saved amounts
+      // Use the same billed-amount, balance and audit rules as generation.
       let ledgerUpdated = 0
       for (const { student_id, fee_category_id, amount } of toSave) {
-        const amt = parseFloat(amount)
-        const { rowCount } = await client.query(
-          `UPDATE student_fee_ledger
-           SET amount_due = $1,
-               status = CASE
-                 WHEN COALESCE(waiver_amount,0) + amount_paid >= $1  THEN 'paid'
-                 WHEN amount_paid > 0 AND amount_paid < $1           THEN 'partial'
-                 WHEN $1 > 0 AND EXISTS (SELECT 1 FROM academic_years ay WHERE ay.school_id = student_fee_ledger.school_id AND ay.label = student_fee_ledger.academic_year AND ay.end_date < CURRENT_DATE) THEN 'overdue'
-                 ELSE 'pending'
-               END
-           WHERE school_id = $2 AND student_id = $3 AND fee_category_id = $4
-             AND academic_year = $5 AND amount_due != $1`,
-          [amt, school_id, student_id, fee_category_id, academic_year]
+        const { rows: periods } = await client.query(
+          `SELECT period_label FROM student_fee_ledger
+           WHERE school_id = $1 AND academic_year = $2 AND student_id = $3 AND fee_category_id = $4`,
+          [school_id, academic_year, student_id, fee_category_id]
         )
-        ledgerUpdated += rowCount ?? 0
+        for (const period of periods) {
+          const synced = await syncGeneratedBill(client, {
+            schoolId: school_id, academicYear: academic_year, studentId: student_id,
+            categoryId: fee_category_id, periodLabel: period.period_label, structureId: null,
+            amount, reason: 'Variable fee assignment amount updated', actor: changed_by,
+          })
+          if (synced.blocked > 0) {
+            await client.query('ROLLBACK')
+            return NextResponse.json({ error: 'The new amount is below recorded payments plus waivers. Correct payments or waivers first.' }, { status: 409 })
+          }
+          ledgerUpdated += synced.updated
+        }
       }
 
       // Log removals in history

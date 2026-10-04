@@ -6,6 +6,7 @@ import type { ReportData } from './types'
 import { useFeeStore } from '@/lib/stores/feeStore'
 import { LoadErrorBanner } from './LoadErrorBanner'
 import { Skeleton } from '@/components/ui/skeleton'
+import { buildFeeReportMonths } from '@/lib/feeReportMonths'
 
 const GRADES = GRADE_SEQUENCE
 function gradeLabel(g: string): string { return /^\d+$/.test(g) ? `Grade ${g}` : g }
@@ -158,7 +159,10 @@ export default function FeeReportsTab({
     finally { setReportLoading(false) }
   }, [schoolId, academicYear])
 
-  useEffect(() => { loadReports() }, [loadReports, reportsVersion])
+  useEffect(() => {
+    const refresh = window.setTimeout(() => { void loadReports() }, 0)
+    return () => window.clearTimeout(refresh)
+  }, [loadReports, reportsVersion])
 
   const [auditLog, setAuditLog]           = useState<AuditRow[]>([])
   const [auditLoading, setAuditLoading]   = useState(false)
@@ -375,20 +379,19 @@ export default function FeeReportsTab({
           </div>
 
           {/* Month-wise billed vs collected */}
-          {reportData.monthly.length > 0 && (
+          {(reportData.monthly.length > 0 || reportData.monthlyDue.length > 0) && (
             <div className="bg-white rounded-xl border border-gray-100 p-5">
               <h3 className="text-sm font-semibold text-gray-700 mb-4">Month-wise Billed vs Collected</h3>
               <div className="space-y-2">
                 {(() => {
-                  const dueMap = new Map(reportData.monthlyDue.map(d => [d.month, d.billed]))
-                  const allMonths = Array.from(new Set([...reportData.monthly.map(m => m.month), ...reportData.monthlyDue.map(d => d.month)])).sort()
-                  const maxVal = Math.max(...allMonths.map(m => Math.max(dueMap.get(m) ?? 0, reportData.monthly.find(x => x.month === m)?.collected ?? 0)), 1)
-                  return allMonths.map(month => {
-                    const billed    = dueMap.get(month) ?? 0
-                    const collected = reportData.monthly.find(x => x.month === month)?.collected ?? 0
+                  const months = buildFeeReportMonths(reportData.monthly, reportData.monthlyDue)
+                  const maxVal = Math.max(...months.map(m => Math.max(m.billed, m.collected)), 1)
+                  return months.map(({ month, month_start, billed, collected }) => {
                     const billedPct    = Math.round((billed    / maxVal) * 100)
                     const collectedPct = Math.round((collected / maxVal) * 100)
-                    const label = new Date(month + '-01').toLocaleDateString('en-IN', { month: 'short', year: '2-digit' })
+                    const label = month_start
+                      ? new Date(month_start).toLocaleDateString('en-IN', { month: 'short', year: '2-digit', timeZone: 'Asia/Kolkata' })
+                      : 'No due date'
                     return (
                       <div key={month}>
                         <div className="flex justify-between text-xs mb-1">

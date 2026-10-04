@@ -15,68 +15,77 @@ export async function GET(req: NextRequest) {
 
   try {
     await ensureDB()
+    const client = await pool.connect()
+    try {
+      // Every read uses one snapshot even if collections change between queries.
+      await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY')
 
-    // Today's payment breakdown by mode
-    const { rows: byMode } = await pool.query(
-      `SELECT payment_mode,
-              COUNT(*) AS count,
-              SUM(amount) AS total
-       FROM fee_payments
-       WHERE school_id = $1
-         AND paid_date = $2
-         AND payment_status = 'completed'
-       GROUP BY payment_mode`,
-      [school_id, date]
-    )
+      // Today's payment breakdown by mode
+      const { rows: byMode } = await client.query(
+        `SELECT payment_mode,
+                COUNT(DISTINCT receipt_number) AS count,
+                SUM(amount) AS total
+         FROM fee_payments
+         WHERE school_id = $1
+           AND paid_date = $2
+           AND payment_status = 'completed'
+         GROUP BY payment_mode`,
+        [school_id, date]
+      )
 
-    // Receipt range today
-    const { rows: [receipts] } = await pool.query(
-      `SELECT MIN(receipt_number) AS first_receipt,
-              MAX(receipt_number) AS last_receipt,
-              COUNT(*) AS count,
-              SUM(amount) AS total
-       FROM fee_payments
-       WHERE school_id = $1 AND paid_date = $2 AND payment_status = 'completed'`,
-      [school_id, date]
-    )
+      // Receipt range today
+      const { rows: [receipts] } = await client.query(
+        `SELECT MIN(receipt_number) AS first_receipt,
+                MAX(receipt_number) AS last_receipt,
+                COUNT(DISTINCT receipt_number) AS count,
+                SUM(amount) AS total
+         FROM fee_payments
+         WHERE school_id = $1 AND paid_date = $2 AND payment_status = 'completed'`,
+        [school_id, date]
+      )
 
-    // Recent payments today (for review)
-    const { rows: todayPayments } = await pool.query(
-      `SELECT fp.*, s.name AS student_name, s.grade, s.section,
-              fc.name AS fee_head_name, l.period_label
-       FROM fee_payments fp
-       JOIN students s ON s.id = fp.student_id
-       JOIN student_fee_ledger l ON l.id = fp.ledger_id
-       JOIN fee_categories fc ON fc.id = l.fee_category_id
-       WHERE fp.school_id = $1 AND fp.paid_date = $2 AND fp.payment_status = 'completed'
-       ORDER BY fp.created_at DESC`,
-      [school_id, date]
-    )
+      // Recent payments today (for review)
+      const { rows: todayPayments } = await client.query(
+        `SELECT fp.*, s.name AS student_name, s.grade, s.section,
+                fc.name AS fee_head_name, l.period_label
+         FROM fee_payments fp
+         JOIN students s ON s.id = fp.student_id
+         JOIN student_fee_ledger l ON l.id = fp.ledger_id
+         JOIN fee_categories fc ON fc.id = l.fee_category_id
+         WHERE fp.school_id = $1 AND fp.paid_date = $2 AND fp.payment_status = 'completed'
+         ORDER BY fp.created_at DESC`,
+        [school_id, date]
+      )
 
-    // Check if already closed
-    const { rows: [existing] } = await pool.query(
-      `SELECT * FROM fee_day_close WHERE school_id = $1 AND close_date = $2`,
-      [school_id, date]
-    )
+      // Check if already closed
+      const { rows: [existing] } = await client.query(
+        `SELECT * FROM fee_day_close WHERE school_id = $1 AND close_date = $2`,
+        [school_id, date]
+      )
 
-    const modeMap: Record<string, { count: number; total: number }> = {}
-    byMode.forEach((r: { payment_mode: string; count: string; total: string }) => {
-      modeMap[r.payment_mode] = { count: parseInt(r.count), total: parseFloat(r.total) }
-    })
+      const modeMap: Record<string, { count: number; total: number }> = {}
+      byMode.forEach((r: { payment_mode: string; count: string; total: string }) => {
+        modeMap[r.payment_mode] = { count: parseInt(r.count), total: parseFloat(r.total) }
+      })
 
-    return NextResponse.json({
-      date,
-      by_mode: modeMap,
-      receipts: {
-        first: receipts?.first_receipt || null,
-        last: receipts?.last_receipt || null,
-        count: parseInt(receipts?.count || '0'),
-        total: parseFloat(receipts?.total || '0'),
-      },
-      payments: todayPayments,
-      already_closed: !!existing,
-      close_record: existing || null,
-    })
+      await client.query('COMMIT')
+      return NextResponse.json({
+        date,
+        by_mode: modeMap,
+        receipts: {
+          first: receipts?.first_receipt || null,
+          last: receipts?.last_receipt || null,
+          count: parseInt(receipts?.count || '0'),
+          total: parseFloat(receipts?.total || '0'),
+        },
+        payments: todayPayments,
+        already_closed: !!existing,
+        close_record: existing || null,
+      })
+    } catch (e) {
+      await client.query('ROLLBACK')
+      throw e
+    } finally { client.release() }
   } catch (e) { console.error(e); return NextResponse.json({ error: 'Failed' }, { status: 500 }) }
 }
 
@@ -112,7 +121,7 @@ export async function POST(req: NextRequest) {
        SELECT payment_mode, SUM(amount) AS total,
               (SELECT MIN(receipt_number) FROM day_payments) AS first_receipt,
               (SELECT MAX(receipt_number) FROM day_payments) AS last_receipt,
-              (SELECT COUNT(*) FROM day_payments) AS cnt
+              (SELECT COUNT(DISTINCT receipt_number) FROM day_payments) AS cnt
        FROM day_payments
        GROUP BY payment_mode`,
       [school_id, date]

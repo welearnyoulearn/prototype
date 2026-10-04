@@ -16,9 +16,6 @@ async function handleGET(req: NextRequest) {
     }
     if (!await requireFeeAccess(school_id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
-    const [startYStr] = academic_year.split('-')
-    const startYear = parseInt(startYStr)
-
     try {
       // Balance sheet summary
       const { rows: [balance] } = await pool.query(
@@ -53,22 +50,22 @@ async function handleGET(req: NextRequest) {
       ).catch(() => ({ rows: [{ total: balance.total_waived }] }))
       balance.discretionary_waived = discretionary.total
 
-      // Month-wise collection (April to March)
+      // Collections against the selected year's bills, grouped by payment month.
       const { rows: monthly } = await pool.query(
         `SELECT
            TO_CHAR(fp.paid_date, 'Mon YYYY')            AS month,
            DATE_TRUNC('month', fp.paid_date)            AS month_start,
-           COUNT(*)                                      AS payment_count,
+           COUNT(DISTINCT fp.receipt_number)              AS payment_count,
            SUM(fp.amount)                                AS collected,
            COUNT(DISTINCT fp.student_id)                AS students_paid
          FROM fee_payments fp
+         JOIN student_fee_ledger l ON l.id = fp.ledger_id
          WHERE fp.school_id = $1
            AND fp.payment_status = 'completed'
-           AND fp.paid_date >= ($2 || '-04-01')::date
-           AND fp.paid_date <  (($3)::text || '-04-01')::date
+           AND l.academic_year = $2
          GROUP BY month, month_start
          ORDER BY month_start`,
-        [school_id, startYear, startYear + 1]
+        [school_id, academic_year]
       )
 
       // Month-wise dues billed (for comparison bar)
@@ -176,15 +173,15 @@ async function handleGET(req: NextRequest) {
 
       // Payment mode breakdown
       const { rows: byMode } = await pool.query(
-        `SELECT payment_mode,
-                COUNT(*)   AS count,
-                SUM(amount) AS total
-         FROM fee_payments
-         WHERE school_id = $1 AND payment_status = 'completed'
-           AND paid_date >= ($2 || '-04-01')::date
-           AND paid_date <  (($3)::text || '-04-01')::date
+        `SELECT fp.payment_mode,
+                COUNT(DISTINCT fp.receipt_number) AS count,
+                SUM(fp.amount) AS total
+         FROM fee_payments fp
+         JOIN student_fee_ledger l ON l.id = fp.ledger_id
+         WHERE fp.school_id = $1 AND fp.payment_status = 'completed'
+           AND l.academic_year = $2
          GROUP BY payment_mode ORDER BY total DESC`,
-        [school_id, startYear, startYear + 1]
+        [school_id, academic_year]
       )
 
       // Full defaulters list (no limit) — defined as outstanding balance > 0, regardless of
