@@ -5,7 +5,7 @@ import { requireFeeAccess } from '@/lib/auth'
 import { withWatchline } from '@/lib/logger'
 import { todayIST } from '@/lib/istDate'
 import { claimIdempotencyKey, saveIdempotentResponse } from '@/lib/idempotency'
-import { lockYearClose } from '@/lib/feeRollover'
+import { lockLedgerYearsAndIsClosed } from '@/lib/feeRollover'
 
 // Hard ceiling on rows per request so a payment history can never come back unbounded.
 const MAX_LIMIT = 500
@@ -184,34 +184,11 @@ async function handlePOST(req: NextRequest) {
       // Taking the lock(s) BEFORE the check (not after, like a row lock would need)
       // is required here because there's no specific ledger row a close action
       // itself locks — the year-end route's own comment on lockYearClose explains why.
-      if (guardIds.length > 0) {
-        const { rows: yearsRows } = await client.query(
-          `SELECT DISTINCT school_id, academic_year FROM student_fee_ledger WHERE id = ANY($1)`,
-          [guardIds]
-        )
-        for (const y of yearsRows) {
-          await lockYearClose(client, y.school_id, y.academic_year)
-        }
-      }
-
-      // Guard: block payments against a closed academic year — fee_year_close is
-      // guaranteed to exist (see lib/db.ts), so a query error here is a real failure,
-      // not a missing table; let it propagate rather than silently failing this open.
-      // Re-checked here, now that the lock(s) above are held, so this can't read a
-      // stale "not closed" state past a concurrent close that was waiting on the
-      // same lock.
-      if (guardIds.length > 0) {
-        const { rows: [locked] } = await client.query(
-          `SELECT 1
-           FROM student_fee_ledger l
-           JOIN fee_year_close yc ON yc.school_id = l.school_id AND yc.academic_year = l.academic_year AND yc.is_reopened = FALSE
-           WHERE l.id = ANY($1) LIMIT 1`,
-          [guardIds]
-        )
-        if (locked) {
-          await client.query('ROLLBACK')
-          return NextResponse.json({ error: 'This academic year is closed. Reopen it to record payments.' }, { status: 409 })
-        }
+      // lockLedgerYearsAndIsClosed takes the year lock(s) first, then checks closed — the
+      // lock must precede the check so a concurrent year-end close can't slip in between.
+      if (await lockLedgerYearsAndIsClosed(client, guardIds)) {
+        await client.query('ROLLBACK')
+        return NextResponse.json({ error: 'This academic year is closed. Reopen it to record payments.' }, { status: 409 })
       }
 
       // Duplicate-submission guard — see lib/idempotency.ts. A network timeout +

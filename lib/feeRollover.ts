@@ -174,3 +174,35 @@ export function nextAcademicYearLabel(label: string): string {
   const next = start + 1
   return `${next}-${String((next + 1) % 100).padStart(2, '0')}`
 }
+
+// True when the academic year has been closed (and not reopened) for the school.
+// Call AFTER lockYearClose(...) so the answer can't be stale past a concurrent close.
+export async function isYearClosed(
+  client: PoolClient,
+  schoolId: number | string,
+  academicYear: string
+): Promise<boolean> {
+  const { rows: [row] } = await client.query(
+    `SELECT 1 FROM fee_year_close WHERE school_id = $1 AND academic_year = $2 AND is_reopened = FALSE LIMIT 1`,
+    [schoolId, academicYear]
+  )
+  return !!row
+}
+
+// Locks every academic year the given ledger rows belong to, then reports whether any
+// of them is closed. Years are locked in sorted order so two requests touching the same
+// set of years can never take the locks in opposite order and deadlock.
+export async function lockLedgerYearsAndIsClosed(
+  client: PoolClient,
+  ledgerIds: Array<number | string>
+): Promise<boolean> {
+  if (ledgerIds.length === 0) return false
+  const { rows } = await client.query<{ school_id: number; academic_year: string }>(
+    `SELECT DISTINCT school_id, academic_year FROM student_fee_ledger WHERE id = ANY($1)
+     ORDER BY school_id, academic_year`,
+    [ledgerIds]
+  )
+  for (const y of rows) await lockYearClose(client, y.school_id, y.academic_year)
+  for (const y of rows) if (await isYearClosed(client, y.school_id, y.academic_year)) return true
+  return false
+}
