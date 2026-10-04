@@ -244,7 +244,7 @@ async function handlePATCH(req: NextRequest) {
       if (w0.waiver_type === 'carry_forward') {
         await client.query('ROLLBACK')
         return NextResponse.json({
-          error: 'This waiver was created automatically during year-end closure and cannot be corrected here. Reopen the academic year to undo the closure instead.',
+          error: 'This waiver was created automatically during year-end closure and cannot be corrected here. It is a year-end carry-forward record and is managed through year-end, not edited per bill.',
         }, { status: 409 })
       }
 
@@ -354,7 +354,7 @@ async function handleDELETE(req: NextRequest) {
       // This bookkeeping waiver can only be undone by reopening the year itself.
       if (w0.waiver_type === 'carry_forward') {
         return NextResponse.json({
-          error: 'This waiver was created automatically during year-end closure and cannot be revoked here. Reopen the academic year to undo the closure instead.',
+          error: 'This waiver was created automatically during year-end closure and cannot be revoked here. It is a year-end carry-forward record and is managed through year-end, not edited per bill.',
         }, { status: 409 })
       }
 

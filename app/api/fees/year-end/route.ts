@@ -172,12 +172,16 @@ export async function POST(req: NextRequest) {
           await client.query('ROLLBACK')
           return NextResponse.json({ error: `${from_year} has already been rolled over — its fee year can no longer be reopened.` }, { status: 409 })
         }
-        await client.query(
+        const { rowCount: reopenedRows } = await client.query(
           `UPDATE fee_year_close
            SET is_reopened = TRUE, reopened_by = $1, reopened_at = NOW(), reopen_reason = $2
-           WHERE school_id = $3 AND academic_year = $4`,
+           WHERE school_id = $3 AND academic_year = $4 AND is_reopened = FALSE`,
           [done_by, body.reason || 'Reopened for correction', school_id, from_year]
         )
+        if (!reopenedRows) {
+          await client.query('ROLLBACK')
+          return NextResponse.json({ error: `${from_year} is not closed, so there is nothing to reopen.` }, { status: 409 })
+        }
         await client.query('COMMIT')
         return NextResponse.json({ reopened: true })
       }
