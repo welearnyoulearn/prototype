@@ -4,7 +4,7 @@ import pool from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
 import { withWatchline } from '@/lib/logger'
 import { claimIdempotencyKey, saveIdempotentResponse } from '@/lib/idempotency'
-import { lockYearClose } from '@/lib/feeRollover'
+import { lockYearClose, isYearClosed } from '@/lib/feeRollover'
 
 // GET /api/fees/waivers?school_id=X&student_id=Y
 async function handleGET(req: NextRequest) {
@@ -112,11 +112,7 @@ async function handlePOST(req: NextRequest) {
       // Block waivers on a closed year (same guard as payments route) — re-checked
       // here, now that the lock above is held, so this can't read a stale
       // "not closed" state past a concurrent close that was waiting on it.
-      const { rows: [closedYear] } = await client.query(
-        `SELECT 1 FROM fee_year_close
-         WHERE school_id = $1 AND academic_year = $2 AND is_reopened = FALSE`,
-        [school_id, ledger.academic_year]
-      )
+      const closedYear = await isYearClosed(client, school_id, ledger.academic_year)
       if (closedYear) {
         await client.query('ROLLBACK')
         return NextResponse.json({ error: 'This academic year is closed. Reopen it to grant waivers.' }, { status: 409 })
@@ -276,11 +272,7 @@ async function handlePATCH(req: NextRequest) {
 
       // Block correcting a waiver on a closed year — same guard as every other
       // mutating fee route.
-      const { rows: [closedYear] } = await client.query(
-        `SELECT 1 FROM fee_year_close
-         WHERE school_id = $1 AND academic_year = $2 AND is_reopened = FALSE`,
-        [w0.school_id, lgCheck.academic_year]
-      )
+      const closedYear = await isYearClosed(client, w0.school_id, lgCheck.academic_year)
       if (closedYear) {
         await client.query('ROLLBACK')
         return NextResponse.json({ error: 'This academic year is closed. Reopen it to correct waivers.' }, { status: 409 })
@@ -379,11 +371,7 @@ async function handleDELETE(req: NextRequest) {
       // mutating fee route (payments, waivers POST, structures/amend, etc.).
       // Re-checked here, now that the lock above is held, so this can't read a
       // stale "not closed" state past a concurrent close that was waiting on it.
-      const { rows: [closedYear] } = await client.query(
-        `SELECT 1 FROM fee_year_close
-         WHERE school_id = $1 AND academic_year = $2 AND is_reopened = FALSE`,
-        [w0.school_id, w0.academic_year]
-      )
+      const closedYear = await isYearClosed(client, w0.school_id, w0.academic_year)
       if (closedYear) {
         await client.query('ROLLBACK')
         return NextResponse.json({ error: 'This academic year is closed. Reopen it to revoke waivers.' }, { status: 409 })

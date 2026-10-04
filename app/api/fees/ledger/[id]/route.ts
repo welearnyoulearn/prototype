@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { ledgerStatusSql } from '@/lib/feeLedgerStatus'
 import pool, { ensureDB } from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
-import { lockYearClose } from '@/lib/feeRollover'
+import { lockYearClose, isYearClosed } from '@/lib/feeRollover'
 
 // Verify a ledger entry belongs to the caller's school. Returns the entry's school_id or null.
 async function ledgerSchoolId(id: string): Promise<string | null> {
@@ -77,11 +77,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
       // already enforces this; DELETE didn't, letting a pending bill in a
       // closed year be permanently removed (no audit trail) without
       // reopening the year first.
-      const { rows: [locked] } = await client.query(
-        `SELECT 1 FROM fee_year_close
-         WHERE school_id = $1 AND academic_year = $2 AND is_reopened = FALSE LIMIT 1`,
-        [school_id, entry.academic_year]
-      )
+      const locked = await isYearClosed(client, school_id, entry.academic_year)
       if (locked) {
         await client.query('ROLLBACK')
         return NextResponse.json({ error: 'This academic year is closed. Reopen it to delete entries.' }, { status: 409 })
@@ -217,11 +213,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       // Block edits on a closed academic year — fee_year_close is guaranteed to exist
       // (see lib/db.ts), so a query error here is a real failure, not a missing table;
       // let it propagate to the outer catch rather than silently failing this guard open.
-      const { rows: [locked] } = await client.query(
-        `SELECT 1 FROM fee_year_close
-         WHERE school_id = $1 AND academic_year = $2 AND is_reopened = FALSE LIMIT 1`,
-        [school_id, entry.academic_year]
-      )
+      const locked = await isYearClosed(client, school_id, entry.academic_year)
       if (locked) {
         await client.query('ROLLBACK')
         return NextResponse.json({ error: 'This academic year is closed. Reopen it to edit amounts.' }, { status: 409 })
