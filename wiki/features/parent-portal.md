@@ -49,6 +49,7 @@ API routes these screens call (all exist):
 - `GET` /api/parent/subjects
 - `GET` /api/school/enabled-features
 - `GET` /api/school/library
+- `GET` /api/students/{}/exams
 - `DELETE/GET/POST` /api/syllabus
 
 ✅ Every API route the screens call exists.

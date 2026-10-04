@@ -174,7 +174,7 @@ export default function FeedbackWizard({ code }: { code: string }) {
       {!loading && !notFound && !closedTitle && <GzBrandPanel schoolName={schoolName} />}
 
       <main
-        className="relative w-full max-w-[480px] rounded-[32px] bg-white/85 p-5 pb-5 ring-1 ring-black/[0.05] backdrop-blur-xl sm:p-7"
+        className="relative w-full max-w-[480px] rounded-[32px] bg-white/85 p-5 pb-5 ring-1 [&_input:not([type=checkbox])]:text-base [&_select]:text-base [&_textarea]:text-base ring-black/[0.05] backdrop-blur-xl sm:p-7"
         style={{ boxShadow: GZ_CARD_SHADOW }}
       >
         {loading && (

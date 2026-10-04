@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { schoolHasFeature, getAnySession, getPlatformSession } from '@/lib/auth'
+import { enabledFeaturesForSchool, getAnySession, getPlatformSession } from '@/lib/auth'
 import { ALL_FEATURES, Portal } from '@/lib/features'
 
 const VALID_PORTALS: Portal[] = ['school-admin', 'student', 'parent', 'teacher']
@@ -9,9 +9,7 @@ const VALID_PORTALS: Portal[] = ['school-admin', 'student', 'parent', 'teacher']
 // given portal (ALL_FEATURES[i].portals includes it) — checked via
 // schoolHasFeature, so per-school overrides win over the tier default, same
 // precedence every other feature-gated route already uses. This is the one
-// place Student/Parent/Teacher portal nav-filtering reads from; school-admin
-// keeps using /api/platform/features?tier= for now (tier-only, no override),
-// since changing that would be a separate, wider behavior change.
+// place every portal reads from, including School Admin.
 //
 // Teacher previously read a separate tier-only endpoint that ignored
 // school_feature_overrides and, worse, silently left every feature "enabled"
@@ -43,9 +41,8 @@ export async function GET(req: NextRequest) {
 
   try {
     const relevant = ALL_FEATURES.filter(f => f.portals.includes(portal))
-    const checks = await Promise.all(relevant.map(f => schoolHasFeature(schoolId, f.key)))
-    const enabled = relevant.filter((_, i) => checks[i]).map(f => f.key)
-    return NextResponse.json({ enabled })
+    const enabled = await enabledFeaturesForSchool(schoolId, relevant.map(f => f.key))
+    return NextResponse.json({ enabled }, { headers: { 'Cache-Control': 'private, no-store' } })
   } catch (error) {
     console.error('[school/enabled-features]', error)
     return NextResponse.json({ error: 'Failed to load enabled features' }, { status: 500 })

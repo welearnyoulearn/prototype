@@ -925,13 +925,16 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
               <div className="flex gap-2">
                 <button onClick={saveYear} disabled={yearSaving}
                   className="px-5 py-2 bg-amber-600 text-white text-sm font-medium rounded-lg hover:bg-amber-700 disabled:opacity-50">
-                  {yearSaving ? 'Saving…' : 'Save Changes'}
+                  {yearSaving ? 'Checking…' : 'Review & Save'}
                 </button>
                 <button onClick={cancelEditYear}
                   className="px-5 py-2 border border-gray-200 text-gray-600 text-sm rounded-lg hover:bg-gray-50">
                   Cancel
                 </button>
               </div>
+              <p className="text-xs text-amber-700">
+                You&apos;ll be asked to confirm with your password on the next step — the date isn&apos;t saved until you do.
+              </p>
             </div>
           )}
 

@@ -243,7 +243,7 @@ export function ArchiveTools({ schoolId, onChanged }: { schoolId: number; onChan
                 <p className="text-xs text-gray-600">Tip: <button type="button" onClick={() => downloadFeedbackExcel(schoolId, 'archived')} className="font-bold text-[#245b46] hover:underline">download an Excel copy</button> first.</p>
                 <div>
                   <label htmlFor="feedback-purge-confirm" className="mb-1.5 block text-xs font-bold text-gray-600">Type <span className="rounded bg-gray-100 px-1 font-mono">DELETE</span> to confirm</label>
-                  <input id="feedback-purge-confirm" data-testid="feedback-archive-purge-input" value={typed} onChange={e => setTyped(e.target.value)} autoComplete="off" className="w-full rounded-md border border-gray-200 px-3 py-2 text-sm focus:border-rose-400 focus:outline-none focus:ring-2 focus:ring-rose-200" />
+                  <input id="feedback-purge-confirm" data-testid="feedback-archive-purge-input" value={typed} onChange={e => setTyped(e.target.value)} autoComplete="off" className="w-full rounded-md border border-gray-200 px-3 py-2 text-base sm:text-sm focus:border-rose-400 focus:outline-none focus:ring-2 focus:ring-rose-200" />
                 </div>
               </>
             )}

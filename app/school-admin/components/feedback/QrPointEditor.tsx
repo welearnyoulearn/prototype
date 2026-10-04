@@ -77,7 +77,7 @@ function audienceLabel(roles: FeedbackRole[]): string {
   return `For ${names.length > 1 ? `${names.slice(0, -1).join(', ')} & ${names[names.length - 1]}` : names[0]}`
 }
 
-const inputCls = 'w-full rounded-md border border-gray-200 px-4 py-2.5 text-sm transition-colors focus:border-[#245b46] focus:outline-none focus:ring-2 focus:ring-[#245b46]/20'
+const inputCls = 'w-full rounded-md border border-gray-200 px-4 py-2.5 text-base sm:text-sm transition-colors focus:border-[#245b46] focus:outline-none focus:ring-2 focus:ring-[#245b46]/20'
 const label = 'mb-1.5 block text-xs font-bold text-gray-600'
 const pillCls = (on: boolean) =>
   `inline-flex items-center gap-2 rounded-md border px-4 py-2 text-sm font-semibold transition-colors ${on ? 'border-[#245b46] bg-[#245b46] text-white' : 'border-gray-200 bg-white text-gray-600 hover:border-[#9bb7a4]'}`
@@ -382,7 +382,7 @@ export default function QrPointEditor({
             <div className="flex flex-wrap items-end gap-3">
               <div>
                 <label className={label} htmlFor="qr-point-closes">Accept feedback until</label>
-                <input id="qr-point-closes" type="date" data-testid="feedback-qr-point-closes-input" value={d.closes_on} onChange={e => set('closes_on', e.target.value)} className={`${inputCls} w-52`} />
+                <input id="qr-point-closes" type="date" data-testid="feedback-qr-point-closes-input" value={d.closes_on} onChange={e => set('closes_on', e.target.value)} className={`${inputCls} sm:w-52`} />
               </div>
               {d.closes_on && (
                 <button type="button" onClick={() => set('closes_on', '')} className="pb-2.5 text-xs font-semibold text-gray-500 hover:underline">Clear — keep open</button>

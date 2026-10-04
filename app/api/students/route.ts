@@ -3,8 +3,9 @@ import pool from '@/lib/db'
 import { invalidateCache } from '@/lib/responseCache'
 import {
   hashPortalPassword, generateTempPassword, getPlatformSession, getSession, getTeacherSession,
-  requireSchoolAdmin, schoolHasFeature,
+  requireSchoolAdmin, schoolHasAnyFeature, schoolHasFeature,
 } from '@/lib/auth'
+import { STUDENT_READ_FEATURES } from '@/lib/featureRoutes'
 import { sendStudentWelcomeEmail, sendParentWelcomeEmail, sendChildCredentialsToParentEmail } from '@/lib/email'
 import { sendWhatsappMessage } from '@/lib/whatsapp'
 import { findOrCreateParent, linkStudentParent, generateStudentId } from '@/lib/studentOnboarding'
@@ -56,7 +57,7 @@ async function handleGET(req: NextRequest) {
         return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
       }
 
-      if (admin && !(await schoolHasFeature(scopedSchoolId, 'students'))) {
+      if (admin && !(await schoolHasAnyFeature(scopedSchoolId, STUDENT_READ_FEATURES))) {
         return NextResponse.json({ error: 'Feature not enabled' }, { status: 403 })
       }
 

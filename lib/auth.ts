@@ -6,6 +6,7 @@ import { NextRequest } from 'next/server'
 import type { Pool as PgPool, PoolClient } from 'pg'
 import pool from './db'
 import { JWT_SECRET, COOKIE_ADMIN, COOKIE_PLATFORM, COOKIE_TEACHER, COOKIE_STUDENT, COOKIE_PARENT } from './auth-constants'
+import { PASSWORD_RULES } from './passwordPolicy'
 
 const COOKIE_MAX_AGE = 60 * 60 * 24 * 7 // 7 days — teacher/student/parent/platform cookies
 
@@ -127,11 +128,12 @@ const COMMON_PASSWORDS = new Set([
 
 export function validateNewPassword(password: unknown, identity?: string | null): string | null {
   if (typeof password !== 'string') return 'Password is required'
-  if (password.length < 8) return 'Password must be at least 8 characters'
   if (password.length > 128) return 'Password must be no more than 128 characters'
-  if (!/[a-z]/.test(password) || !/[A-Z]/.test(password) || !/\d/.test(password)) {
-    return 'Password must include uppercase, lowercase, and a number'
-  }
+  // Character-class rules (length, upper/lowercase, number, symbol) live in lib/passwordPolicy.ts
+  // so the "set your password" screens' own checklist can never silently drift from what this
+  // actually enforces — every first-login and voluntary password change goes through here.
+  const failedRule = PASSWORD_RULES.find(r => !r.test(password))
+  if (failedRule) return `Password must have ${failedRule.label.toLowerCase()}`
   const normalized = password.toLowerCase()
   if (COMMON_PASSWORDS.has(normalized)) return 'Choose a less common password'
   if (identity && normalized === identity.trim().toLowerCase()) return 'Password cannot match your login identifier'
@@ -572,6 +574,33 @@ export async function schoolHasFeature(schoolId: number, featureKey: string, db:
     [tiers, featureKey]
   )
   return tierRes.rows[0]?.enabled === true
+}
+
+export async function schoolHasAnyFeature(schoolId: number, featureKeys: readonly string[], db: PgPool | PoolClient = pool): Promise<boolean> {
+  for (const featureKey of featureKeys) if (await schoolHasFeature(schoolId, featureKey, db)) return true
+  return false
+}
+
+// Resolve portal navigation in bounded queries using the same override and
+// inherited-tier rules as API authorization.
+export async function enabledFeaturesForSchool(schoolId: number, featureKeys: readonly string[], db: PgPool | PoolClient = pool): Promise<string[]> {
+  if (featureKeys.length === 0) return []
+  const overrideRes = await db.query<{ feature_key: string; enabled: boolean }>(
+    `SELECT feature_key, enabled FROM school_feature_overrides WHERE school_id=$1 AND feature_key=ANY($2)`,
+    [schoolId, featureKeys],
+  )
+  const overrides = new Map(overrideRes.rows.map(row => [row.feature_key, row.enabled]))
+  const subRes = await db.query<{ tier: string }>('SELECT tier FROM school_subscriptions WHERE school_id=$1', [schoolId])
+  const tier = subRes.rows[0]?.tier
+  if (!tier) return featureKeys.filter(key => overrides.get(key) === true)
+  const tiers = TIER_INCLUDES[tier] ?? [tier]
+  const planRes = await db.query<{ feature_key: string }>(
+    `SELECT feature_key FROM plan_features WHERE tier=ANY($1) AND feature_key=ANY($2)
+     GROUP BY feature_key HAVING bool_or(enabled)=TRUE`,
+    [tiers, featureKeys],
+  )
+  const planEnabled = new Set(planRes.rows.map(row => row.feature_key))
+  return featureKeys.filter(key => overrides.has(key) ? overrides.get(key) === true : planEnabled.has(key))
 }
 
 // schoolHasFeature for every school at once, inverted: school id → the given feature keys it

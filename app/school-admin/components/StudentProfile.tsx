@@ -22,7 +22,7 @@ type Exam = {
 type Profile = {
   student: {
     id: number; name: string; status: string; email: string | null; phone: string | null; dateOfBirth: string | null
-    grade: string | null; section: string | null; rollNumber: number | null; admitted: string; classTeacher: string | null
+    grade: string | null; section: string | null; rollNumber: number | null; systemId: string | null; admitted: string; classTeacher: string | null
   }
   parents: { name: string | null; phone: string | null; email: string | null }[]
   years: { id: number | null; label: string; isCurrent: boolean; grade: string | null; section: string | null }[]
@@ -105,6 +105,7 @@ export default function StudentProfile({ studentId, onClose }: { studentId: numb
                 <p className="text-xs text-gray-500 flex flex-wrap gap-x-2">
                   <span>Class {s.grade}-{s.section}</span>
                   {s.rollNumber !== null && <span>· Roll {s.rollNumber}</span>}
+                  {s.systemId && <span data-testid="profile-wlyl-id">· WLYL ID {s.systemId}</span>}
                   {s.classTeacher && <span>· Class teacher: {s.classTeacher}</span>}
                   <span>· Admitted {longDate(s.admitted)}</span>
                   {s.dateOfBirth && <span>· Born {longDate(s.dateOfBirth)}</span>}

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { jwtVerify } from 'jose'
 import { JWT_SECRET as JWT_SECRET_RAW, INGEST_SECRET, COOKIE_ADMIN, COOKIE_PLATFORM, COOKIE_TEACHER, COOKIE_STUDENT, COOKIE_PARENT } from '@/lib/auth-constants'
+import { featureRequirementForApiPath } from '@/lib/featureRoutes'
 
 // Combined middleware: auth routing (formerly proxy.ts) + Watchline observability logging.
 // Edge runtime only — cannot use pg, jsonwebtoken, or lib/auth / lib/db.
@@ -154,24 +155,8 @@ async function isLockedRequest(req: NextRequest, pathname: string, origin: strin
 // ── API feature entitlements ─────────────────────────────────────────────────
 // Navigation flags are presentation only. These mappings enforce the same plan
 // decisions before a protected API reaches its handler, including direct calls.
-function apiFeature(pathname: string): string | null {
-  if (pathname.startsWith('/api/teachers')) return 'staff'
-  if (pathname.startsWith('/api/fees/') || pathname === '/api/fees' || pathname.startsWith('/api/parent/fees')) return 'fee-management'
-  if (pathname.startsWith('/api/expenses')) return 'expenses'
-  if (pathname.startsWith('/api/attendance') || pathname.startsWith('/api/parent/attendance') || pathname.startsWith('/api/student/attendance')) return 'attendance'
-  if (pathname.startsWith('/api/exams') || /^\/api\/students\/[^/]+\/exams(?:\/|$)/.test(pathname)) return 'exam-marks'
-  if (pathname.startsWith('/api/syllabus') || pathname.startsWith('/api/school/custom/') || pathname.startsWith('/api/school/subjects')) return 'curriculum'
-  if (pathname.startsWith('/api/school/library') || pathname.startsWith('/api/textbooks') || pathname.startsWith('/api/materials/')) return 'library'
-  if (pathname.startsWith('/api/school-calendar')) return 'calendar'
-  if (pathname.startsWith('/api/data-export')) return 'export'
-  if (pathname.startsWith('/api/feedback/') && !pathname.startsWith('/api/feedback/resolve') && !pathname.startsWith('/api/feedback/submit') && !pathname.startsWith('/api/feedback/voice-upload-url')) return 'feedback-management'
-  if (pathname.startsWith('/api/announcements')) return 'announcements'
-  if (pathname.startsWith('/api/academic-years/rollover') || pathname.startsWith('/api/students/promote')) return 'year-rollover'
-  return null
-}
-
 const entitlementCache = new Map<string, { enabled: boolean; fetchedAt: number }>()
-const ENTITLEMENT_TTL = 15_000
+const ENTITLEMENT_TTL = 2_000
 
 async function schoolFeatureEnabled(origin: string, schoolId: number, feature: string): Promise<boolean> {
   const key = `${schoolId}:${feature}`
@@ -198,21 +183,36 @@ async function requestHasFeature(req: NextRequest, origin: string, feature: stri
   const platform = platformToken ? await getTokenPayload(platformToken) : null
   if (platform?.role === 'platform_admin') return true
 
-  const schoolIds = new Set<number>()
+  // Same precedence every route handler already uses to resolve "who is
+  // actually making this request" (admin, else teacher, else student, else
+  // parent — first cookie present wins, see e.g. GET /api/classes). This
+  // used to instead collect the school_id from EVERY portal cookie present
+  // in the browser and require all of them entitled — so a leftover cookie
+  // from testing a different role or school (never logged out, unrelated to
+  // this request) could block a perfectly entitled admin/teacher/student/
+  // parent session from ever reaching the route. Checking only the one
+  // identity this request will actually resolve to matches reality and
+  // still stops a forged/irrelevant cookie from mattering, since the route
+  // itself never looks at it either.
+  let schoolId: number | null = null
   for (const cookie of [COOKIE_ADMIN, COOKIE_TEACHER, COOKIE_STUDENT, COOKIE_PARENT]) {
     const token = req.cookies.get(cookie)?.value
     if (!token) continue
     const payload = await getTokenPayload(token)
-    const schoolId = Number(payload?.schoolId)
-    if (Number.isInteger(schoolId) && schoolId > 0) schoolIds.add(schoolId)
+    const id = Number(payload?.schoolId)
+    if (Number.isInteger(id) && id > 0) { schoolId = id; break }
   }
 
-  // Authentication remains the route handler's responsibility. When valid
-  // school sessions are present, every one must be entitled, preventing a
-  // second cookie from another school being used to piggy-back on access.
-  if (schoolIds.size === 0) return true
-  const checks = await Promise.all([...schoolIds].map(id => schoolFeatureEnabled(origin, id, feature)))
-  return checks.every(Boolean)
+  // Authentication remains the route handler's responsibility — if no
+  // recognizable session cookie is present at all, let the request through
+  // and let the handler return its own 401.
+  if (schoolId === null) return true
+  return schoolFeatureEnabled(origin, schoolId, feature)
+}
+
+async function requestHasAnyFeature(req: NextRequest, origin: string, features: readonly string[]): Promise<boolean> {
+  for (const feature of features) if (await requestHasFeature(req, origin, feature)) return true
+  return false
 }
 
 function extractSchoolId(req: NextRequest): number | null {
@@ -282,9 +282,9 @@ export async function proxy(req: NextRequest) {
     }, { status: 403 })
   }
 
-  const requiredFeature = apiFeature(pathname)
-  if (requiredFeature && !await requestHasFeature(req, origin, requiredFeature)) {
-    return NextResponse.json({ error: 'Feature not enabled', code: 'FEATURE_DISABLED', feature: requiredFeature }, { status: 403 })
+  const requirement = featureRequirementForApiPath(pathname, req.method)
+  if (requirement && !await requestHasAnyFeature(req, origin, requirement.anyOf)) {
+    return NextResponse.json({ error: 'Feature not enabled', code: 'FEATURE_DISABLED', feature: requirement.primary }, { status: 403 })
   }
 
   if (isPublic(pathname) || pathname === '/') return NextResponse.next()
