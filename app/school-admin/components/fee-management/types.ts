@@ -73,8 +73,8 @@ export type EditRecord = {
 
 export type ReportData = {
   balance: { total_billed: number; total_collected: number; total_outstanding: number; total_waived: number; discretionary_waived?: number; paid_entries: number; partial_entries: number; unpaid_entries: number; waived_entries: number; total_students: number }
-  monthly: Array<{ month: string; collected: number; payment_count: number; students_paid: number }>
-  monthlyDue: Array<{ month: string; billed: number }>
+  monthly: Array<{ month: string; month_start: string | null; collected: number; payment_count: number; students_paid: number }>
+  monthlyDue: Array<{ month: string; month_start: string | null; billed: number }>
   byGrade: Array<{ grade: string; section?: string; students: number; total_due: number; total_collected: number; total_waived: number; discretionary_waived?: number; outstanding: number; fully_paid_students?: number; defaulter_students?: number }>
   byCategory: Array<{ category_name: string; frequency: string; students: number; total_due: number; total_collected: number; total_waived: number; discretionary_waived?: number; outstanding: number; paid_count: number; unpaid_count: number }>
   byMode: Array<{ payment_mode: string; count: number; total: number }>

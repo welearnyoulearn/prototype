@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
+import { lockYearClose } from '@/lib/feeRollover'
 
 // POST /api/fees/structures/lock — lock or unlock a fee structure for an academic year
 // Body: { school_id, academic_year, action: 'lock'|'unlock', locked_by? }
@@ -15,28 +16,36 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'school_id, academic_year, action required' }, { status: 400 })
     }
 
-    if (action === 'lock') {
-      if (!locked_by) return NextResponse.json({ error: 'locked_by required' }, { status: 400 })
-      const { rows: [lock] } = await pool.query(
-        `INSERT INTO fee_structure_locks (school_id, academic_year, locked_by)
-         VALUES ($1, $2, $3)
-         ON CONFLICT (school_id, academic_year) DO UPDATE
-           SET locked_by = $3, locked_at = NOW()
-         RETURNING *`,
-        [school_id, academic_year, locked_by]
-      )
-      return NextResponse.json(lock)
+    if (action !== 'lock' && action !== 'unlock') {
+      return NextResponse.json({ error: 'action must be lock or unlock' }, { status: 400 })
     }
-
-    if (action === 'unlock') {
-      await pool.query(
+    if (action === 'lock' && !locked_by) return NextResponse.json({ error: 'locked_by required' }, { status: 400 })
+    const client = await pool.connect()
+    try {
+      await client.query('BEGIN')
+      await lockYearClose(client, school_id, academic_year)
+      if (action === 'lock') {
+        const { rows: [lock] } = await client.query(
+          `INSERT INTO fee_structure_locks (school_id, academic_year, locked_by)
+           VALUES ($1, $2, $3)
+           ON CONFLICT (school_id, academic_year) DO UPDATE
+             SET locked_by = $3, locked_at = NOW()
+           RETURNING *`,
+          [school_id, academic_year, locked_by]
+        )
+        await client.query('COMMIT')
+        return NextResponse.json(lock)
+      }
+      await client.query(
         `DELETE FROM fee_structure_locks WHERE school_id = $1 AND academic_year = $2`,
         [school_id, academic_year]
       )
+      await client.query('COMMIT')
       return NextResponse.json({ unlocked: true })
-    }
-
-    return NextResponse.json({ error: 'action must be lock or unlock' }, { status: 400 })
+    } catch (e) {
+      await client.query('ROLLBACK')
+      throw e
+    } finally { client.release() }
   } catch (e) { console.error(e); return NextResponse.json({ error: 'Failed' }, { status: 500 }) }
 }
 

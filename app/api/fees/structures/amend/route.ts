@@ -3,9 +3,10 @@ import pool, { ensureDB } from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
 import { todayIST } from '@/lib/istDate'
 import { lockYearClose } from '@/lib/feeRollover'
+import { syncStructureBills } from '@/lib/feeStructureSync'
 
 // POST /api/fees/structures/amend — amend a locked fee structure amount
-// Updates fee_structures + creates amendment record + updates unpaid ledger entries
+// Updates fee_structures, records an amendment and revises the associated bills.
 // Body: { school_id, academic_year, fee_category_id, grade, new_amount, reason, changed_by?, effective_from? }
 // changed_by is derived server-side from the session (client value ignored for audit integrity)
 export async function POST(req: NextRequest) {
@@ -91,63 +92,19 @@ export async function POST(req: NextRequest) {
         [new_amount, school_id, fee_category_id, grade, academic_year]
       )
 
-      // Fetch affected ledger entries before updating (for audit)
-      // Includes partial entries — amount_due must reflect the new structure for all unpaid/partial students
-      const { rows: affected } = await client.query(
-        `SELECT id, student_id, amount_due, amount_paid, waiver_amount FROM student_fee_ledger
-         WHERE fee_structure_id = $1 AND status IN ('pending', 'overdue', 'partial')`,
-        [current.id]
-      )
-
-      // Block a reduction that would leave any student's amount_paid + waiver_amount
-      // exceeding the new amount_due — that's an impossible state (paid/waived more
-      // than is owed) and needs a separate refund/credit decision, not a silent
-      // ledger overwrite. Must include waiver_amount, not just amount_paid: a bill
-      // that's ₹200 waived + ₹750 paid against a ₹1000 due is already committed for
-      // ₹950 — reducing the amount to ₹800 is just as impossible as if that ₹200 had
-      // been cash.
-      const overpaidCount = affected.filter(r =>
-        parseFloat(r.amount_paid) + parseFloat(r.waiver_amount || '0') > parseFloat(new_amount) + 0.01
-      ).length
-      if (overpaidCount > 0) {
+      const synced = await syncStructureBills(client, {
+        schoolId: school_id, academicYear: academic_year, structureId: current.id,
+        amount: updated.amount, reason: `Fee structure amendment: ${reason}`, actor: changed_by,
+      })
+      if (synced.blocked > 0) {
         await client.query('ROLLBACK')
         return NextResponse.json({
-          error: `${overpaidCount} student(s) have already paid or been waived more than ₹${new_amount} toward this fee — reducing the amount this far isn't supported here. Use payment correction/refund or waiver correction for those students first.`,
+          error: `${synced.blocked} bill(s) have already paid or been waived more than ₹${new_amount} toward this fee. Use payment or waiver correction before reducing this amount.`,
         }, { status: 409 })
       }
 
-      // Update pending/overdue/partial ledger entries; re-check paid status after new amount applies
-      const { rows: updatedRows, rowCount } = await client.query(
-        `UPDATE student_fee_ledger
-         SET amount_due = $1,
-             status = CASE
-               WHEN COALESCE(waiver_amount,0) + amount_paid >= $1 THEN 'paid'
-               WHEN amount_paid > 0 THEN 'partial'
-               ELSE status
-             END
-         WHERE fee_structure_id = $2 AND status IN ('pending', 'overdue', 'partial')
-         RETURNING id`,
-        [new_amount, current.id]
-      )
-
-      // Write audit records only for entries the UPDATE above actually touched —
-      // `affected` was snapshotted before the update, so if a concurrent payment or
-      // waiver moved a row to 'paid'/'waived' in between, the UPDATE's WHERE
-      // correctly skipped it, but looping over the stale `affected` array here would
-      // still write an audit entry claiming an amount change that never happened.
-      const updatedIds = new Set(updatedRows.map(r => r.id))
-      for (const row of affected.filter(r => updatedIds.has(r.id))) {
-        await client.query(
-          `INSERT INTO student_fee_ledger_edits
-             (ledger_id, school_id, student_id, old_amount, new_amount, reason, changed_by)
-           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-          [row.id, school_id, row.student_id, row.amount_due, new_amount,
-           `Fee structure amendment: ${reason}`, changed_by]
-        )
-      }
-
       await client.query('COMMIT')
-      return NextResponse.json({ updated_structure: updated, ledger_entries_updated: rowCount || 0 })
+      return NextResponse.json({ updated_structure: updated, ledger_entries_updated: synced.updated })
     } catch (e) {
       await client.query('ROLLBACK')
       console.error(e)
@@ -181,14 +138,18 @@ export async function GET(req: NextRequest) {
           [school_id, fee_category_id, grade, academic_year]
         )
         if (!struct) return NextResponse.json({ count: 0 })
-        const { rows: [{ cnt, partial_cnt }] } = await pool.query(
+        const { rows: [{ cnt, partial_cnt, paid_cnt, waived_cnt }] } = await pool.query(
           `SELECT
              COUNT(*) FILTER (WHERE status IN ('pending','overdue') AND amount_paid = 0) AS cnt,
-             COUNT(*) FILTER (WHERE status = 'partial') AS partial_cnt
-           FROM student_fee_ledger WHERE fee_structure_id=$1`,
+             COUNT(*) FILTER (WHERE status = 'partial') AS partial_cnt,
+             COUNT(*) FILTER (WHERE status = 'paid') AS paid_cnt,
+             COUNT(*) FILTER (WHERE status = 'waived') AS waived_cnt
+           FROM student_fee_ledger l WHERE fee_structure_id=$1
+             AND NOT EXISTS (SELECT 1 FROM fee_waivers w WHERE w.ledger_id = l.id
+                             AND COALESCE(w.is_revoked, FALSE) = FALSE AND w.waiver_type IN ('carry_forward', 'writeoff'))`,
           [struct.id]
         )
-        return NextResponse.json({ count: parseInt(cnt), partial_count: parseInt(partial_cnt) })
+        return NextResponse.json({ count: parseInt(cnt), partial_count: parseInt(partial_cnt), paid_count: parseInt(paid_cnt), waived_count: parseInt(waived_cnt) })
       } catch (e) { console.error(e); return NextResponse.json({ error: 'Failed' }, { status: 500 }) }
     }
     if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })

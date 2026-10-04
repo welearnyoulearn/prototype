@@ -60,11 +60,11 @@ async function handleGET(req: NextRequest) {
            (SELECT COUNT(*) FROM student_fee_ledger WHERE school_id = $1 AND academic_year = $2 AND status = 'pending') AS pending_count,
            (SELECT COUNT(*) FROM student_fee_ledger WHERE school_id = $1 AND academic_year = $2 AND status = 'overdue') AS overdue_count,
            (SELECT COUNT(*) FROM student_fee_ledger WHERE school_id = $1 AND academic_year = $2 AND status = 'waived')  AS waived_count,
-           -- zero payers = students who have made ZERO cash payment AND zero waiver this year
-           COUNT(*) FILTER (WHERE s_cash = 0 AND s_waived = 0)                       AS defaulters_count,
+           -- Zero payers with dues; this powers the Overview's Zero Payers card.
+           COUNT(*) FILTER (WHERE s_cash = 0 AND s_waived = 0 AND s_out > 0)         AS defaulters_count,
            -- student-level paid/partial for progress bar legend
            COUNT(*) FILTER (WHERE s_out <= 0)                                        AS students_fully_paid,
-           COUNT(*) FILTER (WHERE s_cash > 0 AND s_out > 0)                          AS students_partial,
+           COUNT(*) FILTER (WHERE (s_cash > 0 OR s_waived > 0) AND s_out > 0)         AS students_partial,
            COUNT(*) FILTER (WHERE s_cash = 0 AND s_waived = 0 AND s_out > 0)          AS students_not_paid
          FROM per_student`,
         [school_id, academic_year]
@@ -117,21 +117,20 @@ async function handleGET(req: NextRequest) {
       const discCatMap = new Map(discByCat.map((r: {fee_category_id: number; total: string}) => [r.fee_category_id, r.total]))
       for (const c of by_category) c.discretionary_waived = discCatMap.get(c.fee_category_id) ?? '0'
 
-      // Monthly collection trend — scoped to the selected academic year (Apr → Mar)
-      const [ayStartStr] = academic_year.split('-')
-      const ayStart = parseInt(ayStartStr)
+      // Include all completed collections against this year's bills, even when
+      // paid outside the year, so the trend reconciles with the headline total.
       const { rows: monthly_trend } = await pool.query(
         `SELECT TO_CHAR(fp.paid_date, 'Mon YYYY') AS month,
                 DATE_TRUNC('month', fp.paid_date) AS month_start,
                 COALESCE(SUM(fp.amount), 0) AS collected
          FROM fee_payments fp
+         JOIN student_fee_ledger l ON l.id = fp.ledger_id
          WHERE fp.school_id = $1
            AND fp.payment_status = 'completed'
-           AND fp.paid_date >= ($2 || '-04-01')::date
-           AND fp.paid_date <  (($3)::text || '-04-01')::date
+           AND l.academic_year = $2
          GROUP BY month, month_start
          ORDER BY month_start`,
-        [school_id, ayStart, ayStart + 1]
+        [school_id, academic_year]
       )
 
       // Top defaulters — outstanding balance > 0 regardless of status, so partially-paid
@@ -152,13 +151,13 @@ async function handleGET(req: NextRequest) {
         [school_id, academic_year]
       )
 
-      // Payment mode breakdown — filter to this academic year (Apr startYear → Mar endYear)
+      // Count receipts, rather than the individual bill allocations they contain.
       const { rows: by_payment_mode } = await pool.query(
-        `SELECT payment_mode, COUNT(*) AS count, SUM(amount) AS total
-         FROM fee_payments
-         WHERE school_id = $1 AND payment_status = 'completed'
-           AND paid_date >= (SPLIT_PART($2, '-', 1) || '-04-01')::date
-           AND paid_date <  ((SPLIT_PART($2, '-', 1)::int + 1)::text || '-04-01')::date
+        `SELECT fp.payment_mode, COUNT(DISTINCT fp.receipt_number) AS count, SUM(fp.amount) AS total
+         FROM fee_payments fp
+         JOIN student_fee_ledger l ON l.id = fp.ledger_id
+         WHERE fp.school_id = $1 AND fp.payment_status = 'completed'
+           AND l.academic_year = $2
          GROUP BY payment_mode ORDER BY total DESC`,
         [school_id, academic_year]
       )
@@ -169,6 +168,7 @@ async function handleGET(req: NextRequest) {
            SELECT s.grade, COALESCE(s.section, '') AS section, l.student_id,
                   SUM(l.amount_due)  AS s_due,
                   SUM(l.amount_paid) AS s_paid,
+                  SUM(COALESCE(l.waiver_amount, 0)) AS s_waived,
                    SUM(GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0)) AS s_out
            FROM student_fee_ledger l
            JOIN students s ON s.id = l.student_id
@@ -179,6 +179,7 @@ async function handleGET(req: NextRequest) {
                 COUNT(*)                            AS students,
                 COALESCE(SUM(s_due), 0)             AS total_due,
                 COALESCE(SUM(s_paid), 0)            AS total_collected,
+                COALESCE(SUM(s_waived), 0)          AS total_waived,
                 COALESCE(SUM(s_out), 0)            AS outstanding,
                 COUNT(*) FILTER (WHERE s_out <= 0) AS fully_paid_students,
                 COUNT(*) FILTER (WHERE s_out > 0)  AS defaulter_students

@@ -2,18 +2,20 @@ import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
 import { lockYearClose } from '@/lib/feeRollover'
+import { syncGeneratedBill } from '@/lib/feeStructureSync'
 
 // POST /api/fees/generate
 // Generates ledger entries for all students in a grade/all grades for an academic year
-// Idempotent — skips students who already have entries for this category+year+period
+// Creates missing periods and resynchronizes existing eligible bills without duplicates.
 export async function POST(req: NextRequest) {
   try {
     try {
-      const { school_id, academic_year, grade } = await req.json()
+      const { school_id, academic_year, grade, only_missing = false } = await req.json()
       if (!school_id || !academic_year) {
         return NextResponse.json({ error: 'school_id and academic_year required' }, { status: 400 })
       }
-      if (!await requireFeeAccess(school_id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      const access = await requireFeeAccess(school_id)
+      if (!access) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
       // Every bill's due_date is the academic year's own end_date — not a per-category
       // due-day. All bills for a year (monthly, quarterly, or annual) become due at once,
@@ -43,7 +45,7 @@ export async function POST(req: NextRequest) {
       }
 
       const client = await pool.connect()
-      let created = 0; let skipped = 0; let totalStudents = 0
+      let created = 0; let updated = 0; let skipped = 0; let totalStudents = 0
       try {
         await client.query('BEGIN')
 
@@ -143,33 +145,21 @@ export async function POST(req: NextRequest) {
               if (rowCount && rowCount > 0) {
                 created++
               } else {
-                skipped++
-                // A bill for this exact period already exists — but if the student has since
-                // moved to a different grade (e.g. promoted/transferred outside year-rollover),
-                // the existing row's fee_structure_id may now point at the WRONG grade's amount.
-                // Re-sync unpaid/overdue/partial bills to the current grade's structure, exactly
-                // like amending a structure does, so the student is billed at their actual grade.
-                // GREATEST(...) guards against amount_due ending up below what's already
-                // covered by payments + waivers COMBINED (not amount_paid alone — floored
-                // only against amount_paid let a heavily-waived bill's amount_due end up
-                // below amount_paid + waiver_amount, an impossible over-credited state, the
-                // exact same class of bug the ledger PATCH route's own coveredAmount check
-                // guards against).
-                await client.query(
-                  `UPDATE student_fee_ledger
-                   SET fee_structure_id = $1,
-                       amount_due = GREATEST($2, amount_paid + COALESCE(waiver_amount,0)),
-                       status = CASE
-                         WHEN COALESCE(waiver_amount,0) + amount_paid >= GREATEST($2, amount_paid + COALESCE(waiver_amount,0)) THEN 'paid'
-                         WHEN amount_paid > 0 THEN 'partial'
-                         ELSE status
-                       END
-                   WHERE school_id = $3 AND student_id = $4 AND fee_category_id = $5
-                     AND academic_year = $6 AND period_label = $7
-                     AND status IN ('pending', 'overdue', 'partial')
-                     AND fee_structure_id IS DISTINCT FROM $1`,
-                  [s.id, s.amount, school_id, student.id, s.fee_category_id, academic_year, period.label]
-                )
+                if (only_missing === true) {
+                  skipped++
+                  continue
+                }
+                const synced = await syncGeneratedBill(client, {
+                  schoolId: school_id, academicYear: academic_year, studentId: student.id,
+                  categoryId: s.fee_category_id, periodLabel: period.label, structureId: s.id,
+                  amount: s.amount, reason: 'Bill regenerated from current fee plan', actor: access.actor,
+                })
+                if (synced.blocked > 0) {
+                  await client.query('ROLLBACK')
+                  return NextResponse.json({ error: 'Cannot regenerate bills below amounts already paid + waived. Correct payments or waivers first.' }, { status: 409 })
+                }
+                updated += synced.updated
+                if (synced.updated === 0) skipped++
               }
             }
           }
@@ -187,10 +177,30 @@ export async function POST(req: NextRequest) {
               [school_id, a.student_id, a.fee_category_id, academic_year, period.label, a.amount, period.due_date]
             )
             if (rowCount && rowCount > 0) created++
-            else skipped++
+            else if (only_missing === true) skipped++
+            else {
+              const synced = await syncGeneratedBill(client, {
+                schoolId: school_id, academicYear: academic_year, studentId: a.student_id,
+                categoryId: a.fee_category_id, periodLabel: period.label, structureId: null,
+                amount: a.amount, reason: 'Bill regenerated from current variable fee assignment', actor: access.actor,
+              })
+              if (synced.blocked > 0) {
+                await client.query('ROLLBACK')
+                return NextResponse.json({ error: 'Cannot regenerate bills below amounts already paid + waived. Correct payments or waivers first.' }, { status: 409 })
+              }
+              updated += synced.updated
+              if (synced.updated === 0) skipped++
+            }
           }
         }
 
+        // Commit bills and their plan lock together while holding the year lock.
+        await client.query(
+          `INSERT INTO fee_structure_locks (school_id, academic_year, locked_by, locked_at)
+           VALUES ($1, $2, $3, NOW())
+           ON CONFLICT (school_id, academic_year) DO NOTHING`,
+          [school_id, academic_year, access.actor]
+        )
         await client.query('COMMIT')
       } catch (e) { await client.query('ROLLBACK'); throw e }
       finally { client.release() }
@@ -207,19 +217,7 @@ export async function POST(req: NextRequest) {
         [school_id, academic_year]
       )
 
-      // Auto-lock the fee structure after bills are generated so amounts can't be
-      // changed directly (amendments still work via the audit-trail route).
-      // ON CONFLICT DO NOTHING: if already locked, silently skip — idempotent.
-      const access = await requireFeeAccess(school_id)
-      const lockedBy = access ? access.actor : 'system'
-      await pool.query(
-        `INSERT INTO fee_structure_locks (school_id, academic_year, locked_by, locked_at)
-         VALUES ($1, $2, $3, NOW())
-         ON CONFLICT (school_id, academic_year) DO NOTHING`,
-        [school_id, academic_year, lockedBy]
-      ).catch(() => {/* lock table may not exist yet — non-fatal */})
-
-      return NextResponse.json({ created, skipped, total_students: totalStudents, auto_locked: true })
+      return NextResponse.json({ created, updated, skipped, total_students: totalStudents, auto_locked: true })
     } catch (e) { console.error(e); return NextResponse.json({ error: 'Failed to generate ledger' }, { status: 500 }) }
 } catch (err: unknown) {
     console.error('[API]', err)

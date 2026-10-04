@@ -5,6 +5,7 @@ import { GRADE_SEQUENCE } from '@/lib/grades'
 import type { FeeCategory, FeeStructure, StructureLock, Amendment, ApplStudent, ApplCategory, FeeStats } from './types'
 import { LoadErrorBanner } from './LoadErrorBanner'
 import { Skeleton } from '@/components/ui/skeleton'
+import { useFeeStore } from '@/lib/stores/feeStore'
 
 const GRADES = GRADE_SEQUENCE
 function gradeLabel(g: string): string { return /^\d+$/.test(g) ? `Grade ${g}` : g }
@@ -132,10 +133,7 @@ export default function FeeSetupTab({
   const [lockingStructure, setLockingStructure] = useState(false)
   const [structureMsg, setStructureMsg] = useState('')
   const [showAmendLog, setShowAmendLog] = useState(false)
-  // Saving an amount here (unlike the dedicated Amend flow) never touches
-  // already-generated student_fee_ledger rows — it only updates fee_structures.
-  // Students already billed at the old amount silently keep owing it. This
-  // check warns before that happens instead of letting it pass silently.
+  // Preview the existing bills that a midyear amount change will update.
   const [checkingImpact, setCheckingImpact] = useState(false)
   const [pendingAmountWarning, setPendingAmountWarning] = useState<{
     cat: FeeCategory
@@ -291,27 +289,33 @@ export default function FeeSetupTab({
     })
     const d = await r.json()
     setStructureMsg(r.ok
-      ? d.created > 0
-        ? `✓ Generated ${d.created} new bill${d.created !== 1 ? 's' : ''}${d.skipped > 0 ? ` · ${d.skipped} already existed (not duplicated)` : ''}`
-        : `✓ All bills already exist — nothing new to generate (${d.skipped} existing)`
+      ? `✓ ${d.created} new bills · ${d.updated || 0} existing bills updated · ${d.skipped} unchanged`
       : d.error || 'Failed')
+    if (r.ok) {
+      const feeStore = useFeeStore.getState()
+      feeStore.bumpLedger(); feeStore.bumpReports(); feeStore.bumpYearEnd()
+    }
     setGeneratingLedger(false)
     onStatsChanged(); onSetupChanged()
   }
 
-  // Generate bills only for students who have no ledger rows yet (safe after lock)
+  // Create missing bills without changing existing student balances.
   async function generateForNew() {
     setGeneratingLedger(true); setStructureMsg('')
     const r = await fetch('/api/fees/generate', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ school_id: schoolId, academic_year: academicYear }),
+      body: JSON.stringify({ school_id: schoolId, academic_year: academicYear, only_missing: true }),
     })
     const d = await r.json()
     setStructureMsg(r.ok
       ? d.created > 0
-        ? `✓ Billed ${d.created} new student${d.created !== 1 ? 's' : ''}${d.skipped > 0 ? ` · ${d.skipped} already billed (not duplicated)` : ''}`
+        ? `✓ Created ${d.created} new bill${d.created !== 1 ? 's' : ''}${d.skipped > 0 ? ` · ${d.skipped} existing bills unchanged` : ''}`
         : '✓ All active students already billed — no new entries needed'
       : d.error || 'Failed')
+    if (r.ok) {
+      const feeStore = useFeeStore.getState()
+      feeStore.bumpLedger(); feeStore.bumpReports(); feeStore.bumpYearEnd()
+    }
     setGeneratingLedger(false)
     onStatsChanged(); onSetupChanged()
   }
@@ -366,7 +370,7 @@ export default function FeeSetupTab({
       const results = await Promise.all(changedGrades.map(async grade => {
         const r = await fetch(`/api/fees/structures/amend?school_id=${schoolId}&academic_year=${academicYear}&preview=1&fee_category_id=${cat.id}&grade=${grade}`)
         const d = r.ok ? await r.json() : { count: 0, partial_count: 0 }
-        return { grade, count: (d.count || 0) + (d.partial_count || 0) }
+        return { grade, count: (d.count || 0) + (d.partial_count || 0) + (d.paid_count || 0) + (d.waived_count || 0) }
       }))
       const totalAffected = results.reduce((s, r) => s + r.count, 0)
       if (totalAffected > 0) {
@@ -393,7 +397,10 @@ export default function FeeSetupTab({
       const d = await r.json().catch(() => null)
       setStructureMsg(d?.error || 'Failed to save')
     } else {
-      setStructureMsg(`✓ Amounts saved for ${cat.name}`)
+      setStructureMsg(`✓ Amounts saved for ${cat.name}; existing bills updated`)
+      onStatsChanged()
+      const feeStore = useFeeStore.getState()
+      feeStore.bumpLedger(); feeStore.bumpReports(); feeStore.bumpYearEnd()
     }
     setSavingStructure(false)
     setPendingAmountWarning(null)
@@ -534,6 +541,8 @@ export default function FeeSetupTab({
       // Variable-fee assignments can change amount_due on existing bills (ledgerUpdated),
       // so the Overview tab's totals would otherwise stay stale until a tab switch.
       onStatsChanged()
+      const feeStore = useFeeStore.getState()
+      feeStore.bumpLedger(); feeStore.bumpReports(); feeStore.bumpYearEnd()
     } else {
       setApplMsg(d.error || 'Failed to save')
     }
@@ -586,6 +595,8 @@ export default function FeeSetupTab({
       setVgMsg(`✓ Saved — ${d.upserted} assignments${d.ledgerUpdated > 0 ? `, ${d.ledgerUpdated} ledger entries updated` : ''}`)
       setVgOriginal({ ...vgAmounts })   // reset change highlight baseline
       onStatsChanged()
+      const feeStore = useFeeStore.getState()
+      feeStore.bumpLedger(); feeStore.bumpReports(); feeStore.bumpYearEnd()
     } else {
       setVgMsg(d.error || 'Failed to save')
     }
@@ -1340,8 +1351,8 @@ export default function FeeSetupTab({
                     ))}
                   </ul>
                   <p className="text-sm text-gray-500">
-                    Saving here only changes the fee plan going forward — it will <strong>not</strong> update these students&apos; existing bills.
-                    They&apos;ll keep owing the old amount while new bills use the new one, with no note on the ledger explaining the difference.
+                    Saving updates the fee plan and existing bills, including fully paid and waived bills, with an audit entry for each changed bill.
+                    Recorded payments and waiver amounts are retained, and the remaining balance is recalculated. A reduction below payments plus waivers already recorded will be rejected.
                   </p>
                 </div>
                 <div className="px-5 py-4 border-t border-gray-100 flex items-center justify-between">
@@ -1352,7 +1363,7 @@ export default function FeeSetupTab({
                   <button data-testid="btn-confirm-amount-change" onClick={() => doSaveFeeAmounts(pendingAmountWarning.cat, pendingAmountWarning.structs)}
                     disabled={savingStructure}
                     className="text-sm bg-amber-600 text-white px-6 py-2 rounded-lg font-medium hover:bg-amber-700 disabled:opacity-50">
-                    {savingStructure ? 'Saving…' : 'Save anyway'}
+                    {savingStructure ? 'Saving…' : 'Save and update bills'}
                   </button>
                 </div>
               </div>
@@ -1371,6 +1382,9 @@ export default function FeeSetupTab({
                   <p className="text-sm text-gray-500">
                     Bills will be generated for academic year <strong>{academicYear}</strong>. Every fee head, regardless of frequency,
                     becomes due on the academic year&apos;s end date.
+                  </p>
+                  <p className="text-sm text-gray-500">
+                    Existing bills, including paid and waived bills, will be updated to the current fee amounts. Recorded payments and waivers are retained; balances and payment status are recalculated.
                   </p>
                   <div className="border border-gray-100 rounded-xl overflow-hidden">
                     <table className="w-full text-sm">

@@ -1831,6 +1831,338 @@ test.describe.serial('Fee Management — Full Lifecycle', () => {
     expect(d.error).toContain('paid + waived')
   })
 
+  test('MIDYEAR-101: Midyear changes adjust paid and waived bills and audit changes', async () => {
+    test.setTimeout(180000)
+    const testAY = testYear(8)
+    await ensureTestYear(api, schoolId, adminCookie, testAY)
+    const category = await api('/api/fees/categories', 'POST', {
+      school_id: schoolId, name: `Midyear Regression ${ts}`, frequency: 'monthly', category_type: 'fixed',
+    }, adminCookie)
+    expect(category.status).toBe(201)
+    const categoryId = (category.data as { id: number }).id
+    const save = (amount: number) => api('/api/fees/structures', 'POST', {
+      school_id: schoolId, academic_year: testAY,
+      structures: [{ fee_category_id: categoryId, grade: '9', amount }],
+    }, adminCookie)
+    const generate = () => api('/api/fees/generate', 'POST', { school_id: schoolId, academic_year: testAY }, adminCookie)
+    type Bill = { id: number; fee_category_id: number; amount_due: string; amount_paid: string; waiver_amount: string; status: string }
+    const bills = async (studentId: number) => {
+      const result = await api(`/api/fees/ledger?school_id=${schoolId}&student_id=${studentId}&academic_year=${testAY}`, 'GET', undefined, adminCookie)
+      expect(result.status).toBe(200)
+      return (result.data as Bill[]).filter(b => b.fee_category_id === categoryId)
+    }
+    expect((await save(1000)).status).toBe(201)
+    expect((await generate()).status).toBe(200)
+    const initialA = await bills(studentA)
+    const initialB = await bills(studentB)
+    expect(initialA).toHaveLength(12)
+    expect(initialB).toHaveLength(12)
+    for (const [studentId, bill, amount] of [[studentA, initialA[0], 300], [studentB, initialB[0], 1000]] as const) {
+      expect((await api('/api/fees/payments', 'POST', {
+        school_id: schoolId, student_id: studentId, ledger_id: bill.id, amount,
+        payment_mode: 'cash', collected_by_name: 'Test Admin',
+      }, adminCookie)).status).toBe(201)
+    }
+    expect((await api('/api/fees/waivers', 'POST', {
+      school_id: schoolId, student_id: studentA, ledger_id: initialA[0].id,
+      waiver_type: 'fixed_amount', waiver_value: 200, reason: 'Midyear regression',
+    }, adminCookie)).status).toBe(201)
+    expect((await api('/api/fees/waivers', 'POST', {
+      school_id: schoolId, student_id: studentB, ledger_id: initialB[1].id,
+      waiver_type: 'full', reason: 'Fully waived bill participates in midyear changes',
+    }, adminCookie)).status).toBe(201)
+    expect((await api('/api/fees/structures/lock', 'POST', {
+      school_id: schoolId, academic_year: testAY, action: 'unlock',
+    }, adminCookie)).status).toBe(200)
+    // The fully paid bill alone blocks a reduction below its ₹1,000 payment.
+    expect((await save(800)).status).toBe(409)
+    expect((await bills(studentA)).every(b => Number(b.amount_due) === 1000)).toBe(true)
+    const preview = await api(`/api/fees/structures/amend?school_id=${schoolId}&academic_year=${testAY}&preview=1&fee_category_id=${categoryId}&grade=9`, 'GET', undefined, adminCookie)
+    expect(preview.status).toBe(200)
+    expect(Number((preview.data as { paid_count: number }).paid_count)).toBe(1)
+    expect(Number((preview.data as { waived_count: number }).waived_count)).toBe(1)
+
+    expect((await save(2000)).status).toBe(201)
+    const updatedA = await bills(studentA)
+    expect(updatedA.every(b => Number(b.amount_due) === 2000)).toBe(true)
+    const partial = updatedA.find(b => b.id === initialA[0].id)!
+    expect(Number(partial.amount_paid)).toBe(300)
+    expect(Number(partial.waiver_amount)).toBe(200)
+    expect(partial.status).toBe('partial')
+    const updatedB = await bills(studentB)
+    const paid = updatedB.find(b => b.id === initialB[0].id)!
+    expect(Number(paid.amount_due)).toBe(2000)
+    expect(Number(paid.amount_paid)).toBe(1000)
+    expect(paid.status).toBe('partial')
+    const waived = updatedB.find(b => b.id === initialB[1].id)!
+    expect(Number(waived.amount_due)).toBe(2000)
+    expect(Number(waived.waiver_amount)).toBe(1000)
+    expect(waived.status).toBe('partial')
+    expect(updatedB.filter(b => b.id !== waived.id).every(b => Number(b.amount_due) === 2000)).toBe(true)
+
+    expect((await save(400)).status).toBe(409)
+    expect((await bills(studentA)).every(b => Number(b.amount_due) === 2000)).toBe(true)
+    const plan = await api(`/api/fees/structures?school_id=${schoolId}&academic_year=${testAY}`, 'GET', undefined, adminCookie)
+    expect(plan.status).toBe(200)
+    expect(Number((plan.data as Array<{ amount: string }>)[0].amount)).toBe(2000)
+    const regenerated = await generate()
+    expect(regenerated.status).toBe(200)
+    expect((regenerated.data as { created: number }).created).toBe(0)
+    expect(await bills(studentA)).toHaveLength(12)
+    const passbook = await api(`/api/fees/passbook?school_id=${schoolId}&student_id=${studentA}`, 'GET', undefined, adminCookie)
+    expect(passbook.status).toBe(200)
+    const timeline = (passbook.data as { timeline: Array<{ type: string; description: string }> }).timeline
+    expect(timeline.filter(e => e.type === 'amendment' && e.description.includes('Fee plan amount updated after unlock'))).toHaveLength(12)
+
+    const amendment = await api('/api/fees/structures/amend', 'POST', {
+      school_id: schoolId, academic_year: testAY, fee_category_id: categoryId, grade: '9',
+      new_amount: 1800, reason: 'Shared synchronization regression',
+    }, adminCookie)
+    expect(amendment.status).toBe(200)
+    expect((amendment.data as { ledger_entries_updated: number }).ledger_entries_updated).toBe(24)
+    expect((await bills(studentA)).every(b => Number(b.amount_due) === 1800)).toBe(true)
+    const reduced = await api('/api/fees/structures/amend', 'POST', {
+      school_id: schoolId, academic_year: testAY, fee_category_id: categoryId, grade: '9',
+      new_amount: 1000, reason: 'Reduce to the payment already recorded',
+    }, adminCookie)
+    expect(reduced.status).toBe(200)
+    const settled = (await bills(studentB)).find(b => b.id === paid.id)!
+    expect(Number(settled.amount_due)).toBe(1000)
+    expect(Number(settled.amount_paid)).toBe(1000)
+    expect(settled.status).toBe('paid')
+    const fullyWaivedAgain = (await bills(studentB)).find(b => b.id === waived.id)!
+    expect(Number(fullyWaivedAgain.amount_due)).toBe(1000)
+    expect(Number(fullyWaivedAgain.waiver_amount)).toBe(1000)
+    expect(fullyWaivedAgain.status).toBe('waived')
+  })
+
+  test('GENERATE-101: Regeneration updates paid and waived bills, reconciles summaries and never duplicates them', async () => {
+    test.setTimeout(180000)
+    const testAY = testYear(9)
+    await ensureTestYear(api, schoolId, adminCookie, testAY)
+    const category = await api('/api/fees/categories', 'POST', {
+      school_id: schoolId, name: `Regeneration Regression ${ts}`, frequency: 'monthly', category_type: 'fixed',
+    }, adminCookie)
+    expect(category.status).toBe(201)
+    const categoryId = (category.data as { id: number }).id
+    expect((await api('/api/fees/structures', 'POST', {
+      school_id: schoolId, academic_year: testAY,
+      structures: [{ fee_category_id: categoryId, grade: '9', amount: 2000 }],
+    }, adminCookie)).status).toBe(201)
+    const generate = (only_missing = false) => api('/api/fees/generate', 'POST', { school_id: schoolId, academic_year: testAY, only_missing }, adminCookie)
+    expect((await generate()).status).toBe(200)
+    type Bill = { id: number; amount_due: string; amount_paid: string; waiver_amount: string; status: string }
+    const bills = async (studentId: number) => {
+      const result = await api(`/api/fees/ledger?school_id=${schoolId}&academic_year=${testAY}&student_id=${studentId}`, 'GET', undefined, adminCookie)
+      expect(result.status).toBe(200)
+      return result.data as Bill[]
+    }
+    const entries = await bills(studentA)
+    expect(entries).toHaveLength(12)
+    for (const bill of entries.slice(0, 2)) {
+      expect((await api(`/api/fees/ledger/${bill.id}`, 'PATCH', {
+        school_id: schoolId, new_amount: 1000, reason: 'Simulate a bill at the previous amount',
+      }, adminCookie)).status).toBe(200)
+    }
+    expect((await api('/api/fees/payments', 'POST', {
+      school_id: schoolId, student_id: studentA, ledger_id: entries[0].id, amount: 1000,
+      payment_mode: 'cash', collected_by_name: 'Test Admin',
+    }, adminCookie)).status).toBe(201)
+    expect((await api('/api/fees/waivers', 'POST', {
+      school_id: schoolId, student_id: studentA, ledger_id: entries[1].id,
+      waiver_type: 'full', reason: 'Waived bill at the previous amount',
+    }, adminCookie)).status).toBe(201)
+    const missing = await generate(true)
+    expect(missing.status).toBe(200)
+    expect((missing.data as { updated: number }).updated).toBe(0)
+    expect(Number((await bills(studentA)).find(b => b.id === entries[1].id)?.amount_due)).toBe(1000)
+    const regenerated = await generate()
+    expect(regenerated.status).toBe(200)
+    expect(regenerated.data).toMatchObject({ created: 0, updated: 2, skipped: 22 })
+    const after = await bills(studentA)
+    expect(after).toHaveLength(12)
+    const paid = after.find(b => b.id === entries[0].id)!
+    const waived = after.find(b => b.id === entries[1].id)!
+    expect(Number(paid.amount_due)).toBe(2000)
+    expect(Number(paid.amount_paid)).toBe(1000)
+    expect(paid.status).toBe('partial')
+    expect(Number(waived.amount_due)).toBe(2000)
+    expect(Number(waived.waiver_amount)).toBe(1000)
+    expect(waived.status).toBe('partial')
+    const report = await api(`/api/fees/reports?school_id=${schoolId}&academic_year=${testAY}`, 'GET', undefined, adminCookie)
+    expect(report.status).toBe(200)
+    const balance = (report.data as { balance: Record<string, string> }).balance
+    expect(Number(balance.total_billed)).toBe(48000)
+    expect(Number(balance.total_collected)).toBe(1000)
+    expect(Number(balance.total_waived)).toBe(1000)
+    expect(Number(balance.total_outstanding)).toBe(46000)
+    const repeated = await generate()
+    expect(repeated.status).toBe(200)
+    expect(repeated.data).toMatchObject({ created: 0, updated: 0, skipped: 24 })
+    const passbook = await api(`/api/fees/passbook?school_id=${schoolId}&student_id=${studentA}`, 'GET', undefined, adminCookie)
+    expect(passbook.status).toBe(200)
+    expect((passbook.data as { timeline: Array<{ description: string }> }).timeline.filter(e => e.description.includes('Bill regenerated from current fee plan'))).toHaveLength(2)
+    expect((await api(`/api/fees/ledger/${paid.id}`, 'PATCH', { school_id: schoolId, new_amount: 3000, reason: 'Regression overpayment guard' }, adminCookie)).status).toBe(200)
+    expect((await api('/api/fees/payments', 'POST', {
+      school_id: schoolId, student_id: studentA, ledger_id: paid.id, amount: 1500,
+      payment_mode: 'cash', collected_by_name: 'Test Admin',
+    }, adminCookie)).status).toBe(201)
+    expect((await generate()).status).toBe(409)
+    expect(Number((await bills(studentA)).find(b => b.id === paid.id)?.amount_due)).toBe(3000)
+  })
+
+  test('DAYREAD-101: Day Close totals and details reconcile while collections are recorded concurrently', async () => {
+    test.setTimeout(180000)
+    const testAY = testYear(10)
+    const date = '2001-02-03'
+    await ensureTestYear(api, schoolId, adminCookie, testAY)
+    const category = await api('/api/fees/categories', 'POST', {
+      school_id: schoolId, name: `Day Snapshot Regression ${ts}`, frequency: 'annual', category_type: 'fixed',
+    }, adminCookie)
+    expect(category.status).toBe(201)
+    const categoryId = (category.data as { id: number }).id
+    expect((await api('/api/fees/structures', 'POST', {
+      school_id: schoolId, academic_year: testAY,
+      structures: [{ fee_category_id: categoryId, grade: '8', amount: 1000 }],
+    }, adminCookie)).status).toBe(201)
+    expect((await api('/api/fees/generate', 'POST', { school_id: schoolId, academic_year: testAY }, adminCookie)).status).toBe(200)
+    const ledger = await api(`/api/fees/ledger?school_id=${schoolId}&student_id=${studentC}&academic_year=${testAY}`, 'GET', undefined, adminCookie)
+    expect(ledger.status).toBe(200)
+    const bill = (ledger.data as Array<{ id: number }>)[0]
+    expect(bill).toBeDefined()
+    const collect = async (amount: number) => {
+      const payment = await api('/api/fees/payments', 'POST', {
+        school_id: schoolId, student_id: studentC, ledger_id: bill.id, amount,
+        payment_mode: 'cash', collected_by_name: 'Test Admin', paid_date: date,
+      }, adminCookie)
+      expect(payment.status).toBe(201)
+    }
+    const read = async () => {
+      const result = await api(`/api/fees/day-close?school_id=${schoolId}&date=${date}`, 'GET', undefined, adminCookie)
+      expect(result.status).toBe(200)
+      const day = result.data as {
+        by_mode: Record<string, { count: number; total: number }>
+        receipts: { count: number; total: number }
+        payments: Array<{ amount: string; receipt_number: string }>
+      }
+      expect(day.receipts.total).toBe(day.payments.reduce((sum, p) => sum + Number(p.amount), 0))
+      expect(day.receipts.count).toBe(new Set(day.payments.map(p => p.receipt_number)).size)
+      expect(day.receipts.total).toBe(Object.values(day.by_mode).reduce((sum, m) => sum + m.total, 0))
+      expect(day.by_mode.cash.count).toBe(day.receipts.count)
+      return day
+    }
+    await collect(100)
+    await read()
+    await Promise.all([
+      ...Array.from({ length: 5 }, () => collect(50)),
+      ...Array.from({ length: 10 }, () => read()),
+    ])
+    expect((await read()).receipts).toMatchObject({ count: 6, total: 350 })
+  })
+
+  test('PLANRACE-101: Concurrent plan save and generation leave bills matching the locked plan', async () => {
+    test.setTimeout(120000)
+    const testAY = testYear(7)
+    await ensureTestYear(api, schoolId, adminCookie, testAY)
+    const category = await api('/api/fees/categories', 'POST', {
+      school_id: schoolId, name: `Plan Race Regression ${ts}`, frequency: 'annual', category_type: 'fixed',
+    }, adminCookie)
+    expect(category.status).toBe(201)
+    const categoryId = (category.data as { id: number }).id
+    const save = (amount: number) => api('/api/fees/structures', 'POST', {
+      school_id: schoolId, academic_year: testAY,
+      structures: [{ fee_category_id: categoryId, grade: '8', amount }],
+    }, adminCookie)
+    expect((await save(1000)).status).toBe(201)
+    const [generated, changed] = await Promise.all([
+      api('/api/fees/generate', 'POST', { school_id: schoolId, academic_year: testAY }, adminCookie),
+      save(2000),
+    ])
+    expect(generated.status).toBe(200)
+    expect([201, 409]).toContain(changed.status)
+    const expectedAmount = changed.status === 201 ? 2000 : 1000
+    const structures = await api(`/api/fees/structures?school_id=${schoolId}&academic_year=${testAY}`, 'GET', undefined, adminCookie)
+    expect(structures.status).toBe(200)
+    const plan = (structures.data as Array<{ fee_category_id: number; amount: string }>).find(s => s.fee_category_id === categoryId)
+    expect(Number(plan?.amount)).toBe(expectedAmount)
+    const ledger = await api(`/api/fees/ledger?school_id=${schoolId}&student_id=${studentC}&academic_year=${testAY}`, 'GET', undefined, adminCookie)
+    expect(ledger.status).toBe(200)
+    const bills = (ledger.data as Array<{ fee_category_id: number; amount_due: string }>).filter(l => l.fee_category_id === categoryId)
+    expect(bills).toHaveLength(1)
+    expect(Number(bills[0].amount_due)).toBe(expectedAmount)
+    expect((await save(3000)).status).toBe(409)
+  })
+
+  test('SUMMARY-101: Waivers, out-of-year payments and split receipts reconcile across fee summaries', async () => {
+    test.setTimeout(120000)
+    const testAY = testYear(6)
+    await ensureTestYear(api, schoolId, adminCookie, testAY)
+    const category = await api('/api/fees/categories', 'POST', {
+      school_id: schoolId, name: `Summary Regression ${ts}`, frequency: 'monthly', category_type: 'fixed',
+    }, adminCookie)
+    expect(category.status).toBe(201)
+    const categoryId = (category.data as { id: number }).id
+    const structure = await api('/api/fees/structures', 'POST', {
+      school_id: schoolId, academic_year: testAY,
+      structures: [{ fee_category_id: categoryId, grade: '8', amount: 1000 }],
+    }, adminCookie)
+    expect(structure.status).toBe(201)
+    expect((await api('/api/fees/generate', 'POST', { school_id: schoolId, academic_year: testAY }, adminCookie)).status).toBe(200)
+    const ledgerResult = await api(`/api/fees/ledger?school_id=${schoolId}&student_id=${studentC}&academic_year=${testAY}`, 'GET', undefined, adminCookie)
+    expect(ledgerResult.status).toBe(200)
+    const entries = (ledgerResult.data as Array<{ id: number; fee_category_id: number }>).filter(e => e.fee_category_id === categoryId)
+    expect(entries).toHaveLength(12)
+    expect((await api('/api/fees/waivers', 'POST', {
+      school_id: schoolId, student_id: studentC, ledger_id: entries[0].id,
+      waiver_type: 'fixed_amount', waiver_value: 200, reason: 'Summary regression',
+    }, adminCookie)).status).toBe(201)
+
+    const statsUrl = `/api/fees/stats?school_id=${schoolId}&academic_year=${testAY}`
+    type Stats = { summary: Record<string, string>; by_class: Array<{ total_waived: string; total_due: string; total_collected: string }>; monthly_trend: Array<{ collected: string }>; by_payment_mode: Array<{ count: string; total: string }> }
+    const waivedStats = await api(statsUrl, 'GET', undefined, adminCookie)
+    expect(waivedStats.status).toBe(200)
+    const ws = waivedStats.data as Stats
+    expect(Number(ws.summary.students_partial)).toBe(1)
+    expect(Number(ws.summary.students_fully_paid) + Number(ws.summary.students_partial) + Number(ws.summary.students_not_paid)).toBe(Number(ws.summary.total_students))
+    expect(Number(ws.by_class[0].total_waived)).toBe(200)
+
+    // This date is outside testAY; the payment must still belong to its bills' year.
+    const date = '2001-01-02'
+    const payment = await api('/api/fees/payments', 'POST', {
+      school_id: schoolId, student_id: studentC, ledger_ids: entries.map(e => e.id), total_amount: 1200,
+      payment_mode: 'cash', collected_by_name: 'Test Admin', paid_date: date,
+    }, adminCookie)
+    expect(payment.status).toBe(201)
+    expect((payment.data as { allocations: unknown[] }).allocations.length).toBeGreaterThan(1)
+    const statsResult = await api(statsUrl, 'GET', undefined, adminCookie)
+    expect(statsResult.status).toBe(200)
+    const stats = statsResult.data as Stats
+    expect(Number(stats.summary.total_collected)).toBe(1200)
+    expect(stats.monthly_trend.reduce((sum, m) => sum + Number(m.collected), 0)).toBe(1200)
+    expect(Number(stats.by_payment_mode[0].count)).toBe(1)
+    const report = await api(`/api/fees/reports?school_id=${schoolId}&academic_year=${testAY}`, 'GET', undefined, adminCookie)
+    expect(report.status).toBe(200)
+    const r = report.data as { monthly: Array<{ collected: string; payment_count: string }>; byMode: Array<{ count: string; total: string }>; byGrade: Array<{ total_waived: string }> }
+    expect(r.monthly.reduce((sum, m) => sum + Number(m.collected), 0)).toBe(1200)
+    expect(Number(r.monthly[0].payment_count)).toBe(1)
+    expect(Number(r.byMode[0].count)).toBe(1)
+    expect(r.byGrade[0].total_waived).toBe(stats.by_class[0].total_waived)
+    const day = await api(`/api/fees/day-close?school_id=${schoolId}&date=${date}`, 'GET', undefined, adminCookie)
+    expect(day.status).toBe(200)
+    expect((day.data as { receipts: { count: number; total: number } }).receipts).toMatchObject({ count: 1, total: 1200 })
+    const close = await api('/api/fees/day-close', 'POST', { school_id: schoolId, date, actual_cash: 1200 }, adminCookie)
+    expect(close.status).toBe(200)
+    expect(Number((close.data as { record: { txn_count: number } }).record.txn_count)).toBe(1)
+    const blockedSave = await api('/api/fees/structures', 'POST', {
+      school_id: schoolId, academic_year: testAY,
+      structures: [{ fee_category_id: categoryId, grade: '8', amount: 2000 }],
+    }, adminCookie)
+    expect(blockedSave.status).toBe(409)
+    const regenerated = await api('/api/fees/generate', 'POST', { school_id: schoolId, academic_year: testAY }, adminCookie)
+    expect(regenerated.status).toBe(200)
+    expect((regenerated.data as { created: number }).created).toBe(0)
+  })
+
   test('DAYCLOSE-101: Resubmitting day-close recalculates system_cash and totals, not just the difference', async () => {
     // Own dedicated academic year — see the comment on testYear/VER-101 above.
     // Day-close itself sums by paid_date, not academic_year, so this doesn't affect it.

@@ -3,6 +3,8 @@ import pool, { ensureDB } from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
 import { gradeOrderSql } from '@/lib/grades'
 import { resolveAcademicYear } from '@/lib/academicYear'
+import { lockYearClose } from '@/lib/feeRollover'
+import { syncStructureBills } from '@/lib/feeStructureSync'
 
 // GET /api/fees/structures?school_id=X&academic_year=2025-26
 export async function GET(req: NextRequest) {
@@ -49,21 +51,6 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // Server-side enforcement of the fee-structure lock — the UI hides the edit form
-      // when locked, but that's presentation-only; without this check, a direct API call
-      // (or a future UI bug) could change amounts after the plan was locked for the year,
-      // with no guarantee already-generated bills get amended to match (only the dedicated
-      // /api/fees/structures/amend route updates existing student_fee_ledger.amount_due).
-      const { rows: [lock] } = await pool.query(
-        `SELECT 1 FROM fee_structure_locks WHERE school_id = $1 AND academic_year = $2`,
-        [school_id, academic_year]
-      ).catch(() => ({ rows: [] }))
-      if (lock) {
-        return NextResponse.json({
-          error: 'This fee plan is locked for the year. Unlock it first, or use the Amend flow to change an amount with an audit trail.',
-        }, { status: 409 })
-      }
-
       // Must run before pool.connect() below, not after — on Vercel's max:1 pool,
       // ensureDB()'s own pool.query() calls would otherwise block waiting for a
       // connection that `client` is already holding, and `client` can't be
@@ -74,6 +61,23 @@ export async function POST(req: NextRequest) {
       const saved = []
       try {
         await client.query('BEGIN')
+        // Share generation's year lock and re-check inside the transaction.
+        await lockYearClose(client, school_id, academic_year)
+        const { rows: [closed] } = await client.query(
+          `SELECT 1 FROM fee_year_close WHERE school_id = $1 AND academic_year = $2 AND is_reopened = FALSE`,
+          [school_id, academic_year]
+        )
+        const { rows: [lock] } = await client.query(
+          `SELECT 1 FROM fee_structure_locks WHERE school_id = $1 AND academic_year = $2`,
+          [school_id, academic_year]
+        )
+        if (closed || lock) {
+          await client.query('ROLLBACK')
+          return NextResponse.json({
+            error: closed ? 'This academic year is closed. Reopen it to change the fee plan.'
+              : 'This fee plan is locked for the year. Unlock it first, or use the Amend flow to change an amount with an audit trail.',
+          }, { status: 409 })
+        }
 
         for (const s of structures) {
           // Snapshot existing value before upsert
@@ -92,6 +96,21 @@ export async function POST(req: NextRequest) {
             [school_id, s.fee_category_id, s.grade, s.amount || 0, s.due_day || 10, academic_year]
           )
           saved.push(row)
+
+          // Only changing a grade's amount revises its bills. Saving unchanged
+          // grades must not overwrite individual ledger adjustments.
+          if (existing && Number(existing.amount) !== Number(row.amount)) {
+            const synced = await syncStructureBills(client, {
+              schoolId: school_id, academicYear: academic_year, structureId: row.id,
+              amount: row.amount, reason: 'Fee plan amount updated after unlock', actor: changed_by,
+            })
+            if (synced.blocked > 0) {
+              await client.query('ROLLBACK')
+              return NextResponse.json({
+                error: `${synced.blocked} bill(s) have paid + waived amounts above the new fee amount. Correct payments or waivers before reducing this fee.`,
+              }, { status: 409 })
+            }
+          }
 
           const newAmt = parseFloat(s.amount) || 0
           const newDay = parseInt(s.due_day) || 10
