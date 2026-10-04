@@ -140,10 +140,10 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
-    const { action = 'apply', school_id, from_year, to_year, done_by: clientActor } = body
+    const { action = 'apply', school_id, from_year, to_year } = body
     const access = await requireFeeAccess(school_id)
     if (!access) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-    const done_by = clientActor || access.actor
+    const done_by = access.actor
     if (!school_id || !from_year) {
       return NextResponse.json({ error: 'school_id, from_year required' }, { status: 400 })
     }

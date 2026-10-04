@@ -94,10 +94,10 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     await ensureDB()
-    const { school_id, date, actual_cash, submitted_by: clientActor, notes } = await req.json()
+    const { school_id, date, actual_cash, notes } = await req.json()
     const access = await requireFeeAccess(school_id)
     if (!access) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-    const submitted_by = clientActor || access.actor
+    const submitted_by = access.actor
     if (!school_id || !date) {
       return NextResponse.json({ error: 'school_id, date required' }, { status: 400 })
     }

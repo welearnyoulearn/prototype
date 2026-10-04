@@ -48,10 +48,10 @@ export const GET = withWatchline(handleGET, { route: '/api/fees/waivers' })
 async function handlePOST(req: NextRequest) {
   try {
     // Validate before acquiring pool connection
-    const { school_id, student_id, ledger_id, waiver_type, waiver_value, reason, granted_by_name: clientActor, idempotency_key } = await req.json()
+    const { school_id, student_id, ledger_id, waiver_type, waiver_value, reason, idempotency_key } = await req.json()
     const access = await requireFeeAccess(school_id)
     if (!access) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-    const granted_by_name = clientActor || access.actor
+    const granted_by_name = access.actor
     if (!school_id || !student_id || !ledger_id || !waiver_type || !reason) {
       return NextResponse.json({ error: 'school_id, student_id, ledger_id, waiver_type, reason required' }, { status: 400 })
     }
