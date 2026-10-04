@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { ledgerStatusSql } from '@/lib/feeLedgerStatus'
 import pool from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
 import { withWatchline } from '@/lib/logger'
@@ -167,11 +168,7 @@ async function handlePOST(req: NextRequest) {
       await client.query(
         `UPDATE student_fee_ledger
          SET waiver_amount = COALESCE(waiver_amount, 0) + $1,
-             status = CASE
-               WHEN (COALESCE(waiver_amount, 0) + $1 + amount_paid) >= amount_due THEN 'waived'
-               WHEN (COALESCE(waiver_amount, 0) + $1 + amount_paid) > 0           THEN 'partial'
-               ELSE status
-             END
+             status = ${ledgerStatusSql({ due: 'amount_due', paid: 'amount_paid', waiver: 'COALESCE(waiver_amount, 0) + $1' })}
          WHERE id = $2`,
         [waiver_amount, ledger_id]
       )
@@ -313,12 +310,7 @@ async function handlePATCH(req: NextRequest) {
       await client.query(
         `UPDATE student_fee_ledger
          SET waiver_amount = GREATEST(0, COALESCE(waiver_amount, 0) + $1),
-             status = CASE
-               WHEN (GREATEST(0, COALESCE(waiver_amount, 0) + $1) + amount_paid) >= amount_due THEN 'waived'
-               WHEN (GREATEST(0, COALESCE(waiver_amount, 0) + $1) + amount_paid) > 0           THEN 'partial'
-               WHEN EXISTS (SELECT 1 FROM academic_years ay WHERE ay.school_id = student_fee_ledger.school_id AND ay.label = student_fee_ledger.academic_year AND ay.end_date < CURRENT_DATE) THEN 'overdue'
-               ELSE 'pending'
-             END
+             status = ${ledgerStatusSql({ due: 'amount_due', paid: 'amount_paid', waiver: 'GREATEST(0, COALESCE(waiver_amount, 0) + $1)' })}
          WHERE id = $2`,
         [diff, w0.ledger_id]
       )
@@ -441,12 +433,7 @@ async function handleDELETE(req: NextRequest) {
         `UPDATE student_fee_ledger
          SET waiver_amount = $1,
              amount_paid   = $2,
-             status = CASE
-               WHEN $1::numeric + $2::numeric >= amount_due THEN (CASE WHEN $1::numeric > 0 THEN 'waived' ELSE 'paid' END)
-               WHEN $2::numeric > 0 THEN 'partial'
-               WHEN EXISTS (SELECT 1 FROM academic_years ay WHERE ay.school_id = student_fee_ledger.school_id AND ay.label = student_fee_ledger.academic_year AND ay.end_date < CURRENT_DATE) THEN 'overdue'
-               ELSE 'pending'
-             END
+             status = ${ledgerStatusSql({ due: 'amount_due', paid: '$2::numeric', waiver: '$1::numeric' })}
          WHERE id = $3`,
         [residualWaiver, realPaid, waiver.ledger_id]
       )
