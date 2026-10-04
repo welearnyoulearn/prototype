@@ -1349,10 +1349,10 @@ export default function FeeCollectTab({
       )}
 
       {/* ══ Payment Confirmation Modal ══════════════════════════════════════════ */}
-      {showPayConfirm && openStudent && (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+      {showPayConfirm && openStudent && createPortal(
+        <div className="fixed inset-0 z-[200] flex overflow-y-auto p-4 bg-black/50 backdrop-blur-sm"
           onClick={() => setShowPayConfirm(false)}>
-          <div role="dialog" aria-modal="true" className="bg-white rounded-lg w-full max-w-sm shadow-2xl overflow-hidden"
+          <div role="dialog" aria-modal="true" className="m-auto bg-white rounded-lg w-full max-w-sm shadow-2xl overflow-hidden"
             onClick={e => e.stopPropagation()}>
 
             {/* Header */}
@@ -1461,13 +1461,13 @@ export default function FeeCollectTab({
             </div>
           </div>
         </div>
-      )}
+        , document.body)}
 
       {/* ══ Grant Waiver Modal ══════════════════════════════════════════════════ */}
-      {showWaiver && selectedEntry && (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+      {showWaiver && selectedEntry && createPortal(
+        <div className="fixed inset-0 z-[200] flex overflow-y-auto p-4 bg-black/50 backdrop-blur-sm"
           onClick={() => setShowWaiver(false)}>
-          <div role="dialog" aria-modal="true" className="bg-white rounded-lg w-full max-w-md shadow-2xl overflow-hidden"
+          <div role="dialog" aria-modal="true" className="m-auto bg-white rounded-lg w-full max-w-md shadow-2xl overflow-hidden"
             onClick={e => e.stopPropagation()}>
 
             {/* Header */}
@@ -1623,7 +1623,7 @@ export default function FeeCollectTab({
             </div>
           </div>
         </div>
-      )}
+        , document.body)}
     </div>
   )
 }
