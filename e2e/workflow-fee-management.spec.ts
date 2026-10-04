@@ -779,7 +779,7 @@ test.describe.serial('Fee Management — Full Lifecycle', () => {
 
   test('PY-008: Future paid_date → 400', async () => {
     const tomorrow = new Date()
-    tomorrow.setDate(tomorrow.getDate() + 1)
+    tomorrow.setDate(tomorrow.getDate() + 2) // +2: a UTC-based 'tomorrow' is still today in IST between 00:00-05:30 IST
     const { status } = await api('/api/fees/payments', 'POST', {
       school_id: schoolId, student_id: studentA,
       ledger_id: ledgerA2, amount: 100,
