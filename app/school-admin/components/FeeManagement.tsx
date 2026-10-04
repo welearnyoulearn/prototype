@@ -1013,7 +1013,7 @@ export default function FeeManagement({
                     <p className="text-base font-bold text-gray-900">{pbData.student.name}</p>
                     <p className="text-xs text-gray-400">
                       Gr.{pbData.student.grade}{pbData.student.section}
-                      {pbData.student.roll_number ? ` · Roll #${pbData.student.roll_number}` : ''}
+                      {pbData.student.school_roll_number ? ` · Roll ${pbData.student.school_roll_number}` : ''}
                       {pbData.student.parent_name ? ` · Parent: ${pbData.student.parent_name}` : ''}
                     </p>
                   </>

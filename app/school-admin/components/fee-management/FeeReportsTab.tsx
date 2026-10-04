@@ -1,5 +1,6 @@
 'use client'
 
+import { rollLabel } from './format'
 import { useCallback, useEffect, useState } from 'react'
 import { GRADE_SEQUENCE } from '@/lib/grades'
 import type { ReportData } from './types'
@@ -447,6 +448,8 @@ export default function FeeReportsTab({
                       <td className="px-4 py-2.5 text-right text-red-600 font-medium">{fmt(c.outstanding)}</td>
                       <td className="px-4 py-2.5 text-center text-xs">
                         <span className="text-green-600">{c.paid_count} paid</span>
+                        {Number(c.partial_count) > 0 && <><span className="text-gray-300 mx-1">·</span><span className="text-yellow-600">{c.partial_count} partial</span></>}
+                        {Number(c.waived_count) > 0 && <><span className="text-gray-300 mx-1">·</span><span className="text-purple-600">{c.waived_count} waived</span></>}
                         <span className="text-gray-300 mx-1">·</span>
                         <span className="text-red-500">{c.unpaid_count} unpaid</span>
                       </td>
@@ -483,7 +486,7 @@ export default function FeeReportsTab({
                       <tr key={i} className="border-b border-gray-50 hover:bg-gray-50">
                         <td className="px-4 py-2">
                           <p className="font-medium text-gray-800">{d.student_name}</p>
-                          <p className="text-xs text-gray-400">#{d.roll_number}</p>
+                          {d.school_roll_number ? <p className="text-xs text-gray-400">{rollLabel(d.school_roll_number)}</p> : null}
                         </td>
                         <td className="px-4 py-2 text-gray-600">Gr.{d.grade}{d.section}</td>
                         <td className="px-4 py-2 text-xs text-gray-500">{d.parent_name || '—'}{d.parent_phone ? ` · ${d.parent_phone}` : ''}</td>

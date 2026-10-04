@@ -1,5 +1,6 @@
 'use client'
 
+import { rollLabel } from './format'
 import { useCallback, useEffect, useState } from 'react'
 import { FINAL_GRADE } from '@/lib/grades'
 import type { ReceiptHeaderBlock } from './types'
@@ -15,7 +16,7 @@ function fmtDate(d: string) {
 }
 
 type YearEndBill = { id: number; fee_category_id: number; category_name: string; period_label: string; amount_due: number; amount_paid: number; balance: number; due_date: string; status: string }
-type YearEndStudent = { student_id: number; student_name: string; roll_number: string; grade: string; section: string; student_status: string; is_leaver: boolean; leaver_reason: string | null; total_unpaid: number; bills: YearEndBill[] }
+type YearEndStudent = { student_id: number; student_name: string; roll_number: string; school_roll_number?: number | null; grade: string; section: string; student_status: string; is_leaver: boolean; leaver_reason: string | null; total_unpaid: number; bills: YearEndBill[] }
 type YearEndState = {
   academic_year: string
   summary: { total_billed: number; total_collected: number; total_waived: number; discretionary_waived?: number; total_unpaid: number }
@@ -346,7 +347,7 @@ export default function FeeYearEndTab({
                           <div className="min-w-0">
                             <div className="flex items-center gap-2">
                               <p className="text-sm font-medium text-gray-800">{s.student_name}</p>
-                              <span className="text-xs text-gray-400">Gr.{s.grade}{s.section} · #{s.roll_number}</span>
+                              <span className="text-xs text-gray-400">Gr.{s.grade}{s.section}{rollLabel(s.school_roll_number) ? ` · ${rollLabel(s.school_roll_number)}` : ''}</span>
                               {s.is_leaver && (
                                 <span className="text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded font-medium">⚠ {s.leaver_reason}</span>
                               )}

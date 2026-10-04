@@ -134,6 +134,8 @@ async function handleGET(req: NextRequest) {
            COALESCE(SUM(COALESCE(l.waiver_amount, 0)), 0)           AS total_waived,
             COALESCE(SUM(GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0)), 0) AS outstanding,
            COUNT(*) FILTER (WHERE l.status = 'paid')                AS paid_count,
+           COUNT(*) FILTER (WHERE l.status = 'partial')             AS partial_count,
+           COUNT(*) FILTER (WHERE l.status = 'waived')              AS waived_count,
            COUNT(*) FILTER (WHERE l.status IN ('pending','overdue')) AS unpaid_count
          FROM student_fee_ledger l
          JOIN fee_categories fc ON fc.id = l.fee_category_id
@@ -188,7 +190,7 @@ async function handleGET(req: NextRequest) {
       // status, so partially-paid students aren't silently excluded (they still owe money).
       // Matches the same definition already used by the Defaulters CSV export.
       const { rows: defaulters } = await pool.query(
-        `SELECT s.name AS student_name, s.roll_number, s.grade, s.section,
+        `SELECT s.name AS student_name, s.roll_number, s.school_roll_number, s.grade, s.section,
                 s.parent_name, s.parent_phone,
                 SUM(GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0)) AS outstanding,
                 COUNT(*) FILTER (WHERE l.status = 'overdue') AS overdue_entries,
@@ -198,7 +200,7 @@ async function handleGET(req: NextRequest) {
          WHERE l.school_id = $1 AND l.academic_year = $2
            AND l.status NOT IN ('paid', 'waived')
            AND GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0) > 0
-         GROUP BY s.id, s.name, s.roll_number, s.grade, s.section, s.parent_name, s.parent_phone
+         GROUP BY s.id, s.name, s.roll_number, s.school_roll_number, s.grade, s.section, s.parent_name, s.parent_phone
          ORDER BY outstanding DESC`,
         [school_id, academic_year]
       )
