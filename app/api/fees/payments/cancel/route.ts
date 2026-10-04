@@ -181,8 +181,8 @@ async function handlePOST(req: NextRequest) {
            VALUES ($1,$2,$3,$4,$5,'completed',$6,$7,$8,$9,$10)
            RETURNING id`,
           [pmt.school_id, pmt.student_id, pmt.ledger_id, newAmount, newMode,
-           newReceipt, newRef || null, newDate, done_by,
-           `Correction of ${pmt.receipt_number}: ${reason}`]
+           newReceipt, newRef || null, newDate, pmt.collected_by_name || done_by,
+           `Correction of ${pmt.receipt_number} by ${done_by}: ${reason}`]
         )
         newPaymentId = created.id
 
