@@ -508,6 +508,7 @@ test.describe.serial('Fee Management — Full Lifecycle', () => {
       email: `nostr${ts}@test.com`, address: '1 Test St',
     })
     const noStrSchool = ns.id
+    await setSubscription(platformCookie, noStrSchool, 'premium')
     const nsCookie = await loginSchoolAdmin(ns.email, ns.temp_password)
     await api('/api/auth/profile', 'PUT', { full_name: 'Admin', phone: '9000000088' }, nsCookie)
     const { status } = await api('/api/fees/generate', 'POST', {

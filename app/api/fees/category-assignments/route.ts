@@ -109,7 +109,7 @@ export async function POST(req: NextRequest) {
       // Pass `client` — already held via pool.connect() above; the default
       // `pool` here would deadlock requesting a second connection on Vercel's max:1 pool.
       const access = await requireFeeAccess(school_id, client)
-      if (!access) { client.release(); return NextResponse.json({ error: 'Forbidden' }, { status: 403 }) }
+      if (!access) { return NextResponse.json({ error: 'Forbidden' }, { status: 403 }) }
       const changed_by = access.actor
       if (!school_id || !academic_year || !Array.isArray(assignments)) {
         return NextResponse.json({ error: 'school_id, academic_year, assignments required' }, { status: 400 })
@@ -136,14 +136,12 @@ export async function POST(req: NextRequest) {
         `SELECT id FROM students WHERE id = ANY($1) AND school_id = $2`, [studentIds, school_id]
       )
       if (ownedStudents.length !== studentIds.length) {
-        client.release()
         return NextResponse.json({ error: 'One or more students do not belong to this school' }, { status: 403 })
       }
       const { rows: ownedCategories } = await client.query(
         `SELECT id FROM fee_categories WHERE id = ANY($1) AND school_id = $2`, [categoryIds, school_id]
       )
       if (ownedCategories.length !== categoryIds.length) {
-        client.release()
         return NextResponse.json({ error: 'One or more fee categories do not belong to this school' }, { status: 403 })
       }
 
