@@ -58,10 +58,10 @@ export async function GET(req: NextRequest) {
 
       const [studentsRes, categoriesRes, amountsRes] = await Promise.all([
         pool.query(
-          `SELECT id, name, roll_number, section FROM students
+          `SELECT id, name, roll_number, school_roll_number, section FROM students
            WHERE school_id = $1 AND grade = $2 AND status = 'active'
            ${useSection ? 'AND section = $3' : ''}
-           ORDER BY section, (NULLIF(regexp_replace(roll_number,'[^0-9]','','g'),''))::int NULLS LAST, name`,
+           ORDER BY section, school_roll_number NULLS LAST, name`,
           useSection ? [school_id, grade, section] : [school_id, grade]
         ),
         pool.query(
