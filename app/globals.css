@@ -662,10 +662,10 @@ input, select, textarea {
 .pl-slide-title { position: relative; display: flex; flex-direction: column; }
 .pl-slide-title strong { font-size: 26px; font-weight: 700; letter-spacing: -.035em; line-height: 1.1; }
 .pl-slide-title small { color: rgb(255 255 255 / .7); font-size: 11px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; }
-.pl-slide-body { display: flex; flex: 1; flex-direction: column; gap: 14px; padding: 18px 22px 20px; -webkit-font-smoothing: antialiased; text-rendering: geometricPrecision; backface-visibility: hidden; }
-.pl-slide-desc { color: #3d4a41; font-size: 14px; font-weight: 450; line-height: 1.52; }
+.pl-slide-body { display: flex; flex: 1; flex-direction: column; gap: 14px; padding: 18px 22px 20px; -webkit-font-smoothing: subpixel-antialiased; backface-visibility: hidden; }
+.pl-slide-desc { color: #1e2a24; font-size: 14px; font-weight: 500; line-height: 1.52; }
 .pl-chips { display: flex; flex-wrap: wrap; gap: 6px; }
-.pl-chip { display: inline-flex; align-items: center; gap: 5px; padding: 5px 10px 5px 8px; border-radius: 999px; background: var(--soft); color: var(--slide-accent); font-size: 12px; font-weight: 650; }
+.pl-chip { display: inline-flex; align-items: center; gap: 5px; padding: 5px 10px 5px 8px; border-radius: 999px; background: var(--soft); color: var(--deep); font-size: 12px; font-weight: 700; }
 .pl-chip svg { width: 13px; height: 13px; }
 .pl-slide-go { display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: auto; min-height: 42px; border-radius: 12px; background: var(--slide-accent); color: white; font-size: 14px; font-weight: 700; transition: filter 200ms ease; }
 .pl-slide-go svg { width: 16px; height: 16px; transition: transform 200ms ease; }
