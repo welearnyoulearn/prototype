@@ -8,10 +8,10 @@ import { lockYearClose } from '@/lib/feeRollover'
 // locked_by is derived server-side from the session.
 export async function POST(req: NextRequest) {
   try {
-    const { school_id, academic_year, action, locked_by: clientActor } = await req.json()
+    const { school_id, academic_year, action } = await req.json()
     const access = await requireFeeAccess(school_id)
     if (!access) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-    const locked_by = clientActor || access.actor
+    const locked_by = access.actor
     if (!school_id || !academic_year || !action) {
       return NextResponse.json({ error: 'school_id, academic_year, action required' }, { status: 400 })
     }

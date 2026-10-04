@@ -34,10 +34,10 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     try {
-      const { school_id, academic_year, structures, changed_by: clientActor } = await req.json()
+      const { school_id, academic_year, structures } = await req.json()
       const access = await requireFeeAccess(school_id)
       if (!access) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-      const changed_by = clientActor || access.actor
+      const changed_by = access.actor
       if (!school_id || !academic_year || !Array.isArray(structures)) {
         return NextResponse.json({ error: 'school_id, academic_year, structures required' }, { status: 400 })
       }

@@ -175,7 +175,7 @@ async function handlePOST(req: NextRequest) {
 
         const { rows: [seq] } = await client.query(`SELECT nextval('receipt_number_seq') AS n`)
         const schoolCode = String(pmt.school_id).padStart(3, '0')
-        newReceipt = `RCP-${schoolCode}-${new Date().getFullYear()}-${String(seq.n).padStart(6, '0')}`
+        newReceipt = `RCP-${schoolCode}-${new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata", year: "numeric" })}-${String(seq.n).padStart(6, '0')}`
 
         const { rows: [created] } = await client.query(
           `INSERT INTO fee_payments

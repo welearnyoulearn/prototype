@@ -227,7 +227,7 @@ async function handlePOST(req: NextRequest) {
       // Generate one receipt number shared across all allocations
       const { rows: [seq] } = await client.query(`SELECT nextval('receipt_number_seq') AS n`)
       const schoolCode = String(school_id).padStart(3, '0')
-      const receipt_number = `RCP-${schoolCode}-${new Date().getFullYear()}-${String(seq.n).padStart(6, '0')}`
+      const receipt_number = `RCP-${schoolCode}-${new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata", year: "numeric" })}-${String(seq.n).padStart(6, '0')}`
       const payDate = paid_date || todayIST()
 
       const createdPayments = []

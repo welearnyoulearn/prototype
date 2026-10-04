@@ -58,7 +58,7 @@ async function handlePOST(req: NextRequest) {
   try {
     const client = await pool.connect()
     try {
-      const { payment_id, action, verified_by: clientActor, rejection_reason } = await req.json()
+      const { payment_id, action, rejection_reason } = await req.json()
       if (!payment_id || !action) {
         return NextResponse.json({ error: 'payment_id, action required' }, { status: 400 })
       }
@@ -70,7 +70,7 @@ async function handlePOST(req: NextRequest) {
       // this handler's own pool.connect() above, deadlocks on a max:1 pool.
       const access = await requireFeeAccess(pmtRow.school_id, client)
       if (!access) { client.release(); return NextResponse.json({ error: 'Forbidden' }, { status: 403 }) }
-      const verified_by = clientActor || access.actor
+      const verified_by = access.actor
 
       await client.query('BEGIN')
 
