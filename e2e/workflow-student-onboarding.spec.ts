@@ -153,7 +153,10 @@ test.describe.serial('Student Onboarding — Full Lifecycle (UI)', () => {
     await page.getByTestId('enroll-students-btn').click()
 
     await expect(page.getByText('Enrollment Complete — Credentials')).toBeVisible({ timeout: 30000 })
-    await expect(page.getByText(`priya${ts}@student.com`)).toBeVisible()
+    // The panel shows the roll-number login + temp password for the student; the student's
+    // email is only where the credentials are delivered, so it is no longer listed.
+    await expect(page.getByText('Student Credentials')).toBeVisible()
+    await expect(page.getByText('Patel Priya')).toBeVisible()
     await expect(page.getByText('Parent Credentials')).toBeVisible()
     await expect(page.getByText(`ramesh${ts}@parent.com`)).toBeVisible()
 
