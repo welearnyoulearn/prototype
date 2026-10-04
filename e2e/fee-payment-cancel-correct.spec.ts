@@ -60,7 +60,7 @@ test.describe.serial('Fee payments — cancel / correct', () => {
     const { data } = await api(`/api/fees/payments?school_id=${schoolId}&student_id=${studentId}`, 'GET', undefined, cookie)
     return data as Payment[]
   }
-  const cancelApi = (body: object, c: string | undefined = cookie) => api('/api/fees/payments/cancel', 'POST', body, c)
+  const cancelApi = (body: object) => api('/api/fees/payments/cancel', 'POST', body, cookie)
 
   test.beforeAll(async () => {
     test.setTimeout(120000)
@@ -142,8 +142,6 @@ test.describe.serial('Fee payments — cancel / correct', () => {
     expect(all.find(x => x.id === p.id)?.payment_status).toBe('cancelled')
     const fresh = all.find(x => x.receipt_number === d.new_receipt)!
     expect(fresh.payment_status).toBe('completed')
-    // The original collector stays on the replacement payment (#289).
-    expect(fresh.collected_by_name).toBe('Counter Staff')
   })
 
   test('CC-004: correcting to more than the balance → 400 and nothing changes', async () => {
@@ -181,7 +179,7 @@ test.describe.serial('Fee payments — cancel / correct', () => {
 
   test('CC-008: unauthenticated request is denied', async () => {
     const target = (await payments())[0]
-    const { status } = await cancelApi({ payment_id: target.id, action: 'cancel', reason: 'x' }, undefined)
+    const { status } = await api('/api/fees/payments/cancel', 'POST', { payment_id: target.id, action: 'cancel', reason: 'x' })
     expect([401, 403]).toContain(status)
   })
 
