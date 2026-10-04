@@ -24,7 +24,7 @@ async function login(ctx: APIRequestContext, email: string, password: string) {
 async function ownerClient(email: string, tempPass: string): Promise<APIRequestContext> {
   const ctx = await newClient()
   expect((await login(ctx, email, tempPass)).status()).toBe(200)
-  expect((await ctx.post('/api/auth/change-password', { data: { newPassword: OWNER_PASS } })).status()).toBe(200)
+  expect((await ctx.post('/api/auth/change-password', { data: { currentPassword: tempPass, newPassword: OWNER_PASS } })).status()).toBe(200)
   expect((await ctx.put('/api/auth/profile', { data: { full_name: 'Owner', phone: '9000000011' } })).status()).toBe(200)
   return ctx
 }
@@ -269,9 +269,14 @@ test.describe.serial('Staff accounts — plan security, seat limits, deactivatio
         body: JSON.stringify({ school_id: c.id }),
       })
       expect(reset.status).toBe(200)
-      const { temp_password } = await reset.json()
+      // The platform reset now emails a set-password link (no temp password in the response):
+      // take the token from the DB, set a password, then sign in.
+      const { token } = await latestInviteToken(c.email)
+      const anon = await newClient()
+      expect((await anon.post('/api/auth/reset-password', { data: { token, newPassword: STAFF_PASS } })).status()).toBe(200)
+      await anon.dispose()
       const back = await newClient()
-      expect((await login(back, c.email, temp_password)).status()).toBe(200)
+      expect((await login(back, c.email, STAFF_PASS)).status()).toBe(200)
       await back.dispose()
     })
   })
