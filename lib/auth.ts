@@ -26,6 +26,7 @@ export type JWTPayload = {
   firstLogin: boolean
   profileCompleted: boolean
   sid?: string  // user_sessions.id — required for school-staff cookies, absent for platform admin
+  displayName?: string  // runtime-only (not stored in the JWT): users.full_name, else email — for audit trails
 }
 
 export type TeacherJWTPayload = {
@@ -278,8 +279,8 @@ async function validateStaffSession(touch: boolean, db: PgPool | PoolClient = po
   const payload = verifyToken(token)
   if (!payload?.sid) return null
 
-  const { rows: [row] } = await db.query<{ stale: boolean }>(
-    `SELECT (s.last_seen_at < NOW() - INTERVAL '30 seconds') AS stale
+  const { rows: [row] } = await db.query<{ stale: boolean; full_name: string | null; email: string | null }>(
+    `SELECT (s.last_seen_at < NOW() - INTERVAL '30 seconds') AS stale, u.full_name, u.email
      FROM user_sessions s
      JOIN users u ON u.id = s.user_id
      WHERE s.id = $1 AND s.user_id = $2
@@ -294,7 +295,7 @@ async function validateStaffSession(touch: boolean, db: PgPool | PoolClient = po
   if (touch && row.stale) {
     await db.query(`UPDATE user_sessions SET last_seen_at = NOW() WHERE id = $1`, [payload.sid])
   }
-  return payload
+  return { ...payload, displayName: row.full_name?.trim() || row.email || undefined }
 }
 
 // Validates the school-staff session: signed cookie, session row live (not revoked,
@@ -321,8 +322,8 @@ export async function getPlatformSession(): Promise<JWTPayload | null> {
   if (!token) return null
   const payload = verifyToken(token)
   if (!payload?.sid || payload.role !== 'platform_admin') return null
-  const { rows } = await pool.query(
-    `SELECT 1 FROM user_sessions s
+  const { rows } = await pool.query<{ full_name: string | null; email: string | null }>(
+    `SELECT u.full_name, u.email FROM user_sessions s
      JOIN users u ON u.id = s.user_id
      WHERE s.id = $1 AND s.user_id = $2
        AND s.revoked_at IS NULL AND s.expires_at > NOW()
@@ -332,7 +333,7 @@ export async function getPlatformSession(): Promise<JWTPayload | null> {
   )
   if (!rows.length) return null
   await pool.query(`UPDATE user_sessions SET last_seen_at = NOW() WHERE id = $1 AND last_seen_at < NOW() - INTERVAL '30 seconds'`, [payload.sid])
-  return payload
+  return { ...payload, displayName: rows[0].full_name?.trim() || rows[0].email || undefined }
 }
 
 export async function requirePlatformAdmin(): Promise<JWTPayload | null> {
@@ -502,6 +503,14 @@ export function getParentSessionFromRequest(req: NextRequest): ParentJWTPayload 
 // route that calls this AFTER its own pool.connect() must pass `client` here —
 // otherwise, on Vercel's max:1 pool, this deadlocks requesting a second
 // connection while the caller is still holding the only one.
+// Audit-trail identity: the person's name (or email) plus their role, so a trail shows WHICH
+// staff member acted, not just that "an admin" did. Falls back to the role alone.
+const ROLE_LABEL: Record<string, string> = { school_admin: 'School Admin', principal: 'Principal', vice_principal: 'Vice Principal' }
+function auditActor(displayName: string | undefined, roleLabel: string): string {
+  // Capped at 100: fee_waivers.granted_by_name and fee_payments.collected_by_name are VARCHAR(100).
+  return (displayName ? `${displayName} (${roleLabel})` : roleLabel).slice(0, 100)
+}
+
 export async function requireFeeAccess(requestedSchoolId: string | number | null | undefined, db?: PgPool | PoolClient):
   Promise<{ schoolId: number; role: string; userId: number; actor: string } | null> {
   // Platform admin: full access to any school (own cookie — see COOKIE_PLATFORM).
@@ -510,7 +519,7 @@ export async function requireFeeAccess(requestedSchoolId: string | number | null
   if (platformSession?.role === 'platform_admin') {
     const sid = requestedSchoolId != null ? Number(requestedSchoolId) : (platformSession.schoolId ?? 0)
     if (!sid) return null
-    return { schoolId: sid, role: 'platform_admin', userId: platformSession.userId, actor: 'Platform Admin' }
+    return { schoolId: sid, role: 'platform_admin', userId: platformSession.userId, actor: auditActor(platformSession.displayName, 'Platform Admin') }
   }
 
   // School staff (admin, principal, vice_principal): must match their own school
@@ -522,7 +531,7 @@ export async function requireFeeAccess(requestedSchoolId: string | number | null
     if (requestedSchoolId != null && Number(requestedSchoolId) !== Number(session.schoolId)) {
       return null   // cross-tenant attempt
     }
-    return { schoolId: session.schoolId, role: session.role, userId: session.userId, actor: 'School Admin' }
+    return { schoolId: session.schoolId, role: session.role, userId: session.userId, actor: auditActor(session.displayName, ROLE_LABEL[session.role] ?? 'School Admin') }
   }
 
   return null
