@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, useRef, ChangeEvent } from 'react'
 import { Skeleton } from '@/components/ui/skeleton'
 import { BarChart3, CheckCircle2, Eye } from 'lucide-react'
+import NotificationBell from '../../components/NotificationBell'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 type Teacher = { id: number; name: string; subject: string; department: string }
@@ -524,7 +525,7 @@ export default function ExamMarks({ classId, schoolId, grade, section, teacher, 
       {view === 'list' && (
         <div className="space-y-4">
           <div>
-            <h2 className="text-base font-semibold text-gray-800">Marks & Results — Grade {grade} {section}</h2>
+            <h2 className="text-base font-semibold text-gray-800 flex items-center gap-2">Marks & Results — Grade {grade} {section} <NotificationBell teacherId={teacher.id} group="marks" /></h2>
             <p className="text-xs text-gray-400 mt-0.5">Exams are scheduled by school admin. Class teachers assign subject teachers once entry opens.</p>
           </div>
 

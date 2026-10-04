@@ -5,6 +5,7 @@ import { Search, ChevronUp, ChevronDown, Bell, Check } from 'lucide-react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 import { INK, TEAL, GOLD, CORAL, GREEN, BORDER, SURFACE, CREAM } from '@/app/components/ulearn/theme'
 import { UlearnCard } from '@/app/components/ulearn/primitives'
+import NotificationBell from '../../components/NotificationBell'
 
 // ── Types — matches GET /api/syllabus/analytics's extended response ────────
 
@@ -250,7 +251,7 @@ export default function SyllabusTracking({ schoolId }: { schoolId: number }) {
       {/* Header + year selector */}
       <div className="rounded-3xl p-4 sm:p-5 flex items-center justify-between gap-4 flex-wrap" style={{ background: CREAM, border: `1px solid ${BORDER}` }}>
         <div>
-          <h2 className="text-lg font-semibold" style={{ color: INK }}>Syllabus Tracking</h2>
+          <h2 className="text-lg font-semibold flex items-center gap-2" style={{ color: INK }}>Syllabus Tracking <NotificationBell schoolId={schoolId} group="syllabus" /></h2>
           <p className="text-sm text-gray-500 mt-0.5">Coverage by class, subject and teacher — chapter-level, updated live.</p>
         </div>
         {years.length > 0 && (

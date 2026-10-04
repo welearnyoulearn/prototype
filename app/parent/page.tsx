@@ -866,7 +866,7 @@ function ParentDashboard() {
               student who is not linked to the logged-in parent). */}
           {visited.has('attendance') && (
           <div hidden={activeNav !== 'attendance'} className="max-w-3xl space-y-5">
-            <h2 className="text-base font-bold text-gray-800">{T.nav.attendance}</h2>
+            <h2 className="text-base font-bold text-gray-800 flex items-center gap-2">{T.nav.attendance} {parentInfo?.id && <NotificationBell parentId={parentInfo.id} group="attendance" />}</h2>
             <AttendanceCalendar key={student.id} endpoint={`/api/parent/attendance?student_id=${student.id}`} who="parent" />
           </div>
           )}
@@ -1314,7 +1314,7 @@ function ParentDashboard() {
           {/* ── EXAM CALENDAR ─────────────────────────────────────────────── */}
           {visited.has('exams') && (
           <div hidden={activeNav !== 'exams'} className="max-w-3xl space-y-4">
-            <h2 className="text-base font-bold text-gray-800">{T.examCalendar}</h2>
+            <h2 className="text-base font-bold text-gray-800 flex items-center gap-2">{T.examCalendar} {parentInfo?.id && <NotificationBell parentId={parentInfo.id} group="exams" />}</h2>
             <TestCalendar mode="parent" schoolId={student.school_id} studentId={student.id} />
             {summary?.upcoming_exams && summary.upcoming_exams.length > 0 ? (
               <div className="space-y-3">
@@ -1356,7 +1356,7 @@ function ParentDashboard() {
           {/* ── RESULTS ───────────────────────────────────────────────────── */}
           {visited.has('results') && (
           <div hidden={activeNav !== 'results'} className="max-w-2xl space-y-4">
-            <h2 className="text-base font-bold text-gray-800">{T.nav.results} & {T.parentSignoff}</h2>
+            <h2 className="text-base font-bold text-gray-800 flex items-center gap-2">{T.nav.results} & {T.parentSignoff} {parentInfo?.id && <NotificationBell parentId={parentInfo.id} group="marks" />}</h2>
             {(!summary?.released_results || summary.released_results.length === 0) ? (
               <div className="bg-white rounded-xl border border-gray-200 py-16 text-center">
                 <p className="text-muted-foreground text-sm">{T.noResults}</p>

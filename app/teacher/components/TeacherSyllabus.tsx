@@ -5,6 +5,7 @@ import { SyllabusTracking, type TeacherObj } from './ClassView'
 import { INK, GOLD, BORDER, CREAM } from '@/app/components/ulearn/theme'
 import { Pills, UlearnCard } from '@/app/components/ulearn/primitives'
 import { Skeleton } from '@/components/ui/skeleton'
+import NotificationBell from '../../components/NotificationBell'
 
 type ClassOption = {
   id: number
@@ -93,7 +94,7 @@ export default function TeacherSyllabus({
   return (
     <div className="space-y-4">
       <div className="rounded-lg border-l-4 p-4 sm:p-5" style={{ background: CREAM, borderColor: BORDER, borderLeftColor: GOLD }}>
-        <h2 className="text-lg font-semibold" style={{ color: INK }}>Syllabus</h2>
+        <h2 className="text-lg font-semibold flex items-center gap-2" style={{ color: INK }}>Syllabus <NotificationBell teacherId={teacher.id} group="syllabus" /></h2>
         <p className="text-sm text-gray-500 mt-0.5">
           Pick a class to track what&apos;s been taught and mark topics as covered.
         </p>

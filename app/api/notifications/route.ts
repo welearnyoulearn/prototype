@@ -142,7 +142,18 @@ export async function PUT(req: NextRequest) {
     const recipient = await sessionRecipient()
     if (!recipient) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-    const body = await req.json().catch(() => ({})) as { notification_id?: unknown }
+    const body = await req.json().catch(() => ({})) as { notification_id?: unknown; notification_ids?: unknown }
+
+    // A batch (e.g. "mark this group read") — still limited to the caller's own rows.
+    if (body.notification_ids !== undefined) {
+      const ids = Array.isArray(body.notification_ids) ? body.notification_ids.map(Number) : []
+      if (ids.length === 0 || ids.length > 200 || ids.some(id => !Number.isInteger(id) || id <= 0)) {
+        return NextResponse.json({ error: 'notification_ids must be 1-200 positive integers' }, { status: 400 })
+      }
+      await pool.query(`UPDATE notifications SET is_read = TRUE WHERE id = ANY($1::int[]) AND ${recipient.column} = $2`, [ids, recipient.id])
+      return NextResponse.json({ success: true })
+    }
+
     const notificationId = body.notification_id == null ? null : Number(body.notification_id)
     if (notificationId !== null && (!Number.isInteger(notificationId) || notificationId <= 0)) {
       return NextResponse.json({ error: 'Invalid notification_id' }, { status: 400 })

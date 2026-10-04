@@ -8,6 +8,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { StudentAlert, StudentEmptyState, StudentPageIntro, StudentProgressTrack, studentReveal } from './StudentExperience'
 import { Sticker, subjectSticker, type StickerName, type Tone } from './stickers'
+import NotificationBell from '../../components/NotificationBell'
 
 type SubjectResult = {
   subject_name: string
@@ -196,6 +197,7 @@ export default function StudentMarks({ studentId, schoolId, classId }: Props) {
         <div className="flex items-center gap-3">
           <Sticker name="notebook" size="md" tilt={-8} />
           <h2 id="marks-all-title" className="sb-display text-2xl">All released results</h2>
+          <NotificationBell studentId={studentId} group="marks" />
         </div>
         {exams.map((exam, i) => (
           <motion.div
