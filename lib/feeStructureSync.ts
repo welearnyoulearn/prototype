@@ -73,21 +73,44 @@ async function applyBillChanges(
   }
   if (affected.length === 0) return { updated: 0, blocked: 0, blockedBills: [] }
 
+  const updated = await applyBulkBillChanges(client, {
+    schoolId: params.schoolId, reason: params.reason, actor: params.actor,
+    setStructure: targetStructureId !== undefined,
+    changes: affected.map(b => ({
+      id: b.id, student_id: b.student_id, old_amount: b.amount_due, new_amount: params.amount,
+      structure_id: targetStructureId ?? null,
+    })),
+  })
+  return { updated, blocked: 0, blockedBills: [] }
+}
+
+export type BulkBillChange = {
+  id: number; student_id: number; old_amount: string | number; new_amount: string | number; structure_id: number | null
+}
+
+// Applies many bill amount changes in two statements (one UPDATE, one audit INSERT)
+// instead of one audit INSERT per bill. Status is re-derived with the shared rule.
+export async function applyBulkBillChanges(
+  client: PoolClient,
+  p: { schoolId: number | string; reason: string; actor: string; changes: BulkBillChange[]; setStructure: boolean }
+): Promise<number> {
+  if (p.changes.length === 0) return 0
+  const ids = p.changes.map(c => c.id)
+  const newAmounts = p.changes.map(c => String(c.new_amount))
   await client.query(
     `UPDATE student_fee_ledger l
-     SET amount_due = $1,
-         fee_structure_id = CASE WHEN $3::boolean THEN $4::int ELSE fee_structure_id END,
-         status = ${ledgerStatusSql({ due: '$1::numeric', paid: 'amount_paid', waiver: 'waiver_amount', ledger: 'l' })}
-     WHERE id = ANY($2::int[])`,
-    [params.amount, affected.map(r => r.id), targetStructureId !== undefined, targetStructureId ?? null]
+     SET amount_due = c.new_amount,
+         fee_structure_id = CASE WHEN $4::boolean THEN c.structure_id ELSE l.fee_structure_id END,
+         status = ${ledgerStatusSql({ due: 'c.new_amount', paid: 'l.amount_paid', waiver: 'l.waiver_amount', ledger: 'l' })}
+     FROM unnest($1::int[], $2::numeric[], $3::int[]) AS c(id, new_amount, structure_id)
+     WHERE l.id = c.id`,
+    [ids, newAmounts, p.changes.map(c => c.structure_id), p.setStructure]
   )
-  for (const bill of affected) {
-    await client.query(
-      `INSERT INTO student_fee_ledger_edits
-         (ledger_id, school_id, student_id, old_amount, new_amount, reason, changed_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-      [bill.id, params.schoolId, bill.student_id, bill.amount_due, params.amount, params.reason, params.actor]
-    )
-  }
-  return { updated: affected.length, blocked: 0, blockedBills: [] }
+  await client.query(
+    `INSERT INTO student_fee_ledger_edits (ledger_id, school_id, student_id, old_amount, new_amount, reason, changed_by)
+     SELECT t.id, $5, t.student_id, t.old_amount, t.new_amount, $6, $7
+     FROM unnest($1::int[], $2::int[], $3::numeric[], $4::numeric[]) AS t(id, student_id, old_amount, new_amount)`,
+    [ids, p.changes.map(c => c.student_id), p.changes.map(c => String(c.old_amount)), newAmounts, p.schoolId, p.reason, p.actor]
+  )
+  return p.changes.length
 }
