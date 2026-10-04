@@ -277,3 +277,91 @@ export async function backfillPortalCredentials({
     client.release()
   }
 }
+
+export type ParentLinkRow = {
+  studentId: number
+  parent: ParentInfo
+  hash: string | null          // password hash, only used when this row creates the parent
+  createIfMissing: boolean
+}
+export type ResolvedParentContact = { email: string | null; phone: string | null; name: string | null } | null
+
+// Set-based equivalent of calling findOrCreateParent + linkStudentParent + a contact
+// SELECT for every student: one lookup, one bulk INSERT of new parents, one bulk INSERT
+// of links and one contact SELECT — a handful of statements instead of ~4 per student.
+// Matching rules are unchanged: a row's key is its email (case-insensitive) when it has
+// one, else its phone; an existing parent is matched by email OR phone; rows sharing a
+// key within the batch share one parent. Returns the resolved contact per input row.
+export async function linkParentsBulk(
+  client: PoolClient, schoolId: number, rows: ParentLinkRow[]
+): Promise<ResolvedParentContact[]> {
+  type Ref = { id: number } | { createIdx: number }
+  const trimmed = rows.map(r => ({
+    pe: r.parent.email?.trim() || null, pp: r.parent.phone?.trim() || null, pn: r.parent.name?.trim() || null,
+  }))
+  const emails = [...new Set(trimmed.map(t => t.pe?.toLowerCase()).filter((e): e is string => !!e))]
+  const phones = [...new Set(trimmed.map(t => t.pp).filter((p): p is string => !!p))]
+  const existing = emails.length || phones.length
+    ? (await client.query<{ id: number; email_l: string | null; phone: string | null }>(
+        `SELECT id, LOWER(email) AS email_l, phone FROM parents
+         WHERE school_id = $1 AND (LOWER(email) = ANY($2::text[]) OR phone = ANY($3::text[]))
+         ORDER BY id`,
+        [schoolId, emails, phones]
+      )).rows
+    : []
+
+  const cache = new Map<string, Ref>()
+  const toCreate: { name: string | null; email: string | null; phone: string | null; hash: string }[] = []
+  const refs: (Ref | null)[] = rows.map((r, i) => {
+    const { pe, pp, pn } = trimmed[i]
+    if (!pe && !pp) return null
+    const key = pe ? `email:${pe.toLowerCase()}` : `phone:${pp}`
+    const cached = cache.get(key)
+    if (cached) return cached
+    const match = existing.find(e => (pe && e.email_l === pe.toLowerCase()) || (pp && e.phone === pp))
+    let ref: Ref | null = null
+    if (match) ref = { id: match.id }
+    else if (r.createIfMissing && r.hash) {
+      ref = { createIdx: toCreate.length }
+      toCreate.push({ name: pn, email: pe, phone: pp, hash: r.hash })
+    }
+    if (ref) cache.set(key, ref)
+    return ref
+  })
+
+  let createdIds: number[] = []
+  if (toCreate.length > 0) {
+    const ins = await client.query<{ id: number }>(
+      `INSERT INTO parents (school_id, name, email, phone, password_hash, password_changed)
+       SELECT $1, t.name, t.email, t.phone, t.hash, FALSE
+       FROM unnest($2::text[], $3::text[], $4::text[], $5::text[]) WITH ORDINALITY AS t(name, email, phone, hash, n)
+       ORDER BY t.n
+       RETURNING id`,
+      [schoolId, toCreate.map(c => c.name), toCreate.map(c => c.email), toCreate.map(c => c.phone), toCreate.map(c => c.hash)]
+    )
+    createdIds = ins.rows.map(r => r.id)
+  }
+  const parentIdOf = (ref: Ref | null): number | null =>
+    !ref ? null : 'id' in ref ? ref.id : createdIds[ref.createIdx]
+
+  const links = rows.map((r, i) => ({ studentId: r.studentId, parentId: parentIdOf(refs[i]) })).filter(l => l.parentId !== null)
+  if (links.length > 0) {
+    await client.query(
+      `INSERT INTO student_parents (student_id, parent_id)
+       SELECT * FROM unnest($1::int[], $2::int[]) ON CONFLICT DO NOTHING`,
+      [links.map(l => l.studentId), links.map(l => l.parentId)]
+    )
+  }
+  const ids = [...new Set(links.map(l => l.parentId as number))]
+  const contacts = new Map<number, { email: string | null; phone: string | null; name: string | null }>()
+  if (ids.length > 0) {
+    const { rows: cr } = await client.query<{ id: number; email: string | null; phone: string | null; name: string | null }>(
+      `SELECT id, email, phone, name FROM parents WHERE id = ANY($1::int[])`, [ids]
+    )
+    for (const c of cr) contacts.set(c.id, { email: c.email || null, phone: c.phone || null, name: c.name || null })
+  }
+  return refs.map(ref => {
+    const pid = parentIdOf(ref)
+    return pid === null ? null : (contacts.get(pid) ?? { email: null, phone: null, name: null })
+  })
+}

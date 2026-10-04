@@ -4,7 +4,7 @@ import { invalidateCache } from '@/lib/responseCache'
 import { hashPortalPassword, generateTempPassword, requireSchoolAdmin, schoolHasFeature } from '@/lib/auth'
 import { sendStudentWelcomeEmail, sendParentWelcomeEmail, sendChildCredentialsToParentEmail } from '@/lib/email'
 import { sendWhatsappMessage } from '@/lib/whatsapp'
-import { findOrCreateParent, linkStudentParent, generateStudentId } from '@/lib/studentOnboarding'
+import { linkParentsBulk, generateStudentId } from '@/lib/studentOnboarding'
 import { normalizeStudentInput, type NormalizedStudentInput } from '@/lib/studentValidation'
 import { ClassWorkflowError, ensureClassWithSetup } from '@/lib/classManagement'
 
@@ -202,42 +202,24 @@ export async function POST(req: NextRequest) {
       )
       const insertedStudents = insertedRes.rows
 
-      const processedParentIds = new Map<string, number>()
       // Resolved parent contact per row (index-aligned with toInsert), so the
       // "send child's credentials to parent" step below can mail the parent's
       // real account address rather than assuming it equals this row's
       // parent_email — an existing parent's actual email can differ (typo on
       // this row, or the parent's email was set on an earlier sibling's row).
-      const resolvedParentContact: ({ email: string | null; phone: string | null; name: string | null } | null)[] = []
-
-      for (let i = 0; i < toInsert.length; i++) {
-        const s = toInsert[i]
-        const student = insertedStudents[i]
-        const pe = s.parent_email?.trim() || null
-        const pp = s.parent_phone?.trim() || null
-        const pn = s.parent_name?.trim() || null
-        if (!pe && !pp) { resolvedParentContact.push(null); continue }
-
-        // Even when parent-portal is disabled, still link to an existing parent
-        // (e.g. a sibling onboarded earlier while the flag was on) — only suppress
-        // creating a brand-new parents row while the flag is off.
-        const match = await findOrCreateParent(
-          client, school_id, { name: pn, email: pe, phone: pp },
-          parentHashes[i], processedParentIds, needsNewParent[i]
-        )
-
-        if (match) {
-          await linkStudentParent(client, student.id, match.parentId)
-          const parentRow = await client.query('SELECT email, phone, name FROM parents WHERE id = $1', [match.parentId])
-          resolvedParentContact.push({
-            email: parentRow.rows[0]?.email || null,
-            phone: parentRow.rows[0]?.phone || null,
-            name: parentRow.rows[0]?.name || null,
-          })
-        } else {
-          resolvedParentContact.push(null)
-        }
-      }
+      // Even when parent-portal is disabled, still link to an existing parent
+      // (e.g. a sibling onboarded earlier while the flag was on) — only suppress
+      // creating a brand-new parents row while the flag is off. Set-based: see
+      // linkParentsBulk (one lookup, one bulk create, one bulk link).
+      const resolvedParentContact = await linkParentsBulk(
+        client, school_id,
+        toInsert.map((s, i) => ({
+          studentId: insertedStudents[i].id,
+          parent: { name: s.parent_name?.trim() || null, email: s.parent_email?.trim() || null, phone: s.parent_phone?.trim() || null },
+          hash: parentHashes[i],
+          createIfMissing: needsNewParent[i],
+        }))
+      )
 
       await client.query('COMMIT')
 
