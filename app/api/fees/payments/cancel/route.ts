@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { todayIST } from '@/lib/istDate'
 import pool, { ensureDB } from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
 import { withWatchline } from '@/lib/logger'
@@ -144,6 +145,12 @@ async function handlePOST(req: NextRequest) {
         const newMode = body.new_payment_mode || pmt.payment_mode
         const newRef  = body.new_transaction_ref ?? pmt.transaction_ref
         const newDate = body.new_paid_date || pmt.paid_date
+        // Same date rules as payments POST — an unvalidated date either 500s on a bad
+        // string or books a payment into a future day-close.
+        if (body.new_paid_date != null && !(/^d{4}-d{2}-d{2}$/.test(String(body.new_paid_date)) && !isNaN(new Date(body.new_paid_date).getTime()) && body.new_paid_date <= todayIST() && body.new_paid_date >= '2000-01-01')) {
+          await client.query('ROLLBACK')
+          return NextResponse.json({ error: 'new_paid_date must be a valid past date (YYYY-MM-DD)' }, { status: 400 })
+        }
         if (!(newAmount > 0)) {
           await client.query('ROLLBACK')
           return NextResponse.json({ error: 'Corrected amount must be greater than 0' }, { status: 400 })
