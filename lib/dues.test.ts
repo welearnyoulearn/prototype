@@ -25,3 +25,13 @@ test('the carry-forward note collapses into a short range', () => {
   assert.equal(summarizeCarriedNotes(null, 'Previous Year Dues (2026-27)'), 'Previous Year Dues (2026-27)')
   assert.equal(summarizeCarriedNotes('Something unexpected', 'x'), 'Something unexpected')
 })
+
+import { thisYearFees } from '../app/school-admin/components/fee-management/dues'
+
+test('this-year collection leaves carried dues out of both sides', () => {
+  // ₹3,59,000 of this year's fees + ₹1,62,000 carried; ₹10,000 paid, all of it on carried dues
+  const r = thisYearFees({ total_due: 521000, total_collected: 10000, total_waived: 0, discretionary_waived: 0, carried_in_due: 162000, carried_in_collected: 10000 })
+  assert.deepEqual(r, { collected: 0, net: 359000 })
+  // no carried dues: plain collected / (due − waived)
+  assert.deepEqual(thisYearFees({ total_due: 1000, total_collected: 400, total_waived: 100 }), { collected: 400, net: 900 })
+})

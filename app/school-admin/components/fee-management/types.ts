@@ -48,6 +48,7 @@ export type FeeStats = {
     discretionary_waived?: number
     carried_in_due?: number; carried_in_collected?: number; carried_in_outstanding?: number; carried_in_students?: number
     prior_unresolved_outstanding?: number; prior_unresolved_students?: number; prior_unresolved_from?: string | null
+    passout_outstanding?: number; passout_students?: number; owed_all_years?: number
     total_outstanding: number; paid_count: number; partial_count: number
     pending_count: number; overdue_count: number; waived_count: number; defaulters_count: number
     students_fully_paid: number; students_partial: number; students_not_paid: number
@@ -74,7 +75,7 @@ export type EditRecord = {
 }
 
 export type ReportData = {
-  balance: { total_billed: number; total_collected: number; total_outstanding: number; total_waived: number; discretionary_waived?: number; carried_in_due?: number; carried_in_collected?: number; carried_in_outstanding?: number; carried_in_students?: number; prior_unresolved_outstanding?: number; prior_unresolved_students?: number; prior_unresolved_from?: string | null; paid_entries: number; partial_entries: number; unpaid_entries: number; waived_entries: number; total_students: number }
+  balance: { total_billed: number; total_collected: number; total_outstanding: number; total_waived: number; discretionary_waived?: number; carried_in_due?: number; carried_in_collected?: number; carried_in_outstanding?: number; carried_in_students?: number; prior_unresolved_outstanding?: number; prior_unresolved_students?: number; prior_unresolved_from?: string | null; passout_outstanding?: number; passout_students?: number; owed_all_years?: number; paid_entries: number; partial_entries: number; unpaid_entries: number; waived_entries: number; total_students: number }
   monthly: Array<{ month: string; month_start: string | null; collected: number; payment_count: number; students_paid: number }>
   monthlyDue: Array<{ month: string; month_start: string | null; billed: number }>
   byGrade: Array<{ grade: string; section?: string; students: number; total_due: number; total_collected: number; total_waived: number; discretionary_waived?: number; outstanding: number; fully_paid_students?: number; defaulter_students?: number }>

@@ -23,6 +23,22 @@ export function carriedBilled(entries: Array<CarriedLike & { amount_due: number 
   return entries.filter(isCarriedEntry).reduce((s, e) => s + Number(e.amount_due), 0)
 }
 
+// Collected vs expected for THIS year's own fees. Carried-in dues are excluded from both sides — they
+// were already counted as billed in the year they came from, so leaving them in would dilute the
+// rate (and a payment on them would flatter it).
+export function thisYearFees(s: {
+  total_due: number | string; total_collected: number | string; total_waived?: number | string
+  discretionary_waived?: number | string; carried_in_due?: number | string; carried_in_collected?: number | string
+}): { collected: number; net: number } {
+  if (Number(s.carried_in_due) > 0) {
+    return {
+      collected: Number(s.total_collected) - Number(s.carried_in_collected || 0),
+      net: Number(s.total_due) - Number(s.carried_in_due) - Number(s.discretionary_waived ?? 0),
+    }
+  }
+  return { collected: Number(s.total_collected), net: Number(s.total_due) - Number(s.total_waived || 0) }
+}
+
 // Sort helper: current-year fee heads first, carried-in heads last.
 export const carriedCategoriesLast = (a: { category_name: string }, b: { category_name: string }) =>
   Number(isCarriedCategory(a.category_name)) - Number(isCarriedCategory(b.category_name))

@@ -1,7 +1,7 @@
 'use client'
 
 import { rollLabel, plural } from './format'
-import { isCarriedCategory, carriedCategoriesLast } from './dues'
+import { isCarriedCategory, carriedCategoriesLast, thisYearFees } from './dues'
 import PriorDuesBanner from './PriorDuesBanner'
 import type { FeeStats, GradeStat, PassoutData, PassoutStudent, RecentPayment } from './types'
 import { LoadErrorBanner } from './LoadErrorBanner'
@@ -131,11 +131,13 @@ export default function FeeOverviewTab({
         </div>
       ) : stats?.summary ? (
         <>
-          <PriorDuesBanner outstanding={stats.summary.prior_unresolved_outstanding} students={stats.summary.prior_unresolved_students} fromYear={stats.summary.prior_unresolved_from} />
+          <PriorDuesBanner year={academicYear} current={stats.summary.total_outstanding} prior={stats.summary.prior_unresolved_outstanding} priorStudents={stats.summary.prior_unresolved_students} priorFrom={stats.summary.prior_unresolved_from} passout={stats.summary.passout_outstanding} passoutStudents={stats.summary.passout_students} />
           <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
             {[
               { label: 'Total Billed',  value: stats.summary.total_due,                                                                    sub: Number(stats.summary.carried_in_due) > 0 ? `${fmt(Number(stats.summary.total_due) - Number(stats.summary.carried_in_due))} this year + ${fmt(stats.summary.carried_in_due!)} carried from earlier years` : plural(stats.summary.total_students, 'student'),           border: 'border-gray-100',   text: 'text-gray-900',   sub_color: 'text-gray-400' },
-              { label: 'Collected',     value: stats.summary.total_collected,    sub: `${pct(Number(stats.summary.total_collected), Number(stats.summary.total_due) - Number(stats.summary.total_waived || 0))}% of net demand`, border: 'border-green-100',  text: 'text-green-700',  sub_color: 'text-green-500' },
+              { label: 'Collected',     value: stats.summary.total_collected,    sub: Number(stats.summary.carried_in_due) > 0
+                ? `${pct(thisYearFees(stats.summary).collected, thisYearFees(stats.summary).net)}% of this year's fees${Number(stats.summary.carried_in_collected) > 0 ? ` · ${fmt(stats.summary.carried_in_collected!)} on carried dues` : ''}`
+                : `${pct(thisYearFees(stats.summary).collected, thisYearFees(stats.summary).net)}% of net demand`, border: 'border-green-100',  text: 'text-green-700',  sub_color: 'text-green-500' },
               { label: 'Waived',        value: stats.summary.discretionary_waived ?? stats.summary.total_waived,                            sub: `${stats.summary.waived_count} entries waived`,       border: 'border-purple-100', text: 'text-purple-700', sub_color: 'text-purple-400' },
               { label: 'Outstanding',   value: stats.summary.total_outstanding,                                                             sub: Number(stats.summary.carried_in_outstanding) > 0 ? `incl. ${fmt(stats.summary.carried_in_outstanding!)} from earlier years` : `${stats.summary.overdue_count} overdue entries`,     border: 'border-red-100',    text: 'text-red-600',    sub_color: 'text-red-400' },
               { label: 'Zero Payers',   value: stats.summary.defaulters_count,                                                              sub: 'students with no payment or waiver',                 border: 'border-orange-100', text: 'text-orange-600', sub_color: 'text-orange-400', isCount: true },
@@ -154,12 +156,12 @@ export default function FeeOverviewTab({
           <div className="bg-white rounded-xl border border-gray-100 p-5">
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-sm font-semibold text-gray-700">Overall Collection Progress — {academicYear}</h3>
-              <span className="text-sm font-bold text-blue-600">{pct(Number(stats.summary.total_collected), Number(stats.summary.total_due) - Number(stats.summary.total_waived || 0))}%</span>
+              <span className="text-sm font-bold text-blue-600">{pct(thisYearFees(stats.summary).collected, thisYearFees(stats.summary).net)}%</span>
             </div>
             <div className="h-3 bg-gray-100 rounded-full overflow-hidden mb-3">
               <div
                 className="h-full rounded-full bg-[#245b46] transition-all duration-700"
-                style={{ width: `${pct(Number(stats.summary.total_collected), Number(stats.summary.total_due) - Number(stats.summary.total_waived || 0))}%` }}
+                style={{ width: `${pct(thisYearFees(stats.summary).collected, thisYearFees(stats.summary).net)}%` }}
               />
             </div>
             <div className="flex gap-5 flex-wrap">

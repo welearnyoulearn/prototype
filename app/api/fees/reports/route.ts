@@ -83,6 +83,18 @@ async function handleGET(req: NextRequest) {
       balance.prior_unresolved_students = priorOpen.students
       balance.prior_unresolved_from = priorOpen.from_year
 
+      const { rows: [passoutOpen] } = await pool.query(
+        `SELECT COALESCE(SUM(GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0)), 0) AS outstanding,
+                COUNT(DISTINCT l.student_id) AS students
+         FROM student_fee_ledger l
+         WHERE l.school_id = $1 AND l.academic_year = 'passout'
+           AND GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0) > 0`,
+        [school_id]
+      ).catch(() => ({ rows: [{ outstanding: 0, students: 0 }] }))
+      balance.passout_outstanding = passoutOpen.outstanding
+      balance.passout_students = passoutOpen.students
+      balance.owed_all_years = Number(balance.total_outstanding) + Number(priorOpen.outstanding) + Number(passoutOpen.outstanding)
+
       // Collections against the selected year's bills, grouped by payment month.
       const { rows: monthly } = await pool.query(
         `SELECT

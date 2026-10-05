@@ -42,6 +42,12 @@ async function handleGET(req: NextRequest) {
              SUM(l.amount_paid)                                                       AS s_cash,
              SUM(COALESCE(l.waiver_amount, 0))                                        AS s_waived,
              SUM(GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0)) AS s_out,
+             -- The same three figures for THIS year's own fees only (carried-in bills excluded): a student
+             -- who owes only carried dues has not "failed to pay this year", and carried dues shouldn't
+             -- count as payment toward this year's fees.
+             COALESCE(SUM(l.amount_paid) FILTER (WHERE l.source_academic_year IS NULL), 0)                 AS s_cash_cur,
+             COALESCE(SUM(COALESCE(l.waiver_amount, 0)) FILTER (WHERE l.source_academic_year IS NULL), 0)  AS s_waived_cur,
+             COALESCE(SUM(GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0)) FILTER (WHERE l.source_academic_year IS NULL), 0) AS s_out_cur,
              COUNT(*) FILTER (WHERE l.status = 'overdue')                            AS overdue_entries,
              COUNT(*) FILTER (WHERE l.status = 'pending')                            AS pending_entries,
              COUNT(*) FILTER (WHERE l.status IN ('paid','waived'))                   AS paid_entries
@@ -62,11 +68,11 @@ async function handleGET(req: NextRequest) {
            (SELECT COUNT(*) FROM student_fee_ledger WHERE school_id = $1 AND academic_year = $2 AND status = 'overdue') AS overdue_count,
            (SELECT COUNT(*) FROM student_fee_ledger WHERE school_id = $1 AND academic_year = $2 AND status = 'waived')  AS waived_count,
            -- Zero payers with dues; this powers the Overview's Zero Payers card.
-           COUNT(*) FILTER (WHERE s_cash = 0 AND s_waived = 0 AND s_out > 0)         AS defaulters_count,
+           COUNT(*) FILTER (WHERE s_cash_cur = 0 AND s_waived_cur = 0 AND s_out_cur > 0) AS defaulters_count,
            -- student-level paid/partial for progress bar legend
            COUNT(*) FILTER (WHERE s_out <= 0)                                        AS students_fully_paid,
-           COUNT(*) FILTER (WHERE (s_cash > 0 OR s_waived > 0) AND s_out > 0)         AS students_partial,
-           COUNT(*) FILTER (WHERE s_cash = 0 AND s_waived = 0 AND s_out > 0)          AS students_not_paid
+           COUNT(*) FILTER (WHERE (s_cash_cur > 0 OR s_waived_cur > 0) AND s_out > 0) AS students_partial,
+           COUNT(*) FILTER (WHERE s_cash_cur = 0 AND s_waived_cur = 0 AND s_out > 0)  AS students_not_paid
          FROM per_student`,
         [school_id, academic_year]
       )
@@ -117,6 +123,19 @@ async function handleGET(req: NextRequest) {
       summary.prior_unresolved_outstanding = priorOpen.outstanding
       summary.prior_unresolved_students = priorOpen.students
       summary.prior_unresolved_from = priorOpen.from_year
+
+      // Dues sitting in the passout bucket (graduated/left students) — a third place money can be owed.
+      const { rows: [passoutOpen] } = await pool.query(
+        `SELECT COALESCE(SUM(GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0)), 0) AS outstanding,
+                COUNT(DISTINCT l.student_id) AS students
+         FROM student_fee_ledger l
+         WHERE l.school_id = $1 AND l.academic_year = 'passout'
+           AND GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0) > 0`,
+        [school_id]
+      ).catch(() => ({ rows: [{ outstanding: 0, students: 0 }] }))
+      summary.passout_outstanding = passoutOpen.outstanding
+      summary.passout_students = passoutOpen.students
+      summary.owed_all_years = Number(summary.total_outstanding) + Number(priorOpen.outstanding) + Number(passoutOpen.outstanding)
 
       // Collection by category — discretionary_waived computed from fee_waivers
       // (separate query to avoid multiplying total_due/collected when joining waivers)

@@ -747,6 +747,20 @@ export default function FeeCollectTab({
                               <button type="button" onClick={closeCollect} aria-label="Close payment window" className="grid h-10 w-10 place-items-center rounded-md text-xl text-gray-500 hover:bg-gray-100">×</button>
                             </div>
                             <div className="space-y-5 px-5 py-5 sm:px-6">
+                            {row.open_entries.some(isCarriedEntry) && row.open_entries.some(x => !isCarriedEntry(x)) && (
+                              <div data-testid="collect-order-note" className="flex flex-wrap items-center gap-2 rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-600">
+                                <span className="flex-1 min-w-[12rem]">Payments are applied to the <strong>oldest bill first</strong> — previous years&apos; dues are cleared before {academicYear} fees. Everything is selected; tick only what this payment is for.</span>
+                                {([
+                                  { label: 'All dues', pick: row.open_entries },
+                                  { label: `Only ${academicYear} fees`, pick: row.open_entries.filter(x => !isCarriedEntry(x)) },
+                                  { label: 'Only previous years', pick: row.open_entries.filter(isCarriedEntry) },
+                                ]).map(opt => (
+                                  <button key={opt.label} type="button" data-testid={`collect-pick-${opt.label.replace(/\s+/g, '-').toLowerCase()}`}
+                                    onClick={() => { setCollectChecked(new Set(opt.pick.map(x => x.id))); setPayAmount(String(opt.pick.reduce((s, x) => s + Number(x.balance), 0))) }}
+                                    className="rounded-md border border-gray-200 bg-white px-2 py-1 font-medium text-gray-700 hover:bg-gray-100">{opt.label}</button>
+                                ))}
+                              </div>
+                            )}
                             <div className="space-y-1.5">
                               {[...row.open_entries.filter(isCarriedEntry), ...row.open_entries.filter(e => !isCarriedEntry(e))].map((e, idx, ordered) => (
                                 <Fragment key={e.id}>
