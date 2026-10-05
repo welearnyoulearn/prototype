@@ -27,6 +27,14 @@ test('a job that was off for weeks sends one reminder, not three', () => {
   assert.deepEqual(pickYearEndReminder(5, []), { kind: 'ye_7', supersedes: ['ye_30', 'ye_60'] })
 })
 
+test('a year-old open due is escalated by name to the approver', () => {
+  const t = reminderText('od_stale', { year: '2026-27', count: 2, total: 120000, approver: 'Principal Rao', owner: 'Priya' })
+  assert.match(t.title, /over a year/)
+  assert.match(t.message, /2 students left open in 2026-27 \(₹1,20,000\) have been unresolved for more than a year/)
+  assert.match(t.message, /Principal Rao: please decide/)
+  assert.match(reminderText('od_stale', { year: 'Y', count: 1, total: 5 }).message, /1 student left open in Y \(₹5\) has been unresolved.*Please decide whether to collect, carry or write it off/)
+})
+
 test('reminder text names the year, the date and the owner', () => {
   const t = reminderText('ye_30', { year: '2026-27', endDate: '2027-03-31', owner: 'Priya' })
   assert.match(t.title, /30 days/)

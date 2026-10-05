@@ -6,6 +6,12 @@ All finished features and bug fixes. Most recent first.
 
 <!-- Add new entries at the top -->
 
+### 2026-10-05 — Fee year-end process (#343)
+**Type:** Feature
+**Portal:** School Admin
+**Summary:** Makes year-end a repeatable process. Year-end owner and a write-off approver are chosen from the existing staff logins (a single-login school has no sign-off); write-offs above a limit need the approver's sign-off, enforced when applied; closing with dues still on Leave Open needs a reason and fills an open-dues register (owner, promised date, note, deadline); a live checklist heads the Year-End tab; a daily cron raises in-app reminders; and a year-end pack workbook (summary + reconciliation, carried dues, write-offs with approvals, passout moves, Leave Open list) downloads after closing.
+**PR:** #343
+
 ### 2026-09-15 — Exam Management, Calendar & Notifications v3 (#TBD)
 **Type:** Feature / Bug Fix
 **Portal:** School Admin / Teacher / Student / Parent

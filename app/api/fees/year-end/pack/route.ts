@@ -134,7 +134,7 @@ async function handleGET(req: NextRequest) {
     sheet('Carried dues', `CARRIED TO THE NEXT YEAR — ${year}`, ['Student', 'Class (that year)', 'Amount carried', 'Carried to', 'Done by'], [28, 18, 18, 16, 36],
       carried.map(c => [c.name, c.cls, c.amount, c.note, c.by]), [3], 3)
     sheet('Write-offs', `WRITE-OFFS — ${year}`, ['Student', 'Class (that year)', 'Amount written off', 'Reason', 'Asked by', 'Approved by', 'Approved on', 'Applied by'], [28, 18, 18, 46, 34, 30, 22, 34],
-      writeoffs.map(w => { const q = reqBy.get(w.student_id); return [w.name, w.cls, w.amount, w.note, q?.requested_by || '', q?.decided_by || (settings.approver_user_id ? '' : 'no sign-off step'), q?.decided_at ? formatISTDateTime(q.decided_at) : '', w.by] }), [3], 3)
+      writeoffs.map(w => { const q = reqBy.get(w.student_id); return [w.name, w.cls, w.amount, w.note, q?.requested_by || '', q?.decided_by || (settings.approver_user_id ? 'no approval recorded' : 'no sign-off step'), q?.decided_at ? formatISTDateTime(q.decided_at) : '', w.by] }), [3], 3)
     sheet('Passout moves', `MOVED TO THE PASSOUT LEDGER — ${year}`, ['Student', 'Class (that year)', 'Amount moved', 'Done by'], [28, 18, 18, 36],
       passout.map(c => [c.name, c.cls, c.amount, c.by]), [3], 3)
     sheet('Left open', `LEFT OPEN AT CLOSE (open-dues register) — ${year}`, ['Student', 'Owed at close', 'Owes now', 'Owner', 'Promised by', 'Deadline', 'Note'], [28, 16, 16, 30, 14, 14, 44],

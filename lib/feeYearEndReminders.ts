@@ -7,7 +7,10 @@ import type { Pool, PoolClient } from 'pg'
 type Db = Pool | PoolClient
 
 export const YE_THRESHOLDS = [7, 30, 60] as const   // smallest first
-export type YearEndKind = 'ye_60' | 'ye_30' | 'ye_7' | 'ye_ended' | 'od_overdue'
+export type YearEndKind = 'ye_60' | 'ye_30' | 'ye_7' | 'ye_ended' | 'od_overdue' | 'od_stale'
+
+// Dues left open for longer than this are escalated to the write-off approver (the Principal).
+export const STALE_OPEN_DAYS = 365
 
 export function daysBetween(fromIso: string, toIso: string): number {
   const a = Date.parse(`${fromIso}T00:00:00Z`), b = Date.parse(`${toIso}T00:00:00Z`)
@@ -27,7 +30,7 @@ export function pickYearEndReminder(daysToEnd: number, sent: string[]): { kind: 
   return { kind, supersedes }
 }
 
-export function reminderText(kind: YearEndKind, ctx: { year: string; endDate?: string; owner?: string | null; count?: number; total?: number }): { title: string; message: string } {
+export function reminderText(kind: YearEndKind, ctx: { year: string; endDate?: string; owner?: string | null; approver?: string | null; count?: number; total?: number }): { title: string; message: string } {
   const owner = ctx.owner ? ` Year-end owner: ${ctx.owner}.` : ''
   const money = (n: number) => `₹${n.toLocaleString('en-IN')}`
   switch (kind) {
@@ -39,6 +42,8 @@ export function reminderText(kind: YearEndKind, ctx: { year: string; endDate?: s
       return { title: 'Fee year-end next week', message: `${ctx.year} ends on ${ctx.endDate}. Run the final collection drive and Day Close, then work through the Year-End checklist.${owner}` }
     case 'ye_ended':
       return { title: `${ctx.year} has ended — not closed yet`, message: `Open Fee Management → Year-End, resolve every student's dues and close ${ctx.year}.${owner}` }
+    case 'od_stale':
+      return { title: 'Dues open for over a year — needs a decision', message: `${ctx.count} student${ctx.count === 1 ? '' : 's'} left open in ${ctx.year} (${money(ctx.total ?? 0)}) ${ctx.count === 1 ? 'has' : 'have'} been unresolved for more than a year. ${ctx.approver ? `${ctx.approver}: please decide` : 'Please decide'} whether to collect, carry or write ${ctx.count === 1 ? 'it' : 'them'} off.${owner}` }
     case 'od_overdue':
       return { title: 'Dues left open are past their deadline', message: `${ctx.count} student${ctx.count === 1 ? '' : 's'} left open in ${ctx.year} (${money(ctx.total ?? 0)}) passed the follow-up deadline. Review the open-dues register.${owner}` }
   }
@@ -111,6 +116,30 @@ export async function runYearEndReminders(db: Db, today: string): Promise<{ chec
     const { rows: [o] } = await db.query<{ name: string }>(
       `SELECT COALESCE(u.full_name, u.email) AS name FROM fee_year_end_settings s JOIN users u ON u.id = s.owner_user_id WHERE s.school_id = $1`, [r.school_id])
     await notify(db, r.school_id, 'od_overdue', r.academic_year, reminderText('od_overdue', { year: r.academic_year, count: Number(r.n), total: Number(r.total), owner: o?.name }))
+    sent++
+  }
+
+  // Zero tolerance: dues still owing a year after the close are escalated to the approver, once per year.
+  const { rows: stale } = await db.query<{ school_id: number; academic_year: string; n: string; total: string }>(
+    `SELECT od.school_id, od.academic_year, COUNT(*) AS n, SUM(b.balance) AS total
+     FROM fee_open_dues od
+     LEFT JOIN fee_year_close yc ON yc.school_id = od.school_id AND yc.academic_year = od.academic_year
+     JOIN LATERAL (
+       SELECT SUM(GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0)) AS balance
+       FROM student_fee_ledger l
+       WHERE l.school_id = od.school_id AND l.academic_year = od.academic_year AND l.student_id = od.student_id
+         AND l.status IN ('pending', 'overdue', 'partial')
+     ) b ON b.balance > 0
+     WHERE ($1::date - COALESCE(yc.closed_at, od.created_at)::date) > ${STALE_OPEN_DAYS}
+     GROUP BY od.school_id, od.academic_year`, [today])
+  for (const r of stale) {
+    const got = await claim(db, r.school_id, r.academic_year, ['od_stale'])
+    if (!got.has('od_stale')) continue
+    const { rows: [names] } = await db.query<{ owner: string | null; approver: string | null }>(
+      `SELECT (SELECT COALESCE(full_name, email) FROM users WHERE id = s.owner_user_id) AS owner,
+              (SELECT COALESCE(full_name, email) FROM users WHERE id = s.approver_user_id) AS approver
+       FROM fee_year_end_settings s WHERE s.school_id = $1`, [r.school_id])
+    await notify(db, r.school_id, 'od_stale', r.academic_year, reminderText('od_stale', { year: r.academic_year, count: Number(r.n), total: Number(r.total), owner: names?.owner, approver: names?.approver }))
     sent++
   }
   return { checked: years.length, sent }
