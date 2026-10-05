@@ -203,7 +203,7 @@ export default function FeeManagement({
       if (open.length === 0) throw new Error('No outstanding dues found for this student')
       const row: StudentRow = {
         student_id: s.student_id, student_name: s.student_name, roll_number: s.roll_number,
-        school_roll_number: null, grade: s.grade ?? '—', section: s.section ?? '',
+        school_roll_number: s.school_roll_number ?? null, grade: s.grade ?? '—', section: s.section ?? '',
         email: null, phone: null, parent_name: null, parent_phone: null, parent_email: null,
         student_status: s.student_status,
         total_billed: open.reduce((a, e) => a + Number(e.amount_due), 0),
@@ -353,7 +353,7 @@ export default function FeeManagement({
       // state (openStudent/collectChecked/payAmount/etc.) since the extraction.
       const row: StudentRow = {
         student_id: s.student_id, student_name: s.student_name, roll_number: s.roll_number,
-        school_roll_number: null, grade: s.grade, section: s.section,
+        school_roll_number: s.school_roll_number ?? null, grade: s.grade, section: s.section,
         email: null, phone: null, parent_name: null, parent_phone: null, parent_email: null,
         student_status: 'left',
         total_billed: open.reduce((a, e) => a + Number(e.amount_due), 0),
@@ -596,7 +596,7 @@ export default function FeeManagement({
     const first = rows[0] as PaymentRecord & { fee_head_name?: string; period_label?: string; category_name?: string }
     printDualCopyReceipt({
       school_name: branding.school_name || 'Fee Receipt', logo_url: branding.logo_url, logo_align: branding.logo_align, header_blocks: branding.receipt_header_blocks,
-      student_name: s.name, roll_number: s.roll_number, grade: s.grade, section: s.section || '',
+      student_name: s.name, roll_number: s.school_roll_number ? String(s.school_roll_number) : '', system_id: s.roll_number, grade: s.grade, section: s.section || '',
       parent_name: s.parent_name, receipt_number: receiptNumber,
       lines: rows.map(r => {
         const row = r as PaymentRecord & { fee_head_name?: string; period_label?: string; category_name?: string }
@@ -644,7 +644,7 @@ export default function FeeManagement({
     <div class="school">${escapeHtml(branding.school_name || 'School')}</div>
     ${renderHeaderBlocks(branding.receipt_header_blocks)}
     <div class="title">Fee Statement (Passbook)</div>
-    <div class="sub">${escapeHtml(s.name)} · Grade ${escapeHtml(s.grade)}${escapeHtml(s.section || '')} · Roll #${escapeHtml(s.roll_number)} · ${escapeHtml(academicYear)}</div>
+    <div class="sub" style="overflow-wrap:anywhere">${escapeHtml(s.name)} · Grade ${escapeHtml(s.grade)}${escapeHtml(s.section || '')}${s.school_roll_number ? ` · Roll ${escapeHtml(String(s.school_roll_number))}` : ''} · System ID ${escapeHtml(s.roll_number)} · ${escapeHtml(academicYear)}</div>
     ${branding.logo_url && branding.logo_align === 'right' ? `<img class="hdr-logo right" src="${escapeHtml(branding.logo_url)}" style="height:64px;object-fit:contain" />` : ''}
   </div>
 </div>
@@ -1011,9 +1011,9 @@ export default function FeeManagement({
                 {pbData ? (
                   <>
                     <p className="text-base font-bold text-gray-900">{pbData.student.name}</p>
-                    <p className="text-xs text-gray-400">
+                    <p className="text-xs text-gray-400 [overflow-wrap:anywhere]">
                       Gr.{pbData.student.grade}{pbData.student.section}
-                      {pbData.student.roll_number ? ` · Roll #${pbData.student.roll_number}` : ''}
+                      {pbData.student.school_roll_number ? ` · Roll ${pbData.student.school_roll_number}` : ''}{pbData.student.roll_number ? ` · System ID ${pbData.student.roll_number}` : ''}
                       {pbData.student.parent_name ? ` · Parent: ${pbData.student.parent_name}` : ''}
                     </p>
                   </>

@@ -41,7 +41,8 @@ ${copyLabel ? `<div class="copy-label">${escapeHtml(copyLabel)}</div>` : ''}
 </div>
 <div class="grid2">
   <div><div class="lbl">Student Name</div><div class="val">${escapeHtml(data.student_name)}</div></div>
-  <div><div class="lbl">Roll Number</div><div class="val">${escapeHtml(data.roll_number)}</div></div>
+  ${data.roll_number ? `<div><div class="lbl">Roll Number</div><div class="val">${escapeHtml(data.roll_number)}</div></div>` : ''}
+  ${data.system_id ? `<div><div class="lbl">System ID</div><div class="val">${escapeHtml(data.system_id)}</div></div>` : ''}
   <div><div class="lbl">Class</div><div class="val">Grade ${escapeHtml(data.grade)}${escapeHtml(data.section)}</div></div>
   <div><div class="lbl">Parent / Guardian</div><div class="val">${escapeHtml(data.parent_name || '—')}</div></div>
 </div>
@@ -77,7 +78,7 @@ const RECEIPT_STYLE = `
   .school{font-size:18px;font-weight:bold}.rtitle{font-size:13px;font-weight:bold;margin-top:4px;letter-spacing:1px}
   .rno{font-size:11px;color:#555;margin-top:3px}
   .grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px}
-  .lbl{font-size:10px;color:#888;margin-bottom:1px}.val{font-size:12px;font-weight:500}
+  .lbl{font-size:10px;color:#888;margin-bottom:1px}.val{font-size:12px;font-weight:500;overflow-wrap:anywhere}
   table{width:100%;border-collapse:collapse;margin:8px 0}
   th{background:#f3f4f6;padding:5px 8px;text-align:left;font-size:10px;border:1px solid #ddd}
   td{padding:5px 8px;font-size:11px;border:1px solid #ddd}

@@ -1,5 +1,6 @@
 'use client'
 
+import { rollLabel } from './format'
 import { useCallback, useEffect, useState } from 'react'
 import { LoadErrorBanner } from './LoadErrorBanner'
 
@@ -7,6 +8,7 @@ export type RemovedStudent = {
   student_id: number
   student_name: string
   roll_number: string
+  school_roll_number?: number | null
   grade: string | null
   section: string | null
   student_status: string
@@ -116,7 +118,7 @@ export default function FeeLeaversTab({
                   <td className="px-4 py-2.5">
                     <p className="font-medium text-gray-800">{s.student_name}</p>
                     <p className="text-xs text-gray-400">
-                      {s.roll_number}{s.grade ? ` · Gr.${s.grade}${s.section || ''}` : ''}
+                      {[rollLabel(s.school_roll_number), s.grade ? `Gr.${s.grade}${s.section || ''}` : ''].filter(Boolean).join(' · ')}
                     </p>
                   </td>
                   <td className="px-4 py-2.5 text-xs text-gray-500 capitalize">

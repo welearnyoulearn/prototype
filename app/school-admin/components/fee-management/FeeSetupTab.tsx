@@ -1,5 +1,6 @@
 'use client'
 
+import { rollLabel } from './format'
 import { useEffect, useState, Fragment, type Dispatch, type SetStateAction, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { GRADE_SEQUENCE } from '@/lib/grades'
 import type { FeeCategory, FeeStructure, StructureLock, Amendment, ApplStudent, ApplCategory, FeeStats } from './types'
@@ -73,7 +74,7 @@ function blockNonNumericKeys(e: ReactKeyboardEvent<HTMLInputElement>) {
   if (['e', 'E', '+', '-'].includes(e.key)) e.preventDefault()
 }
 
-type VarGridStudent = { id: number; name: string; roll_number: string; section: string }
+type VarGridStudent = { id: number; name: string; roll_number: string; school_roll_number?: number | null; section: string }
 type VarGridCategory = { id: number; name: string; frequency: string }
 type StructureHistoryRow = { id: number; grade: string; old_amount: number | null; new_amount: number; old_due_day: number | null; new_due_day: number; change_type: string; changed_by: string; changed_at: string }
 type CategoryChangeRow = { id: number; field_changed: string; old_value: string | null; new_value: string | null; changed_by: string; changed_at: string }
@@ -980,7 +981,7 @@ export default function FeeSetupTab({
                               <tr key={s.id} className="border-b border-gray-50 hover:bg-gray-50/50">
                                 <td className="px-4 py-2 whitespace-nowrap">
                                   <p className="font-medium text-gray-800">{s.name}</p>
-                                  <p className="text-xs text-gray-400">{s.section ? `Sec ${s.section} · ` : ''}#{s.roll_number}</p>
+                                  <p className="text-xs text-gray-400">{[s.section ? `Sec ${s.section}` : '', rollLabel(s.school_roll_number)].filter(Boolean).join(' · ')}</p>
                                 </td>
                                 {varHeads.map(c => {
                                   const key = `${s.id}:${c.id}`
@@ -1217,7 +1218,7 @@ export default function FeeSetupTab({
                                           <tr key={s.id} className="hover:bg-gray-50/60">
                                             <td className="px-3 py-1.5">
                                               <p className="font-medium text-gray-800 text-sm">{s.name}</p>
-                                              <p className="text-[10px] text-gray-400">#{s.roll_number}</p>
+                                              <p className="text-[10px] text-gray-400">{rollLabel(s.school_roll_number)}</p>
                                             </td>
                                             <td className="px-3 py-1.5 text-xs text-gray-500">{s.section}</td>
                                             <td className="px-3 py-1.5 text-center">

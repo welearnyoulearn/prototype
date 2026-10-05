@@ -9,7 +9,7 @@ export type FeeCategory = {
   is_system?: boolean
 }
 
-export type ApplStudent = { id: number; name: string; roll_number: string; section: string }
+export type ApplStudent = { id: number; name: string; roll_number: string; school_roll_number?: number | null; section: string }
 export type ApplCategory = { id: number; name: string; frequency: string }
 
 export type FeeStructure = {
@@ -52,14 +52,14 @@ export type FeeStats = {
   }
   by_category: Array<{ category_name: string; frequency: string; total_due: number; total_collected: number; total_waived?: number; total_outstanding?: number; overdue_count: number }>
   monthly_trend: Array<{ month: string; collected: number }>
-  top_defaulters: Array<{ student_id: number; student_name: string; grade: string; section: string; roll_number: string; outstanding: number; overdue_entries: number }>
+  top_defaulters: Array<{ student_id: number; student_name: string; grade: string; section: string; roll_number: string; school_roll_number?: number | null; outstanding: number; overdue_entries: number }>
   by_payment_mode: Array<{ payment_mode: string; count: number; total: number }>
   by_class?: Array<{ grade: string; section?: string; students: number; total_due: number; total_collected: number; outstanding: number; fully_paid_students?: number; defaulter_students?: number }>
   unbilled_students?: number
 }
 
 export type PendingPayment = {
-  id: number; student_id: number; student_name: string; roll_number: string
+  id: number; student_id: number; student_name: string; roll_number: string; school_roll_number?: number | null
   grade: string; section: string; category_name: string; period_label: string
   amount: number; payment_mode: string; transaction_ref: string | null
   receipt_number: string; paid_date: string; notes: string | null
@@ -76,9 +76,9 @@ export type ReportData = {
   monthly: Array<{ month: string; month_start: string | null; collected: number; payment_count: number; students_paid: number }>
   monthlyDue: Array<{ month: string; month_start: string | null; billed: number }>
   byGrade: Array<{ grade: string; section?: string; students: number; total_due: number; total_collected: number; total_waived: number; discretionary_waived?: number; outstanding: number; fully_paid_students?: number; defaulter_students?: number }>
-  byCategory: Array<{ category_name: string; frequency: string; students: number; total_due: number; total_collected: number; total_waived: number; discretionary_waived?: number; outstanding: number; paid_count: number; unpaid_count: number }>
+  byCategory: Array<{ category_name: string; frequency: string; students: number; total_due: number; total_collected: number; total_waived: number; discretionary_waived?: number; outstanding: number; paid_count: number; partial_count?: number; waived_count?: number; unpaid_count: number }>
   byMode: Array<{ payment_mode: string; count: number; total: number }>
-  defaulters: Array<{ student_name: string; roll_number: string; grade: string; section: string; parent_name: string | null; parent_phone: string | null; outstanding: number; overdue_entries: number; unpaid_entries: number }>
+  defaulters: Array<{ student_name: string; roll_number: string; school_roll_number?: number | null; grade: string; section: string; parent_name: string | null; parent_phone: string | null; outstanding: number; overdue_entries: number; unpaid_entries: number }>
 }
 
 
@@ -167,7 +167,7 @@ export type PassbookYearGroup = {
   entries: LedgerEntry[]
 }
 export type PassbookData = {
-  student: { id: number; name: string; roll_number: string; grade: string; section: string; parent_name: string | null; parent_phone: string | null; parent_email: string | null }
+  student: { id: number; name: string; roll_number: string; school_roll_number?: number | null; grade: string; section: string; parent_name: string | null; parent_phone: string | null; parent_email: string | null }
   current_year: string | null
   summary: { total_billed: number; total_paid: number; total_waived: number; discretionary_waived?: number; outstanding: number }
   timeline: PassbookTimeline[]
@@ -178,7 +178,7 @@ export type PassbookData = {
   waivers: Array<{ id: number; ledger_id: number; waiver_type: string; waiver_amount: number; reason: string; granted_by_name: string | null; created_at: string; fee_head_name: string; period_label: string; bill_year?: string; is_revoked?: boolean; revoked_by?: string | null; revoked_at?: string | null; revoke_reason?: string | null }>
   prior_unresolved: PassbookYearGroup[]
 }
-export type PassbookSearchResult = { id: number; name: string; roll_number: string; grade: string; section: string; status: string }
+export type PassbookSearchResult = { id: number; name: string; roll_number: string; school_roll_number?: number | null; grade: string; section: string; status: string }
 export type PassbookReceipt = { receipt_number: string; paid_date: string; total: number; cancelled: boolean; lineCount: number }
 
 // One row per student in the Collect tab's ledger view — also the shape used to
@@ -211,7 +211,7 @@ export type GradeStat = {
 }
 
 export type PassoutStudent = {
-  student_id: number; student_name: string; roll_number: string
+  student_id: number; student_name: string; roll_number: string; school_roll_number?: number | null
   grade: string; section: string; passout_year: string
   outstanding: number; total_collected: number
 }
@@ -233,7 +233,8 @@ export type ReceiptCardData = {
   logo_align: 'left' | 'center' | 'right'
   header_blocks: ReceiptHeaderBlock[]
   student_name: string
-  roll_number: string
+  roll_number: string          // class roll number ("" when none)
+  system_id?: string           // internal student id (wlyl-stu-…)
   grade: string
   section: string
   parent_name: string | null

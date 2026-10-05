@@ -37,7 +37,7 @@ export type BulkReport = {
 export type StudentReport = {
   kind: 'student'
   meta: Meta
-  student: { id: number; name: string; roll_number: string; grade: string; section: string; parent_name: string | null; parent_phone: string | null; parent_email: string | null }
+  student: { id: number; name: string; roll_number: string; school_roll_number: number | null; grade: string; section: string; parent_name: string | null; parent_phone: string | null; parent_email: string | null }
   balance: Money
   bills: { fee_type: string; period_label: string; billed: number; waived: number; paid: number; balance: number; due_date: string; status: string }[]
   payments: { receipt_number: string; amount: number; payment_mode: string; payment_status: string; paid_date: string; transaction_ref: string | null; collected_by_name: string | null; notes: string | null; fee_type: string; period_label: string }[]
@@ -75,7 +75,7 @@ export async function buildFeeAuditReport(opts: {
   // ── INDIVIDUAL STUDENT ──
   if (student_id) {
     const { rows: [student] } = await pool.query(
-      `SELECT id, name, roll_number, grade, section, parent_name, parent_phone, parent_email
+      `SELECT id, name, roll_number, school_roll_number, grade, section, parent_name, parent_phone, parent_email
        FROM students WHERE id = $1 AND school_id = $2`, [student_id, school_id]
     )
     if (!student) throw new Error('Student not found')

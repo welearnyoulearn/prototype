@@ -170,7 +170,7 @@ async function handleGET(req: NextRequest) {
     ws.columns = [{ width: 22 }, { width: 20 }, { width: 16 }, { width: 14 }, { width: 16 }, { width: 14 }, { width: 18 }, { width: 18 }, { width: 28 }]
     metaBlock(ws, rep.meta, 'INDIVIDUAL STUDENT FEE REPORT')
     // Profile
-    ws.addRow(['Student', rep.student.name]); ws.addRow(['Roll No', rep.student.roll_number])
+    ws.addRow(['Student', rep.student.name]); ws.addRow(['Roll No', rep.student.school_roll_number ?? '']); ws.addRow(['System ID', rep.student.roll_number])
     ws.addRow(['Class', `${rep.student.grade}${rep.student.section || ''}`])
     ws.addRow(['Parent', rep.student.parent_name || '—']); ws.addRow(['Phone', rep.student.parent_phone || '—'])
     ws.addRow([])

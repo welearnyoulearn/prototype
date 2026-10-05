@@ -1,5 +1,6 @@
 'use client'
 
+import { rollLabel } from './format'
 import type { FeeStats, GradeStat, PassoutData, PassoutStudent, RecentPayment } from './types'
 import { LoadErrorBanner } from './LoadErrorBanner'
 import { useFeeStore } from '@/lib/stores/feeStore'
@@ -368,7 +369,7 @@ export default function FeeOverviewTab({
                         <span className="text-xs font-bold text-gray-300 w-4">{i + 1}</span>
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-medium text-gray-800 truncate">{d.student_name}</p>
-                          <p className="text-xs text-gray-400">Gr.{d.grade}{d.section} · #{d.roll_number}</p>
+                          <p className="text-xs text-gray-400">Gr.{d.grade}{d.section}{rollLabel(d.school_roll_number) ? ` · ${rollLabel(d.school_roll_number)}` : ''}</p>
                         </div>
                         <div className="text-right flex-shrink-0">
                           <p className="text-sm font-bold text-red-600">{fmt(d.outstanding)}</p>

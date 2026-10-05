@@ -12,3 +12,9 @@ export function todayLocal(): string {
 export function fmtDate(d: string) {
   return new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
 }
+
+// "Roll 7" for the class roll number the school assigned; empty when none. The internal
+// system ID (roll_number, wlyl-stu-…) is the login id, not something staff recognise.
+export function rollLabel(schoolRollNumber: number | null | undefined): string {
+  return schoolRollNumber ? `Roll ${schoolRollNumber}` : ''
+}

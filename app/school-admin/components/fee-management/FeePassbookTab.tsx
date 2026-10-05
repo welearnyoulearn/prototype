@@ -1,5 +1,6 @@
 'use client'
 
+import { rollLabel } from './format'
 import { useCallback, useEffect, useState, Fragment, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { GRADE_SEQUENCE } from '@/lib/grades'
 import type {
@@ -102,8 +103,8 @@ export default function FeePassbookTab({
       if (r.ok) {
         const data = await r.json()
         const arr = Array.isArray(data) ? data : (data.students || [])
-        setPbAllStudents(arr.map((s: { id: number; name: string; roll_number: string; grade: string; section: string; status: string }) => ({
-          id: s.id, name: s.name, roll_number: s.roll_number, grade: s.grade, section: s.section, status: s.status || 'active',
+        setPbAllStudents(arr.map((s: { id: number; name: string; roll_number: string; school_roll_number?: number | null; grade: string; section: string; status: string }) => ({
+          id: s.id, name: s.name, roll_number: s.roll_number, school_roll_number: s.school_roll_number ?? null, grade: s.grade, section: s.section, status: s.status || 'active',
         })))
       }
     } catch { /* silent */ }
@@ -149,7 +150,7 @@ export default function FeePassbookTab({
             const q = pbSearch.trim().toLowerCase()
             const list = pbAllStudents.filter(s =>
               (!pbGrade || String(s.grade) === pbGrade) &&
-              (!q || s.name.toLowerCase().includes(q) || (s.roll_number || '').toLowerCase().includes(q))
+              (!q || s.name.toLowerCase().includes(q) || (s.roll_number || '').toLowerCase().includes(q) || String(s.school_roll_number ?? '') === q)
             )
             if (pbAllStudents.length === 0) return <p className="text-sm text-gray-400 py-8 text-center">No students found for this school.</p>
             if (list.length === 0) return <p className="text-sm text-gray-400 py-8 text-center">No students match your filter.</p>
@@ -165,7 +166,7 @@ export default function FeePassbookTab({
                         {s.status === 'inactive' && <span className="text-xs bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded font-medium">Inactive</span>}
                       </span>
                       <span className="flex items-center gap-3">
-                        <span className="text-xs text-gray-400">Gr.{s.grade}{s.section} · #{s.roll_number}</span>
+                        <span className="text-xs text-gray-400">Gr.{s.grade}{s.section}{rollLabel(s.school_roll_number) ? ` · ${rollLabel(s.school_roll_number)}` : ''}</span>
                         <span className="text-xs text-blue-600 opacity-0 group-hover:opacity-100">Open →</span>
                       </span>
                     </button>
@@ -193,7 +194,7 @@ export default function FeePassbookTab({
             <div className="flex items-start justify-between">
               <div>
                 <h3 className="text-lg font-bold text-gray-900">{pbData.student.name}</h3>
-                <p className="text-sm text-gray-500">Grade {pbData.student.grade}{pbData.student.section} · Roll #{pbData.student.roll_number}</p>
+                <p className="text-sm text-gray-500 [overflow-wrap:anywhere]">Grade {pbData.student.grade}{pbData.student.section}{rollLabel(pbData.student.school_roll_number) ? ` · ${rollLabel(pbData.student.school_roll_number)}` : ''}{pbData.student.roll_number ? ` · System ID ${pbData.student.roll_number}` : ''}</p>
                 {(pbData.student.parent_name || pbData.student.parent_phone) && (
                   <p className="text-xs text-gray-400 mt-1">
                     Parent: {pbData.student.parent_name || '—'}{pbData.student.parent_phone ? ` · 📞 ${pbData.student.parent_phone}` : ''}

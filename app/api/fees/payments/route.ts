@@ -64,7 +64,7 @@ async function handleGET(req: NextRequest) {
       // inserts several rows inside a single transaction and they share a
       // timestamp, so paging over it would drop/duplicate rows. fp.id breaks ties.
       const { rows } = await pool.query(
-        `SELECT fp.*, s.name AS student_name, s.roll_number, s.grade, s.section,
+        `SELECT fp.*, s.name AS student_name, s.roll_number, s.school_roll_number, s.grade, s.section,
                 fc.name AS category_name, l.period_label
          ${from}
          ${where}
@@ -334,7 +334,7 @@ async function handlePOST(req: NextRequest) {
       // re-deriving it (and, more importantly, instead of re-running the payment
       // logic above).
       const { rows: [full] } = await client.query(
-        `SELECT fp.*, s.name AS student_name, s.roll_number, s.grade, s.section, s.parent_name,
+        `SELECT fp.*, s.name AS student_name, s.roll_number, s.school_roll_number, s.grade, s.section, s.parent_name,
                 fc.name AS category_name, l.period_label, l.amount_due,
                 sc.name AS school_name
          FROM fee_payments fp

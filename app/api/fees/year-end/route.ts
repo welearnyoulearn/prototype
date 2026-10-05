@@ -54,7 +54,7 @@ export async function GET(req: NextRequest) {
               GREATEST(l.amount_due - COALESCE(l.waiver_amount,0) - l.amount_paid, 0) AS balance,
               l.due_date, l.status,
               fc.name AS category_name,
-              s.name AS student_name, s.roll_number, s.grade, s.section,
+              s.name AS student_name, s.roll_number, s.school_roll_number, s.grade, s.section,
               COALESCE(s.status, 'active') AS student_status
        FROM student_fee_ledger l
        JOIN students s ON s.id = l.student_id
@@ -72,7 +72,7 @@ export async function GET(req: NextRequest) {
       amount_due: number; amount_paid: number; balance: number; due_date: string; status: string
     }
     type StudentGroup = {
-      student_id: number; student_name: string; roll_number: string; grade: string; section: string
+      student_id: number; student_name: string; roll_number: string; school_roll_number: number | null; grade: string; section: string
       student_status: string; is_leaver: boolean; leaver_reason: string | null
       total_unpaid: number; bills: Bill[]
     }
@@ -83,7 +83,7 @@ export async function GET(req: NextRequest) {
         const isGraduating = isFinalOrBeyondGrade(b.grade)
         const isInactive = b.student_status !== 'active'
         g = {
-          student_id: b.student_id, student_name: b.student_name, roll_number: b.roll_number,
+          student_id: b.student_id, student_name: b.student_name, roll_number: b.roll_number, school_roll_number: b.school_roll_number,
           grade: b.grade, section: b.section, student_status: b.student_status,
           is_leaver: isGraduating || isInactive,
           leaver_reason: isInactive ? 'Transferred / Left' : isGraduating ? `Graduating (Grade ${FINAL_GRADE})` : null,
