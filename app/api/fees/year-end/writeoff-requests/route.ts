@@ -101,6 +101,15 @@ async function handlePOST(req: NextRequest) {
       )
       created.push(r.id)
     }
+    if (created.length > 0) {
+      const { rows: [ap] } = await pool.query<{ name: string }>(`SELECT COALESCE(full_name, email) AS name FROM users WHERE id = $1`, [settings.approver_user_id])
+      await pool.query(
+        `INSERT INTO notifications (school_id, recipient_school_id, type, title, message, data) VALUES ($1, $1, 'fee_writeoff_request', $2, $3, $4)`,
+        [access.schoolId, `${created.length} write-off${created.length === 1 ? '' : 's'} waiting for sign-off`,
+         `${access.actor} asked ${ap?.name ?? 'the approver'} to sign off ${created.length} year-end write-off${created.length === 1 ? '' : 's'} for ${academic_year}. Open Fee Management → Year-End.`,
+         JSON.stringify({ academic_year, tab: 'fee-management' })]
+      ).catch(() => { /* a missed notification must not undo the request */ })
+    }
     return NextResponse.json({ approval_required: true, requested: created.length, skipped, requests: await listRequests(access.schoolId, academic_year) })
   } catch (err: unknown) {
     console.error('[writeoff-requests POST]', err)
@@ -137,6 +146,13 @@ async function handlePATCH(req: NextRequest) {
       `UPDATE fee_writeoff_requests SET status = $1, decided_by = $2, decided_at = NOW(), decision_note = $3 WHERE id = $4`,
       [action === 'approve' ? 'approved' : 'rejected', access.actor, note || null, r.id]
     )
+    const { rows: [who] } = await pool.query<{ student_name: string }>(`SELECT s.name AS student_name FROM fee_writeoff_requests r JOIN students s ON s.id = r.student_id WHERE r.id = $1`, [r.id])
+    await pool.query(
+      `INSERT INTO notifications (school_id, recipient_school_id, type, title, message, data) VALUES ($1, $1, 'fee_writeoff_decided', $2, $3, $4)`,
+      [access.schoolId, `Write-off ${action === 'approve' ? 'approved' : 'rejected'}`,
+       `${access.actor} ${action === 'approve' ? 'approved' : 'rejected'} the ${r.academic_year} write-off for ${who?.student_name ?? 'a student'}${note ? ` — ${note}` : ''}.`,
+       JSON.stringify({ academic_year: r.academic_year, tab: 'fee-management' })]
+    ).catch(() => { /* a missed notification must not undo the decision */ })
     return NextResponse.json({ ok: true, requests: await listRequests(access.schoolId, r.academic_year) })
   } catch (err: unknown) {
     console.error('[writeoff-requests PATCH]', err)
