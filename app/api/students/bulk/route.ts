@@ -4,7 +4,7 @@ import { invalidateCache } from '@/lib/responseCache'
 import { hashPortalPassword, generateTempPassword, requireSchoolAdmin, schoolHasFeature } from '@/lib/auth'
 import { sendStudentWelcomeEmail, sendParentWelcomeEmail, sendChildCredentialsToParentEmail } from '@/lib/email'
 import { sendWhatsappMessage } from '@/lib/whatsapp'
-import { linkParentsBulk, generateStudentId } from '@/lib/studentOnboarding'
+import { linkParentsBulk, generateUniqueStudentIds } from '@/lib/studentOnboarding'
 import { normalizeStudentInput, type NormalizedStudentInput } from '@/lib/studentValidation'
 import { ClassWorkflowError, ensureClassWithSetup } from '@/lib/classManagement'
 
@@ -175,6 +175,8 @@ export async function POST(req: NextRequest) {
         })
       }
 
+      const systemIds = await generateUniqueStudentIds(client, toInsert.length)
+
       const studentValues = toInsert.map((s, i) => {
         const base = i * 12
         return `($${base+1},$${base+2},$${base+3},$${base+4},$${base+5},$${base+6},$${base+7},$${base+8},$${base+9},$${base+10},$${base+11},'active',$${base+12},FALSE)`
@@ -186,7 +188,7 @@ export async function POST(req: NextRequest) {
         s.email?.trim() || null,
         s.grade?.trim() || null,
         s.section?.trim() || null,
-        generateStudentId(schoolName),
+        systemIds[i],
         s._school_roll_number,
         s.parent_name?.trim() || null,
         s.parent_phone?.trim() || null,
