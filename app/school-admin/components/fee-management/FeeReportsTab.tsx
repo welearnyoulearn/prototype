@@ -1,6 +1,7 @@
 'use client'
 
 import { rollLabel, plural } from './format'
+import PriorDuesBanner from './PriorDuesBanner'
 import { useCallback, useEffect, useState } from 'react'
 import { GRADE_SEQUENCE } from '@/lib/grades'
 import type { ReportData } from './types'
@@ -351,10 +352,18 @@ export default function FeeReportsTab({
               <div key={s.label} className={`${s.bg} rounded-xl border border-gray-100 p-4`}>
                 <p className="text-xs text-gray-400 font-medium uppercase tracking-wide">{s.label}</p>
                 <p className={`text-2xl font-bold mt-1 ${s.color}`}>{fmt(s.val)}</p>
-                <p className="text-xs text-gray-400 mt-1">{plural(reportData.balance.total_students, 'student')}</p>
+                <p className="text-xs text-gray-400 mt-1">
+                  {s.label === 'Total Billed' && Number(reportData.balance.carried_in_due) > 0
+                    ? `${fmt(Number(reportData.balance.total_billed) - Number(reportData.balance.carried_in_due))} this year + ${fmt(reportData.balance.carried_in_due!)} carried`
+                    : s.label === 'Total Outstanding' && Number(reportData.balance.carried_in_outstanding) > 0
+                    ? `incl. ${fmt(reportData.balance.carried_in_outstanding!)} from earlier years`
+                    : plural(reportData.balance.total_students, 'student')}
+                </p>
               </div>
             ))}
           </div>
+
+          <PriorDuesBanner outstanding={reportData.balance.prior_unresolved_outstanding} students={reportData.balance.prior_unresolved_students} fromYear={reportData.balance.prior_unresolved_from} />
 
           {/* Dues carried in from earlier years are billed here AND were counted as billed in the year
               they came from — say so, so nobody adds the two years' Billed together. */}
@@ -527,7 +536,10 @@ export default function FeeReportsTab({
                         </td>
                         <td className="px-4 py-2 text-gray-600">Gr.{d.grade}{d.section}</td>
                         <td className="px-4 py-2 text-xs text-gray-500">{d.parent_name || '—'}{d.parent_phone ? ` · ${d.parent_phone}` : ''}</td>
-                        <td className="px-4 py-2 text-right font-bold text-red-600">{fmt(d.outstanding)}</td>
+                        <td className="px-4 py-2 text-right font-bold text-red-600">
+                          {fmt(d.outstanding)}
+                          {Number(d.carried_outstanding) > 0 && <span className="block text-[10px] font-normal text-amber-700">{fmt(Number(d.carried_outstanding))} from earlier years</span>}
+                        </td>
                         <td className="px-4 py-2 text-center">
                           <span className="text-xs bg-red-100 text-red-600 px-1.5 py-0.5 rounded font-medium">{d.overdue_entries}</span>
                         </td>

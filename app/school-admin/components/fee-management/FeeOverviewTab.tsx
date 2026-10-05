@@ -1,6 +1,8 @@
 'use client'
 
 import { rollLabel, plural } from './format'
+import { isCarriedCategory, carriedCategoriesLast } from './dues'
+import PriorDuesBanner from './PriorDuesBanner'
 import type { FeeStats, GradeStat, PassoutData, PassoutStudent, RecentPayment } from './types'
 import { LoadErrorBanner } from './LoadErrorBanner'
 import { useFeeStore } from '@/lib/stores/feeStore'
@@ -129,12 +131,13 @@ export default function FeeOverviewTab({
         </div>
       ) : stats?.summary ? (
         <>
+          <PriorDuesBanner outstanding={stats.summary.prior_unresolved_outstanding} students={stats.summary.prior_unresolved_students} fromYear={stats.summary.prior_unresolved_from} />
           <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
             {[
-              { label: 'Total Billed',  value: stats.summary.total_due,                                                                    sub: plural(stats.summary.total_students, 'student'),           border: 'border-gray-100',   text: 'text-gray-900',   sub_color: 'text-gray-400' },
+              { label: 'Total Billed',  value: stats.summary.total_due,                                                                    sub: Number(stats.summary.carried_in_due) > 0 ? `${fmt(Number(stats.summary.total_due) - Number(stats.summary.carried_in_due))} this year + ${fmt(stats.summary.carried_in_due!)} carried from earlier years` : plural(stats.summary.total_students, 'student'),           border: 'border-gray-100',   text: 'text-gray-900',   sub_color: 'text-gray-400' },
               { label: 'Collected',     value: stats.summary.total_collected,    sub: `${pct(Number(stats.summary.total_collected), Number(stats.summary.total_due) - Number(stats.summary.total_waived || 0))}% of net demand`, border: 'border-green-100',  text: 'text-green-700',  sub_color: 'text-green-500' },
               { label: 'Waived',        value: stats.summary.discretionary_waived ?? stats.summary.total_waived,                            sub: `${stats.summary.waived_count} entries waived`,       border: 'border-purple-100', text: 'text-purple-700', sub_color: 'text-purple-400' },
-              { label: 'Outstanding',   value: stats.summary.total_outstanding,                                                             sub: `${stats.summary.overdue_count} overdue entries`,     border: 'border-red-100',    text: 'text-red-600',    sub_color: 'text-red-400' },
+              { label: 'Outstanding',   value: stats.summary.total_outstanding,                                                             sub: Number(stats.summary.carried_in_outstanding) > 0 ? `incl. ${fmt(stats.summary.carried_in_outstanding!)} from earlier years` : `${stats.summary.overdue_count} overdue entries`,     border: 'border-red-100',    text: 'text-red-600',    sub_color: 'text-red-400' },
               { label: 'Zero Payers',   value: stats.summary.defaulters_count,                                                              sub: 'students with no payment or waiver',                 border: 'border-orange-100', text: 'text-orange-600', sub_color: 'text-orange-400', isCount: true },
             ].map(card => (
               <div key={card.label} className={`bg-white rounded-xl border ${card.border} p-5`}>
@@ -309,17 +312,21 @@ export default function FeeOverviewTab({
                 <p className="text-sm text-gray-400">No fee heads configured yet.</p>
               ) : (
                 <div className="space-y-4">
-                  {stats.by_category.map(cat => {
+                  {[...stats.by_category].sort(carriedCategoriesLast).map((cat, idx, arr) => {
+                    const firstCarried = isCarriedCategory(cat.category_name) && !arr.slice(0, idx).some(c => isCarriedCategory(c.category_name))
                     const collected = Number(cat.total_collected)
                     const due = Number(cat.total_due) - Number(cat.total_waived ?? 0)
                     const p = pct(collected, due)
                     const color = p >= 80 ? 'bg-green-500' : p >= 50 ? 'bg-yellow-400' : 'bg-red-400'
                     return (
                       <div key={cat.category_name}>
+                        {firstCarried && (
+                          <p data-testid="overview-carried-heading" className="text-[10px] font-semibold uppercase tracking-wide text-amber-700 border-t border-amber-100 pt-3 -mt-1 mb-2">Carried from earlier years — not new fees</p>
+                        )}
                         <div className="flex justify-between items-center mb-1.5">
                           <div>
                             <span className="text-sm font-medium text-gray-700">{cat.category_name}</span>
-                            <span className="text-xs text-gray-400 ml-2 capitalize">{cat.frequency}</span>
+                            <span className="text-xs text-gray-400 ml-2 capitalize">{cat.frequency.replace('_', ' ')}</span>
                           </div>
                           <div className="text-right">
                             <span className="text-xs font-bold text-gray-700">{p}%</span>
@@ -373,6 +380,9 @@ export default function FeeOverviewTab({
                         </div>
                         <div className="text-right flex-shrink-0">
                           <p className="text-sm font-bold text-red-600">{fmt(d.outstanding)}</p>
+                          {Number(d.carried_outstanding) > 0 && (
+                            <p className="text-[10px] text-amber-700">{fmt(Number(d.carried_outstanding))} from earlier years</p>
+                          )}
                           {d.overdue_entries > 0 && (
                             <p className="text-[10px] text-red-400">{d.overdue_entries} overdue</p>
                           )}

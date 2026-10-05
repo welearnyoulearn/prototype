@@ -86,6 +86,38 @@ async function handleGET(req: NextRequest) {
       ).catch(() => ({ rows: [{ total: summary.total_waived }] }))
       summary.discretionary_waived = discretionary.total
 
+      // Dues carried in from earlier years (bills created by year-end carry-forward / passout) are
+      // billed in THIS year too, but were already counted as billed in the year they came from.
+      // Report them separately so "current-year fees" and "previous-year dues" are never blurred.
+      const { rows: [carriedIn] } = await pool.query(
+        `SELECT COALESCE(SUM(l.amount_due), 0) AS due,
+                COALESCE(SUM(l.amount_paid), 0) AS collected,
+                COALESCE(SUM(GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0)), 0) AS outstanding,
+                COUNT(DISTINCT l.student_id) AS students
+         FROM student_fee_ledger l
+         WHERE l.school_id = $1 AND l.academic_year = $2 AND l.source_academic_year IS NOT NULL`,
+        [school_id, academic_year]
+      ).catch(() => ({ rows: [{ due: 0, collected: 0, outstanding: 0, students: 0 }] }))
+      summary.carried_in_due = carriedIn.due
+      summary.carried_in_collected = carriedIn.collected
+      summary.carried_in_outstanding = carriedIn.outstanding
+      summary.carried_in_students = carriedIn.students
+
+      // Dues from EARLIER years that are still unpaid (e.g. students "left open" at year-end) are not
+      // part of this year's figures. Count them so the screen can say "this isn't included".
+      const { rows: [priorOpen] } = await pool.query(
+        `SELECT COALESCE(SUM(GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0)), 0) AS outstanding,
+                COUNT(DISTINCT l.student_id) AS students,
+                MIN(l.academic_year) AS from_year
+         FROM student_fee_ledger l
+         WHERE l.school_id = $1 AND l.academic_year ~ '^[0-9]{4}-[0-9]{2}$' AND l.academic_year < $2
+           AND GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0) > 0`,
+        [school_id, academic_year]
+      ).catch(() => ({ rows: [{ outstanding: 0, students: 0, from_year: null }] }))
+      summary.prior_unresolved_outstanding = priorOpen.outstanding
+      summary.prior_unresolved_students = priorOpen.students
+      summary.prior_unresolved_from = priorOpen.from_year
+
       // Collection by category — discretionary_waived computed from fee_waivers
       // (separate query to avoid multiplying total_due/collected when joining waivers)
       const { rows: by_category } = await pool.query(
@@ -140,6 +172,7 @@ async function handleGET(req: NextRequest) {
       const { rows: top_defaulters } = await pool.query(
         `SELECT s.id AS student_id, s.name AS student_name, ${CLASS_GRADE} AS grade, ${CLASS_SECTION} AS section, s.roll_number, ${CLASS_ROLL} AS school_roll_number,
                 SUM(GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0)) AS outstanding,
+                COALESCE(SUM(GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0)) FILTER (WHERE l.source_academic_year IS NOT NULL), 0) AS carried_outstanding,
                 COUNT(*) FILTER (WHERE l.status = 'overdue') AS overdue_entries
          FROM student_fee_ledger l
          JOIN students s ON s.id = l.student_id

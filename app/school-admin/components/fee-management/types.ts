@@ -46,13 +46,15 @@ export type FeeStats = {
   summary: {
     total_students: number; total_due: number; total_collected: number; total_waived: number
     discretionary_waived?: number
+    carried_in_due?: number; carried_in_collected?: number; carried_in_outstanding?: number; carried_in_students?: number
+    prior_unresolved_outstanding?: number; prior_unresolved_students?: number; prior_unresolved_from?: string | null
     total_outstanding: number; paid_count: number; partial_count: number
     pending_count: number; overdue_count: number; waived_count: number; defaulters_count: number
     students_fully_paid: number; students_partial: number; students_not_paid: number
   }
   by_category: Array<{ category_name: string; frequency: string; total_due: number; total_collected: number; total_waived?: number; total_outstanding?: number; overdue_count: number }>
   monthly_trend: Array<{ month: string; collected: number }>
-  top_defaulters: Array<{ student_id: number; student_name: string; grade: string; section: string; roll_number: string; school_roll_number?: number | null; outstanding: number; overdue_entries: number }>
+  top_defaulters: Array<{ student_id: number; student_name: string; grade: string; section: string; roll_number: string; school_roll_number?: number | null; outstanding: number; carried_outstanding?: number; overdue_entries: number }>
   by_payment_mode: Array<{ payment_mode: string; count: number; total: number }>
   by_class?: Array<{ grade: string; section?: string; students: number; total_due: number; total_collected: number; outstanding: number; fully_paid_students?: number; defaulter_students?: number }>
   unbilled_students?: number
@@ -72,13 +74,13 @@ export type EditRecord = {
 }
 
 export type ReportData = {
-  balance: { total_billed: number; total_collected: number; total_outstanding: number; total_waived: number; discretionary_waived?: number; paid_entries: number; partial_entries: number; unpaid_entries: number; waived_entries: number; total_students: number }
+  balance: { total_billed: number; total_collected: number; total_outstanding: number; total_waived: number; discretionary_waived?: number; carried_in_due?: number; carried_in_collected?: number; carried_in_outstanding?: number; carried_in_students?: number; prior_unresolved_outstanding?: number; prior_unresolved_students?: number; prior_unresolved_from?: string | null; paid_entries: number; partial_entries: number; unpaid_entries: number; waived_entries: number; total_students: number }
   monthly: Array<{ month: string; month_start: string | null; collected: number; payment_count: number; students_paid: number }>
   monthlyDue: Array<{ month: string; month_start: string | null; billed: number }>
   byGrade: Array<{ grade: string; section?: string; students: number; total_due: number; total_collected: number; total_waived: number; discretionary_waived?: number; outstanding: number; fully_paid_students?: number; defaulter_students?: number }>
   byCategory: Array<{ category_name: string; frequency: string; students: number; total_due: number; total_collected: number; total_waived: number; discretionary_waived?: number; outstanding: number; paid_count: number; partial_count?: number; waived_count?: number; unpaid_count: number }>
   byMode: Array<{ payment_mode: string; count: number; total: number }>
-  defaulters: Array<{ student_name: string; roll_number: string; school_roll_number?: number | null; grade: string; section: string; parent_name: string | null; parent_phone: string | null; outstanding: number; overdue_entries: number; unpaid_entries: number }>
+  defaulters: Array<{ student_name: string; roll_number: string; school_roll_number?: number | null; grade: string; section: string; parent_name: string | null; parent_phone: string | null; outstanding: number; carried_outstanding?: number; overdue_entries: number; unpaid_entries: number }>
 }
 
 
@@ -202,7 +204,7 @@ export type StudentRow = {
 export type RecentPayment = {
   id: number; student_name: string; grade: string; section: string
   roll_number: string; category_name: string; period_label: string
-  amount: number; payment_mode: string; receipt_number: string; paid_date: string
+  amount: number; payment_mode: string; receipt_number: string; paid_date: string; bill_year?: string
 }
 
 export type GradeStat = {

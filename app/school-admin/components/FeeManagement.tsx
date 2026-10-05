@@ -9,6 +9,7 @@ import type {
   ReceiptHeaderBlock,
 } from './fee-management/types'
 import { classForYear } from './fee-management/format'
+import { carriedBilled } from './fee-management/dues'
 import { escapeHtml, printDualCopyReceipt, writeAndPrint, renderHeaderBlocks } from './fee-management/receipts'
 import FeeArchiveTab from './fee-management/FeeArchiveTab'
 import FeeLeaversTab, { type RemovedStudent } from './fee-management/FeeLeaversTab'
@@ -375,7 +376,7 @@ export default function FeeManagement({
     try {
       const [statsRes, pmtRes] = await Promise.all([
         fetch(`/api/fees/stats?school_id=${schoolId}&academic_year=${academicYear}`),
-        fetch(`/api/fees/payments?school_id=${schoolId}`),
+        fetch(`/api/fees/payments?school_id=${schoolId}&academic_year=${encodeURIComponent(academicYear)}`),
       ])
       if (statsRes.ok) {
         clearLoadError('stats')
@@ -1057,6 +1058,7 @@ export default function FeeManagement({
                   </div>
                 ))}
                 {pbSummary.carried_forward ? <p className="col-span-full text-center text-[11px] text-gray-400">{fmt(pbSummary.carried_forward)} moved to the next year's bills — not counted in Billed.</p> : null}
+                {(() => { const c = carriedBilled((pbYearGroup?.entries ?? [])); return c > 0 ? <p data-testid="passbook-carried-in" className="col-span-full text-center text-[11px] text-amber-700">Billed includes {fmt(c)} carried in from earlier years.</p> : null })()}
               </div>
             )}
 
