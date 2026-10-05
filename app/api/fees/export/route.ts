@@ -60,7 +60,7 @@ async function handleGET(req: NextRequest) {
              FROM fee_waivers WHERE COALESCE(is_revoked, FALSE) = FALSE GROUP BY ledger_id
            ) wv ON wv.ledger_id = l.id
            WHERE ${conditions.join(' AND ')}
-           ORDER BY ${gradeOrderSql(CLASS_GRADE)}, ${CLASS_SECTION}, s.name, l.due_date, fc.name`,
+           ORDER BY ${gradeOrderSql(CLASS_GRADE)}, ${CLASS_SECTION}, s.name, l.due_date, fc.name, l.id`,
           values
         )
 

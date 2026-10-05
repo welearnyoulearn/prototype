@@ -201,6 +201,22 @@ async function handleGET(req: NextRequest) {
     const br = ws.addRow(['Total', rep.balance.billed, rep.balance.waived, rep.balance.net_demand, rep.balance.paid, rep.balance.balance])
     moneyCols(ws, 2, 6, br.number)
     ws.addRow([])
+    // Reconciliation (live formulas) — a carried-forward or written-off bill is not "waived" and not
+    // outstanding, so without these lines the figures above would not add up.
+    const swb = rep.waiver_breakdown
+    ws.addRow(['RECONCILIATION']).font = { bold: true }
+    const rBilled = ws.addRow(['Billed', rep.balance.billed])
+    const rDisc = ws.addRow(['Less: discretionary waivers', -swb.discretionary])
+    const rCarry = ws.addRow(['Less: carried forward to a new year', -swb.carried_forward])
+    const rOff = ws.addRow(['Less: written off', -swb.written_off])
+    const rPaid = ws.addRow(['Less: paid', -rep.balance.paid])
+    const calc = rep.balance.billed - swb.discretionary - swb.carried_forward - swb.written_off - rep.balance.paid
+    const rCalc = ws.addRow(['= Balance (calculated)', { formula: `SUM(B${rBilled.number}:B${rPaid.number})`, result: calc }])
+    const rSys = ws.addRow(['Balance per report', rep.balance.balance])
+    const rDiff = ws.addRow(['Difference (0 = reconciled)', { formula: `B${rCalc.number}-B${rSys.number}`, result: calc - rep.balance.balance }])
+    ;[rBilled, rDisc, rCarry, rOff, rPaid, rCalc, rSys, rDiff].forEach(r => moneyCols(ws, 2, 2, r.number))
+    rCalc.font = { bold: true }; rDiff.font = { bold: true }
+    ws.addRow([])
     // Fee structure / bills
     ws.addRow(['FEE STRUCTURE']).font = { bold: true }
     headerRow(ws, ['Fee Type', 'Period', 'Billed', 'Waived', 'Paid', 'Balance', 'Status'])
