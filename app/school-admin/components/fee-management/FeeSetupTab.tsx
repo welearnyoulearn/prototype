@@ -474,7 +474,7 @@ export default function FeeSetupTab({
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ school_id: schoolId, academic_year: academicYear, action: 'lock', locked_by: adminName || 'Admin' }),
     })
-    if (r.ok) onSetupChanged()
+    if (r.ok) { setStructureMsg(''); onSetupChanged() }
     else { const d = await r.json().catch(() => ({})); setStructureMsg(d.error || 'Failed to lock fee plan') }
     setLockingStructure(false)
   }
@@ -486,7 +486,7 @@ export default function FeeSetupTab({
       body: JSON.stringify({ school_id: schoolId, academic_year: academicYear, action: 'unlock', locked_by: adminName || 'Admin' }),
     })
     if (!r.ok) { const d = await r.json().catch(() => ({})); setStructureMsg(d.error || 'Failed to unlock fee plan') }
-    else onSetupChanged()
+    else { setStructureMsg(''); onSetupChanged() }
     setLockingStructure(false)
   }
 
@@ -1081,6 +1081,8 @@ export default function FeeSetupTab({
                     <div className="flex items-center gap-4 mt-4 text-xs flex-wrap">
                       {cat.is_system ? (
                         <span className="text-gray-400">Billed directly to each student — no setup needed</span>
+                      ) : cat.category_type === 'variable' ? (
+                        <span className="text-gray-500">Amount set per student</span>
                       ) : (
                         <span className={amountsSet ? 'text-green-600' : 'text-amber-600'}>
                           {amountsSet ? '✅ Amounts set' : '⚠ Amounts not set'}
@@ -1258,7 +1260,7 @@ export default function FeeSetupTab({
                             </div>
 
                             {/* Grade group quick-fill */}
-                            <div className="grid grid-cols-2 gap-2">
+                            <div className="grid grid-cols-1 gap-2">
                               {GRADE_GROUPS.map(grp => (
                                 <div key={grp.key} className="flex items-center gap-2 bg-gray-50 rounded-lg px-3 py-2">
                                   <div className="flex-1">
@@ -1284,9 +1286,9 @@ export default function FeeSetupTab({
                             {/* Individual grades */}
                             <div>
                               <p className="text-[10px] text-gray-400 mb-1.5 uppercase tracking-wide">Individual grades (review &amp; adjust)</p>
-                              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                              <div className="grid grid-cols-2 gap-2">
                                 {GRADES.map(g => (
-                                  <div key={g} className="flex items-center gap-1">
+                                  <div key={g} className="flex items-center gap-1 min-w-0">
                                     <span className="text-[10px] text-gray-400 w-10 shrink-0">{/^\d+$/.test(g) ? `Gr.${g}` : g}</span>
                                     <input type="number" min="0" placeholder="0"
                                       value={editAmounts[`${cat.id}_${g}`] || ''}
@@ -1338,17 +1340,17 @@ export default function FeeSetupTab({
             <div className="fixed inset-0 bg-black/40 z-[100] flex items-center justify-center p-4" onClick={() => setPendingAmountWarning(null)}>
               <div className="bg-white rounded-2xl w-full max-w-md shadow-xl" onClick={e => e.stopPropagation()}>
                 <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
-                  <p className="font-semibold text-amber-700">⚠ Students already billed at the old amount</p>
+                  <p className="font-semibold text-amber-700">⚠ Existing bills at the old amount</p>
                   <button onClick={() => setPendingAmountWarning(null)} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
                 </div>
                 <div className="p-5 space-y-3">
                   <p className="text-sm text-gray-600">
-                    <strong>{pendingAmountWarning.totalAffected}</strong> student{pendingAmountWarning.totalAffected === 1 ? '' : 's'} already {pendingAmountWarning.totalAffected === 1 ? 'has' : 'have'} a bill for{' '}
-                    <strong>{pendingAmountWarning.cat.name}</strong> at the current amount:
+                    <strong>{pendingAmountWarning.totalAffected}</strong> existing bill{pendingAmountWarning.totalAffected === 1 ? '' : 's'} for{' '}
+                    <strong>{pendingAmountWarning.cat.name}</strong> {pendingAmountWarning.totalAffected === 1 ? 'is' : 'are'} billed at the current amount:
                   </p>
                   <ul className="text-sm text-gray-700 bg-amber-50 border border-amber-100 rounded-lg px-4 py-2.5 space-y-1">
                     {pendingAmountWarning.byGrade.map(g => (
-                      <li key={g.grade}>{gradeLabel(g.grade)}: <strong>{g.count}</strong> student{g.count === 1 ? '' : 's'}</li>
+                      <li key={g.grade}>{gradeLabel(g.grade)}: <strong>{g.count}</strong> bill{g.count === 1 ? '' : 's'}</li>
                     ))}
                   </ul>
                   <p className="text-sm text-gray-500">
