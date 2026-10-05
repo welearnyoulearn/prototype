@@ -3,12 +3,13 @@ import { fmt, plural } from './format'
 // Money can be owed in three places: this year's ledger, earlier years' ledgers (dues left open at
 // year-end) and the passout bucket (graduated/left students). The figures on a year's screens only
 // cover the first, so say what is NOT in them and give the grand total.
-export default function PriorDuesBanner({ year, current, prior, priorStudents, priorFrom, passout, passoutStudents }: {
+export default function PriorDuesBanner({ year, current, prior, priorStudents, priorFrom, priorByYear, passout, passoutStudents }: {
   year: string
   current?: number | string | null
   prior?: number | string | null
   priorStudents?: number | string | null
   priorFrom?: string | null
+  priorByYear?: Array<{ year: string; outstanding: number | string; students: number | string }>
   passout?: number | string | null
   passoutStudents?: number | string | null
 }) {
@@ -23,7 +24,12 @@ export default function PriorDuesBanner({ year, current, prior, priorStudents, p
       <ul className="text-xs text-amber-800 list-disc pl-5">
         {pr > 0 && (
           <li data-testid="prior-dues-earlier">
-            <strong>{fmt(pr)}</strong> from {priorFrom && priorFrom !== year ? `${priorFrom} and earlier` : 'earlier years'} ({plural(Number(priorStudents ?? 0), 'student')}) — dues left open at year-end. Not included below; see Past Records or the student&apos;s passbook.
+            <strong>{fmt(pr)}</strong> from earlier years ({plural(Number(priorStudents ?? 0), 'student')}) — dues left open at year-end. Not included below; see Past Records or the student&apos;s passbook.
+            {priorByYear && priorByYear.length > 0 && (
+              <span data-testid="prior-dues-by-year" className="block">
+                {priorByYear.map(y => `${y.year}: ${fmt(Number(y.outstanding))} (${plural(Number(y.students), 'student')})`).join(' · ')}
+              </span>
+            )}
           </li>
         )}
         {po > 0 && (

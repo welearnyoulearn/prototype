@@ -43,6 +43,14 @@ export function thisYearFees(s: {
 export const carriedCategoriesLast = (a: { category_name: string }, b: { category_name: string }) =>
   Number(isCarriedCategory(a.category_name)) - Number(isCarriedCategory(b.category_name))
 
+// Years a carried-in bill's money came from. After more than one rollover a single carry-forward bill
+// can hold dues from several years: source_academic_year is the oldest, and the bill's own label —
+// "Previous Year Dues (2027-28)" — names the year it was carried out of.
+export function carriedOriginYears(e: { source_academic_year?: string | null; period_label?: string }): string[] {
+  const fromLabel = e.period_label?.match(/\((\d{4}-\d{2})\)/)?.[1]
+  return [...new Set([e.source_academic_year, fromLabel].filter((y): y is string => !!y))].sort()
+}
+
 // Outstanding balance on the carried-in part of a list of bills.
 export function carriedBalance(entries: Array<CarriedLike & { balance: number | string }>): number {
   return entries.filter(isCarriedEntry).reduce((s, e) => s + Number(e.balance), 0)

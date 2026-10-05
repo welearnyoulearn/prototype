@@ -9,7 +9,7 @@ import { useFeeStore } from '@/lib/stores/feeStore'
 import { LoadErrorBanner } from './LoadErrorBanner'
 import FeeDayClosePanel from './FeeDayClosePanel'
 import { fmt, fmtDate, todayLocal, rollLabel, plural } from './format'
-import { isCarriedEntry, carriedBalance, carriedBilled, summarizeCarriedNotes } from './dues'
+import { isCarriedEntry, carriedBalance, carriedBilled, carriedOriginYears, summarizeCarriedNotes } from './dues'
 
 const GRADES = GRADE_SEQUENCE
 function gradeLabel(g: string): string { return /^\d+$/.test(g) ? `Grade ${g}` : g }
@@ -768,7 +768,7 @@ export default function FeeCollectTab({
                                 {ordered.some(isCarriedEntry) && ordered.some(x => !isCarriedEntry(x)) && (idx === 0 || isCarriedEntry(ordered[idx - 1]) !== isCarriedEntry(e)) && (
                                   <p data-testid={isCarriedEntry(e) ? 'collect-heading-carried' : 'collect-heading-current'} className={`flex items-center justify-between pt-2 text-[11px] font-semibold uppercase tracking-wide ${isCarriedEntry(e) ? 'text-amber-700' : 'text-blue-700'}`}>
                                     <span>{isCarriedEntry(e)
-                                      ? `Previous years' dues${[...new Set(ordered.filter(isCarriedEntry).map(x => x.source_academic_year).filter(Boolean))].length ? ` · from ${[...new Set(ordered.filter(isCarriedEntry).map(x => x.source_academic_year).filter(Boolean))].join(', ')}` : ''}`
+                                      ? `Previous years' dues · from ${[...new Set(ordered.filter(isCarriedEntry).flatMap(carriedOriginYears))].join(' + ')}`
                                       : `${academicYear} fees`}</span>
                                     <span>{fmt(ordered.filter(x => isCarriedEntry(x) === isCarriedEntry(e)).reduce((s, x) => s + Number(x.balance), 0))}</span>
                                   </p>
@@ -789,7 +789,7 @@ export default function FeeCollectTab({
                                     className="w-4 h-4 rounded border-gray-300 text-blue-600" />
                                   <span className="flex-1 text-sm text-gray-700">
                                     {e.source_academic_year ? (
-                                      <><span className="text-amber-700 font-medium">⏱ Previous Year Dues ({e.source_academic_year})</span> · <span className="text-gray-400">{summarizeCarriedNotes(e.notes, e.period_label)}</span></>
+                                      <><span className="text-amber-700 font-medium">⏱ Previous Year Dues ({carriedOriginYears(e).join(' + ')})</span> · <span className="text-gray-400">{summarizeCarriedNotes(e.notes, e.period_label)}</span></>
                                     ) : (
                                       <>{e.category_name} · <span className="text-gray-400">{e.period_label}</span></>
                                     )}
@@ -1250,7 +1250,7 @@ export default function FeeCollectTab({
                     <div key={e.id} className="flex items-center justify-between text-sm">
                       <span className="text-gray-600">
                         {e.source_academic_year ? (
-                          <><span className="text-amber-700 font-medium">⏱ Previous Year Dues ({e.source_academic_year})</span> · {summarizeCarriedNotes(e.notes, e.period_label)}</>
+                          <><span className="text-amber-700 font-medium">⏱ Previous Year Dues ({carriedOriginYears(e).join(' + ')})</span> · {summarizeCarriedNotes(e.notes, e.period_label)}</>
                         ) : (
                           <>{e.category_name} · {e.period_label}</>
                         )}
