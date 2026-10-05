@@ -40,10 +40,12 @@ export async function GET(req: NextRequest) {
         academic_year ? [school_id, academic_year, limit] : [school_id, limit]
       )
       for (const pm of pmts) {
-        if (pm.payment_status === 'completed') {
+        if (pm.payment_status === 'completed' || pm.payment_status === 'cancelled') {
+          // A cancelled payment was still recorded by someone at the time; its reversal is logged
+          // separately below (1b), so keep the original entry — who took it and the receipt number.
           rows.push({ at: pm.at, who: pm.collected_by_name || pm.verified_by || 'Admin',
             action: 'Payment recorded',
-            detail: `${pm.student_name} · ${pm.fee_head} ${pm.period_label} · ${pm.receipt_number} · ${pm.payment_mode}`,
+            detail: `${pm.student_name} · ${pm.fee_head} ${pm.period_label} · ${pm.receipt_number} · ${pm.payment_mode}${pm.payment_status === 'cancelled' ? ' · since cancelled' : ''}`,
             amount: parseFloat(pm.amount) })
         } else if (pm.payment_status === 'rejected') {
           rows.push({ at: pm.verified_at || pm.at, who: pm.verified_by || 'Admin',
