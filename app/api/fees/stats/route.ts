@@ -3,6 +3,7 @@ import pool from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
 import { gradeOrderSql } from '@/lib/grades'
 import { withWatchline } from '@/lib/logger'
+import { YEAR_CLASS_JOIN, CLASS_GRADE, CLASS_SECTION, CLASS_ROLL } from '@/lib/feeYearClass'
 
 // GET /api/fees/stats?school_id=X&academic_year=2025-26
 async function handleGET(req: NextRequest) {
@@ -137,15 +138,16 @@ async function handleGET(req: NextRequest) {
       // students aren't silently excluded (they still owe money). Matches the Defaulters
       // CSV export's definition.
       const { rows: top_defaulters } = await pool.query(
-        `SELECT s.id AS student_id, s.name AS student_name, s.grade, s.section, s.roll_number, s.school_roll_number,
+        `SELECT s.id AS student_id, s.name AS student_name, ${CLASS_GRADE} AS grade, ${CLASS_SECTION} AS section, s.roll_number, ${CLASS_ROLL} AS school_roll_number,
                 SUM(GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0)) AS outstanding,
                 COUNT(*) FILTER (WHERE l.status = 'overdue') AS overdue_entries
          FROM student_fee_ledger l
          JOIN students s ON s.id = l.student_id
+         ${YEAR_CLASS_JOIN}
          WHERE l.school_id = $1 AND l.academic_year = $2
            AND l.status NOT IN ('paid', 'waived')
            AND GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0) > 0
-         GROUP BY s.id, s.name, s.grade, s.section, s.roll_number, s.school_roll_number
+         GROUP BY s.id, s.name, ${CLASS_GRADE}, ${CLASS_SECTION}, s.roll_number, ${CLASS_ROLL}
          ORDER BY outstanding DESC
          LIMIT 10`,
         [school_id, academic_year]
@@ -165,15 +167,16 @@ async function handleGET(req: NextRequest) {
       // Class-wise (grade + section) collection breakdown for Overview analysis
       const { rows: by_class } = await pool.query(
         `WITH per_student AS (
-           SELECT s.grade, COALESCE(s.section, '') AS section, l.student_id,
+           SELECT ${CLASS_GRADE} AS grade, COALESCE(${CLASS_SECTION}, '') AS section, l.student_id,
                   SUM(l.amount_due)  AS s_due,
                   SUM(l.amount_paid) AS s_paid,
                   SUM(COALESCE(l.waiver_amount, 0)) AS s_waived,
                    SUM(GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0)) AS s_out
            FROM student_fee_ledger l
            JOIN students s ON s.id = l.student_id
+           ${YEAR_CLASS_JOIN}
            WHERE l.school_id = $1 AND l.academic_year = $2
-           GROUP BY s.grade, s.section, l.student_id
+           GROUP BY ${CLASS_GRADE}, ${CLASS_SECTION}, l.student_id
          )
          SELECT grade, section,
                 COUNT(*)                            AS students,

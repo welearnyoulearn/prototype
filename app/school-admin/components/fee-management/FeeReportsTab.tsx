@@ -94,13 +94,24 @@ function buildAuditPdfHtml(rep: Record<string, unknown>): string {
     <h3>1. Fee Summary <span style="font-weight:normal;color:#888">(${sm.students} students)</span></h3>
     <table><thead>${moneyHead}</thead><tbody><tr class="tot">${mrow(sm)}</tr></tbody></table>
 
-    <h3>2. Waiver Breakdown <span style="font-weight:normal;color:#888">("Waived" above is discretionary only — see below for the rest</span></h3>
+    <h3>2. Waiver Breakdown <span style="font-weight:normal;color:#888">("Waived" above is discretionary only — see below for the rest)</span></h3>
     <table><thead><tr><th>Type</th><th class="r">Amount</th><th>Note</th></tr></thead>
     <tbody>
       <tr><td>Discretionary Waivers (fee reductions actually granted to a student)</td><td class="r">${RUPEE(wvb.discretionary)}</td><td></td></tr>
       <tr><td>Carried Forward (bill moved to a new year)</td><td class="r">${RUPEE(wvb.carried_forward)}</td><td style="color:#888">not forgiven — excluded from "Waived"</td></tr>
       <tr><td>Written Off (admin gave up collecting)</td><td class="r">${RUPEE(wvb.written_off)}</td><td style="color:#888">not a concession — excluded from "Waived"</td></tr>
       <tr class="tot"><td>Total reduction across all three types</td><td class="r">${RUPEE(wvb.total)}</td><td></td></tr>
+    </tbody></table>
+    <h3>Reconciliation</h3>
+    <table><thead><tr><th>Step</th><th class="r">Amount</th></tr></thead>
+    <tbody>
+      <tr><td>Billed</td><td class="r">${RUPEE(sm.billed)}</td></tr>
+      <tr><td>Less: discretionary waivers</td><td class="r">− ${RUPEE(wvb.discretionary)}</td></tr>
+      <tr><td>Less: carried forward to a new year</td><td class="r">− ${RUPEE(wvb.carried_forward)}</td></tr>
+      <tr><td>Less: written off</td><td class="r">− ${RUPEE(wvb.written_off)}</td></tr>
+      <tr><td>Less: paid</td><td class="r">− ${RUPEE(sm.paid)}</td></tr>
+      <tr class="tot"><td>= Balance (calculated)</td><td class="r">${RUPEE(sm.billed - wvb.discretionary - wvb.carried_forward - wvb.written_off - sm.paid)}</td></tr>
+      <tr><td>Balance per report</td><td class="r">${RUPEE(sm.balance)}</td></tr>
     </tbody></table>
     <p style="font-size:10px;color:#888;line-height:1.5">
       <b>How to read this report:</b> Billed = total due in scope. Net Demand = Billed − Waived (discretionary only).
