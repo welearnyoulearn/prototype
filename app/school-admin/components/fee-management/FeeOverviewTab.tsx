@@ -1,6 +1,6 @@
 'use client'
 
-import { rollLabel } from './format'
+import { rollLabel, plural } from './format'
 import type { FeeStats, GradeStat, PassoutData, PassoutStudent, RecentPayment } from './types'
 import { LoadErrorBanner } from './LoadErrorBanner'
 import { useFeeStore } from '@/lib/stores/feeStore'
@@ -80,7 +80,7 @@ export default function FeeOverviewTab({
         if (stats && stats.summary.overdue_count > 20)
           actions.push({ msg: `${stats.summary.overdue_count} overdue entries — follow up with parents`, tab: 'collect' })
         if (stats && stats.summary.defaulters_count > 0)
-          actions.push({ msg: `${stats.summary.defaulters_count} students have made zero payment this year`, tab: 'collect' })
+          actions.push({ msg: `${plural(stats.summary.defaulters_count, 'student')} ${Number(stats.summary.defaulters_count) === 1 ? 'has' : 'have'} made zero payment this year`, tab: 'collect' })
         // Warn if the immediately preceding year (older, higher index since array is DESC) is not closed
         if (academicYears.length > 1) {
           const idx = academicYears.indexOf(academicYear)
@@ -131,7 +131,7 @@ export default function FeeOverviewTab({
         <>
           <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
             {[
-              { label: 'Total Billed',  value: stats.summary.total_due,                                                                    sub: `${stats.summary.total_students} students`,           border: 'border-gray-100',   text: 'text-gray-900',   sub_color: 'text-gray-400' },
+              { label: 'Total Billed',  value: stats.summary.total_due,                                                                    sub: plural(stats.summary.total_students, 'student'),           border: 'border-gray-100',   text: 'text-gray-900',   sub_color: 'text-gray-400' },
               { label: 'Collected',     value: stats.summary.total_collected,    sub: `${pct(Number(stats.summary.total_collected), Number(stats.summary.total_due) - Number(stats.summary.total_waived || 0))}% of net demand`, border: 'border-green-100',  text: 'text-green-700',  sub_color: 'text-green-500' },
               { label: 'Waived',        value: stats.summary.discretionary_waived ?? stats.summary.total_waived,                            sub: `${stats.summary.waived_count} entries waived`,       border: 'border-purple-100', text: 'text-purple-700', sub_color: 'text-purple-400' },
               { label: 'Outstanding',   value: stats.summary.total_outstanding,                                                             sub: `${stats.summary.overdue_count} overdue entries`,     border: 'border-red-100',    text: 'text-red-600',    sub_color: 'text-red-400' },

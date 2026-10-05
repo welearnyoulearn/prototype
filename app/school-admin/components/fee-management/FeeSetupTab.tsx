@@ -1,6 +1,6 @@
 'use client'
 
-import { rollLabel } from './format'
+import { rollLabel, plural } from './format'
 import { useEffect, useState, Fragment, type Dispatch, type SetStateAction, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { GRADE_SEQUENCE } from '@/lib/grades'
 import type { FeeCategory, FeeStructure, StructureLock, Amendment, ApplStudent, ApplCategory, FeeStats } from './types'
@@ -958,7 +958,7 @@ export default function FeeSetupTab({
                 {vgStudents.length > 0 && (
                   <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
                     <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-100 flex items-center justify-between">
-                      <p className="text-sm text-gray-600">{vgStudents.length} students · {varHeads.length} variable fees</p>
+                      <p className="text-sm text-gray-600">{plural(vgStudents.length, 'student')} · {plural(varHeads.length, 'variable fee')}</p>
                       {changedCount > 0 && <p className="text-xs text-amber-600 font-medium">{changedCount} unsaved change{changedCount !== 1 ? 's' : ''}</p>}
                     </div>
                     <div className="overflow-x-auto max-h-[540px]">
