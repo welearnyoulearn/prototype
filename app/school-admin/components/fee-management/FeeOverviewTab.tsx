@@ -131,7 +131,7 @@ export default function FeeOverviewTab({
         </div>
       ) : stats?.summary ? (
         <>
-          <PriorDuesBanner year={academicYear} current={stats.summary.total_outstanding} prior={stats.summary.prior_unresolved_outstanding} priorStudents={stats.summary.prior_unresolved_students} priorFrom={stats.summary.prior_unresolved_from} passout={stats.summary.passout_outstanding} passoutStudents={stats.summary.passout_students} />
+          <PriorDuesBanner year={academicYear} current={stats.summary.total_outstanding} prior={stats.summary.prior_unresolved_outstanding} priorStudents={stats.summary.prior_unresolved_students} priorFrom={stats.summary.prior_unresolved_from} priorByYear={stats.summary.prior_unresolved_by_year} passout={stats.summary.passout_outstanding} passoutStudents={stats.summary.passout_students} />
           <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
             {[
               { label: 'Total Billed',  value: stats.summary.total_due,                                                                    sub: Number(stats.summary.carried_in_due) > 0 ? `${fmt(Number(stats.summary.total_due) - Number(stats.summary.carried_in_due))} this year + ${fmt(stats.summary.carried_in_due!)} carried from earlier years` : plural(stats.summary.total_students, 'student'),           border: 'border-gray-100',   text: 'text-gray-900',   sub_color: 'text-gray-400' },
