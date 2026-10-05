@@ -448,6 +448,9 @@ export default function FeeManagement({
   // banner on Overview until academicYear happened to change again. This endpoint
   // is cheap enough that refetching on tab switches is a non-issue.
   useEffect(() => { if (academicYear) loadSetupStatus() }, [academicYear, activeTab, loadSetupStatus])
+  // Fee Plan edits (head added, amounts saved, bills generated, plan locked) reload the plan data
+  // without changing tab; refresh the banner's status then too so it doesn't contradict the checklist.
+  useEffect(() => { if (academicYear && activeTab === 'setup') loadSetupStatus() }, [categories, structures, structureLock, academicYear, activeTab, loadSetupStatus])
 
   // ── Setup actions ────────────────────────────────────────────────────────────
   // Generate bills only for students who have no ledger rows yet (safe after lock)
