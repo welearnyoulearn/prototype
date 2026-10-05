@@ -109,13 +109,34 @@ export async function GET(req: NextRequest) {
         [school_id, student_id, academic_year]
       ).catch(() => ({ rows: [] }))
 
+      // Bills from EARLIER years that are still unpaid (e.g. dues the school left open at year-end).
+      // The selected-year figures above don't include them, so a parent would never see them —
+      // return them separately, for display only (paying them is still done at the school office).
+      const { rows: priorRows } = await pool.query(
+        `SELECT l.id, l.academic_year, fc.name AS category_name, l.period_label, l.due_date,
+                GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0) AS balance
+         FROM student_fee_ledger l
+         JOIN fee_categories fc ON fc.id = l.fee_category_id
+         WHERE l.school_id = $1 AND l.student_id = $2
+           AND (l.academic_year = 'passout' OR (l.academic_year ~ '^[0-9]{4}-[0-9]{2}$' AND l.academic_year < $3))
+           AND GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0) > 0
+         ORDER BY l.academic_year, l.due_date`,
+        [school_id, student_id, academic_year]
+      ).catch(() => ({ rows: [] as Array<{ id: number; academic_year: string; category_name: string; period_label: string; due_date: string; balance: string }> }))
+      const prior_dues = {
+        total: priorRows.reduce((s, r) => s + Number(r.balance), 0),
+        items: priorRows,
+      }
+
       const total_due         = ledger.reduce((s, r) => s + Number(r.amount_due), 0)
       const total_paid        = ledger.reduce((s, r) => s + Number(r.amount_paid), 0)
       const total_outstanding = ledger.reduce((s, r) => s + Number(r.balance), 0)
+      // Part of this year's outstanding that was carried in from an earlier year
+      const carried_outstanding = ledger.filter(r => r.source_academic_year).reduce((s, r) => s + Number(r.balance), 0)
       const total_waived      = (waivers as Array<{waiver_amount: number}>).reduce((s, r) => s + Number(r.waiver_amount), 0)
       const overdue_count     = ledger.filter(r => r.status === 'overdue').length
 
-      return NextResponse.json({ ledger, payments, waivers, summary: { total_due, total_paid, total_outstanding, total_waived, overdue_count } })
+      return NextResponse.json({ ledger, payments, waivers, prior_dues, summary: { total_due, total_paid, total_outstanding, carried_outstanding, total_waived, overdue_count } })
     } catch (e) { console.error(e); return NextResponse.json({ error: 'Failed' }, { status: 500 }) }
 } catch (err: unknown) {
     console.error('[API]', err)

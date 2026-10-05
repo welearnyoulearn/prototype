@@ -71,7 +71,7 @@ type Summary = {
 type FeeLedger = {
   id: number; category_name: string; period_label: string; frequency: string
   amount_due: number; amount_paid: number; balance: number
-  due_date: string; status: string
+  due_date: string; status: string; source_academic_year?: string | null
 }
 type FeePayment = {
   id: number; receipt_number: string; amount: number; payment_mode: string
@@ -84,7 +84,8 @@ type FeeWaiver = {
   granted_by_name: string | null; created_at: string
   category_name: string; period_label: string; amount_due: number
 }
-type FeeSummary = { total_due: number; total_paid: number; total_outstanding: number; total_waived: number; overdue_count: number }
+type FeeSummary = { total_due: number; total_paid: number; total_outstanding: number; carried_outstanding?: number; total_waived: number; overdue_count: number }
+type PriorDues = { total: number; items: Array<{ id: number; academic_year: string; category_name: string; period_label: string; due_date: string; balance: number }> }
 
 type Activity = {
   id: number; action_type: string; action_detail: string | null; created_at: string
@@ -193,6 +194,7 @@ function ParentDashboard() {
   const [feePayments, setFeePayments] = useState<FeePayment[]>([])
   const [feeWaivers, setFeeWaivers] = useState<FeeWaiver[]>([])
   const [feeSummary, setFeeSummary] = useState<FeeSummary | null>(null)
+  const [priorDues, setPriorDues] = useState<PriorDues | null>(null)
   const [feeLoading, setFeeLoading] = useState(false)
   const [feeAcYear, setFeeAcYear] = useState('')
   const [feeAcYears, setFeeAcYears] = useState<string[]>([])
@@ -275,6 +277,7 @@ function ParentDashboard() {
       setFeePayments(d.payments || [])
       setFeeWaivers(d.waivers || [])
       setFeeSummary(d.summary || null)
+      setPriorDues(d.prior_dues && d.prior_dues.total > 0 ? d.prior_dues : null)
     } catch { setFeeLedger([]); setFeePayments([]); setFeeWaivers([]) }
     setFeeLoading(false)
   }, [])
@@ -303,7 +306,7 @@ function ParentDashboard() {
     const s: Student = { ...child, class_id: cid, parent_name: null, parent_phone: null }
     setStudent(s)
     setShowChildPicker(false)
-    setSummary(null); setFeeLedger([]); setFeePayments([]); setFeeWaivers([]); setFeeSummary(null)
+    setSummary(null); setFeeLedger([]); setFeePayments([]); setFeeWaivers([]); setFeeSummary(null); setPriorDues(null)
     setContact(null)
     resetNav('overview'); setVisited(new Set(['overview']))
 
@@ -953,7 +956,27 @@ function ParentDashboard() {
                     <div className={`${feeSummary.total_outstanding > 0 ? 'bg-red-50 border-red-100' : 'bg-gray-50 border-gray-100'} border rounded-xl p-4 text-center`}>
                       <p className={`text-xs ${feeSummary.total_outstanding > 0 ? 'text-red-500' : 'text-muted-foreground'}`}>{T.outstanding}</p>
                       <p className={`text-xl font-semibold mt-1 ${feeSummary.total_outstanding > 0 ? 'text-red-600' : 'text-muted-foreground'}`}>{fmt(feeSummary.total_outstanding)}</p>
+                      {Number(feeSummary.carried_outstanding) > 0 && (
+                        <p className="text-[11px] text-amber-700 mt-1">incl. {fmt(Number(feeSummary.carried_outstanding))} carried from an earlier year</p>
+                      )}
                     </div>
+                  </div>
+                )}
+
+                {/* Unpaid bills from earlier years are not in the figures above — show them so they are never invisible */}
+                {priorDues && (
+                  <div data-testid="parent-prior-dues" className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
+                    <p className="text-sm font-semibold text-amber-900">
+                      {fmt(priorDues.total)} from earlier years is still unpaid
+                    </p>
+                    <p className="text-xs text-amber-800 mt-0.5">
+                      This is <strong>not included</strong> in the totals above. Please contact the school office to pay it.
+                    </p>
+                    <ul className="mt-2 space-y-0.5 text-xs text-amber-900">
+                      {[...new Set(priorDues.items.map(i => i.academic_year))].map(y => (
+                        <li key={y}>{y === 'passout' ? 'Passout dues' : y}: {fmt(priorDues.items.filter(i => i.academic_year === y).reduce((s, i) => s + Number(i.balance), 0))}</li>
+                      ))}
+                    </ul>
                   </div>
                 )}
 
@@ -1208,7 +1231,10 @@ function ParentDashboard() {
                             )}
                             {(!hasOnlinePayments || !isPending || payingLedger) && <div className="w-4 flex-shrink-0" />}
                             <div className="flex-1 min-w-0">
-                              <p className="text-sm font-medium text-gray-800">{entry.category_name}</p>
+                              <p className="text-sm font-medium text-gray-800">
+                                {entry.category_name}
+                                {entry.source_academic_year && <span className="ml-2 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800">carried from {entry.source_academic_year}</span>}
+                              </p>
                               <p className="text-xs text-muted-foreground">{entry.period_label} · {T.dueDate} {entry.due_date}</p>
                             </div>
                             <div className="flex items-center gap-3 flex-shrink-0">

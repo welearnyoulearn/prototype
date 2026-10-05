@@ -9,6 +9,7 @@ import type {
   ReceiptHeaderBlock,
 } from './fee-management/types'
 import { classForYear } from './fee-management/format'
+import { carriedBilled } from './fee-management/dues'
 import { escapeHtml, printDualCopyReceipt, writeAndPrint, renderHeaderBlocks } from './fee-management/receipts'
 import FeeArchiveTab from './fee-management/FeeArchiveTab'
 import FeeLeaversTab, { type RemovedStudent } from './fee-management/FeeLeaversTab'
@@ -375,7 +376,7 @@ export default function FeeManagement({
     try {
       const [statsRes, pmtRes] = await Promise.all([
         fetch(`/api/fees/stats?school_id=${schoolId}&academic_year=${academicYear}`),
-        fetch(`/api/fees/payments?school_id=${schoolId}`),
+        fetch(`/api/fees/payments?school_id=${schoolId}&academic_year=${encodeURIComponent(academicYear)}`),
       ])
       if (statsRes.ok) {
         clearLoadError('stats')
@@ -618,13 +619,20 @@ export default function FeeManagement({
     if (!pbData) return
     const s = pbData.student
     const cls = classForYear(s, pbData.class_by_year, academicYear)
-    const rows = pbData.timeline.map(t => `<tr>
+    // A statement is for the selected year: only that year's entries, with a running balance of its
+    // own. (The full timeline spans every year — it would list e.g. next year's "Previous Year
+    // Dues" bill as a charge in this one and carry the balance across years.)
+    let running = 0
+    const rows = pbData.timeline.filter(t => !t.academic_year || t.academic_year === academicYear).map(t => {
+      running += Number(t.debit) - Number(t.credit)
+      return `<tr>
       <td>${new Date(t.date).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' })}</td>
       <td>${t.description}</td>
       <td style="text-align:right">${t.debit > 0 ? '₹' + Number(t.debit).toLocaleString('en-IN') : ''}</td>
       <td style="text-align:right">${t.credit > 0 ? '₹' + Number(t.credit).toLocaleString('en-IN') : ''}</td>
-      <td style="text-align:right">₹${Number(t.balance).toLocaleString('en-IN')}</td>
-    </tr>`).join('')
+      <td style="text-align:right">₹${Math.max(0, running).toLocaleString('en-IN')}</td>
+    </tr>`
+    }).join('')
     const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Statement ${escapeHtml(s.name)}</title>
 <style>
   body{font-family:Arial,sans-serif;padding:32px;color:#222;max-width:820px;margin:0 auto}
@@ -660,12 +668,13 @@ export default function FeeManagement({
   <div>Phone: ${s.parent_phone || '—'}</div>
 </div>
 <div class="sumbox">
-  <div><div class="l">Total Billed</div><div class="v">₹${Number(pbData.summary.total_billed).toLocaleString('en-IN')}</div></div>
-  <div><div class="l">Paid</div><div class="v">₹${Number(pbData.summary.total_paid).toLocaleString('en-IN')}</div></div>
-  <div><div class="l">Waived</div><div class="v">₹${Number(pbData.summary.discretionary_waived ?? pbData.summary.total_waived).toLocaleString('en-IN')}</div></div>
-  ${Number(pbData.summary.written_off) > 0 ? `<div><div class="l">Written off</div><div class="v">₹${Number(pbData.summary.written_off).toLocaleString('en-IN')}</div></div>` : ''}
-  <div><div class="l">Outstanding</div><div class="v">₹${Number(pbData.summary.outstanding).toLocaleString('en-IN')}</div></div>
+  <div><div class="l">Total Billed</div><div class="v">₹${Number(pbSummary.total_billed).toLocaleString('en-IN')}</div></div>
+  <div><div class="l">Paid</div><div class="v">₹${Number(pbSummary.total_paid).toLocaleString('en-IN')}</div></div>
+  <div><div class="l">Waived</div><div class="v">₹${Number(pbSummary.discretionary_waived ?? pbSummary.total_waived).toLocaleString('en-IN')}</div></div>
+  ${Number(pbSummary.written_off) > 0 ? `<div><div class="l">Written off</div><div class="v">₹${Number(pbSummary.written_off).toLocaleString('en-IN')}</div></div>` : ''}
+  <div><div class="l">Outstanding</div><div class="v">₹${Number(pbSummary.outstanding).toLocaleString('en-IN')}</div></div>
 </div>
+${Number(pbSummary.carried_forward) > 0 ? `<p style="font-size:11px;color:#92400e;margin:6px 0 10px">₹${Number(pbSummary.carried_forward).toLocaleString('en-IN')} of this year's bills was carried forward to the next year (listed below as "Carried forward" lines). It is not counted in Total Billed or Outstanding above.</p>` : ''}
 <table><thead><tr><th>Date</th><th>Description</th><th style="text-align:right">Charge</th><th style="text-align:right">Paid</th><th style="text-align:right">Balance</th></tr></thead>
 <tbody>${rows}</tbody></table>
 <div class="ftr">Generated ${new Date().toLocaleString('en-IN')} · Computer-generated statement.</div>
@@ -1057,6 +1066,7 @@ export default function FeeManagement({
                   </div>
                 ))}
                 {pbSummary.carried_forward ? <p className="col-span-full text-center text-[11px] text-gray-400">{fmt(pbSummary.carried_forward)} moved to the next year's bills — not counted in Billed.</p> : null}
+                {(() => { const c = carriedBilled((pbYearGroup?.entries ?? [])); return c > 0 ? <p data-testid="passbook-carried-in" className="col-span-full text-center text-[11px] text-amber-700">Billed includes {fmt(c)} carried in from earlier years.</p> : null })()}
               </div>
             )}
 

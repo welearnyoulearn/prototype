@@ -1,6 +1,7 @@
 'use client'
 
 import { rollLabel, classForYear } from './format'
+import { carriedBilled } from './dues'
 import { useCallback, useEffect, useState, Fragment, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { GRADE_SEQUENCE } from '@/lib/grades'
 import type {
@@ -218,6 +219,7 @@ export default function FeePassbookTab({
                 </div>
               ))}
               {pbSummary.carried_forward ? <p className="col-span-full text-center text-[11px] text-gray-400">{fmt(pbSummary.carried_forward)} moved to the next year's bills — not counted in Billed.</p> : null}
+              {(() => { const c = carriedBilled(pbYearOnly.flatMap(y => y.entries)); return c > 0 ? <p data-testid="passbook-carried-in" className="col-span-full text-center text-[11px] text-amber-700">Billed includes {fmt(c)} carried in from earlier years.</p> : null })()}
             </div>
           </div>
 

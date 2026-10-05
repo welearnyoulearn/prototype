@@ -24,6 +24,7 @@ async function handleGET(req: NextRequest) {
     const school_id  = p.get('school_id')
     const student_id = p.get('student_id')
     const ledger_id  = p.get('ledger_id')
+    const bill_year  = p.get('academic_year')   // optional: only payments against this year's bills
 
     if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
     if (!await requireFeeAccess(school_id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
@@ -32,6 +33,7 @@ async function handleGET(req: NextRequest) {
     const values: (string | number)[] = [school_id]
     if (student_id) { values.push(student_id); conditions.push(`fp.student_id = $${values.length}`) }
     if (ledger_id)  { values.push(ledger_id);  conditions.push(`fp.ledger_id = $${values.length}`) }
+    if (bill_year)  { values.push(bill_year);  conditions.push(`l.academic_year = $${values.length}`) }
 
     const where = `WHERE ${conditions.join(' AND ')}`
     // Every JOIN is on a primary key (students.id, student_fee_ledger.id,
@@ -65,7 +67,7 @@ async function handleGET(req: NextRequest) {
       // timestamp, so paging over it would drop/duplicate rows. fp.id breaks ties.
       const { rows } = await pool.query(
         `SELECT fp.*, s.name AS student_name, s.roll_number, s.school_roll_number, s.grade, s.section,
-                fc.name AS category_name, l.period_label
+                fc.name AS category_name, l.period_label, l.academic_year AS bill_year
          ${from}
          ${where}
          ORDER BY fp.created_at DESC, fp.id DESC
