@@ -1292,12 +1292,21 @@ test.describe.serial('Fee Management — Full Lifecycle', () => {
     expect(status).toBe(400)
   })
 
-  test('YE-010: Close year — creates fee_year_close record', async () => {
-    const { status, data } = await api('/api/fees/year-end', 'POST', {
-      action: 'close', school_id: schoolId, from_year: AY,
+  test('YE-010: Close year — creates fee_year_close record (dues still open need a reason)', async () => {
+    const close = (reason?: string) => api('/api/fees/year-end', 'POST', {
+      action: 'close', school_id: schoolId, from_year: AY, ...(reason ? { reason } : {}),
     }, adminCookie)
-    expect(status).toBe(200)
-    const d = data as { closed: boolean }
+    // Students left on Leave Open drop out of next year's totals, so closing with any of them needs a
+    // stated reason (#343). If nothing happens to be open the first call just closes.
+    let res = await close()
+    if (res.status === 409) {
+      const gate = res.data as { needs_reason?: boolean; open_count?: number }
+      expect(gate.needs_reason).toBe(true)
+      expect(gate.open_count).toBeGreaterThan(0)
+      res = await close('E2E: closing with dues still open')
+    }
+    expect(res.status).toBe(200)
+    const d = res.data as { closed: boolean }
     expect(d.closed).toBe(true)
   })
 

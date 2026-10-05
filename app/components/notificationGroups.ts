@@ -2,7 +2,7 @@
 // The bell groups by this so "12 notifications" reads as "Exams · 7, Marks & Results · 5".
 // One primary group per type, so nothing is ever counted twice.
 
-export type NotificationGroupId = 'exams' | 'marks' | 'messages' | 'timetable' | 'syllabus' | 'attendance' | 'birthdays' | 'other'
+export type NotificationGroupId = 'exams' | 'marks' | 'messages' | 'timetable' | 'syllabus' | 'attendance' | 'birthdays' | 'fees' | 'other'
 
 export const NOTIFICATION_GROUP_LABELS: Record<NotificationGroupId, string> = {
   exams: 'Exams',
@@ -12,6 +12,7 @@ export const NOTIFICATION_GROUP_LABELS: Record<NotificationGroupId, string> = {
   syllabus: 'Syllabus',
   attendance: 'Attendance',
   birthdays: 'Birthdays',
+  fees: 'Fees',
   other: 'Other',
 }
 
@@ -37,6 +38,9 @@ const TYPES: Record<string, [NotificationGroupId, string]> = {
   syllabus_behind_nudge: ['syllabus', 'Behind schedule'],
   attendance_reminder: ['attendance', 'Reminder'],
   birthday: ['birthdays', 'Birthday'],
+  fee_year_end_reminder: ['fees', 'Year-end'],
+  fee_writeoff_request: ['fees', 'Sign-off needed'],
+  fee_writeoff_decided: ['fees', 'Sign-off decision'],
   period_delay: ['timetable', 'Delay'],
   substitute_needed: ['timetable', 'Cover needed'],
   substitute_assigned: ['timetable', 'Cover assigned'],

@@ -1,6 +1,7 @@
 'use client'
 
 import { rollLabel, plural } from './format'
+import OpenDuesRegister from './OpenDuesRegister'
 import { isCarriedCategory, carriedCategoriesLast, thisYearFees } from './dues'
 import PriorDuesBanner from './PriorDuesBanner'
 import type { FeeStats, GradeStat, PassoutData, PassoutStudent, RecentPayment } from './types'
@@ -131,6 +132,7 @@ export default function FeeOverviewTab({
         </div>
       ) : stats?.summary ? (
         <>
+          <OpenDuesRegister schoolId={schoolId} compact onManage={onGoToYearEnd} />
           <PriorDuesBanner year={academicYear} current={stats.summary.total_outstanding} prior={stats.summary.prior_unresolved_outstanding} priorStudents={stats.summary.prior_unresolved_students} priorFrom={stats.summary.prior_unresolved_from} passout={stats.summary.passout_outstanding} passoutStudents={stats.summary.passout_students} />
           <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
             {[

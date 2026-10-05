@@ -93,6 +93,9 @@ const TYPE_NAV: Record<string, string> = {
   exam_reminder_7day: 'my-marks',
   exam_reminder_1day: 'my-marks',
   exam_reminder_today: 'my-marks',
+  fee_year_end_reminder: 'fee-management', // school admin: open Fee Management (Year-End tab)
+  fee_writeoff_request: 'fee-management',
+  fee_writeoff_decided: 'fee-management',
 }
 
 function notificationDestination(

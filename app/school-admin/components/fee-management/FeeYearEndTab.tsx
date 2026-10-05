@@ -7,6 +7,9 @@ import type { ReceiptHeaderBlock } from './types'
 import { escapeHtml, renderHeaderBlocks, writeAndPrint } from './receipts'
 import { useFeeStore } from '@/lib/stores/feeStore'
 import { LoadErrorBanner } from './LoadErrorBanner'
+import OpenDuesRegister from './OpenDuesRegister'
+import YearEndChecklist from './YearEndChecklist'
+import { buildChecklist } from '@/lib/feeYearEndChecklist'
 
 function fmt(n: number | string) {
   return `₹${Number(n).toLocaleString('en-IN')}`
@@ -27,6 +30,9 @@ type YearEndState = {
   is_closed: boolean
   close_record: { closed_by: string; closed_at: string; carried_count?: number; carried_total: number; writeoff_count?: number; writeoff_total: number; open_count?: number; open_total: number } | null
 }
+
+type SignoffRequest = { id: number; student_id: number; student_name: string; grade: string; section: string; amount: string; reason: string | null; status: 'pending' | 'approved' | 'rejected' | 'applied'; requested_by: string | null; decided_by: string | null; decision_note: string | null }
+type Signoff = { approval_required: boolean; settings: { writeoff_limit: number; leave_open_days: number }; approver_name: string | null; owner_name: string | null; can_approve: boolean; my_user_id: number; requests: SignoffRequest[] }
 
 // Year-end closure: review outstanding dues, decide per-student (carry/write-off/
 // passout/leave-open), apply, then close the year. Creating the next academic year, promoting
@@ -72,12 +78,22 @@ export default function FeeYearEndTab({
   const [yeFilter, setYeFilter]             = useState<'all' | 'leavers' | 'continuing'>('all')
   const [yeProcessing, setYeProcessing]     = useState(false)
   const [yeMsg, setYeMsg]                   = useState('')
+  // Write-off sign-off (only when the school has an approver and at least two logins)
+  const [signoff, setSignoff]               = useState<Signoff | null>(null)
+  const [signoffBusy, setSignoffBusy]       = useState<number | null>(null)
+  const [signoffMsg, setSignoffMsg]         = useState('')
+  const [rejectNote, setRejectNote]         = useState<Record<number, string>>({})
   const [yeClosing, setYeClosing]           = useState(false)
   // Reopen year modal
   const [showReopenModal, setShowReopenModal] = useState(false)
   const [reopenReason, setReopenReason]       = useState('')
   // Close year confirm modal
   const [showCloseConfirm, setShowCloseConfirm] = useState(false)
+  const [closeReason, setCloseReason] = useState('')
+  // Checklist inputs that aren't part of the year-end payload
+  const [statementDone, setStatementDone] = useState(false)
+  const [rolledOver, setRolledOver] = useState<boolean | null>(null)
+  const [registerOverdue, setRegisterOverdue] = useState(0)
   // Apply decisions confirm modal
   const [showApplyConfirm, setShowApplyConfirm] = useState(false)
 
@@ -101,6 +117,68 @@ export default function FeeYearEndTab({
 
   useEffect(() => { loadYearEnd() }, [loadYearEnd, yearEndVersion])
 
+  // "Statement printed" is remembered per device and year (sessionStorage) — it is a prompt, not a record.
+  const statementKey = `ye-statement-${schoolId}-${academicYear}`
+  useEffect(() => {
+    try { setStatementDone(sessionStorage.getItem(statementKey) === '1') } catch { setStatementDone(false) }
+  }, [statementKey])
+  function markStatementDone() {
+    setStatementDone(true)
+    try { sessionStorage.setItem(statementKey, '1') } catch { /* private mode — prompt only */ }
+  }
+
+  // Has this year been rolled over (it is closed and no longer the current year)? How many open-dues rows are late?
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const [yr, od] = await Promise.all([
+          fetch(`/api/academic-years?school_id=${schoolId}`),
+          fetch(`/api/fees/open-dues?school_id=${schoolId}&academic_year=${academicYear}`),
+        ])
+        if (!cancelled && yr.ok) {
+          const years = await yr.json() as Array<{ label: string; is_current: boolean }>
+          const me = Array.isArray(years) ? years.find(y => y.label === academicYear) : undefined
+          setRolledOver(!!me && !me.is_current)
+        }
+        if (!cancelled && od.ok) setRegisterOverdue(Number((await od.json()).summary?.overdue ?? 0))
+      } catch { /* checklist degrades to "unknown" */ }
+    })()
+    return () => { cancelled = true }
+  }, [schoolId, academicYear, yearEndVersion, yearEnd?.is_closed])
+
+  const loadSignoff = useCallback(async () => {
+    if (!academicYear) return
+    try {
+      const r = await fetch(`/api/fees/year-end/writeoff-requests?school_id=${schoolId}&academic_year=${academicYear}`)
+      if (r.ok) setSignoff(await r.json())
+    } catch { /* sign-off panel just stays hidden */ }
+  }, [schoolId, academicYear])
+  useEffect(() => { loadSignoff() }, [loadSignoff, yearEndVersion])
+
+  // Where a student's write-off stands: does it need sign-off, and has it been given?
+  function signoffState(s: YearEndStudent): 'none' | 'needed' | 'pending' | 'approved' | 'rejected' {
+    if (!signoff?.approval_required || s.total_unpaid <= signoff.settings.writeoff_limit) return 'none'
+    const r = signoff.requests.find(x => x.student_id === s.student_id)
+    if (!r) return 'needed'
+    if (r.status === 'approved' && Number(r.amount) + 0.01 >= s.total_unpaid) return 'approved'
+    if (r.status === 'pending') return 'pending'
+    if (r.status === 'rejected') return 'rejected'
+    return 'needed'   // applied earlier, or approved for a smaller amount — needs a fresh look
+  }
+
+  async function decideSignoff(id: number, action: 'approve' | 'reject') {
+    setSignoffBusy(id); setSignoffMsg('')
+    const r = await fetch('/api/fees/year-end/writeoff-requests', {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ school_id: schoolId, id, action, note: rejectNote[id] || '' }),
+    })
+    const d = await r.json()
+    if (r.ok) { setSignoff(prev => prev ? { ...prev, requests: d.requests } : prev); setSignoffMsg(action === 'approve' ? '✓ Approved' : '✓ Rejected') }
+    else setSignoffMsg(d.error || 'Could not save the decision')
+    setSignoffBusy(null)
+  }
+
   async function applyYearEndDecisions() {
     if (!yearEnd) return
     // Build decisions only for students who have an actionable (non-'open') decision
@@ -120,19 +198,58 @@ export default function FeeYearEndTab({
     }
 
     setYeProcessing(true); setYeMsg('')
+
+    // Large write-offs go to the approver first; everything else is applied now.
+    let toApply = decisions
+    let sentForSignoff = 0
+    if (signoff?.approval_required) {
+      const waiting = decisions.filter(d => {
+        if (d.decision !== 'writeoff') return false
+        const st = yearEnd.students.find(s => s.student_id === d.student_id)
+        const state = st ? signoffState(st) : 'none'
+        return state === 'needed' || state === 'pending' || state === 'rejected'
+      })
+      if (waiting.length > 0) {
+        const missing = waiting.find(d => (d.reason ?? '').trim().length < 3)
+        if (missing) {
+          const nm = yearEnd.students.find(s => s.student_id === missing.student_id)?.student_name
+          setYeMsg(`Write a reason for ${nm}'s write-off — the approver needs it to sign off.`)
+          setYeProcessing(false); return
+        }
+        const fresh = waiting.filter(d => signoffState(yearEnd.students.find(s => s.student_id === d.student_id)!) !== 'pending')
+        if (fresh.length > 0) {
+          const rr = await fetch('/api/fees/year-end/writeoff-requests', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ school_id: schoolId, academic_year: academicYear, items: fresh.map(d => ({ student_id: d.student_id, reason: d.reason })) }),
+          })
+          const rd = await rr.json()
+          if (!rr.ok) { setYeMsg(rd.error || 'Could not send the write-offs for sign-off'); setYeProcessing(false); return }
+          sentForSignoff = fresh.length
+        }
+        const waitingIds = new Set(waiting.map(w => w.student_id))
+        toApply = decisions.filter(d => !waitingIds.has(d.student_id))
+        await loadSignoff()
+        if (toApply.length === 0) {
+          setYeMsg(`${sentForSignoff > 0 ? `Sent ${sentForSignoff} write-off${sentForSignoff === 1 ? '' : 's'} to ${signoff.approver_name ?? 'the approver'} for sign-off. ` : ''}Nothing else to apply — come back once ${waiting.length === 1 ? 'it is' : 'they are'} approved.`)
+          setYeProcessing(false); return
+        }
+      }
+    }
+
     const r = await fetch('/api/fees/year-end', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         action: 'apply', school_id: schoolId, from_year: academicYear,
-        to_year: targetYear, done_by: adminName || 'Admin', decisions,
+        to_year: targetYear, done_by: adminName || 'Admin', decisions: toApply,
       }),
     })
     const d = await r.json()
     if (r.ok) {
       const passoutPart = d.passout?.count > 0 ? `, ${d.passout.count} to passout ledger (${fmt(d.passout.total)})` : ''
       const closedPart = d.closed ? ` — ${academicYear} is now fully resolved and closed.` : ''
-      setYeMsg(`✓ Applied — ${d.carried.count} carried (${fmt(d.carried.total)}), ${d.writeoff.count} written off (${fmt(d.writeoff.total)})${passoutPart}${closedPart}`)
-      loadYearEnd(); onStatsChanged(); onLedgerChanged(); bumpReports()
+      const signoffPart = sentForSignoff > 0 ? ` ${sentForSignoff} write-off${sentForSignoff === 1 ? ' was' : 's were'} sent to ${signoff?.approver_name ?? 'the approver'} for sign-off.` : ''
+      setYeMsg(`✓ Applied — ${d.carried.count} carried (${fmt(d.carried.total)}), ${d.writeoff.count} written off (${fmt(d.writeoff.total)})${passoutPart}${closedPart}${signoffPart}`)
+      loadYearEnd(); loadSignoff(); onStatsChanged(); onLedgerChanged(); bumpReports()
       if (d.closed) onAcademicYearsChanged()
       if (d.passout?.count > 0) onPassoutChanged()
     } else {
@@ -145,12 +262,15 @@ export default function FeeYearEndTab({
     setYeClosing(true); setYeMsg('')
     const r = await fetch('/api/fees/year-end', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'close', school_id: schoolId, from_year: academicYear, done_by: adminName || 'Admin' }),
+      body: JSON.stringify({ action: 'close', school_id: schoolId, from_year: academicYear, done_by: adminName || 'Admin', reason: closeReason.trim() || undefined }),
     })
     const d = await r.json()
-    setYeMsg(r.ok ? '✓ Financial year closed and locked' : (d.error || 'Failed to close'))
+    setYeMsg(r.ok
+      ? `✓ Financial year closed and locked${d.open_registered > 0 ? ` — ${plural(d.open_registered, 'student')} added to the open-dues register` : ''}`
+      : (d.error || 'Failed to close'))
     setYeClosing(false)
     if (r.ok) {
+      setCloseReason('')
       loadYearEnd()
     }
   }
@@ -178,6 +298,7 @@ export default function FeeYearEndTab({
 
   function printYearEndStatement() {
     if (!yearEnd) return
+    markStatementDone()
     const s = yearEnd.summary
     const carryN = Object.values(yeDecisions).filter(d => d === 'carry').length
     const woN = Object.values(yeDecisions).filter(d => d === 'writeoff').length
@@ -241,6 +362,30 @@ export default function FeeYearEndTab({
         </div>
       ) : (
         <>
+          {/* Where are we? Live checklist with the owner and sign-off shown */}
+          <YearEndChecklist
+            year={academicYear}
+            steps={buildChecklist({
+              year: academicYear,
+              isClosed: yearEnd.is_closed,
+              openStudents: yearEnd.students.length,
+              openTotal: yearEnd.students.reduce((s, x) => s + x.total_unpaid, 0),
+              signoff: {
+                required: !!signoff?.approval_required,
+                waiting: signoff?.requests.filter(r => r.status === 'pending').length ?? 0,
+                approverName: signoff?.approver_name ?? null,
+              },
+              statementDone,
+              rolledOver,
+              registerOverdue,
+            })}
+            ownerName={signoff?.owner_name ?? null}
+            approverName={signoff?.approver_name ?? null}
+            signoffOn={!!signoff?.approval_required}
+            leaveOpenDays={signoff?.settings.leave_open_days ?? 30}
+            onOpenRollover={onGoToYearRollover}
+          />
+
           {/* Closed banner */}
           {yearEnd.is_closed && (
             <div className="bg-gray-800 text-white rounded-xl px-5 py-4">
@@ -265,7 +410,10 @@ export default function FeeYearEndTab({
                     </div>
                   )}
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <a data-testid="btn-year-end-pack" href={`/api/fees/year-end/pack?school_id=${schoolId}&academic_year=${academicYear}`} download
+                    title="Summary and reconciliation, carried dues, write-offs with approvals, passout moves and the Leave Open list"
+                    className="text-xs bg-white/10 border border-white/30 text-white px-3 py-1.5 rounded-lg hover:bg-white/20">⬇ Year-end pack</a>
                   <button data-testid="btn-yearend-reopen" onClick={() => { setReopenReason(''); setShowReopenModal(true) }} disabled={yeClosing}
                     className="text-xs bg-gray-600 text-white px-3 py-1.5 rounded-lg hover:bg-gray-500 disabled:opacity-50">
                     {yeClosing ? 'Working…' : 'Reopen'}
@@ -394,16 +542,65 @@ export default function FeeYearEndTab({
                         </div>
                         {/* write-off reason inline */}
                         {!yearEnd.is_closed && decision === 'writeoff' && (
-                          <input type="text" placeholder="Reason for write-off (recommended)…"
-                            value={yeReasons[s.student_id] || ''}
-                            onChange={e => setYeReasons(p => ({ ...p, [s.student_id]: e.target.value }))}
-                            className="mt-2 w-full text-xs border border-gray-200 rounded-lg px-3 py-1.5 focus:ring-2 focus:ring-red-300" />
+                          <>
+                            <input type="text" placeholder={signoffState(s) === 'none' ? 'Reason for write-off (recommended)…' : 'Reason for write-off (required — the approver sees this)…'}
+                              value={yeReasons[s.student_id] || ''}
+                              onChange={e => setYeReasons(p => ({ ...p, [s.student_id]: e.target.value }))}
+                              className="mt-2 w-full text-xs border border-gray-200 rounded-lg px-3 py-1.5 focus:ring-2 focus:ring-red-300" />
+                            {signoffState(s) !== 'none' && (
+                              <p data-testid={`signoff-state-${s.student_id}`} className={`mt-1 text-xs font-medium ${
+                                signoffState(s) === 'approved' ? 'text-green-700' : signoffState(s) === 'rejected' ? 'text-red-600' : 'text-amber-700'}`}>
+                                {signoffState(s) === 'needed' && `Above ₹${signoff!.settings.writeoff_limit.toLocaleString('en-IN')} — Apply will send this to ${signoff!.approver_name ?? 'the approver'} for sign-off.`}
+                                {signoffState(s) === 'pending' && `Waiting for ${signoff!.approver_name ?? 'the approver'} to sign off.`}
+                                {signoffState(s) === 'approved' && '✓ Signed off — it will be applied.'}
+                                {signoffState(s) === 'rejected' && `Rejected${signoff!.requests.find(x => x.student_id === s.student_id)?.decision_note ? `: ${signoff!.requests.find(x => x.student_id === s.student_id)!.decision_note}` : ''} — choose another action.`}
+                              </p>
+                            )}
+                          </>
                         )}
                       </div>
                     )
                   })}
                 </div>
               </div>
+
+              {/* Write-off sign-off: who has asked for what, and the approver's buttons */}
+              {signoff?.approval_required && signoff.requests.length > 0 && (
+                <div data-testid="signoff-card" className="bg-white rounded-xl border border-amber-200 p-5 space-y-3">
+                  <div className="flex items-center justify-between gap-3 flex-wrap">
+                    <p className="text-xs font-bold text-amber-700 uppercase tracking-wide">Write-off sign-off</p>
+                    <p className="text-xs text-gray-500">
+                      Write-offs above ₹{signoff.settings.writeoff_limit.toLocaleString('en-IN')} are signed off by <strong>{signoff.approver_name ?? 'the approver'}</strong>
+                      {signoff.can_approve ? ' — that is you.' : '.'}
+                    </p>
+                  </div>
+                  {signoffMsg && <p className={`text-sm font-medium ${signoffMsg.startsWith('✓') ? 'text-green-600' : 'text-red-600'}`}>{signoffMsg}</p>}
+                  <div className="divide-y divide-gray-50">
+                    {signoff.requests.map(rq => (
+                      <div key={rq.id} data-testid={`signoff-row-${rq.student_id}`} className="py-2.5 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-gray-800">{rq.student_name} <span className="text-xs text-gray-400">Gr.{rq.grade}{rq.section}</span> · <span className="text-red-600">{fmt(rq.amount)}</span></p>
+                          <p className="text-xs text-gray-500">{rq.reason || '—'} · asked by {rq.requested_by || '—'}</p>
+                          {rq.decided_by && <p className="text-xs text-gray-400">{rq.status === 'rejected' ? 'Rejected' : 'Approved'} by {rq.decided_by}{rq.decision_note ? ` — ${rq.decision_note}` : ''}</p>}
+                        </div>
+                        <div className="flex items-center gap-2 flex-shrink-0">
+                          <span className={`text-xs px-2 py-0.5 rounded-full font-medium capitalize ${rq.status === 'approved' ? 'bg-green-100 text-green-700' : rq.status === 'rejected' ? 'bg-red-100 text-red-700' : rq.status === 'applied' ? 'bg-gray-100 text-gray-600' : 'bg-amber-100 text-amber-700'}`}>{rq.status === 'pending' ? 'waiting' : rq.status}</span>
+                          {rq.status === 'pending' && signoff.can_approve && (
+                            <>
+                              <input type="text" placeholder="Note (needed to reject)" value={rejectNote[rq.id] || ''} onChange={e => setRejectNote(p => ({ ...p, [rq.id]: e.target.value }))}
+                                className="text-xs border border-gray-200 rounded-lg px-2 py-1 w-40" />
+                              <button data-testid={`signoff-approve-${rq.student_id}`} disabled={signoffBusy === rq.id} onClick={() => decideSignoff(rq.id, 'approve')}
+                                className="text-xs bg-green-600 text-white px-3 py-1 rounded-lg font-medium hover:bg-green-700 disabled:opacity-50">Approve</button>
+                              <button data-testid={`signoff-reject-${rq.student_id}`} disabled={signoffBusy === rq.id} onClick={() => decideSignoff(rq.id, 'reject')}
+                                className="text-xs border border-red-300 text-red-600 px-3 py-1 rounded-lg font-medium hover:bg-red-50 disabled:opacity-50">Reject</button>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* STEP 3 — Carry target + apply */}
               {!yearEnd.is_closed && (
@@ -450,6 +647,9 @@ export default function FeeYearEndTab({
             </>
           )}
 
+          {/* Students left open at an earlier close: who follows up, what was promised, by when */}
+          <OpenDuesRegister schoolId={schoolId} />
+
           {/* STEP 4 & 5 — Statement + Close */}
           {!yearEnd.is_closed && (
             <div className="bg-white rounded-xl border border-gray-100 p-5 space-y-3">
@@ -461,7 +661,7 @@ export default function FeeYearEndTab({
               <div className="flex items-center gap-2">
                 <button onClick={printYearEndStatement}
                   className="text-sm border border-gray-200 text-gray-600 px-4 py-2 rounded-lg hover:bg-gray-50">🖨 Print Statement</button>
-                <a href={`/api/fees/export?school_id=${schoolId}&academic_year=${academicYear}&type=ledger`} download
+                <a href={`/api/fees/export?school_id=${schoolId}&academic_year=${academicYear}&type=ledger`} download onClick={markStatementDone}
                   className="text-sm border border-gray-200 text-gray-600 px-4 py-2 rounded-lg hover:bg-gray-50">Export Ledger CSV</a>
                 <button data-testid="btn-close-year" onClick={() => setShowCloseConfirm(true)}
                   disabled={yeClosing}
@@ -502,14 +702,46 @@ export default function FeeYearEndTab({
       {/* ══ Close Year Confirm Modal ══════════════════════════════════════════════ */}
       {showCloseConfirm && (
         <div className="fixed inset-0 z-[300] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={() => setShowCloseConfirm(false)}>
-          <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl p-6 space-y-4" onClick={e => e.stopPropagation()}>
+          <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl p-6 space-y-4" onClick={e => e.stopPropagation()}>
             <div>
               <p className="text-base font-bold text-gray-900">Close {academicYear}?</p>
               <p className="text-sm text-gray-500 mt-1">This locks the year — no new payments or waivers can be added. You can reopen it later if needed.</p>
             </div>
+            {/* Close gate: dues still open are hidden from next year's totals and the parents' bills, so say why. */}
+            {(yearEnd?.students.length ?? 0) > 0 && (
+              <div data-testid="close-gate" className="rounded-xl border border-amber-200 bg-amber-50 p-3 space-y-2">
+                <p className="text-sm font-semibold text-amber-900">
+                  {plural(yearEnd!.students.length, 'student')} still owe {fmt(yearEnd!.students.reduce((s, x) => s + x.total_unpaid, 0))} and will be closed as Leave Open
+                </p>
+                {(() => {
+                  const chosen = yearEnd!.students.filter(s => ['carry', 'writeoff', 'passout'].includes(yeDecisions[s.student_id] ?? ''))
+                  return chosen.length > 0 && (
+                    <p data-testid="close-gate-unapplied" className="text-xs font-semibold text-red-700 bg-red-50 border border-red-200 rounded-lg px-2 py-1.5">
+                      {plural(chosen.length, 'student')} {chosen.length === 1 ? 'has' : 'have'} a carry-forward, write-off or passout selected that has not been applied. Closing now ignores {chosen.length === 1 ? 'it' : 'them'}
+                      and leaves the dues open — cancel and click Apply first if that is not what you want.
+                    </p>
+                  )
+                })()}
+                <ul className="text-xs text-amber-900 max-h-28 overflow-y-auto space-y-0.5">
+                  {yearEnd!.students.map(s => {
+                    const pick = yeDecisions[s.student_id]
+                    const label = pick === 'carry' ? 'carry selected, not applied' : pick === 'writeoff' ? 'write-off selected, not applied' : pick === 'passout' ? 'passout selected, not applied' : 'Leave Open'
+                    return <li key={s.student_id}>{s.student_name} · Gr.{s.grade}{s.section} · {fmt(s.total_unpaid)} · <span className={label === 'Leave Open' ? '' : 'font-semibold text-red-700'}>{label}</span></li>
+                  })}
+                </ul>
+                <p className="text-xs text-amber-800">
+                  These dues stay in {academicYear} only — they will not appear in next year&apos;s totals or in the parents&apos; next-year bills.
+                  Each one is added to the open-dues register with a follow-up owner and a deadline.
+                </p>
+                <input data-testid="close-gate-reason" type="text" value={closeReason} onChange={e => setCloseReason(e.target.value)}
+                  placeholder="Why are you closing with dues still open? (required)"
+                  className="w-full text-sm border border-amber-300 rounded-lg px-3 py-2 bg-white focus:ring-2 focus:ring-amber-300" />
+              </div>
+            )}
             <div className="flex gap-2">
               <button onClick={() => setShowCloseConfirm(false)} className="flex-1 border border-gray-200 text-gray-600 py-2 rounded-xl text-sm hover:bg-gray-50">Cancel</button>
-              <button onClick={() => { setShowCloseConfirm(false); closeYear() }} disabled={yeClosing}
+              <button data-testid="close-gate-confirm" onClick={() => { setShowCloseConfirm(false); closeYear() }}
+                disabled={yeClosing || ((yearEnd?.students.length ?? 0) > 0 && closeReason.trim().length < 3)}
                 className="flex-1 bg-gray-800 text-white py-2 rounded-xl text-sm font-semibold hover:bg-gray-700 disabled:opacity-50">
                 {yeClosing ? 'Closing…' : `Close ${academicYear}`}
               </button>

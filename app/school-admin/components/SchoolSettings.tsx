@@ -5,6 +5,7 @@ import { ExportButtons, useRenewalRequest } from '@/components/PlanNotice'
 import { useRouter } from 'next/navigation'
 import { ALL_FEATURES, CATEGORY_ORDER } from '@/lib/features'
 import { useConfirm } from '@/components/ui/use-confirm'
+import YearEndResponsibilities from './YearEndResponsibilities'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -1300,6 +1301,8 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
           )}
 
           {/* Add staff form — School Administrators only (the server refuses everyone else) */}
+          <YearEndResponsibilities schoolId={schoolId} canManage={canManageStaff} />
+
           {canManageStaff && (() => {
             const limit = subscription?.staff_limit ?? null
             const count = staffList.filter(s => s.status === 'active').length

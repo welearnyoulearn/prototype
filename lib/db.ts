@@ -87,7 +87,7 @@ const BOOTSTRAP_MARKER_KEY   = 'initial_schema_bootstrap'
 // silently never runs anywhere, and you will chase a "column does not exist" 500
 // that reproduces on production but never locally against a fresh DB.
 // Adding a migration statement and bumping this number is ONE change, not two.
-const SCHEMA_VERSION = 49
+const SCHEMA_VERSION = 51
 
 // Records the schema level this build finished applying, on the same row as the
 // bootstrap marker (no extra row, no extra round-trip to read it back).
@@ -1722,6 +1722,63 @@ const SYLLABUS_SCHEMA: string[] = [
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )`,
     `CREATE INDEX IF NOT EXISTS idx_data_export_log_school ON data_export_log(school_id, created_at DESC)`,
+
+    // ── Fee year-end process (#343) ──
+    // Who runs year-end and who signs off write-offs. Both are existing staff logins; a school with
+    // one active login (or no approver chosen) has no sign-off step.
+    `CREATE TABLE IF NOT EXISTS fee_year_end_settings (
+      school_id INTEGER PRIMARY KEY REFERENCES schools(id) ON DELETE CASCADE,
+      owner_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      approver_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      writeoff_limit NUMERIC(12,2) NOT NULL DEFAULT 0,
+      leave_open_days INTEGER NOT NULL DEFAULT 30,
+      updated_by VARCHAR(100),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`,
+    // A write-off above the limit is requested by one person and approved by another before it is applied.
+    `CREATE TABLE IF NOT EXISTS fee_writeoff_requests (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      academic_year VARCHAR(20) NOT NULL,
+      student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+      amount NUMERIC(12,2) NOT NULL,
+      reason TEXT,
+      status VARCHAR(12) NOT NULL DEFAULT 'pending',
+      requested_by VARCHAR(100),
+      requested_by_user_id INTEGER,
+      requested_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      decided_by VARCHAR(100),
+      decided_at TIMESTAMPTZ,
+      decision_note TEXT
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_fee_writeoff_requests_year ON fee_writeoff_requests(school_id, academic_year, status)`,
+    // Students left on "Leave Open" when a year closes: who follows up, what was promised, by when.
+    `CREATE TABLE IF NOT EXISTS fee_open_dues (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      academic_year VARCHAR(20) NOT NULL,
+      student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+      amount_at_close NUMERIC(12,2) NOT NULL DEFAULT 0,
+      owner_user_id INTEGER,
+      owner_name VARCHAR(100),
+      promised_date DATE,
+      deadline DATE,
+      note TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_by VARCHAR(100),
+      updated_at TIMESTAMPTZ,
+      UNIQUE (school_id, academic_year, student_id)
+    )`,
+    // One row per reminder already raised, so the daily job never repeats itself.
+    `CREATE TABLE IF NOT EXISTS fee_year_end_notices (
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      academic_year VARCHAR(20) NOT NULL,
+      kind VARCHAR(30) NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (school_id, academic_year, kind)
+    )`,
+    // Why a year was closed with students still on Leave Open.
+    `ALTER TABLE fee_year_close ADD COLUMN IF NOT EXISTS close_reason TEXT`,
 ]
 
 async function runIncrementalMigrations() {

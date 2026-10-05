@@ -26,6 +26,10 @@
       "schedule": "0 1 * * *"
     },
     {
+      "path": "/api/cron/fee-year-end-reminders",
+      "schedule": "20 1 * * *"
+    },
+    {
       "path": "/api/cron/birthday-sweep",
       "schedule": "30 18 * * *"
     },
