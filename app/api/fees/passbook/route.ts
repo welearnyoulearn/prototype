@@ -27,6 +27,19 @@ export async function GET(req: NextRequest) {
     )
     if (!student) return NextResponse.json({ error: 'Student not found' }, { status: 404 })
 
+    // The class they were in during each academic year that has been rolled over. Receipts and
+    // statements for an old year should show that class, not wherever the student is today.
+    // Years with no history row (the current, un-rolled year) fall back to the live class.
+    const { rows: classRows } = await pool.query(
+      `SELECT ay.label, sch.grade, sch.section, sch.school_roll_number
+       FROM student_class_history sch
+       JOIN academic_years ay ON ay.id = sch.academic_year_id
+       WHERE sch.student_id = $1 AND sch.school_id = $2`,
+      [student_id, school_id]
+    ).catch(() => ({ rows: [] as Array<{ label: string; grade: string; section: string; school_roll_number: number | null }> }))
+    const class_by_year: Record<string, { grade: string; section: string; school_roll_number: number | null }> = {}
+    for (const r of classRows) class_by_year[r.label] = { grade: r.grade, section: r.section, school_roll_number: r.school_roll_number ?? student.school_roll_number ?? null }
+
     // 2. ALL ledger entries across all years — ordered oldest first
     const ledgerRes = await pool.query(
       `SELECT l.id, l.school_id, l.student_id, l.fee_category_id, l.fee_structure_id,
@@ -310,6 +323,7 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       student,
+      class_by_year,
       current_year,
       summary: { total_billed: totalBilled, total_paid: totalPaid, total_waived: totalWaived, discretionary_waived: discretionaryWaived, written_off: writtenOff, carried_forward: carriedForward, outstanding },
       ledger_by_year: ledgerByYear,   // grouped by year with headers

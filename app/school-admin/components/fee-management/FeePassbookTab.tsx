@@ -1,6 +1,6 @@
 'use client'
 
-import { rollLabel } from './format'
+import { rollLabel, classForYear } from './format'
 import { useCallback, useEffect, useState, Fragment, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { GRADE_SEQUENCE } from '@/lib/grades'
 import type {
@@ -194,7 +194,7 @@ export default function FeePassbookTab({
             <div className="flex items-start justify-between">
               <div>
                 <h3 className="text-lg font-bold text-gray-900">{pbData.student.name}</h3>
-                <p className="text-sm text-gray-500 [overflow-wrap:anywhere]">Grade {pbData.student.grade}{pbData.student.section}{rollLabel(pbData.student.school_roll_number) ? ` · ${rollLabel(pbData.student.school_roll_number)}` : ''}{pbData.student.roll_number ? ` · System ID ${pbData.student.roll_number}` : ''}</p>
+                <p className="text-sm text-gray-500 [overflow-wrap:anywhere]">Grade {classForYear(pbData.student, pbData.class_by_year, academicYear).grade}{classForYear(pbData.student, pbData.class_by_year, academicYear).section}{rollLabel(classForYear(pbData.student, pbData.class_by_year, academicYear).school_roll_number) ? ` · ${rollLabel(classForYear(pbData.student, pbData.class_by_year, academicYear).school_roll_number)}` : ''}{pbData.student.roll_number ? ` · System ID ${pbData.student.roll_number}` : ''}</p>
                 {(pbData.student.parent_name || pbData.student.parent_phone) && (
                   <p className="text-xs text-gray-400 mt-1">
                     Parent: {pbData.student.parent_name || '—'}{pbData.student.parent_phone ? ` · 📞 ${pbData.student.parent_phone}` : ''}

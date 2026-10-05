@@ -8,6 +8,7 @@ import type {
   RecentPayment, GradeStat, PassoutData, PassoutStudent,
   ReceiptHeaderBlock,
 } from './fee-management/types'
+import { classForYear } from './fee-management/format'
 import { escapeHtml, printDualCopyReceipt, writeAndPrint, renderHeaderBlocks } from './fee-management/receipts'
 import FeeArchiveTab from './fee-management/FeeArchiveTab'
 import FeeLeaversTab, { type RemovedStudent } from './fee-management/FeeLeaversTab'
@@ -597,9 +598,11 @@ export default function FeeManagement({
     if (rows.length === 0) return
     const s = pbData.student
     const first = rows[0] as PaymentRecord & { fee_head_name?: string; period_label?: string; category_name?: string }
+    // Class as of the year this payment was for, not today's (a reprint must match the original)
+    const cls = classForYear(s, pbData.class_by_year, first.bill_year)
     printDualCopyReceipt({
       school_name: branding.school_name || 'Fee Receipt', logo_url: branding.logo_url, logo_align: branding.logo_align, header_blocks: branding.receipt_header_blocks,
-      student_name: s.name, roll_number: s.school_roll_number ? String(s.school_roll_number) : '', system_id: s.roll_number, grade: s.grade, section: s.section || '',
+      student_name: s.name, roll_number: cls.school_roll_number ? String(cls.school_roll_number) : '', system_id: s.roll_number, grade: cls.grade, section: cls.section || '',
       parent_name: s.parent_name, receipt_number: receiptNumber,
       lines: rows.map(r => {
         const row = r as PaymentRecord & { fee_head_name?: string; period_label?: string; category_name?: string }
@@ -614,6 +617,7 @@ export default function FeeManagement({
   function printPassbookStatement() {
     if (!pbData) return
     const s = pbData.student
+    const cls = classForYear(s, pbData.class_by_year, academicYear)
     const rows = pbData.timeline.map(t => `<tr>
       <td>${new Date(t.date).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' })}</td>
       <td>${t.description}</td>
@@ -647,7 +651,7 @@ export default function FeeManagement({
     <div class="school">${escapeHtml(branding.school_name || 'School')}</div>
     ${renderHeaderBlocks(branding.receipt_header_blocks)}
     <div class="title">Fee Statement (Passbook)</div>
-    <div class="sub" style="overflow-wrap:anywhere">${escapeHtml(s.name)} · Grade ${escapeHtml(s.grade)}${escapeHtml(s.section || '')}${s.school_roll_number ? ` · Roll ${escapeHtml(String(s.school_roll_number))}` : ''} · System ID ${escapeHtml(s.roll_number)} · ${escapeHtml(academicYear)}</div>
+    <div class="sub" style="overflow-wrap:anywhere">${escapeHtml(s.name)} · Grade ${escapeHtml(cls.grade)}${escapeHtml(cls.section || '')}${cls.school_roll_number ? ` · Roll ${escapeHtml(String(cls.school_roll_number))}` : ''} · System ID ${escapeHtml(s.roll_number)} · ${escapeHtml(academicYear)}</div>
     ${branding.logo_url && branding.logo_align === 'right' ? `<img class="hdr-logo right" src="${escapeHtml(branding.logo_url)}" style="height:64px;object-fit:contain" />` : ''}
   </div>
 </div>
@@ -1016,8 +1020,8 @@ export default function FeeManagement({
                   <>
                     <p className="text-base font-bold text-gray-900">{pbData.student.name}</p>
                     <p className="text-xs text-gray-400 [overflow-wrap:anywhere]">
-                      Gr.{pbData.student.grade}{pbData.student.section}
-                      {pbData.student.school_roll_number ? ` · Roll ${pbData.student.school_roll_number}` : ''}{pbData.student.roll_number ? ` · System ID ${pbData.student.roll_number}` : ''}
+                      Gr.{classForYear(pbData.student, pbData.class_by_year, academicYear).grade}{classForYear(pbData.student, pbData.class_by_year, academicYear).section}
+                      {classForYear(pbData.student, pbData.class_by_year, academicYear).school_roll_number ? ` · Roll ${classForYear(pbData.student, pbData.class_by_year, academicYear).school_roll_number}` : ''}{pbData.student.roll_number ? ` · System ID ${pbData.student.roll_number}` : ''}
                       {pbData.student.parent_name ? ` · Parent: ${pbData.student.parent_name}` : ''}
                     </p>
                   </>
