@@ -410,7 +410,10 @@ export default function FeeYearEndTab({
                     </div>
                   )}
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <a data-testid="btn-year-end-pack" href={`/api/fees/year-end/pack?school_id=${schoolId}&academic_year=${academicYear}`} download
+                    title="Summary and reconciliation, carried dues, write-offs with approvals, passout moves and the Leave Open list"
+                    className="text-xs bg-white/10 border border-white/30 text-white px-3 py-1.5 rounded-lg hover:bg-white/20">⬇ Year-end pack</a>
                   <button data-testid="btn-yearend-reopen" onClick={() => { setReopenReason(''); setShowReopenModal(true) }} disabled={yeClosing}
                     className="text-xs bg-gray-600 text-white px-3 py-1.5 rounded-lg hover:bg-gray-500 disabled:opacity-50">
                     {yeClosing ? 'Working…' : 'Reopen'}
