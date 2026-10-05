@@ -35,3 +35,11 @@ test('this-year collection leaves carried dues out of both sides', () => {
   // no carried dues: plain collected / (due − waived)
   assert.deepEqual(thisYearFees({ total_due: 1000, total_collected: 400, total_waived: 100 }), { collected: 400, net: 900 })
 })
+
+import { carriedOriginYears } from '../app/school-admin/components/fee-management/dues'
+
+test('a bill carried twice names both the oldest source year and the year it was carried out of', () => {
+  assert.deepEqual(carriedOriginYears({ source_academic_year: '2026-27', period_label: 'Previous Year Dues (2027-28)' }), ['2026-27', '2027-28'])
+  assert.deepEqual(carriedOriginYears({ source_academic_year: '2027-28', period_label: 'Previous Year Dues (2027-28)' }), ['2027-28'])
+  assert.deepEqual(carriedOriginYears({ source_academic_year: null, period_label: 'Tuition Fee' }), [])
+})

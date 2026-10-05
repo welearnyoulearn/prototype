@@ -120,9 +120,22 @@ async function handleGET(req: NextRequest) {
            AND GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0) > 0`,
         [school_id, academic_year]
       ).catch(() => ({ rows: [{ outstanding: 0, students: 0, from_year: null }] }))
+      // The same dues split by the year they sit in, so each earlier year is named — "and earlier"
+      // is ambiguous once dues from more than one year are left open.
+      const { rows: priorByYear } = await pool.query(
+        `SELECT l.academic_year AS year,
+                COALESCE(SUM(GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0)), 0) AS outstanding,
+                COUNT(DISTINCT l.student_id) AS students
+         FROM student_fee_ledger l
+         WHERE l.school_id = $1 AND l.academic_year ~ '^[0-9]{4}-[0-9]{2}$' AND l.academic_year < $2
+           AND GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0) > 0
+         GROUP BY l.academic_year ORDER BY l.academic_year`,
+        [school_id, academic_year]
+      ).catch(() => ({ rows: [] as Array<{ year: string; outstanding: string; students: string }> }))
       summary.prior_unresolved_outstanding = priorOpen.outstanding
       summary.prior_unresolved_students = priorOpen.students
       summary.prior_unresolved_from = priorOpen.from_year
+      summary.prior_unresolved_by_year = priorByYear
 
       // Dues sitting in the passout bucket (graduated/left students) — a third place money can be owed.
       const { rows: [passoutOpen] } = await pool.query(

@@ -363,7 +363,7 @@ export default function FeeReportsTab({
             ))}
           </div>
 
-          <PriorDuesBanner year={academicYear} current={reportData.balance.total_outstanding} prior={reportData.balance.prior_unresolved_outstanding} priorStudents={reportData.balance.prior_unresolved_students} priorFrom={reportData.balance.prior_unresolved_from} passout={reportData.balance.passout_outstanding} passoutStudents={reportData.balance.passout_students} />
+          <PriorDuesBanner year={academicYear} current={reportData.balance.total_outstanding} prior={reportData.balance.prior_unresolved_outstanding} priorStudents={reportData.balance.prior_unresolved_students} priorFrom={reportData.balance.prior_unresolved_from} priorByYear={reportData.balance.prior_unresolved_by_year} passout={reportData.balance.passout_outstanding} passoutStudents={reportData.balance.passout_students} />
 
           {/* Dues carried in from earlier years are billed here AND were counted as billed in the year
               they came from — say so, so nobody adds the two years' Billed together. */}
