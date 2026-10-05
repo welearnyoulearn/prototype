@@ -62,3 +62,31 @@ export function validateSettings(next: YearEndSettings, staff: StaffLogin[]): st
   if (!Number.isInteger(next.leave_open_days) || next.leave_open_days < 1 || next.leave_open_days > 365) return 'Leave Open days must be between 1 and 365'
   return null
 }
+
+// Unpaid balance per student for one academic year — the amount a year-end write-off would clear.
+// Same bills the year-end apply step looks at (pending / overdue / partial with something still owed).
+export async function unpaidBalances(db: Db, schoolId: number, year: string, studentIds?: number[]): Promise<Map<number, number>> {
+  const { rows } = await db.query<{ student_id: number; balance: string }>(
+    `SELECT l.student_id,
+            SUM(GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0)) AS balance
+     FROM student_fee_ledger l
+     WHERE l.school_id = $1 AND l.academic_year = $2
+       AND l.status IN ('pending', 'overdue', 'partial')
+       AND ($3::int[] IS NULL OR l.student_id = ANY($3::int[]))
+     GROUP BY l.student_id
+     HAVING SUM(GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0)) > 0`,
+    [schoolId, year, studentIds && studentIds.length ? studentIds : null]
+  )
+  return new Map(rows.map(r => [r.student_id, Number(r.balance)]))
+}
+
+export type WriteoffRequestStatus = 'pending' | 'approved' | 'rejected' | 'applied'
+
+// Can this write-off go ahead? `request` is the newest request row for the student in that year.
+// An approval only covers the amount that was approved — if more has fallen due since, it needs a fresh look.
+export function writeoffCleared(
+  amount: number,
+  request: { status: WriteoffRequestStatus; amount: number } | undefined,
+): boolean {
+  return !!request && request.status === 'approved' && request.amount + 0.01 >= amount
+}

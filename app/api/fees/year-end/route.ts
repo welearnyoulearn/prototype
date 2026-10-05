@@ -3,6 +3,7 @@ import pool, { ensureDB } from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
 import { gradeOrderSql, FINAL_GRADE, isFinalOrBeyondGrade } from '@/lib/grades'
 import { closeOutBill, getOrCreateSystemFeeCategory, getRemainingOpenSummary, lockYearClose, nextAcademicYearLabel, upsertCarryForwardBill } from '@/lib/feeRollover'
+import { loadYearEndSettings, unpaidBalances, writeoffNeedsApproval, writeoffCleared, type WriteoffRequestStatus } from '@/lib/feeYearEnd'
 
 // ── GET: student-grouped year-end review ────────────────────────────────────────
 // /api/fees/year-end?school_id=X&academic_year=Y
@@ -272,6 +273,40 @@ export async function POST(req: NextRequest) {
         let openCount = 0, openTotal = 0
         let passoutCount = 0, passoutTotal = 0
 
+        // ── Write-off sign-off (#343) ──
+        // When the school has an approver, a write-off above the limit only goes through with an approved
+        // request that covers the amount. Checked up front for the whole batch so nothing is half-applied.
+        const { settings: yeSettings, approvalRequired: yeApproval } = await loadYearEndSettings(client, school_id)
+        const approvedBy = new Map<number, { id: number; decidedBy: string | null }>()
+        if (yeApproval) {
+          const writeoffIds = decisions.filter(d => d.decision === 'writeoff').map(d => Number(d.student_id))
+          if (writeoffIds.length > 0) {
+            const balances = await unpaidBalances(client, school_id, from_year, writeoffIds)
+            const { rows: reqRows } = await client.query<{ id: number; student_id: number; status: WriteoffRequestStatus; amount: string; decided_by: string | null }>(
+              `SELECT DISTINCT ON (student_id) id, student_id, status, amount, decided_by
+               FROM fee_writeoff_requests WHERE school_id = $1 AND academic_year = $2
+               ORDER BY student_id, id DESC`,
+              [school_id, from_year]
+            )
+            const latest = new Map(reqRows.map(r => [r.student_id, r]))
+            const blocked: Array<{ student_id: number; amount: number; status: string }> = []
+            for (const sid of writeoffIds) {
+              const amount = balances.get(sid) ?? 0
+              if (!writeoffNeedsApproval(amount, yeSettings)) continue
+              const r = latest.get(sid)
+              if (writeoffCleared(amount, r ? { status: r.status, amount: Number(r.amount) } : undefined)) approvedBy.set(sid, { id: r!.id, decidedBy: r!.decided_by })
+              else blocked.push({ student_id: sid, amount, status: r ? r.status : 'not requested' })
+            }
+            if (blocked.length > 0) {
+              await client.query('ROLLBACK')
+              return NextResponse.json({
+                error: `${blocked.length} write-off${blocked.length === 1 ? '' : 's'} above ₹${yeSettings.writeoff_limit.toLocaleString('en-IN')} need${blocked.length === 1 ? 's' : ''} the approver's sign-off first.`,
+                needs_approval: blocked,
+              }, { status: 409 })
+            }
+          }
+        }
+
         for (const d of decisions) {
           // Fetch this student's unpaid bills in from_year (with leaver status).
           // FOR UPDATE OF l takes the same row lock the payment/waiver routes take
@@ -357,9 +392,13 @@ export async function POST(req: NextRequest) {
               await closeOutBill(client, {
                 schoolId: school_id, studentId: d.student_id, ledgerId: b.id,
                 amountPaid: parseFloat(b.amount_paid), balance: parseFloat(b.balance),
-                waiverType: 'writeoff', reason: d.reason || `Year-end write-off ${from_year}`, doneBy: done_by,
+                waiverType: 'writeoff',
+                reason: `${d.reason || `Year-end write-off ${from_year}`}${approvedBy.get(d.student_id)?.decidedBy ? ` · approved by ${approvedBy.get(d.student_id)!.decidedBy}` : ''}`,
+                doneBy: done_by,
               })
             }
+            const used = approvedBy.get(d.student_id)
+            if (used) await client.query(`UPDATE fee_writeoff_requests SET status = 'applied' WHERE id = $1`, [used.id])
             writeoffCount++; writeoffTotal += studentBalance
           }
 

@@ -32,3 +32,16 @@ test('settings validation', () => {
   assert.match(validateSettings({ ...ok, leave_open_days: 0 }, staff(2))!, /days/)
   assert.equal(validateSettings({ owner_user_id: null, approver_user_id: null, writeoff_limit: 0, leave_open_days: 30 }, staff(1)), null)
 })
+
+import { writeoffCleared } from './feeYearEnd'
+
+test('an approval only covers the amount that was approved', () => {
+  assert.equal(writeoffCleared(5000, { status: 'approved', amount: 5000 }), true)
+  assert.equal(writeoffCleared(5000, { status: 'approved', amount: 6000 }), true)
+  assert.equal(writeoffCleared(5000.005, { status: 'approved', amount: 5000 }), true)   // rounding
+  assert.equal(writeoffCleared(7000, { status: 'approved', amount: 5000 }), false)      // more fell due since
+  assert.equal(writeoffCleared(5000, { status: 'pending', amount: 5000 }), false)
+  assert.equal(writeoffCleared(5000, { status: 'rejected', amount: 5000 }), false)
+  assert.equal(writeoffCleared(5000, { status: 'applied', amount: 5000 }), false)       // already used
+  assert.equal(writeoffCleared(5000, undefined), false)
+})
