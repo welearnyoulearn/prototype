@@ -57,7 +57,7 @@ test.describe.serial('Announcement Board', () => {
     const s = await createSchool(platform, { name: `${label} ${ts}`, phone, email: `${label.toLowerCase().replace(/\W/g, '')}${ts}@test.com`, address: '5 Notice Rd' })
     await setSubscription(platform, s.id, 'premium')
     const first = await login(s.email, s.temp_password)
-    expect((await api('/api/auth/change-password', 'POST', { newPassword: PASS }, first)).status).toBe(200)
+    expect((await api('/api/auth/change-password', 'POST', { currentPassword: s.temp_password, newPassword: PASS }, first)).status).toBe(200)
     const cookie = await login(s.email, PASS)
     await api('/api/auth/profile', 'PUT', { full_name: name, phone: '9000000044' }, cookie)
     return { id: s.id as number, email: s.email as string, cookie }

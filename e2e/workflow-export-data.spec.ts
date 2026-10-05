@@ -71,7 +71,7 @@ test.describe.serial('Export Data', () => {
       if (tier) await setSubscription(platform, s.id, tier)
       const ctx = await newCtx()
       expect((await call(ctx, 'post', '/api/auth/login', { email: s.email, password: s.temp_password })).status).toBe(200)
-      expect((await call(ctx, 'post', '/api/auth/change-password', { newPassword: PASS })).status).toBe(200)
+      expect((await call(ctx, 'post', '/api/auth/change-password', { currentPassword: s.temp_password, newPassword: PASS })).status).toBe(200)
       return { id: s.id as number, ctx }
     }
     const a = await mkSchool('Export School', 90, 'premium'); schoolId = a.id; admin = a.ctx

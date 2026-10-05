@@ -55,7 +55,7 @@ test.describe.serial('Student 360 profile — school admin', () => {
     await setSubscription(platformCookie, schoolId, 'premium')
     owner = await newCtx()
     expect((await call(owner, 'post', '/api/auth/login', { email: school.email, password: school.temp_password })).status).toBe(200)
-    expect((await call(owner, 'post', '/api/auth/change-password', { newPassword: OWNER_PASS })).status).toBe(200)
+    expect((await call(owner, 'post', '/api/auth/change-password', { currentPassword: school.temp_password, newPassword: OWNER_PASS })).status).toBe(200)
     expect((await call(owner, 'put', '/api/auth/profile', { full_name: `Owner ${ts}`, phone: '9000000041' })).status).toBe(200)
     expect((await call(owner, 'put', '/api/school-calendar/settings', { weekly_off_days: [] })).status).toBe(200)
 
@@ -131,7 +131,7 @@ test.describe.serial('Student 360 profile — school admin', () => {
     schoolBId = b.id
     ownerB = await newCtx()
     expect((await call(ownerB, 'post', '/api/auth/login', { email: b.email, password: b.temp_password })).status).toBe(200)
-    expect((await call(ownerB, 'post', '/api/auth/change-password', { newPassword: OWNER_PASS })).status).toBe(200)
+    expect((await call(ownerB, 'post', '/api/auth/change-password', { currentPassword: b.temp_password, newPassword: OWNER_PASS })).status).toBe(200)
     anon = await newCtx()
   })
 

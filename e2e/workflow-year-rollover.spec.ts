@@ -278,7 +278,7 @@ test.describe.serial('Year Rollover — central, gated by fee year-end', () => {
       await setSubscription(platform, s.id, 'premium')
       const first = await loginSchoolAdmin(s.email, s.temp_password)
       // The browser would otherwise stop on the "set your password" screen
-      expect((await api('/api/auth/change-password', 'POST', { newPassword: 'RollUi#2026x' }, first)).status).toBe(200)
+      expect((await api('/api/auth/change-password', 'POST', { currentPassword: s.temp_password, newPassword: 'RollUi#2026x' }, first)).status).toBe(200)
       const c = await loginSchoolAdmin(s.email, 'RollUi#2026x')
       await api('/api/auth/profile', 'PUT', { full_name: 'UI Admin', phone: '9000000066' }, c)
       const ys = (await api(`/api/academic-years?school_id=${s.id}`, 'GET', undefined, c)).data as Year[]
@@ -329,7 +329,7 @@ test.describe.serial('Year Rollover — repeat a year / change section', () => {
     await setSubscription(platform, schoolId, 'premium')
     await ensureFeaturesOn(platform)
     const first = await loginSchoolAdmin(email, tempPass)
-    expect((await api('/api/auth/change-password', 'POST', { newPassword: 'RollExc#2026x' }, first)).status).toBe(200)
+    expect((await api('/api/auth/change-password', 'POST', { currentPassword: tempPass, newPassword: 'RollExc#2026x' }, first)).status).toBe(200)
     cookie = await loginSchoolAdmin(email, 'RollExc#2026x')
     await api('/api/auth/profile', 'PUT', { full_name: 'Exc Admin', phone: '9000000055' }, cookie)
 
