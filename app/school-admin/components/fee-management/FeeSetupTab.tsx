@@ -3,6 +3,7 @@
 import { rollLabel, plural } from './format'
 import { useEffect, useState, Fragment, type Dispatch, type SetStateAction, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { GRADE_SEQUENCE } from '@/lib/grades'
+import AmendFeeDialog, { type AmendRequest } from './AmendFeeDialog'
 import type { FeeCategory, FeeStructure, StructureLock, Amendment, ApplStudent, ApplCategory, FeeStats } from './types'
 import { LoadErrorBanner } from './LoadErrorBanner'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -136,6 +137,7 @@ export default function FeeSetupTab({
   const [showAmendLog, setShowAmendLog] = useState(false)
   // Preview the existing bills that a midyear amount change will update.
   const [checkingImpact, setCheckingImpact] = useState(false)
+  const [amendRequest, setAmendRequest] = useState<AmendRequest | null>(null)
   const [pendingAmountWarning, setPendingAmountWarning] = useState<{
     cat: FeeCategory
     structs: { fee_category_id: number; grade: string; amount: number }[]
@@ -363,6 +365,19 @@ export default function FeeSetupTab({
       await doSaveFeeAmounts(cat, structs)
       return
     }
+    // A locked plan can't be edited directly — changes go through an amendment with a reason.
+    if (structureLock) {
+      setStructureMsg('')
+      setAmendRequest({
+        catName: cat.name,
+        changes: changedGrades.map(grade => ({
+          grade, label: gradeLabel(grade),
+          from: Number(structures.find(s => s.fee_category_id === cat.id && s.grade === grade)!.amount),
+          to: parseFloat(editAmounts[`${cat.id}_${grade}`]),
+        })),
+      })
+      return
+    }
     // Some of these grades already have a saved amount that's being changed —
     // check how many students are already billed under the old amount before
     // committing (reuses the same per-grade impact count the Amend flow computes).
@@ -386,6 +401,33 @@ export default function FeeSetupTab({
     } finally {
       setCheckingImpact(false)
     }
+  }
+
+  // Applies a locked-plan amendment one grade at a time. Returns an error message (the dialog
+  // stays open to show it) or null once every grade has been amended.
+  async function confirmAmendment(cat: FeeCategory, reason: string): Promise<string | null> {
+    if (!amendRequest) return null
+    const done: string[] = []
+    for (const c of amendRequest.changes) {
+      const r = await fetch('/api/fees/structures/amend', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ school_id: schoolId, academic_year: academicYear, fee_category_id: cat.id, grade: c.grade, new_amount: c.to, reason }),
+      })
+      if (!r.ok) {
+        const d = await r.json().catch(() => null)
+        const partial = done.length ? ` (${done.join(', ')} already amended)` : ''
+        if (done.length) onSetupChanged()
+        return `${c.label}: ${d?.error || 'Failed to amend'}${partial}`
+      }
+      done.push(c.label)
+    }
+    setAmendRequest(null)
+    setStructureMsg(`✓ ${cat.name} amended for ${done.join(', ')}; existing bills updated`)
+    onStatsChanged()
+    const feeStore = useFeeStore.getState()
+    feeStore.bumpLedger(); feeStore.bumpReports(); feeStore.bumpYearEnd()
+    onSetupChanged()
+    return null
   }
 
   async function doSaveFeeAmounts(cat: FeeCategory, structs: { fee_category_id: number; grade: string; amount: number }[]) {
@@ -1334,6 +1376,11 @@ export default function FeeSetupTab({
               </button>
             </div>
           )}
+
+          {amendRequest && (() => {
+            const cat = categories.find(c => c.name === amendRequest.catName)
+            return cat ? <AmendFeeDialog request={amendRequest} onCancel={() => setAmendRequest(null)} onConfirm={reason => confirmAmendment(cat, reason)} /> : null
+          })()}
 
           {/* ── Warn before changing an amount students are already billed at ── */}
           {pendingAmountWarning && (

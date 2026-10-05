@@ -163,13 +163,13 @@ export type PassbookTimeline = {
 }
 export type PassbookYearGroup = {
   academic_year: string; is_current: boolean
-  total_billed: number; total_paid: number; total_waived: number; discretionary_waived?: number; outstanding: number
+  total_billed: number; total_paid: number; total_waived: number; discretionary_waived?: number; written_off?: number; carried_forward?: number; outstanding: number
   entries: LedgerEntry[]
 }
 export type PassbookData = {
   student: { id: number; name: string; roll_number: string; school_roll_number?: number | null; grade: string; section: string; parent_name: string | null; parent_phone: string | null; parent_email: string | null }
   current_year: string | null
-  summary: { total_billed: number; total_paid: number; total_waived: number; discretionary_waived?: number; outstanding: number }
+  summary: { total_billed: number; total_paid: number; total_waived: number; discretionary_waived?: number; written_off?: number; carried_forward?: number; outstanding: number }
   timeline: PassbookTimeline[]
   ledger: LedgerEntry[]
   ledger_by_year: PassbookYearGroup[]
