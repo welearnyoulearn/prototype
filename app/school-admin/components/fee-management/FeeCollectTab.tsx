@@ -177,7 +177,7 @@ export default function FeeCollectTab({
   const payIdemKeyRef = useRef<string | null>(null)
   const waiverIdemKeyRef = useRef<string | null>(null)
   const [showWaiver, setShowWaiver] = useState(false)
-  const [waiverForm, setWaiverForm] = useState({ waiver_type: 'percentage', waiver_value: '', reason: '', granted_by_name: adminName || '' })
+  const [waiverForm, setWaiverForm] = useState({ waiver_type: 'percentage', waiver_value: '', reason: '' })
   const [waiverLoading, setWaiverLoading] = useState(false)
   const [waiverError, setWaiverError] = useState('')
   const [showPayConfirm, setShowPayConfirm] = useState(false)
@@ -526,7 +526,7 @@ export default function FeeCollectTab({
           school_id: schoolId, student_id: selectedEntry.student_id,
           ledger_id: selectedEntry.id, waiver_type: waiverForm.waiver_type,
           waiver_value: parseFloat(waiverForm.waiver_value) || null,
-          reason: waiverForm.reason, granted_by_name: waiverForm.granted_by_name || null,
+          reason: waiverForm.reason,
           idempotency_key: waiverIdemKeyRef.current,
         }),
       })
@@ -840,7 +840,7 @@ export default function FeeCollectTab({
                               </button>
                               <button
                                 data-testid="btn-grant-waiver"
-                                onClick={() => { waiverIdemKeyRef.current = null; setSelectedEntry(row.open_entries[0]); setWaiverForm({ waiver_type: 'percentage', waiver_value: '', reason: '', granted_by_name: adminName || '' }); setWaiverError(''); setShowWaiver(true) }}
+                                onClick={() => { waiverIdemKeyRef.current = null; setSelectedEntry(row.open_entries[0]); setWaiverForm({ waiver_type: 'percentage', waiver_value: '', reason: '' }); setWaiverError(''); setShowWaiver(true) }}
                                 className="px-3 py-2.5 border border-purple-200 text-purple-700 bg-purple-50 hover:bg-purple-100 rounded-lg text-sm font-medium whitespace-nowrap">
                                 Grant Waiver
                               </button>
@@ -877,7 +877,7 @@ export default function FeeCollectTab({
                                     </button>
                                     <button
                                       data-testid="btn-grant-waiver"
-                                      onClick={() => { waiverIdemKeyRef.current = null; setSelectedEntry(row.open_entries[0]); setWaiverForm({ waiver_type: 'percentage', waiver_value: '', reason: '', granted_by_name: adminName || '' }); setWaiverError(''); setShowWaiver(true) }}
+                                      onClick={() => { waiverIdemKeyRef.current = null; setSelectedEntry(row.open_entries[0]); setWaiverForm({ waiver_type: 'percentage', waiver_value: '', reason: '' }); setWaiverError(''); setShowWaiver(true) }}
                                       className="px-3 py-2 border border-purple-200 text-purple-700 bg-purple-50 hover:bg-purple-100 rounded-lg text-sm font-medium">
                                       Grant Waiver
                                     </button>
@@ -1401,14 +1401,8 @@ export default function FeeCollectTab({
                   className="w-full mt-1.5 border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400" />
               </div>
 
-              {/* Granted by */}
-              <div>
-                <label className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Granted By</label>
-                <input type="text"
-                  value={waiverForm.granted_by_name}
-                  onChange={e => setWaiverForm(f => ({ ...f, granted_by_name: e.target.value }))}
-                  className="w-full mt-1.5 border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400" />
-              </div>
+              {/* The server records the logged-in staff member, so this is shown, not editable. */}
+              <p className="text-xs text-gray-500">Granted by: <span className="font-semibold text-gray-700">{adminName || 'you'}</span> (recorded from your login)</p>
 
               {/* Error */}
               {waiverError && (

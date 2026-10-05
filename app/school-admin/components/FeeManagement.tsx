@@ -131,8 +131,8 @@ export default function FeeManagement({
   // Derived passbook data filtered to the selected academic year
   const pbYearGroup = pbData?.ledger_by_year.find(y => y.academic_year === academicYear) ?? null
   const pbSummary   = pbYearGroup
-    ? { total_billed: pbYearGroup.total_billed, total_paid: pbYearGroup.total_paid, total_waived: pbYearGroup.total_waived, discretionary_waived: pbYearGroup.discretionary_waived ?? pbYearGroup.total_waived, outstanding: pbYearGroup.outstanding }
-    : { total_billed: 0, total_paid: 0, total_waived: 0, discretionary_waived: 0, outstanding: 0 }
+    ? { total_billed: pbYearGroup.total_billed, total_paid: pbYearGroup.total_paid, total_waived: pbYearGroup.total_waived, discretionary_waived: pbYearGroup.discretionary_waived ?? pbYearGroup.total_waived, written_off: pbYearGroup.written_off ?? 0, carried_forward: pbYearGroup.carried_forward ?? 0, outstanding: pbYearGroup.outstanding }
+    : { total_billed: 0, total_paid: 0, total_waived: 0, discretionary_waived: 0, written_off: 0, carried_forward: 0, outstanding: 0 }
   const pbPayments  = pbData?.payments.filter(p => p.bill_year === academicYear) ?? []
   // One receipt_number can span several fee-category rows in pbPayments (one
   // payment covering multiple categories at once) — group them here so the
@@ -656,6 +656,7 @@ export default function FeeManagement({
   <div><div class="l">Total Billed</div><div class="v">₹${Number(pbData.summary.total_billed).toLocaleString('en-IN')}</div></div>
   <div><div class="l">Paid</div><div class="v">₹${Number(pbData.summary.total_paid).toLocaleString('en-IN')}</div></div>
   <div><div class="l">Waived</div><div class="v">₹${Number(pbData.summary.discretionary_waived ?? pbData.summary.total_waived).toLocaleString('en-IN')}</div></div>
+  ${Number(pbData.summary.written_off) > 0 ? `<div><div class="l">Written off</div><div class="v">₹${Number(pbData.summary.written_off).toLocaleString('en-IN')}</div></div>` : ''}
   <div><div class="l">Outstanding</div><div class="v">₹${Number(pbData.summary.outstanding).toLocaleString('en-IN')}</div></div>
 </div>
 <table><thead><tr><th>Date</th><th>Description</th><th style="text-align:right">Charge</th><th style="text-align:right">Paid</th><th style="text-align:right">Balance</th></tr></thead>
@@ -1035,11 +1036,12 @@ export default function FeeManagement({
 
             {/* Summary bar */}
             {pbData && (
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 px-5 py-3 bg-gray-50 border-b border-gray-100 flex-shrink-0">
+              <div className={`grid grid-cols-2 ${pbSummary.written_off ? 'sm:grid-cols-5' : 'sm:grid-cols-4'} gap-3 px-5 py-3 bg-gray-50 border-b border-gray-100 flex-shrink-0`}>
                 {[
                   { l: 'Total Billed', v: pbSummary.total_billed, c: 'text-gray-800' },
                   { l: 'Paid',         v: pbSummary.total_paid,    c: 'text-green-700' },
                   { l: 'Waived',       v: pbSummary.discretionary_waived,  c: 'text-purple-700' },
+                  ...(pbSummary.written_off ? [{ l: 'Written off', v: pbSummary.written_off, c: 'text-amber-700' }] : []),
                   { l: 'Outstanding',  v: pbSummary.outstanding,   c: 'text-red-600' },
                 ].map(s => (
                   <div key={s.l} className="text-center">
@@ -1047,6 +1049,7 @@ export default function FeeManagement({
                     <p className={`text-base font-bold mt-0.5 ${s.c}`}>{fmt(s.v)}</p>
                   </div>
                 ))}
+                {pbSummary.carried_forward ? <p className="col-span-full text-center text-[11px] text-gray-400">{fmt(pbSummary.carried_forward)} moved to the next year's bills — not counted in Billed.</p> : null}
               </div>
             )}
 
