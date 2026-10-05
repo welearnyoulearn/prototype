@@ -808,7 +808,7 @@ export default function FeeSetupTab({
           {/* ── Lock banner ── */}
           {structureLock ? (
             <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="flex items-center gap-3">
                   <span className="text-amber-600 text-lg">🔒</span>
                   <div>
@@ -816,7 +816,7 @@ export default function FeeSetupTab({
                     <p className="text-xs text-amber-600">Locked by <strong>{structureLock.locked_by}</strong> on {fmtDate(structureLock.locked_at)} · Changes need an Amendment with a reason</p>
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   {/* Generate for new students — safe even when locked (ON CONFLICT DO NOTHING) */}
                   <button
                     onClick={generateForNew}
