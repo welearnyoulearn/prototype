@@ -1,6 +1,7 @@
 'use client'
 
 import { rollLabel, plural } from './format'
+import PriorDuesBanner from './PriorDuesBanner'
 import { useCallback, useEffect, useState } from 'react'
 import { GRADE_SEQUENCE } from '@/lib/grades'
 import type { ReportData } from './types'
@@ -61,12 +62,23 @@ function buildAuditPdfHtml(rep: Record<string, unknown>): string {
     const bills = rep.bills as Array<{ fee_type: string; period_label: string; billed: number; waived: number; paid: number; balance: number; status: string }>
     const pays = rep.payments as Array<{ receipt_number: string; paid_date: string; fee_type: string; period_label: string; amount: number; payment_mode: string; payment_status: string }>
     const wvs = rep.waivers as Array<{ fee_type: string; period_label: string; waiver_amount: number; reason: string; granted_by_name: string | null; is_revoked: boolean; revoked_by: string | null; revoked_at: string | null; revoke_reason: string | null }>
+    const swb = rep.waiver_breakdown as { discretionary: number; carried_forward: number; written_off: number }
     return `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Student Fee Report</title>${style}</head><body>${head}
       <h3>Student Profile</h3>
       <table><tr><td><b>Name</b></td><td>${esc(s.name)}</td><td><b>Roll No</b></td><td>${esc(s.school_roll_number ?? '')}</td><td><b>Class</b></td><td>${esc(s.grade)}${esc(s.section || '')}</td></tr>
       <tr><td><b>Parent</b></td><td>${esc(s.parent_name) || '—'}</td><td><b>Phone</b></td><td>${esc(s.parent_phone) || '—'}</td><td><b>System ID</b></td><td>${esc(s.roll_number)}</td></tr></table>
       <h3>Fee Balance</h3>
       <table><thead>${moneyHead}</thead><tbody><tr class="tot"><td class="r">${RUPEE(bal.billed)}</td><td class="r">${RUPEE(bal.waived)}</td><td class="r">${RUPEE(bal.net_demand)}</td><td class="r">${RUPEE(bal.paid)}</td><td class="r">${RUPEE(bal.balance)}</td></tr></tbody></table>
+      <h3>Reconciliation</h3>
+      <table><thead><tr><th>Step</th><th class="r">Amount</th></tr></thead><tbody>
+        <tr><td>Billed</td><td class="r">${RUPEE(bal.billed)}</td></tr>
+        <tr><td>Less: discretionary waivers</td><td class="r">− ${RUPEE(swb.discretionary)}</td></tr>
+        <tr><td>Less: carried forward to a new year</td><td class="r">− ${RUPEE(swb.carried_forward)}</td></tr>
+        <tr><td>Less: written off</td><td class="r">− ${RUPEE(swb.written_off)}</td></tr>
+        <tr><td>Less: paid</td><td class="r">− ${RUPEE(bal.paid)}</td></tr>
+        <tr class="tot"><td>= Balance (calculated)</td><td class="r">${RUPEE(bal.billed - swb.discretionary - swb.carried_forward - swb.written_off - bal.paid)}</td></tr>
+        <tr><td>Balance per report</td><td class="r">${RUPEE(bal.balance)}</td></tr>
+      </tbody></table>
       <h3>Fee Structure</h3>
       <table><thead><tr><th>Fee Type</th><th>Period</th><th class="r">Billed</th><th class="r">Waived</th><th class="r">Paid</th><th class="r">Balance</th><th>Status</th></tr></thead>
       <tbody>${bills.map(b => `<tr><td>${esc(b.fee_type)}</td><td>${esc(b.period_label)}</td><td class="r">${RUPEE(b.billed)}</td><td class="r">${RUPEE(b.waived)}</td><td class="r">${RUPEE(b.paid)}</td><td class="r">${RUPEE(b.balance)}</td><td>${esc(b.status)}</td></tr>`).join('')}</tbody></table>
@@ -340,10 +352,32 @@ export default function FeeReportsTab({
               <div key={s.label} className={`${s.bg} rounded-xl border border-gray-100 p-4`}>
                 <p className="text-xs text-gray-400 font-medium uppercase tracking-wide">{s.label}</p>
                 <p className={`text-2xl font-bold mt-1 ${s.color}`}>{fmt(s.val)}</p>
-                <p className="text-xs text-gray-400 mt-1">{plural(reportData.balance.total_students, 'student')}</p>
+                <p className="text-xs text-gray-400 mt-1">
+                  {s.label === 'Total Billed' && Number(reportData.balance.carried_in_due) > 0
+                    ? `${fmt(Number(reportData.balance.total_billed) - Number(reportData.balance.carried_in_due))} this year + ${fmt(reportData.balance.carried_in_due!)} carried`
+                    : s.label === 'Total Outstanding' && Number(reportData.balance.carried_in_outstanding) > 0
+                    ? `incl. ${fmt(reportData.balance.carried_in_outstanding!)} from earlier years`
+                    : plural(reportData.balance.total_students, 'student')}
+                </p>
               </div>
             ))}
           </div>
+
+          <PriorDuesBanner year={academicYear} current={reportData.balance.total_outstanding} prior={reportData.balance.prior_unresolved_outstanding} priorStudents={reportData.balance.prior_unresolved_students} priorFrom={reportData.balance.prior_unresolved_from} passout={reportData.balance.passout_outstanding} passoutStudents={reportData.balance.passout_students} />
+
+          {/* Dues carried in from earlier years are billed here AND were counted as billed in the year
+              they came from — say so, so nobody adds the two years' Billed together. */}
+          {(() => {
+            const carriedIn = reportData.byCategory
+              .filter(c => ['Previous Year Dues', 'Passout Dues'].includes(c.category_name))
+              .reduce((sum, c) => sum + Number(c.total_due), 0)
+            return carriedIn > 0 ? (
+              <p data-testid="note-carried-in" className="text-xs text-gray-500 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
+                Total Billed includes <strong>{fmt(carriedIn)}</strong> of dues carried in from earlier years. Those amounts were also counted as billed
+                in the year they came from, so don't add this year's Billed to an earlier year's.
+              </p>
+            ) : null
+          })()}
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
             {/* Class-wise collection */}
@@ -377,6 +411,7 @@ export default function FeeReportsTab({
             <div className="bg-white rounded-xl border border-gray-100 p-5">
               <h3 className="text-sm font-semibold text-gray-700 mb-4">Collection by Payment Mode</h3>
               <div className="space-y-3">
+                {reportData.byMode.length === 0 && <p className="text-sm text-gray-400">No payments recorded for {academicYear}.</p>}
                 {reportData.byMode.map(m => (
                   <div key={m.payment_mode} className="flex items-center justify-between">
                     <span className="text-sm text-gray-600 capitalize">{m.payment_mode}</span>
@@ -451,7 +486,7 @@ export default function FeeReportsTab({
                     <tr key={c.category_name} className="border-b border-gray-50 hover:bg-gray-50">
                       <td className="px-4 py-2.5">
                         <p className="font-medium text-gray-800">{c.category_name}</p>
-                        <p className="text-xs text-gray-400 capitalize">{c.frequency} · {plural(c.students, 'student')}</p>
+                        <p className="text-xs text-gray-400 capitalize">{c.frequency.replace('_', ' ')} · {plural(c.students, 'student')}</p>
                       </td>
                       <td className="px-4 py-2.5 text-right text-gray-700">{fmt(c.total_due)}</td>
                       <td className="px-4 py-2.5 text-right text-green-600 font-medium">{fmt(c.total_collected)}</td>
@@ -501,7 +536,10 @@ export default function FeeReportsTab({
                         </td>
                         <td className="px-4 py-2 text-gray-600">Gr.{d.grade}{d.section}</td>
                         <td className="px-4 py-2 text-xs text-gray-500">{d.parent_name || '—'}{d.parent_phone ? ` · ${d.parent_phone}` : ''}</td>
-                        <td className="px-4 py-2 text-right font-bold text-red-600">{fmt(d.outstanding)}</td>
+                        <td className="px-4 py-2 text-right font-bold text-red-600">
+                          {fmt(d.outstanding)}
+                          {Number(d.carried_outstanding) > 0 && <span className="block text-[10px] font-normal text-amber-700">{fmt(Number(d.carried_outstanding))} from earlier years</span>}
+                        </td>
                         <td className="px-4 py-2 text-center">
                           <span className="text-xs bg-red-100 text-red-600 px-1.5 py-0.5 rounded font-medium">{d.overdue_entries}</span>
                         </td>

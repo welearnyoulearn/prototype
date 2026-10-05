@@ -9,6 +9,7 @@ import { useFeeStore } from '@/lib/stores/feeStore'
 import { LoadErrorBanner } from './LoadErrorBanner'
 import FeeDayClosePanel from './FeeDayClosePanel'
 import { fmt, fmtDate, todayLocal, rollLabel, plural } from './format'
+import { isCarriedEntry, carriedBalance, carriedBilled, summarizeCarriedNotes } from './dues'
 
 const GRADES = GRADE_SEQUENCE
 function gradeLabel(g: string): string { return /^\d+$/.test(g) ? `Grade ${g}` : g }
@@ -666,11 +667,19 @@ export default function FeeCollectTab({
                       <div className="flex justify-between text-xs text-gray-400 sm:hidden">
                         <span>Billed: <span className="text-gray-600">{fmt(row.total_billed)}</span></span>
                         <span>Paid+Waived: <span className="text-green-600">{fmt(row.total_paid)}</span></span>
-                        <span>Outstanding: <span className="font-bold text-red-600">{fmt(row.outstanding)}</span></span>
+                        <span>Outstanding: <span className="font-bold text-red-600">{fmt(row.outstanding)}</span>
+                          {carriedBalance(row.open_entries) > 0 && <span className="block text-[10px] text-amber-700">incl. {fmt(carriedBalance(row.open_entries))} from earlier years</span>}
+                        </span>
                       </div>
-                      <div className="hidden sm:block sm:col-span-2 text-right text-sm text-gray-600">{fmt(row.total_billed)}</div>
+                      <div className="hidden sm:block sm:col-span-2 text-right text-sm text-gray-600">
+                        {fmt(row.total_billed)}
+                        {carriedBilled(row.all_entries) > 0 && <span className="block text-[10px] text-amber-700">incl. {fmt(carriedBilled(row.all_entries))} carried</span>}
+                      </div>
                       <div className="hidden sm:block sm:col-span-2 text-right text-sm text-green-600">{fmt(row.total_paid)}</div>
-                      <div className="hidden sm:block sm:col-span-2 text-right text-sm font-bold text-red-600">{fmt(row.outstanding)}</div>
+                      <div className="hidden sm:block sm:col-span-2 text-right text-sm font-bold text-red-600">
+                        {fmt(row.outstanding)}
+                        {carriedBalance(row.open_entries) > 0 && <span data-testid={`ledger-carried-${row.student_id}`} className="block text-[10px] font-normal text-amber-700">incl. {fmt(carriedBalance(row.open_entries))} from earlier years</span>}
+                      </div>
                       <div className="flex justify-end sm:justify-center gap-1.5 sm:col-span-2" onClick={e => e.stopPropagation()}>
                         {row.outstanding > 0 ? (
                           <button onClick={() => startCollect(row)} aria-haspopup="dialog"
@@ -733,14 +742,38 @@ export default function FeeCollectTab({
                               <div>
                                 <p className="text-xs font-semibold uppercase tracking-[.08em] text-[#245b46]">Fee collection</p>
                                 <h2 id="collect-payment-title" className="mt-1 text-lg font-semibold text-gray-900">{row.student_name}</h2>
-                                <p className="mt-0.5 text-xs text-gray-500">Grade {row.grade}{row.section}{row.school_roll_number != null ? ` · Roll ${row.school_roll_number}` : ''} · {fmt(row.outstanding)} outstanding</p>
+                                <p className="mt-0.5 text-xs text-gray-500">Grade {row.grade}{row.section}{row.school_roll_number != null ? ` · Roll ${row.school_roll_number}` : ''} · {fmt(row.outstanding)} outstanding{carriedBalance(row.open_entries) > 0 ? ` (${fmt(carriedBalance(row.open_entries))} earlier years + ${fmt(row.outstanding - carriedBalance(row.open_entries))} ${academicYear})` : ''}</p>
                               </div>
                               <button type="button" onClick={closeCollect} aria-label="Close payment window" className="grid h-10 w-10 place-items-center rounded-md text-xl text-gray-500 hover:bg-gray-100">×</button>
                             </div>
                             <div className="space-y-5 px-5 py-5 sm:px-6">
+                            {row.open_entries.some(isCarriedEntry) && row.open_entries.some(x => !isCarriedEntry(x)) && (
+                              <div data-testid="collect-order-note" className="flex flex-wrap items-center gap-2 rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-600">
+                                <span className="flex-1 min-w-[12rem]">Payments are applied to the <strong>oldest bill first</strong> — previous years&apos; dues are cleared before {academicYear} fees. Everything is selected; tick only what this payment is for.</span>
+                                {([
+                                  { label: 'All dues', pick: row.open_entries },
+                                  { label: `Only ${academicYear} fees`, pick: row.open_entries.filter(x => !isCarriedEntry(x)) },
+                                  { label: 'Only previous years', pick: row.open_entries.filter(isCarriedEntry) },
+                                ]).map(opt => (
+                                  <button key={opt.label} type="button" data-testid={`collect-pick-${opt.label.replace(/\s+/g, '-').toLowerCase()}`}
+                                    onClick={() => { setCollectChecked(new Set(opt.pick.map(x => x.id))); setPayAmount(String(opt.pick.reduce((s, x) => s + Number(x.balance), 0))) }}
+                                    className="rounded-md border border-gray-200 bg-white px-2 py-1 font-medium text-gray-700 hover:bg-gray-100">{opt.label}</button>
+                                ))}
+                              </div>
+                            )}
                             <div className="space-y-1.5">
-                              {row.open_entries.map(e => (
-                                <label key={e.id} className={`flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer border-l-2 transition-colors ${
+                              {[...row.open_entries.filter(isCarriedEntry), ...row.open_entries.filter(e => !isCarriedEntry(e))].map((e, idx, ordered) => (
+                                <Fragment key={e.id}>
+                                {/* Name the two kinds of dues when a student has both, with a subtotal for each */}
+                                {ordered.some(isCarriedEntry) && ordered.some(x => !isCarriedEntry(x)) && (idx === 0 || isCarriedEntry(ordered[idx - 1]) !== isCarriedEntry(e)) && (
+                                  <p data-testid={isCarriedEntry(e) ? 'collect-heading-carried' : 'collect-heading-current'} className={`flex items-center justify-between pt-2 text-[11px] font-semibold uppercase tracking-wide ${isCarriedEntry(e) ? 'text-amber-700' : 'text-blue-700'}`}>
+                                    <span>{isCarriedEntry(e)
+                                      ? `Previous years' dues${[...new Set(ordered.filter(isCarriedEntry).map(x => x.source_academic_year).filter(Boolean))].length ? ` · from ${[...new Set(ordered.filter(isCarriedEntry).map(x => x.source_academic_year).filter(Boolean))].join(', ')}` : ''}`
+                                      : `${academicYear} fees`}</span>
+                                    <span>{fmt(ordered.filter(x => isCarriedEntry(x) === isCarriedEntry(e)).reduce((s, x) => s + Number(x.balance), 0))}</span>
+                                  </p>
+                                )}
+                                <label className={`flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer border-l-2 transition-colors ${
                                   e.source_academic_year
                                     ? (collectChecked.has(e.id) ? 'bg-amber-50 border-amber-400 hover:bg-amber-100' : 'bg-amber-50/40 border-amber-200 hover:bg-amber-50')
                                     : (collectChecked.has(e.id) ? 'bg-blue-50 border-blue-400 hover:bg-blue-100' : 'border-transparent hover:bg-gray-50')
@@ -756,7 +789,7 @@ export default function FeeCollectTab({
                                     className="w-4 h-4 rounded border-gray-300 text-blue-600" />
                                   <span className="flex-1 text-sm text-gray-700">
                                     {e.source_academic_year ? (
-                                      <><span className="text-amber-700 font-medium">⏱ Previous Year Dues</span> · <span className="text-gray-400">{e.notes?.replace(/^Carried from [^:]+:\s*/, '') || e.period_label}</span></>
+                                      <><span className="text-amber-700 font-medium">⏱ Previous Year Dues ({e.source_academic_year})</span> · <span className="text-gray-400">{summarizeCarriedNotes(e.notes, e.period_label)}</span></>
                                     ) : (
                                       <>{e.category_name} · <span className="text-gray-400">{e.period_label}</span></>
                                     )}
@@ -764,6 +797,7 @@ export default function FeeCollectTab({
                                   <span className={`text-xs px-1.5 py-0.5 rounded-full capitalize ${STATUS_COLORS[e.status]}`}>{e.status}</span>
                                   <span className="text-sm font-bold text-gray-800 w-20 text-right">{fmt(e.balance)}</span>
                                 </label>
+                                </Fragment>
                               ))}
                             </div>
 
@@ -1216,7 +1250,7 @@ export default function FeeCollectTab({
                     <div key={e.id} className="flex items-center justify-between text-sm">
                       <span className="text-gray-600">
                         {e.source_academic_year ? (
-                          <><span className="text-amber-700 font-medium">⏱ Previous Year Dues</span> · {e.notes?.replace(/^Carried from [^:]+:\s*/, '') || e.period_label}</>
+                          <><span className="text-amber-700 font-medium">⏱ Previous Year Dues ({e.source_academic_year})</span> · {summarizeCarriedNotes(e.notes, e.period_label)}</>
                         ) : (
                           <>{e.category_name} · {e.period_label}</>
                         )}

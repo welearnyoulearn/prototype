@@ -40,6 +40,7 @@ export type StudentReport = {
   meta: Meta
   student: { id: number; name: string; roll_number: string; school_roll_number: number | null; grade: string; section: string; parent_name: string | null; parent_phone: string | null; parent_email: string | null }
   balance: Money
+  waiver_breakdown: WaiverBreakdown
   bills: { fee_type: string; period_label: string; billed: number; waived: number; paid: number; balance: number; due_date: string; status: string }[]
   payments: { receipt_number: string; amount: number; payment_mode: string; payment_status: string; paid_date: string; transaction_ref: string | null; collected_by_name: string | null; notes: string | null; fee_type: string; period_label: string }[]
   waivers: { fee_type: string; period_label: string; waiver_type: string; waiver_amount: number; reason: string; granted_by_name: string | null; created_at: string; is_revoked: boolean; revoked_by: string | null; revoked_at: string | null; revoke_reason: string | null }[]
@@ -131,11 +132,19 @@ export async function buildFeeAuditReport(opts: {
       .filter(w => !w.is_revoked && w.waiver_type !== 'carry_forward' && w.waiver_type !== 'writeoff')
       .reduce((s, w) => s + Number(w.waiver_amount), 0)
 
+    // Same three buckets as the school-wide report, so Billed − waived − carried − written off − paid
+    // = Balance also holds for one student (a carried-forward or written-off bill otherwise
+    // looks like money that vanished).
+    const sumType = (type: string) => (waivers as Array<{ waiver_type: string; waiver_amount: string; is_revoked: boolean }>)
+      .filter(w => !w.is_revoked && w.waiver_type === type).reduce((s, w) => s + Number(w.waiver_amount), 0)
+    const carriedForward = sumType('carry_forward'), writtenOff = sumType('writeoff')
+
     return {
       kind: 'student',
       meta: { school_name: schoolName, academic_year, generated_by: actor, generated_on: new Date().toISOString() },
       student,
       balance: money(billed, discretionaryWaived, paid, balance),
+      waiver_breakdown: { discretionary: discretionaryWaived, carried_forward: carriedForward, written_off: writtenOff, total: discretionaryWaived + carriedForward + writtenOff },
       bills: bills.map(b => ({ ...b, billed: Number(b.billed), waived: Number(b.waived), paid: Number(b.paid), balance: Number(b.balance) })),
       payments: payments.map(p => ({ ...p, amount: Number(p.amount) })),
       waivers: waivers.map((w: Record<string, unknown>) => ({ ...w, waiver_amount: Number(w.waiver_amount) })) as StudentReport['waivers'],
