@@ -123,14 +123,13 @@ export async function runYearEndReminders(db: Db, today: string): Promise<{ chec
   const { rows: stale } = await db.query<{ school_id: number; academic_year: string; n: string; total: string }>(
     `SELECT od.school_id, od.academic_year, COUNT(*) AS n, SUM(b.balance) AS total
      FROM fee_open_dues od
-     LEFT JOIN fee_year_close yc ON yc.school_id = od.school_id AND yc.academic_year = od.academic_year
      JOIN LATERAL (
        SELECT SUM(GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0)) AS balance
        FROM student_fee_ledger l
        WHERE l.school_id = od.school_id AND l.academic_year = od.academic_year AND l.student_id = od.student_id
          AND l.status IN ('pending', 'overdue', 'partial')
      ) b ON b.balance > 0
-     WHERE ($1::date - COALESCE(yc.closed_at, od.created_at)::date) > ${STALE_OPEN_DAYS}
+     WHERE ($1::date - od.created_at::date) > ${STALE_OPEN_DAYS}
      GROUP BY od.school_id, od.academic_year`, [today])
   for (const r of stale) {
     const got = await claim(db, r.school_id, r.academic_year, ['od_stale'])

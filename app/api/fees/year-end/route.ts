@@ -565,7 +565,7 @@ export async function POST(req: NextRequest) {
                VALUES ($1, $2, $3, $4, $5, $6, (CURRENT_DATE + ($7 || ' days')::interval)::date)
                ON CONFLICT (school_id, academic_year, student_id) DO UPDATE
                  SET amount_at_close = EXCLUDED.amount_at_close,
-                     deadline = EXCLUDED.deadline,
+                     deadline = COALESCE(fee_open_dues.deadline, EXCLUDED.deadline),
                      owner_user_id = COALESCE(fee_open_dues.owner_user_id, EXCLUDED.owner_user_id),
                      owner_name = COALESCE(fee_open_dues.owner_name, EXCLUDED.owner_name)`,
               [school_id, from_year, st.student_id, st.amount, closeSettings.owner_user_id, ownerRow?.name ?? null, String(closeSettings.leave_open_days)]

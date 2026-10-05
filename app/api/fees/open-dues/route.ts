@@ -35,7 +35,7 @@ async function handleGET(req: NextRequest) {
       `SELECT od.id, od.academic_year, od.student_id, s.name AS student_name, s.grade, COALESCE(s.section, '') AS section,
               od.amount_at_close, od.owner_user_id, od.owner_name,
               od.promised_date::text AS promised_date, od.deadline::text AS deadline, od.note,
-              (CURRENT_DATE - COALESCE(yc.closed_at, od.created_at)::date) AS age_days,
+              (CURRENT_DATE - od.created_at::date) AS age_days,
               (od.deadline - CURRENT_DATE) AS days_to_deadline,
               (SELECT SUM(GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0))
                FROM student_fee_ledger l
@@ -43,7 +43,6 @@ async function handleGET(req: NextRequest) {
                  AND l.status IN ('pending', 'overdue', 'partial')) AS balance_now
        FROM fee_open_dues od
        JOIN students s ON s.id = od.student_id
-       LEFT JOIN fee_year_close yc ON yc.school_id = od.school_id AND yc.academic_year = od.academic_year
        WHERE od.school_id = $1 AND ($2::text IS NULL OR od.academic_year = $2)
        ORDER BY od.academic_year, s.name`,
       [access.schoolId, year]
