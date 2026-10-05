@@ -3,6 +3,7 @@ import pool from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
 import { gradeOrderSql } from '@/lib/grades'
 import { withWatchline } from '@/lib/logger'
+import { YEAR_CLASS_JOIN, CLASS_GRADE, CLASS_SECTION, CLASS_ROLL } from '@/lib/feeYearClass'
 
 // GET /api/fees/reports?school_id=X&academic_year=Y
 // Returns comprehensive annual financial report data
@@ -84,15 +85,16 @@ async function handleGET(req: NextRequest) {
       // Class-wise collection (grade + section), enriched: defaulters + fully-paid counts
       const { rows: byGrade } = await pool.query(
         `WITH per_student AS (
-           SELECT s.grade, COALESCE(s.section, '') AS section, l.student_id,
+           SELECT ${CLASS_GRADE} AS grade, COALESCE(${CLASS_SECTION}, '') AS section, l.student_id,
                   SUM(l.amount_due)                                                        AS s_due,
                   SUM(l.amount_paid)                                                       AS s_paid,
                   SUM(COALESCE(l.waiver_amount, 0))                                        AS s_waived,
                   SUM(GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0)) AS s_out
            FROM student_fee_ledger l
            JOIN students s ON s.id = l.student_id
+           ${YEAR_CLASS_JOIN}
            WHERE l.school_id = $1 AND l.academic_year = $2
-           GROUP BY s.grade, s.section, l.student_id
+           GROUP BY ${CLASS_GRADE}, ${CLASS_SECTION}, l.student_id
          )
          SELECT
            grade,
@@ -111,14 +113,15 @@ async function handleGET(req: NextRequest) {
       )
       // Discretionary waivers per grade/section (excludes carry_forward bookkeeping)
       const { rows: discByGradeRows } = await pool.query(
-        `SELECT s.grade, COALESCE(s.section, '') AS section, COALESCE(SUM(w.waiver_amount), 0) AS total
+        `SELECT ${CLASS_GRADE} AS grade, COALESCE(${CLASS_SECTION}, '') AS section, COALESCE(SUM(w.waiver_amount), 0) AS total
          FROM fee_waivers w
          JOIN student_fee_ledger l ON l.id = w.ledger_id
          JOIN students s ON s.id = l.student_id
+         ${YEAR_CLASS_JOIN}
          WHERE l.school_id = $1 AND l.academic_year = $2
            AND COALESCE(w.is_revoked, FALSE) = FALSE
            AND w.waiver_type NOT IN ('carry_forward', 'writeoff')
-         GROUP BY s.grade, s.section`,
+         GROUP BY ${CLASS_GRADE}, ${CLASS_SECTION}`,
         [school_id, academic_year]
       ).catch(() => ({ rows: [] as Array<{grade: string; section: string; total: string}> }))
       const discGradeMap = new Map(discByGradeRows.map((r: {grade: string; section: string; total: string}) => [`${r.grade}|${r.section}`, r.total]))
@@ -190,17 +193,18 @@ async function handleGET(req: NextRequest) {
       // status, so partially-paid students aren't silently excluded (they still owe money).
       // Matches the same definition already used by the Defaulters CSV export.
       const { rows: defaulters } = await pool.query(
-        `SELECT s.name AS student_name, s.roll_number, s.school_roll_number, s.grade, s.section,
+        `SELECT s.name AS student_name, s.roll_number, ${CLASS_ROLL} AS school_roll_number, ${CLASS_GRADE} AS grade, ${CLASS_SECTION} AS section,
                 s.parent_name, s.parent_phone,
                 SUM(GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0)) AS outstanding,
                 COUNT(*) FILTER (WHERE l.status = 'overdue') AS overdue_entries,
                 COUNT(*) FILTER (WHERE l.status IN ('pending','overdue','partial')) AS unpaid_entries
          FROM student_fee_ledger l
          JOIN students s ON s.id = l.student_id
+         ${YEAR_CLASS_JOIN}
          WHERE l.school_id = $1 AND l.academic_year = $2
            AND l.status NOT IN ('paid', 'waived')
            AND GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0) > 0
-         GROUP BY s.id, s.name, s.roll_number, s.school_roll_number, s.grade, s.section, s.parent_name, s.parent_phone
+         GROUP BY s.id, s.name, s.roll_number, ${CLASS_ROLL}, ${CLASS_GRADE}, ${CLASS_SECTION}, s.parent_name, s.parent_phone
          ORDER BY outstanding DESC`,
         [school_id, academic_year]
       )

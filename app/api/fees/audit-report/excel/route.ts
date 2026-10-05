@@ -24,6 +24,7 @@ async function handleGET(req: NextRequest) {
     const wb = new ExcelJS.Workbook()
     wb.creator = 'WLYL'
     wb.created = new Date()
+    wb.calcProperties.fullCalcOnLoad = true   // reconciliation cells are live formulas; always recalculate on open
 
     const fmtMoney = '#,##0.00'
     const headerFill: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E3A5F' } }
@@ -80,6 +81,23 @@ async function handleGET(req: NextRequest) {
       moneyCols(s1, 2, 2, wbTotalRow.number)
       s1.addRow([])
 
+      // Reconciliation — live formulas so a reader can check the arithmetic in Excel itself.
+      // Any difference is the per-bill zero floor on Balance (an overpaid bill never goes negative).
+      s1.addRow(['RECONCILIATION']).font = { bold: true, size: 12 }
+      headerRow(s1, ['Step', 'Amount', '', '', '', ''])
+      const rcBilled = s1.addRow(['Billed', rep.summary.billed])
+      const rcDisc = s1.addRow(['Less: discretionary waivers', -wb_.discretionary])
+      const rcCarry = s1.addRow(['Less: carried forward to a new year', -wb_.carried_forward])
+      const rcOff = s1.addRow(['Less: written off', -wb_.written_off])
+      const rcPaid = s1.addRow(['Less: paid', -rep.summary.paid])
+      const calcResult = rep.summary.billed - wb_.discretionary - wb_.carried_forward - wb_.written_off - rep.summary.paid
+      const rcCalc = s1.addRow(['= Balance (calculated)', { formula: `SUM(B${rcBilled.number}:B${rcPaid.number})`, result: calcResult }])
+      const rcSys = s1.addRow(['Balance per report', rep.summary.balance])
+      const rcDiff = s1.addRow(['Difference (0 = reconciled)', { formula: `B${rcCalc.number}-B${rcSys.number}`, result: calcResult - rep.summary.balance }])
+      ;[rcBilled, rcDisc, rcCarry, rcOff, rcPaid, rcCalc, rcSys, rcDiff].forEach(r => moneyCols(s1, 2, 2, r.number))
+      rcCalc.font = { bold: true }; rcDiff.font = { bold: true }
+      s1.addRow([])
+
       // How to read this report — plain-language notes so a reader doesn't need
       // outside context to interpret the figures correctly.
       s1.addRow(['HOW TO READ THIS REPORT']).font = { bold: true, size: 12 }
@@ -126,7 +144,9 @@ async function handleGET(req: NextRequest) {
       const s4 = wb.addWorksheet('Class-wise')
       s4.columns = [{ width: 12 }, { width: 22 }, { width: 16 }, { width: 14 }, { width: 16 }, { width: 14 }, { width: 14 }]
       metaBlock(s4, rep.meta, 'CLASS-WISE FEE DETAILS')
-      headerRow(s4, ['Class', 'Fee Type', 'Billed', 'Waived', 'Net Demand', 'Paid', 'Balance'])
+      const h4 = headerRow(s4, ['Class', 'Fee Type', 'Billed', 'Waived', 'Net Demand', 'Paid', 'Balance'])
+      s4.views = [{ state: 'frozen', ySplit: h4.number }]
+      s4.autoFilter = { from: { row: h4.number, column: 1 }, to: { row: h4.number, column: 7 } }
       for (const c of rep.by_class) {
         const r = s4.addRow([c.class, c.fee_type, c.billed, c.waived, c.net_demand, c.paid, c.balance])
         moneyCols(s4, 3, 7, r.number)
@@ -140,7 +160,9 @@ async function handleGET(req: NextRequest) {
       const s5 = wb.addWorksheet('Student-wise')
       s5.columns = [{ width: 26 }, { width: 14 }, { width: 12 }, { width: 22 }, { width: 16 }, { width: 18 }, { width: 14 }, { width: 14 }, { width: 16 }, { width: 14 }, { width: 14 }]
       metaBlock(s5, rep.meta, 'STUDENT-WISE FEE DETAILS (by fee type)')
-      headerRow(s5, ['Student', 'School Roll No', 'Class', 'Parent Name', 'Parent Phone', 'Fee Type', 'Billed', 'Waived', 'Net Demand', 'Paid', 'Balance'])
+      const h5 = headerRow(s5, ['Student', 'School Roll No', 'Class', 'Parent Name', 'Parent Phone', 'Fee Type', 'Billed', 'Waived', 'Net Demand', 'Paid', 'Balance'])
+      s5.views = [{ state: 'frozen', ySplit: h5.number }]
+      s5.autoFilter = { from: { row: h5.number, column: 1 }, to: { row: h5.number, column: 11 } }
       for (const st of rep.by_student) {
         const label = st.is_subtotal ? 'SUBTOTAL' : st.fee_type
         const r = s5.addRow([st.student, st.roll_number, st.class, st.parent_name || '', st.parent_phone || '', label, st.billed, st.waived, st.net_demand, st.paid, st.balance])

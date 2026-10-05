@@ -3,17 +3,8 @@ import pool from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
 import { gradeOrderSql } from '@/lib/grades'
 import { withWatchline } from '@/lib/logger'
-
-function toCSV(rows: Record<string, unknown>[], cols: { key: string; label: string }[]): string {
-  const header = cols.map(c => `"${c.label}"`).join(',')
-  const body = rows.map(r =>
-    cols.map(c => {
-      const v = r[c.key] ?? ''
-      return `"${String(v).replace(/"/g, '""')}"`
-    }).join(',')
-  ).join('\n')
-  return header + '\n' + body
-}
+import { toCSV } from '@/lib/csv'
+import { YEAR_CLASS_JOIN, CLASS_GRADE, CLASS_SECTION, CLASS_ROLL } from '@/lib/feeYearClass'
 
 // GET /api/fees/export?school_id=X&academic_year=Y&type=ledger|payments&grade=Z&status=S
 async function handleGET(req: NextRequest) {
@@ -36,30 +27,45 @@ async function handleGET(req: NextRequest) {
       if (type === 'ledger') {
         const conditions = ['l.school_id = $1', 'l.academic_year = $2']
         const values: unknown[] = [school_id, academic_year]
-        if (grade)  { values.push(grade);  conditions.push(`s.grade = $${values.length}`) }
+        if (grade)  { values.push(grade);  conditions.push(`${CLASS_GRADE} = $${values.length}`) }
         if (outstanding) {
           conditions.push(`GREATEST(l.amount_due - COALESCE(l.waiver_amount,0) - l.amount_paid, 0) > 0`)
         } else if (status) {
           values.push(status); conditions.push(`l.status = $${values.length}`)
         }
 
+        // l.waiver_amount is the bill's full running total. Year-end carry-forwards and
+        // write-offs are recorded as waivers too, so split them out: "Waiver" is then only real
+        // concessions and matches the "Waived" figure on every report, and
+        //   Due − Waiver − Carried Forward − Written Off − Paid = Balance.
         const { rows } = await pool.query(
-          `SELECT s.name AS student_name, s.roll_number, s.school_roll_number, s.grade, s.section,
-                  s.parent_name, s.parent_phone,
+          `SELECT s.name AS student_name, s.roll_number, ${CLASS_ROLL} AS school_roll_number,
+                  ${CLASS_GRADE} AS grade, ${CLASS_SECTION} AS section,
+                  s.parent_name, s.parent_phone, l.academic_year,
                   fc.name AS category_name, l.period_label, l.amount_due,
+                  (COALESCE(l.waiver_amount, 0) - COALESCE(wv.carried, 0) - COALESCE(wv.written_off, 0))::numeric(12,2) AS waiver_amount,
+                  COALESCE(wv.carried, 0)::numeric(12,2) AS carried_forward,
+                  COALESCE(wv.written_off, 0)::numeric(12,2) AS written_off,
                   l.amount_paid,
-                  COALESCE(l.waiver_amount, 0) AS waiver_amount,
                   GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0) AS balance,
                   l.due_date, l.status
            FROM student_fee_ledger l
            JOIN students s ON s.id = l.student_id
            JOIN fee_categories fc ON fc.id = l.fee_category_id
+           ${YEAR_CLASS_JOIN}
+           LEFT JOIN (
+             SELECT ledger_id,
+                    SUM(waiver_amount) FILTER (WHERE waiver_type = 'carry_forward') AS carried,
+                    SUM(waiver_amount) FILTER (WHERE waiver_type = 'writeoff') AS written_off
+             FROM fee_waivers WHERE COALESCE(is_revoked, FALSE) = FALSE GROUP BY ledger_id
+           ) wv ON wv.ledger_id = l.id
            WHERE ${conditions.join(' AND ')}
-           ORDER BY ${gradeOrderSql('s.grade')}, s.section, s.name, l.due_date`,
+           ORDER BY ${gradeOrderSql(CLASS_GRADE)}, ${CLASS_SECTION}, s.name, l.due_date, fc.name`,
           values
         )
 
         const cols = [
+          { key: 'academic_year', label: 'Academic Year' },
           { key: 'student_name',  label: 'Student Name' },
           { key: 'school_roll_number', label: 'Roll Number' },
           { key: 'roll_number',   label: 'System ID' },
@@ -70,8 +76,10 @@ async function handleGET(req: NextRequest) {
           { key: 'category_name', label: 'Fee Category' },
           { key: 'period_label',  label: 'Period' },
           { key: 'amount_due',    label: 'Amount Due (₹)' },
-          { key: 'amount_paid',   label: 'Amount Paid (₹)' },
           { key: 'waiver_amount', label: 'Waiver (₹)' },
+          { key: 'carried_forward', label: 'Carried Forward (₹)' },
+          { key: 'written_off',   label: 'Written Off (₹)' },
+          { key: 'amount_paid',   label: 'Amount Paid (₹)' },
           { key: 'balance',       label: 'Balance (₹)' },
           { key: 'due_date',      label: 'Due Date' },
           { key: 'status',        label: 'Status' },
@@ -98,8 +106,9 @@ async function handleGET(req: NextRequest) {
         // record of why. The full audit-report already surfaces cancellations; this
         // day-collection/reconciliation export should too.
         const { rows } = await pool.query(
-          `SELECT s.name AS student_name, s.roll_number, s.school_roll_number, s.grade, s.section,
-                  s.parent_name, s.parent_phone,
+          `SELECT s.name AS student_name, s.roll_number, ${CLASS_ROLL} AS school_roll_number,
+                  ${CLASS_GRADE} AS grade, ${CLASS_SECTION} AS section,
+                  s.parent_name, s.parent_phone, l.academic_year,
                   fc.name AS category_name, l.period_label,
                   fp.receipt_number, fp.amount, fp.payment_mode, fp.payment_status,
                   fp.paid_date, fp.transaction_ref, fp.collected_by_name, fp.notes,
@@ -109,6 +118,7 @@ async function handleGET(req: NextRequest) {
            JOIN students s ON s.id = fp.student_id
            JOIN student_fee_ledger l ON l.id = fp.ledger_id
            JOIN fee_categories fc ON fc.id = l.fee_category_id
+           ${YEAR_CLASS_JOIN}
            WHERE fp.school_id = $1 AND l.academic_year = $2
              AND fp.payment_status IN ('completed', 'cancelled') ${pmtCond}
            ORDER BY fp.paid_date DESC, fp.created_at DESC`,
@@ -116,6 +126,7 @@ async function handleGET(req: NextRequest) {
         )
 
         const cols = [
+          { key: 'academic_year',    label: 'Academic Year' },
           { key: 'student_name',     label: 'Student Name' },
           { key: 'school_roll_number', label: 'Roll Number' },
           { key: 'roll_number',      label: 'System ID' },

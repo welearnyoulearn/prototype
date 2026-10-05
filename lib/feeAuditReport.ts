@@ -1,5 +1,6 @@
 import pool from '@/lib/db'
 import { gradeOrderSql } from '@/lib/grades'
+import { yearClassSql } from '@/lib/feeYearClass'
 
 // Shared builder for the Fee Audit Report — used by the JSON, Excel and PDF routes.
 // Every money section uses the reconcilable model:
@@ -63,20 +64,26 @@ export async function buildFeeAuditReport(opts: {
   const { rows: [sc] } = await pool.query(`SELECT name FROM schools WHERE id = $1`, [school_id])
   const schoolName = sc?.name || `School #${school_id}`
 
+  // Class filters and groupings use the class the student was in during this academic year.
+  const yc = yearClassSql()
   const cond = ['l.school_id = $1', 'l.academic_year = $2']
   const vals: unknown[] = [school_id, academic_year]
   if (student_id) { vals.push(student_id); cond.push(`l.student_id = $${vals.length}`) }
   else {
-    if (grade) { vals.push(grade); cond.push(`s.grade = $${vals.length}`) }
-    if (section && section !== 'all') { vals.push(section); cond.push(`s.section = $${vals.length}`) }
+    if (grade) { vals.push(grade); cond.push(`${yc.grade} = $${vals.length}`) }
+    if (section && section !== 'all') { vals.push(section); cond.push(`${yc.section} = $${vals.length}`) }
   }
   const WHERE = cond.join(' AND ')
 
   // ── INDIVIDUAL STUDENT ──
   if (student_id) {
     const { rows: [student] } = await pool.query(
-      `SELECT id, name, roll_number, school_roll_number, grade, section, parent_name, parent_phone, parent_email
-       FROM students WHERE id = $1 AND school_id = $2`, [student_id, school_id]
+      `SELECT s.id, s.name, s.roll_number, ${yc.roll} AS school_roll_number, ${yc.grade} AS grade, ${yc.section} AS section,
+              s.parent_name, s.parent_phone, s.parent_email
+       FROM students s
+       LEFT JOIN academic_years ay_c ON ay_c.school_id = s.school_id AND ay_c.label = $3
+       LEFT JOIN student_class_history sch ON sch.student_id = s.id AND sch.academic_year_id = ay_c.id
+       WHERE s.id = $1 AND s.school_id = $2`, [student_id, school_id, academic_year]
     )
     if (!student) throw new Error('Student not found')
 
@@ -163,6 +170,7 @@ export async function buildFeeAuditReport(opts: {
             ${BALANCE_SUM} AS balance,
             COUNT(DISTINCT l.student_id) AS students
      FROM student_fee_ledger l JOIN students s ON s.id = l.student_id
+     ${yc.join}
      ${BOOKKEEPING_JOIN} WHERE ${WHERE}`, vals
   )
 
@@ -173,6 +181,7 @@ export async function buildFeeAuditReport(opts: {
      FROM fee_waivers w
      JOIN student_fee_ledger l ON l.id = w.ledger_id
      JOIN students s ON s.id = l.student_id
+     ${yc.join}
      WHERE ${WHERE} AND COALESCE(w.is_revoked,FALSE) = FALSE
      GROUP BY bucket`, vals
   )
@@ -191,18 +200,20 @@ export async function buildFeeAuditReport(opts: {
             ${BALANCE_SUM} AS balance
      FROM student_fee_ledger l JOIN fee_categories fc ON fc.id = l.fee_category_id
      JOIN students s ON s.id = l.student_id
+     ${yc.join}
      ${BOOKKEEPING_JOIN} WHERE ${WHERE} GROUP BY fc.name ORDER BY billed DESC`, vals
   )
   const by_type = byType.map(r => ({ fee_type: r.fee_type, ...money(Number(r.billed), Number(r.waived), Number(r.paid), Number(r.balance)) }))
 
   const { rows: byClass } = await pool.query(
-    `SELECT s.grade, COALESCE(s.section,'') AS section, fc.name AS fee_type,
+    `SELECT ${yc.grade} AS grade, COALESCE(${yc.section},'') AS section, fc.name AS fee_type,
             COALESCE(SUM(l.amount_due),0) AS billed, ${WAIVED_SUM} AS waived,
             COALESCE(SUM(l.amount_paid),0) AS paid, ${BALANCE_SUM} AS balance
      FROM student_fee_ledger l JOIN fee_categories fc ON fc.id = l.fee_category_id
      JOIN students s ON s.id = l.student_id
+     ${yc.join}
      ${BOOKKEEPING_JOIN} WHERE ${WHERE}
-     GROUP BY s.grade, s.section, fc.name ORDER BY ${gradeOrderSql('s.grade')}, s.section, fc.name`, vals
+     GROUP BY ${yc.grade}, ${yc.section}, fc.name ORDER BY ${gradeOrderSql(yc.grade)}, ${yc.section}, fc.name`, vals
   )
   const by_class = byClass.map(r => ({
     class: r.section ? `${r.grade}-${r.section}` : `Grade ${r.grade}`, fee_type: r.fee_type,
@@ -211,8 +222,8 @@ export async function buildFeeAuditReport(opts: {
 
   // Student-wise, broken down per fee type, with a subtotal row per student.
   const { rows: byStudent } = await pool.query(
-    `SELECT s.id AS sid, s.name AS student, s.grade, COALESCE(s.section,'') AS section,
-            COALESCE(s.school_roll_number::text, '') AS roll_number,
+    `SELECT s.id AS sid, s.name AS student, ${yc.grade} AS grade, COALESCE(${yc.section},'') AS section,
+            COALESCE(${yc.roll}::text, '') AS roll_number,
             s.parent_name, s.parent_phone,
             fc.name AS fee_type,
             COALESCE(SUM(l.amount_due),0) AS billed, ${WAIVED_SUM} AS waived,
@@ -220,9 +231,10 @@ export async function buildFeeAuditReport(opts: {
      FROM student_fee_ledger l
      JOIN students s ON s.id = l.student_id
      JOIN fee_categories fc ON fc.id = l.fee_category_id
+     ${yc.join}
      ${BOOKKEEPING_JOIN} WHERE ${WHERE}
-     GROUP BY s.id, s.name, s.grade, s.section, s.school_roll_number, s.parent_name, s.parent_phone, fc.name
-     ORDER BY ${gradeOrderSql('s.grade')}, s.section, s.name, fc.name`, vals
+     GROUP BY s.id, s.name, ${yc.grade}, ${yc.section}, ${yc.roll}, s.parent_name, s.parent_phone, fc.name
+     ORDER BY ${gradeOrderSql(yc.grade)}, ${yc.section}, s.name, fc.name`, vals
   )
   const by_student: BulkReport['by_student'] = []
   let curSid: number | null = null
@@ -253,10 +265,11 @@ export async function buildFeeAuditReport(opts: {
   // Mirrors the same grade+section scoping used for the numeric tables above (WHERE/cond) —
   // previously this only filtered by grade, so a single-section report's Change Log
   // leaked payments/waivers/edits from other sections of the same grade.
+  const ycl = yearClassSql('st', 'l')   // same year-class scoping, for queries that alias students as st
   const gFilterParams: unknown[] = [school_id, academic_year]
   let gClause = ''
-  if (grade) { gFilterParams.push(grade); gClause += ` AND st.grade = $${gFilterParams.length}` }
-  if (section && section !== 'all') { gFilterParams.push(section); gClause += ` AND st.section = $${gFilterParams.length}` }
+  if (grade) { gFilterParams.push(grade); gClause += ` AND ${ycl.grade} = $${gFilterParams.length}` }
+  if (section && section !== 'all') { gFilterParams.push(section); gClause += ` AND ${ycl.section} = $${gFilterParams.length}` }
   const gParams = (extra: unknown[] = []) => [...gFilterParams, ...extra]
 
   async function tableExists(t: string) { return (await pool.query(`SELECT to_regclass($1) AS t`, [t])).rows[0].t != null }
@@ -279,6 +292,7 @@ export async function buildFeeAuditReport(opts: {
       `SELECT e.old_amount, e.new_amount, e.reason, e.changed_by, e.changed_at, st.name AS student_name, fc.name AS fee_type
        FROM student_fee_ledger_edits e JOIN student_fee_ledger l ON l.id = e.ledger_id
        JOIN students st ON st.id = e.student_id JOIN fee_categories fc ON fc.id = l.fee_category_id
+       ${ycl.join}
        WHERE e.school_id = $1 AND l.academic_year = $2 ${gClause} ORDER BY e.changed_at`, gParams()
     ).catch(() => ({ rows: [] }))
     for (const r of rows) log.push({
@@ -292,6 +306,7 @@ export async function buildFeeAuditReport(opts: {
               w.revoked_by, w.revoked_at, w.revoke_reason, st.name AS student_name, fc.name AS fee_type
        FROM fee_waivers w JOIN student_fee_ledger l ON l.id = w.ledger_id
        JOIN students st ON st.id = w.student_id JOIN fee_categories fc ON fc.id = l.fee_category_id
+       ${ycl.join}
        WHERE w.school_id = $1 AND l.academic_year = $2 ${gClause} ORDER BY w.created_at`, gParams()
     ).catch(() => ({ rows: [] }))
     for (const r of rows) {
@@ -305,12 +320,15 @@ export async function buildFeeAuditReport(opts: {
               fp.cancelled_by, fp.cancel_reason, fp.created_at, fp.cancelled_at, st.name AS student_name, fc.name AS fee_type
        FROM fee_payments fp JOIN student_fee_ledger l ON l.id = fp.ledger_id
        JOIN students st ON st.id = fp.student_id JOIN fee_categories fc ON fc.id = l.fee_category_id
+       ${ycl.join}
        WHERE fp.school_id = $1 AND l.academic_year = $2 AND fp.payment_status IN ('completed','cancelled') ${gClause}
        ORDER BY fp.created_at`, gParams()
     ).catch(() => ({ rows: [] }))
     for (const r of rows) {
+      // A cancelled payment was received first — keep that entry (who took it, receipt no.) and
+      // add the cancellation, so the log doesn't lose the original collection.
+      log.push({ type: 'Payment Received', detail: `${r.student_name} · ${r.fee_type} · ${r.receipt_number} · ${r.payment_mode}${r.payment_status === 'cancelled' ? ' · since cancelled' : ''}`, user: r.collected_by_name, at: r.created_at, amount: Number(r.amount) })
       if (r.payment_status === 'cancelled') log.push({ type: 'Payment Cancelled', detail: `${r.student_name} · ${r.fee_type} · ${r.receipt_number} · ${r.cancel_reason || ''}`, user: r.cancelled_by || r.collected_by_name, at: r.cancelled_at || r.created_at, amount: Number(r.amount) })
-      else log.push({ type: 'Payment Received', detail: `${r.student_name} · ${r.fee_type} · ${r.receipt_number} · ${r.payment_mode}`, user: r.collected_by_name, at: r.created_at, amount: Number(r.amount) })
     }
   }
   log.sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime())
