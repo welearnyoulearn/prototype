@@ -8,7 +8,7 @@ import { printDualCopyReceipt } from './receipts'
 import { useFeeStore } from '@/lib/stores/feeStore'
 import { LoadErrorBanner } from './LoadErrorBanner'
 import FeeDayClosePanel from './FeeDayClosePanel'
-import { fmt, fmtDate, todayLocal, rollLabel } from './format'
+import { fmt, fmtDate, todayLocal, rollLabel, plural } from './format'
 
 const GRADES = GRADE_SEQUENCE
 function gradeLabel(g: string): string { return /^\d+$/.test(g) ? `Grade ${g}` : g }
@@ -223,7 +223,12 @@ export default function FeeCollectTab({
   // A student expanded in one academic year's ledger shouldn't stay "open" once
   // the ledger reloads for a different year (the parent's year selector used to
   // reset this directly when this state lived there).
+  // Skip the initial mount: the tab can mount *because of* a hand-off (Leavers → Collect), and
+  // this effect runs after the hand-off effect above, so resetting on mount would wipe it.
+  const lastAcademicYearRef = useRef(academicYear)
   useEffect(() => {
+    if (lastAcademicYearRef.current === academicYear) return
+    lastAcademicYearRef.current = academicYear
     setOpenStudentId(null); setShowCollectForm(false); setPassoutOpenStudent(null)
   }, [academicYear])
 
@@ -351,6 +356,13 @@ export default function FeeCollectTab({
     || studentRows.find(r => r.student_id === openStudentId)
     || (passoutOpenStudent?.student_id === openStudentId ? passoutOpenStudent : undefined)
 
+  // A student handed off from Leavers / the passout panel isn't on the active roster, so they
+  // have no row of their own — append theirs so the collect form and the "Payment Recorded"
+  // panel (both rendered inside the student's row) have somewhere to appear.
+  const visibleRows = passoutOpenStudent && !collectionFiltered.some(r => r.student_id === passoutOpenStudent.student_id)
+    ? [...collectionFiltered, passoutOpenStudent]
+    : collectionFiltered
+
   const checkedTotal = openStudent
     ? openStudent.open_entries.filter(e => collectChecked.has(e.id)).reduce((s, e) => s + Number(e.balance), 0)
     : 0
@@ -474,7 +486,11 @@ export default function FeeCollectTab({
         line_items: d.line_items || undefined,
       })
       setShowCollectForm(false)
-      setPassoutOpenStudent(null)
+      // Handed-off (leaver) rows aren't in the reloaded ledger, so keep their figures current here.
+      const paidNow = d.total_paid ?? enteredAmount
+      setPassoutOpenStudent(p => p && p.student_id === openStudent.student_id
+        ? { ...p, total_paid: p.total_paid + paidNow, outstanding: Math.max(0, p.outstanding - paidNow) }
+        : p)
       // The confirm dialog is a full-screen overlay — once it closes, the row
       // underneath (and the "Payment Recorded" success view inside it) can be
       // scrolled well out of view in a long list, with nothing telling the
@@ -634,7 +650,7 @@ export default function FeeCollectTab({
                 <div className="col-span-2 text-center">Action</div>
               </div>
               <div className="divide-y divide-gray-50 max-h-[600px] overflow-y-auto">
-                {collectionFiltered.map(row => (
+                {visibleRows.map(row => (
                   <Fragment key={row.student_id}>
                     <div id={`student-row-${row.student_id}`} className={`px-4 py-3 flex flex-col gap-2 sm:grid sm:grid-cols-12 sm:gap-2 sm:items-center hover:bg-gray-50/60 cursor-pointer ${openStudentId === row.student_id ? 'bg-blue-50/40' : ''}`}
                       onClick={() => toggleStudent(row.student_id)}>
@@ -705,7 +721,7 @@ export default function FeeCollectTab({
                                 printCounterReceipt(row, paySuccess, lines)
                               }}
                                 className="text-sm bg-white border border-green-300 text-green-700 px-4 py-1.5 rounded-lg font-medium hover:bg-green-50">🖨 Print Receipt</button>
-                              <button onClick={() => { setPaySuccess(null); setOpenStudentId(null) }}
+                              <button onClick={() => { setPaySuccess(null); setOpenStudentId(null); setPassoutOpenStudent(null) }}
                                 className="text-sm bg-green-600 text-white px-4 py-1.5 rounded-lg font-medium hover:bg-green-700">Done</button>
                             </div>
                           </div>
@@ -1115,7 +1131,7 @@ export default function FeeCollectTab({
             return (
               <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
                 <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-100 flex justify-between">
-                  <p className="text-sm text-gray-500">{defaulters.length} students with outstanding dues</p>
+                  <p className="text-sm text-gray-500">{plural(defaulters.length, 'student')} with outstanding dues</p>
                   <p className="text-sm font-bold text-red-600">Total: {fmt(defaulters.reduce((s, r) => s + r.outstanding, 0))}</p>
                 </div>
                 <div className="overflow-x-auto max-h-[600px]">

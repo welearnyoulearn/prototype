@@ -9,6 +9,11 @@ export function todayLocal(): string {
   return new Date().toLocaleDateString('en-CA')
 }
 
+// "1 student", "7 students" — counts shown in headings and summaries.
+export function plural(n: number | string, singular: string, pluralForm = `${singular}s`): string {
+  return `${n} ${Number(n) === 1 ? singular : pluralForm}`
+}
+
 export function fmtDate(d: string) {
   return new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
 }

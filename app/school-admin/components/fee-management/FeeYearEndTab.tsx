@@ -1,6 +1,6 @@
 'use client'
 
-import { rollLabel } from './format'
+import { rollLabel, plural } from './format'
 import { useCallback, useEffect, useState } from 'react'
 import { FINAL_GRADE } from '@/lib/grades'
 import type { ReceiptHeaderBlock } from './types'
@@ -296,7 +296,7 @@ export default function FeeYearEndTab({
               ))}
             </div>
             <p className="text-xs text-gray-400 mt-3">
-              {yearEnd.students.length} students have unpaid dues ({yearEnd.unpaid_count} bills). Decide what to do with each below.
+              {plural(yearEnd.students.length, 'student')} {yearEnd.students.length === 1 ? 'has' : 'have'} unpaid dues ({plural(yearEnd.unpaid_count, 'bill')}). Decide what to do with each below.
             </p>
           </div>
 
