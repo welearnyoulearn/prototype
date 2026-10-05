@@ -46,7 +46,7 @@ test.describe.serial('Plan expiry: grace, lock, export, renewal queue', () => {
     await setSubscription(platformCookie, schoolId, 'premium')
     owner = await newClient()
     expect((await owner.post('/api/auth/login', { data: { email: s.email, password: s.temp_password } })).status()).toBe(200)
-    expect((await owner.post('/api/auth/change-password', { data: { newPassword: OWNER_PASS } })).status()).toBe(200)
+    expect((await owner.post('/api/auth/change-password', { data: { currentPassword: s.temp_password, newPassword: OWNER_PASS } })).status()).toBe(200)
     expect((await owner.put('/api/auth/profile', { data: { full_name: 'Owner', phone: '9000000012' } })).status()).toBe(200)
   })
 

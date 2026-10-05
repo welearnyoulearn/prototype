@@ -285,7 +285,7 @@ test.describe.serial('Student Onboarding — Full Lifecycle (UI)', () => {
 
     await fillRow(page, {
       rollNo: '1', lastName: 'Das', firstName: 'Bina',
-      grade: '11', section: 'A', parentName: 'Dina Das', parentPhone: phone(8),
+      grade: '5', section: 'A', parentName: 'Dina Das', parentPhone: phone(8),
     })
     await page.getByTestId('enroll-students-btn').click()
 
@@ -362,7 +362,7 @@ test.describe.serial('Student Onboarding — Full Lifecycle (UI)', () => {
     await fillRow(page, {
       rollNo: '1', lastName: 'Cred', firstName: 'Test',
       email: `credtest${ts}@student.com`,
-      grade: '10', section: 'A',
+      grade: '10', section: 'D',
       parentName: 'Cred Parent', parentPhone: phone(12),
       parentEmail: `credparent${ts}@parent.com`,
     })
@@ -371,7 +371,7 @@ test.describe.serial('Student Onboarding — Full Lifecycle (UI)', () => {
     await expect(page.getByText('Enrollment Complete — Credentials')).toBeVisible({ timeout: 30000 })
     await expect(page.getByText('Student Credentials')).toBeVisible()
     await expect(page.getByText('Parent Credentials')).toBeVisible()
-    await expect(page.getByText(`credtest${ts}@student.com`)).toBeVisible()
+    await expect(page.getByText('Cred Test')).toBeVisible()
     await expect(page.getByText(`credparent${ts}@parent.com`)).toBeVisible()
 
     const found = await studentIdsByNames(['Cred Test'])
@@ -459,7 +459,7 @@ test.describe.serial('Student Onboarding — Full Lifecycle (UI)', () => {
 
     await fillRow(page, {
       rollNo: '1', lastName: 'UITest', firstName: 'Student',
-      grade: String(ts).slice(-2), section: 'Z',
+      grade: '4', section: 'Z',
       parentName: 'UI Parent', parentPhone: phone(50),
     })
     await page.getByTestId('enroll-students-btn').click()

@@ -184,7 +184,7 @@ test.describe.serial('Staff accounts — plan security, seat limits, deactivatio
   })
 
   test('10. You cannot deactivate yourself', async () => {
-    const me = (await listStaff(ownerA, a.id)).find(s => s.email === a.email)!
+    const me = (await listStaff(ownerA, a.id)).find(s => s.email.toLowerCase() === a.email.toLowerCase())!
     expect((await ownerA.delete('/api/school-admin/staff-accounts', { data: { id: me.id } })).status()).toBe(400)
   })
 
@@ -226,7 +226,7 @@ test.describe.serial('Staff accounts — plan security, seat limits, deactivatio
       expect((await addStaff(vp, `sneaky${ts}@hardening.test`, 'school_admin')).status()).toBe(403)
       expect((await addStaff(vp, `sneaky2${ts}@hardening.test`, 'principal')).status()).toBe(403)
 
-      const owner = (await listStaff(vp, c.id)).find(s => s.email === c.email)!   // they can still see the list
+      const owner = (await listStaff(vp, c.id)).find(s => s.email.toLowerCase() === c.email.toLowerCase())!   // they can still see the list
       expect((await vp.delete('/api/school-admin/staff-accounts', { data: { id: owner.id } })).status()).toBe(403)
       expect((await vp.patch('/api/school-admin/staff-accounts', { data: { id: owner.id } })).status()).toBe(403)
       await vp.dispose()
@@ -254,7 +254,7 @@ test.describe.serial('Staff accounts — plan security, seat limits, deactivatio
       expect((await addStaff(ownerC, adminEmail, 'school_admin')).status()).toBe(201)
       const admin2 = await acceptInvite(adminEmail)
 
-      const owner = (await listStaff(admin2, c.id)).find(s => s.email === c.email)!
+      const owner = (await listStaff(admin2, c.id)).find(s => s.email.toLowerCase() === c.email.toLowerCase())!
       expect(owner.is_primary_admin).toBe(true)
       const res = await admin2.delete('/api/school-admin/staff-accounts', { data: { id: owner.id } })
       expect(res.status()).toBe(403)                          // used to succeed — the bug this test now guards

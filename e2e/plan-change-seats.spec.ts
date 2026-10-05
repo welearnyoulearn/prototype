@@ -23,7 +23,7 @@ async function login(ctx: APIRequestContext, email: string, password: string) {
 async function ownerClient(email: string, tempPass: string): Promise<APIRequestContext> {
   const ctx = await newClient()
   expect((await login(ctx, email, tempPass)).status()).toBe(200)
-  expect((await ctx.post('/api/auth/change-password', { data: { newPassword: OWNER_PASS } })).status()).toBe(200)
+  expect((await ctx.post('/api/auth/change-password', { data: { currentPassword: tempPass, newPassword: OWNER_PASS } })).status()).toBe(200)
   expect((await ctx.put('/api/auth/profile', { data: { full_name: 'Owner', phone: '9000000011' } })).status()).toBe(200)
   return ctx
 }
