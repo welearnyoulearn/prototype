@@ -268,6 +268,8 @@ function SchoolAdmin() {
   // the browser/phone Back button moves through the portal's own screens.
   const { current: requestedNav, navigate: navigateSection, reset: resetSection } = useSectionNav<string>('overview')
   const [visited, setVisited] = useState<Set<string>>(new Set([requestedNav]))
+  // Onboarding panels mount on first open of their sub-tab (then stay mounted to keep form state).
+  const [onboardOpened, setOnboardOpened] = useState<{ staff: boolean; students: boolean }>({ staff: false, students: false })
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
   const [myRole, setMyRole] = useState<string>('school_admin')
@@ -679,7 +681,7 @@ function SchoolAdmin() {
                       <h2 className="text-xl font-bold text-gray-900 mb-1">Staff</h2>
                       <div className="flex max-w-full gap-1 overflow-x-auto border-b border-[#dce2db]">
                         {([['directory', 'Staff Directory'], ['onboard', 'Onboard Staff']] as const).map(([key, label]) => (
-                          <button key={key} onClick={() => setStaffSubTab(key)}
+                          <button key={key} onClick={() => { setStaffSubTab(key); if (key === 'onboard') setOnboardOpened(o => ({ ...o, staff: true })) }}
                             aria-pressed={staffSubTab === key} className={`min-h-11 whitespace-nowrap border-b-2 px-4 text-sm font-medium transition-colors ${staffSubTab === key ? 'border-[#235b46] text-[#235b46]' : 'border-transparent text-gray-600 hover:text-gray-900'}`}>
                             {label}
                           </button>
@@ -687,7 +689,7 @@ function SchoolAdmin() {
                       </div>
                     </div>
                     <div hidden={staffSubTab !== 'directory'}><TeachersManagement schoolId={selectedSchool.id} refreshKey={staffRefreshKey} /></div>
-                    <div hidden={staffSubTab !== 'onboard'}><StaffOnboarding schoolId={selectedSchool.id} onRefresh={() => { setStaffRefreshKey(k => k + 1); setStaffSubTab('directory') }} /></div>
+                    <div hidden={staffSubTab !== 'onboard'}>{(onboardOpened.staff || staffSubTab === 'onboard') && <StaffOnboarding schoolId={selectedSchool.id} onRefresh={() => { setStaffRefreshKey(k => k + 1); setStaffSubTab('directory') }} />}</div>
                   </div>
                 )}
 
@@ -698,7 +700,7 @@ function SchoolAdmin() {
                       <h2 className="text-xl font-bold text-gray-900 mb-1">Student Management</h2>
                       <div className="flex max-w-full gap-1 overflow-x-auto border-b border-[#dce2db]">
                         {([['list', 'Student List'], ['onboard', 'Onboard Students']] as const).map(([key, label]) => (
-                          <button key={key} onClick={() => setStudentsSubTab(key)}
+                          <button key={key} onClick={() => { setStudentsSubTab(key); if (key === 'onboard') setOnboardOpened(o => ({ ...o, students: true })) }}
                             aria-pressed={studentsSubTab === key} className={`min-h-11 whitespace-nowrap border-b-2 px-4 text-sm font-medium transition-colors ${studentsSubTab === key ? 'border-[#235b46] text-[#235b46]' : 'border-transparent text-gray-600 hover:text-gray-900'}`}>
                             {label}
                           </button>
@@ -706,7 +708,7 @@ function SchoolAdmin() {
                       </div>
                     </div>
                     <div hidden={studentsSubTab !== 'list'}><StudentsManagement schoolId={selectedSchool.id} refreshKey={studentRefreshKey} /></div>
-                    <div hidden={studentsSubTab !== 'onboard'}><StudentOnboarding schoolId={selectedSchool.id} onRefresh={() => { setStudentRefreshKey(k => k + 1); setStudentsSubTab('list') }} /></div>
+                    <div hidden={studentsSubTab !== 'onboard'}>{(onboardOpened.students || studentsSubTab === 'onboard') && <StudentOnboarding schoolId={selectedSchool.id} onRefresh={() => { setStudentRefreshKey(k => k + 1); setStudentsSubTab('list') }} />}</div>
                   </div>
                 )}
 

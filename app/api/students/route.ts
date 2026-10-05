@@ -92,6 +92,17 @@ async function handleGET(req: NextRequest) {
         return NextResponse.json(rows.map(r => r.grade))
       }
 
+      // Lightweight mode: only the roll-number fields, for onboarding duplicate checks.
+      if (searchParams.get('rolls_only') === '1') {
+        if (teacher) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+        const { rows } = await pool.query(
+          `SELECT grade, section, school_roll_number, status FROM students
+           WHERE school_id = $1 AND school_roll_number IS NOT NULL`,
+          [scopedSchoolId]
+        )
+        return NextResponse.json(rows)
+      }
+
       // school_id is seeded as $1 rather than pushed conditionally, so there is no
       // code path that can emit a school-less query.
       const values: (string | number)[] = [scopedSchoolId]
