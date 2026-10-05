@@ -585,10 +585,10 @@ export default function FeeCollectTab({
       {collectionView === 'counter' && (
         <div className="space-y-4">
           {/* Filters */}
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             <input data-testid="input-ledger-search" type="text" placeholder="Search name, roll, grade, phone, parent…" value={ledgerSearch}
               onChange={e => setLedgerSearch(e.target.value)}
-              className="flex-1 text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              className="flex-1 min-w-[12rem] text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500" />
             <select data-testid="select-ledger-grade" value={ledgerGrade} onChange={e => setLedgerGrade(e.target.value)}
               className="text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white">
               <option value="">All Grades</option>
