@@ -8,6 +8,8 @@ import type {
   RecentPayment, GradeStat, PassoutData, PassoutStudent,
   ReceiptHeaderBlock,
 } from './fee-management/types'
+import { classForYear } from './fee-management/format'
+import { carriedBilled } from './fee-management/dues'
 import { escapeHtml, printDualCopyReceipt, writeAndPrint, renderHeaderBlocks } from './fee-management/receipts'
 import FeeArchiveTab from './fee-management/FeeArchiveTab'
 import FeeLeaversTab, { type RemovedStudent } from './fee-management/FeeLeaversTab'
@@ -131,8 +133,8 @@ export default function FeeManagement({
   // Derived passbook data filtered to the selected academic year
   const pbYearGroup = pbData?.ledger_by_year.find(y => y.academic_year === academicYear) ?? null
   const pbSummary   = pbYearGroup
-    ? { total_billed: pbYearGroup.total_billed, total_paid: pbYearGroup.total_paid, total_waived: pbYearGroup.total_waived, discretionary_waived: pbYearGroup.discretionary_waived ?? pbYearGroup.total_waived, outstanding: pbYearGroup.outstanding }
-    : { total_billed: 0, total_paid: 0, total_waived: 0, discretionary_waived: 0, outstanding: 0 }
+    ? { total_billed: pbYearGroup.total_billed, total_paid: pbYearGroup.total_paid, total_waived: pbYearGroup.total_waived, discretionary_waived: pbYearGroup.discretionary_waived ?? pbYearGroup.total_waived, written_off: pbYearGroup.written_off ?? 0, carried_forward: pbYearGroup.carried_forward ?? 0, outstanding: pbYearGroup.outstanding }
+    : { total_billed: 0, total_paid: 0, total_waived: 0, discretionary_waived: 0, written_off: 0, carried_forward: 0, outstanding: 0 }
   const pbPayments  = pbData?.payments.filter(p => p.bill_year === academicYear) ?? []
   // One receipt_number can span several fee-category rows in pbPayments (one
   // payment covering multiple categories at once) — group them here so the
@@ -374,7 +376,7 @@ export default function FeeManagement({
     try {
       const [statsRes, pmtRes] = await Promise.all([
         fetch(`/api/fees/stats?school_id=${schoolId}&academic_year=${academicYear}`),
-        fetch(`/api/fees/payments?school_id=${schoolId}`),
+        fetch(`/api/fees/payments?school_id=${schoolId}&academic_year=${encodeURIComponent(academicYear)}`),
       ])
       if (statsRes.ok) {
         clearLoadError('stats')
@@ -448,6 +450,9 @@ export default function FeeManagement({
   // banner on Overview until academicYear happened to change again. This endpoint
   // is cheap enough that refetching on tab switches is a non-issue.
   useEffect(() => { if (academicYear) loadSetupStatus() }, [academicYear, activeTab, loadSetupStatus])
+  // Fee Plan edits (head added, amounts saved, bills generated, plan locked) reload the plan data
+  // without changing tab; refresh the banner's status then too so it doesn't contradict the checklist.
+  useEffect(() => { if (academicYear && activeTab === 'setup') loadSetupStatus() }, [categories, structures, structureLock, academicYear, activeTab, loadSetupStatus])
 
   // ── Setup actions ────────────────────────────────────────────────────────────
   // Generate bills only for students who have no ledger rows yet (safe after lock)
@@ -594,9 +599,11 @@ export default function FeeManagement({
     if (rows.length === 0) return
     const s = pbData.student
     const first = rows[0] as PaymentRecord & { fee_head_name?: string; period_label?: string; category_name?: string }
+    // Class as of the year this payment was for, not today's (a reprint must match the original)
+    const cls = classForYear(s, pbData.class_by_year, first.bill_year)
     printDualCopyReceipt({
       school_name: branding.school_name || 'Fee Receipt', logo_url: branding.logo_url, logo_align: branding.logo_align, header_blocks: branding.receipt_header_blocks,
-      student_name: s.name, roll_number: s.school_roll_number ? String(s.school_roll_number) : '', system_id: s.roll_number, grade: s.grade, section: s.section || '',
+      student_name: s.name, roll_number: cls.school_roll_number ? String(cls.school_roll_number) : '', system_id: s.roll_number, grade: cls.grade, section: cls.section || '',
       parent_name: s.parent_name, receipt_number: receiptNumber,
       lines: rows.map(r => {
         const row = r as PaymentRecord & { fee_head_name?: string; period_label?: string; category_name?: string }
@@ -611,13 +618,21 @@ export default function FeeManagement({
   function printPassbookStatement() {
     if (!pbData) return
     const s = pbData.student
-    const rows = pbData.timeline.map(t => `<tr>
+    const cls = classForYear(s, pbData.class_by_year, academicYear)
+    // A statement is for the selected year: only that year's entries, with a running balance of its
+    // own. (The full timeline spans every year — it would list e.g. next year's "Previous Year
+    // Dues" bill as a charge in this one and carry the balance across years.)
+    let running = 0
+    const rows = pbData.timeline.filter(t => !t.academic_year || t.academic_year === academicYear).map(t => {
+      running += Number(t.debit) - Number(t.credit)
+      return `<tr>
       <td>${new Date(t.date).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' })}</td>
       <td>${t.description}</td>
       <td style="text-align:right">${t.debit > 0 ? '₹' + Number(t.debit).toLocaleString('en-IN') : ''}</td>
       <td style="text-align:right">${t.credit > 0 ? '₹' + Number(t.credit).toLocaleString('en-IN') : ''}</td>
-      <td style="text-align:right">₹${Number(t.balance).toLocaleString('en-IN')}</td>
-    </tr>`).join('')
+      <td style="text-align:right">₹${Math.max(0, running).toLocaleString('en-IN')}</td>
+    </tr>`
+    }).join('')
     const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Statement ${escapeHtml(s.name)}</title>
 <style>
   body{font-family:Arial,sans-serif;padding:32px;color:#222;max-width:820px;margin:0 auto}
@@ -644,7 +659,7 @@ export default function FeeManagement({
     <div class="school">${escapeHtml(branding.school_name || 'School')}</div>
     ${renderHeaderBlocks(branding.receipt_header_blocks)}
     <div class="title">Fee Statement (Passbook)</div>
-    <div class="sub" style="overflow-wrap:anywhere">${escapeHtml(s.name)} · Grade ${escapeHtml(s.grade)}${escapeHtml(s.section || '')}${s.school_roll_number ? ` · Roll ${escapeHtml(String(s.school_roll_number))}` : ''} · System ID ${escapeHtml(s.roll_number)} · ${escapeHtml(academicYear)}</div>
+    <div class="sub" style="overflow-wrap:anywhere">${escapeHtml(s.name)} · Grade ${escapeHtml(cls.grade)}${escapeHtml(cls.section || '')}${cls.school_roll_number ? ` · Roll ${escapeHtml(String(cls.school_roll_number))}` : ''} · System ID ${escapeHtml(s.roll_number)} · ${escapeHtml(academicYear)}</div>
     ${branding.logo_url && branding.logo_align === 'right' ? `<img class="hdr-logo right" src="${escapeHtml(branding.logo_url)}" style="height:64px;object-fit:contain" />` : ''}
   </div>
 </div>
@@ -653,11 +668,13 @@ export default function FeeManagement({
   <div>Phone: ${s.parent_phone || '—'}</div>
 </div>
 <div class="sumbox">
-  <div><div class="l">Total Billed</div><div class="v">₹${Number(pbData.summary.total_billed).toLocaleString('en-IN')}</div></div>
-  <div><div class="l">Paid</div><div class="v">₹${Number(pbData.summary.total_paid).toLocaleString('en-IN')}</div></div>
-  <div><div class="l">Waived</div><div class="v">₹${Number(pbData.summary.discretionary_waived ?? pbData.summary.total_waived).toLocaleString('en-IN')}</div></div>
-  <div><div class="l">Outstanding</div><div class="v">₹${Number(pbData.summary.outstanding).toLocaleString('en-IN')}</div></div>
+  <div><div class="l">Total Billed</div><div class="v">₹${Number(pbSummary.total_billed).toLocaleString('en-IN')}</div></div>
+  <div><div class="l">Paid</div><div class="v">₹${Number(pbSummary.total_paid).toLocaleString('en-IN')}</div></div>
+  <div><div class="l">Waived</div><div class="v">₹${Number(pbSummary.discretionary_waived ?? pbSummary.total_waived).toLocaleString('en-IN')}</div></div>
+  ${Number(pbSummary.written_off) > 0 ? `<div><div class="l">Written off</div><div class="v">₹${Number(pbSummary.written_off).toLocaleString('en-IN')}</div></div>` : ''}
+  <div><div class="l">Outstanding</div><div class="v">₹${Number(pbSummary.outstanding).toLocaleString('en-IN')}</div></div>
 </div>
+${Number(pbSummary.carried_forward) > 0 ? `<p style="font-size:11px;color:#92400e;margin:6px 0 10px">₹${Number(pbSummary.carried_forward).toLocaleString('en-IN')} of this year's bills was carried forward to the next year (listed below as "Carried forward" lines). It is not counted in Total Billed or Outstanding above.</p>` : ''}
 <table><thead><tr><th>Date</th><th>Description</th><th style="text-align:right">Charge</th><th style="text-align:right">Paid</th><th style="text-align:right">Balance</th></tr></thead>
 <tbody>${rows}</tbody></table>
 <div class="ftr">Generated ${new Date().toLocaleString('en-IN')} · Computer-generated statement.</div>
@@ -1012,8 +1029,8 @@ export default function FeeManagement({
                   <>
                     <p className="text-base font-bold text-gray-900">{pbData.student.name}</p>
                     <p className="text-xs text-gray-400 [overflow-wrap:anywhere]">
-                      Gr.{pbData.student.grade}{pbData.student.section}
-                      {pbData.student.school_roll_number ? ` · Roll ${pbData.student.school_roll_number}` : ''}{pbData.student.roll_number ? ` · System ID ${pbData.student.roll_number}` : ''}
+                      Gr.{classForYear(pbData.student, pbData.class_by_year, academicYear).grade}{classForYear(pbData.student, pbData.class_by_year, academicYear).section}
+                      {classForYear(pbData.student, pbData.class_by_year, academicYear).school_roll_number ? ` · Roll ${classForYear(pbData.student, pbData.class_by_year, academicYear).school_roll_number}` : ''}{pbData.student.roll_number ? ` · System ID ${pbData.student.roll_number}` : ''}
                       {pbData.student.parent_name ? ` · Parent: ${pbData.student.parent_name}` : ''}
                     </p>
                   </>
@@ -1035,11 +1052,12 @@ export default function FeeManagement({
 
             {/* Summary bar */}
             {pbData && (
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 px-5 py-3 bg-gray-50 border-b border-gray-100 flex-shrink-0">
+              <div className={`grid grid-cols-2 ${pbSummary.written_off ? 'sm:grid-cols-5' : 'sm:grid-cols-4'} gap-3 px-5 py-3 bg-gray-50 border-b border-gray-100 flex-shrink-0`}>
                 {[
                   { l: 'Total Billed', v: pbSummary.total_billed, c: 'text-gray-800' },
                   { l: 'Paid',         v: pbSummary.total_paid,    c: 'text-green-700' },
                   { l: 'Waived',       v: pbSummary.discretionary_waived,  c: 'text-purple-700' },
+                  ...(pbSummary.written_off ? [{ l: 'Written off', v: pbSummary.written_off, c: 'text-amber-700' }] : []),
                   { l: 'Outstanding',  v: pbSummary.outstanding,   c: 'text-red-600' },
                 ].map(s => (
                   <div key={s.l} className="text-center">
@@ -1047,6 +1065,8 @@ export default function FeeManagement({
                     <p className={`text-base font-bold mt-0.5 ${s.c}`}>{fmt(s.v)}</p>
                   </div>
                 ))}
+                {pbSummary.carried_forward ? <p className="col-span-full text-center text-[11px] text-gray-400">{fmt(pbSummary.carried_forward)} moved to the next year's bills — not counted in Billed.</p> : null}
+                {(() => { const c = carriedBilled((pbYearGroup?.entries ?? [])); return c > 0 ? <p data-testid="passbook-carried-in" className="col-span-full text-center text-[11px] text-amber-700">Billed includes {fmt(c)} carried in from earlier years.</p> : null })()}
               </div>
             )}
 

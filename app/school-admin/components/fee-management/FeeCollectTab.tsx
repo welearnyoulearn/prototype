@@ -8,7 +8,8 @@ import { printDualCopyReceipt } from './receipts'
 import { useFeeStore } from '@/lib/stores/feeStore'
 import { LoadErrorBanner } from './LoadErrorBanner'
 import FeeDayClosePanel from './FeeDayClosePanel'
-import { fmt, fmtDate, todayLocal, rollLabel } from './format'
+import { fmt, fmtDate, todayLocal, rollLabel, plural } from './format'
+import { isCarriedEntry, carriedBalance, carriedBilled, summarizeCarriedNotes } from './dues'
 
 const GRADES = GRADE_SEQUENCE
 function gradeLabel(g: string): string { return /^\d+$/.test(g) ? `Grade ${g}` : g }
@@ -177,7 +178,7 @@ export default function FeeCollectTab({
   const payIdemKeyRef = useRef<string | null>(null)
   const waiverIdemKeyRef = useRef<string | null>(null)
   const [showWaiver, setShowWaiver] = useState(false)
-  const [waiverForm, setWaiverForm] = useState({ waiver_type: 'percentage', waiver_value: '', reason: '', granted_by_name: adminName || '' })
+  const [waiverForm, setWaiverForm] = useState({ waiver_type: 'percentage', waiver_value: '', reason: '' })
   const [waiverLoading, setWaiverLoading] = useState(false)
   const [waiverError, setWaiverError] = useState('')
   const [showPayConfirm, setShowPayConfirm] = useState(false)
@@ -223,7 +224,12 @@ export default function FeeCollectTab({
   // A student expanded in one academic year's ledger shouldn't stay "open" once
   // the ledger reloads for a different year (the parent's year selector used to
   // reset this directly when this state lived there).
+  // Skip the initial mount: the tab can mount *because of* a hand-off (Leavers → Collect), and
+  // this effect runs after the hand-off effect above, so resetting on mount would wipe it.
+  const lastAcademicYearRef = useRef(academicYear)
   useEffect(() => {
+    if (lastAcademicYearRef.current === academicYear) return
+    lastAcademicYearRef.current = academicYear
     setOpenStudentId(null); setShowCollectForm(false); setPassoutOpenStudent(null)
   }, [academicYear])
 
@@ -351,6 +357,13 @@ export default function FeeCollectTab({
     || studentRows.find(r => r.student_id === openStudentId)
     || (passoutOpenStudent?.student_id === openStudentId ? passoutOpenStudent : undefined)
 
+  // A student handed off from Leavers / the passout panel isn't on the active roster, so they
+  // have no row of their own — append theirs so the collect form and the "Payment Recorded"
+  // panel (both rendered inside the student's row) have somewhere to appear.
+  const visibleRows = passoutOpenStudent && !collectionFiltered.some(r => r.student_id === passoutOpenStudent.student_id)
+    ? [...collectionFiltered, passoutOpenStudent]
+    : collectionFiltered
+
   const checkedTotal = openStudent
     ? openStudent.open_entries.filter(e => collectChecked.has(e.id)).reduce((s, e) => s + Number(e.balance), 0)
     : 0
@@ -474,7 +487,11 @@ export default function FeeCollectTab({
         line_items: d.line_items || undefined,
       })
       setShowCollectForm(false)
-      setPassoutOpenStudent(null)
+      // Handed-off (leaver) rows aren't in the reloaded ledger, so keep their figures current here.
+      const paidNow = d.total_paid ?? enteredAmount
+      setPassoutOpenStudent(p => p && p.student_id === openStudent.student_id
+        ? { ...p, total_paid: p.total_paid + paidNow, outstanding: Math.max(0, p.outstanding - paidNow) }
+        : p)
       // The confirm dialog is a full-screen overlay — once it closes, the row
       // underneath (and the "Payment Recorded" success view inside it) can be
       // scrolled well out of view in a long list, with nothing telling the
@@ -526,7 +543,7 @@ export default function FeeCollectTab({
           school_id: schoolId, student_id: selectedEntry.student_id,
           ledger_id: selectedEntry.id, waiver_type: waiverForm.waiver_type,
           waiver_value: parseFloat(waiverForm.waiver_value) || null,
-          reason: waiverForm.reason, granted_by_name: waiverForm.granted_by_name || null,
+          reason: waiverForm.reason,
           idempotency_key: waiverIdemKeyRef.current,
         }),
       })
@@ -634,7 +651,7 @@ export default function FeeCollectTab({
                 <div className="col-span-2 text-center">Action</div>
               </div>
               <div className="divide-y divide-gray-50 max-h-[600px] overflow-y-auto">
-                {collectionFiltered.map(row => (
+                {visibleRows.map(row => (
                   <Fragment key={row.student_id}>
                     <div id={`student-row-${row.student_id}`} className={`px-4 py-3 flex flex-col gap-2 sm:grid sm:grid-cols-12 sm:gap-2 sm:items-center hover:bg-gray-50/60 cursor-pointer ${openStudentId === row.student_id ? 'bg-blue-50/40' : ''}`}
                       onClick={() => toggleStudent(row.student_id)}>
@@ -650,11 +667,19 @@ export default function FeeCollectTab({
                       <div className="flex justify-between text-xs text-gray-400 sm:hidden">
                         <span>Billed: <span className="text-gray-600">{fmt(row.total_billed)}</span></span>
                         <span>Paid+Waived: <span className="text-green-600">{fmt(row.total_paid)}</span></span>
-                        <span>Outstanding: <span className="font-bold text-red-600">{fmt(row.outstanding)}</span></span>
+                        <span>Outstanding: <span className="font-bold text-red-600">{fmt(row.outstanding)}</span>
+                          {carriedBalance(row.open_entries) > 0 && <span className="block text-[10px] text-amber-700">incl. {fmt(carriedBalance(row.open_entries))} from earlier years</span>}
+                        </span>
                       </div>
-                      <div className="hidden sm:block sm:col-span-2 text-right text-sm text-gray-600">{fmt(row.total_billed)}</div>
+                      <div className="hidden sm:block sm:col-span-2 text-right text-sm text-gray-600">
+                        {fmt(row.total_billed)}
+                        {carriedBilled(row.all_entries) > 0 && <span className="block text-[10px] text-amber-700">incl. {fmt(carriedBilled(row.all_entries))} carried</span>}
+                      </div>
                       <div className="hidden sm:block sm:col-span-2 text-right text-sm text-green-600">{fmt(row.total_paid)}</div>
-                      <div className="hidden sm:block sm:col-span-2 text-right text-sm font-bold text-red-600">{fmt(row.outstanding)}</div>
+                      <div className="hidden sm:block sm:col-span-2 text-right text-sm font-bold text-red-600">
+                        {fmt(row.outstanding)}
+                        {carriedBalance(row.open_entries) > 0 && <span data-testid={`ledger-carried-${row.student_id}`} className="block text-[10px] font-normal text-amber-700">incl. {fmt(carriedBalance(row.open_entries))} from earlier years</span>}
+                      </div>
                       <div className="flex justify-end sm:justify-center gap-1.5 sm:col-span-2" onClick={e => e.stopPropagation()}>
                         {row.outstanding > 0 ? (
                           <button onClick={() => startCollect(row)} aria-haspopup="dialog"
@@ -705,7 +730,7 @@ export default function FeeCollectTab({
                                 printCounterReceipt(row, paySuccess, lines)
                               }}
                                 className="text-sm bg-white border border-green-300 text-green-700 px-4 py-1.5 rounded-lg font-medium hover:bg-green-50">🖨 Print Receipt</button>
-                              <button onClick={() => { setPaySuccess(null); setOpenStudentId(null) }}
+                              <button onClick={() => { setPaySuccess(null); setOpenStudentId(null); setPassoutOpenStudent(null) }}
                                 className="text-sm bg-green-600 text-white px-4 py-1.5 rounded-lg font-medium hover:bg-green-700">Done</button>
                             </div>
                           </div>
@@ -717,14 +742,38 @@ export default function FeeCollectTab({
                               <div>
                                 <p className="text-xs font-semibold uppercase tracking-[.08em] text-[#245b46]">Fee collection</p>
                                 <h2 id="collect-payment-title" className="mt-1 text-lg font-semibold text-gray-900">{row.student_name}</h2>
-                                <p className="mt-0.5 text-xs text-gray-500">Grade {row.grade}{row.section}{row.school_roll_number != null ? ` · Roll ${row.school_roll_number}` : ''} · {fmt(row.outstanding)} outstanding</p>
+                                <p className="mt-0.5 text-xs text-gray-500">Grade {row.grade}{row.section}{row.school_roll_number != null ? ` · Roll ${row.school_roll_number}` : ''} · {fmt(row.outstanding)} outstanding{carriedBalance(row.open_entries) > 0 ? ` (${fmt(carriedBalance(row.open_entries))} earlier years + ${fmt(row.outstanding - carriedBalance(row.open_entries))} ${academicYear})` : ''}</p>
                               </div>
                               <button type="button" onClick={closeCollect} aria-label="Close payment window" className="grid h-10 w-10 place-items-center rounded-md text-xl text-gray-500 hover:bg-gray-100">×</button>
                             </div>
                             <div className="space-y-5 px-5 py-5 sm:px-6">
+                            {row.open_entries.some(isCarriedEntry) && row.open_entries.some(x => !isCarriedEntry(x)) && (
+                              <div data-testid="collect-order-note" className="flex flex-wrap items-center gap-2 rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-600">
+                                <span className="flex-1 min-w-[12rem]">Payments are applied to the <strong>oldest bill first</strong> — previous years&apos; dues are cleared before {academicYear} fees. Everything is selected; tick only what this payment is for.</span>
+                                {([
+                                  { label: 'All dues', pick: row.open_entries },
+                                  { label: `Only ${academicYear} fees`, pick: row.open_entries.filter(x => !isCarriedEntry(x)) },
+                                  { label: 'Only previous years', pick: row.open_entries.filter(isCarriedEntry) },
+                                ]).map(opt => (
+                                  <button key={opt.label} type="button" data-testid={`collect-pick-${opt.label.replace(/\s+/g, '-').toLowerCase()}`}
+                                    onClick={() => { setCollectChecked(new Set(opt.pick.map(x => x.id))); setPayAmount(String(opt.pick.reduce((s, x) => s + Number(x.balance), 0))) }}
+                                    className="rounded-md border border-gray-200 bg-white px-2 py-1 font-medium text-gray-700 hover:bg-gray-100">{opt.label}</button>
+                                ))}
+                              </div>
+                            )}
                             <div className="space-y-1.5">
-                              {row.open_entries.map(e => (
-                                <label key={e.id} className={`flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer border-l-2 transition-colors ${
+                              {[...row.open_entries.filter(isCarriedEntry), ...row.open_entries.filter(e => !isCarriedEntry(e))].map((e, idx, ordered) => (
+                                <Fragment key={e.id}>
+                                {/* Name the two kinds of dues when a student has both, with a subtotal for each */}
+                                {ordered.some(isCarriedEntry) && ordered.some(x => !isCarriedEntry(x)) && (idx === 0 || isCarriedEntry(ordered[idx - 1]) !== isCarriedEntry(e)) && (
+                                  <p data-testid={isCarriedEntry(e) ? 'collect-heading-carried' : 'collect-heading-current'} className={`flex items-center justify-between pt-2 text-[11px] font-semibold uppercase tracking-wide ${isCarriedEntry(e) ? 'text-amber-700' : 'text-blue-700'}`}>
+                                    <span>{isCarriedEntry(e)
+                                      ? `Previous years' dues${[...new Set(ordered.filter(isCarriedEntry).map(x => x.source_academic_year).filter(Boolean))].length ? ` · from ${[...new Set(ordered.filter(isCarriedEntry).map(x => x.source_academic_year).filter(Boolean))].join(', ')}` : ''}`
+                                      : `${academicYear} fees`}</span>
+                                    <span>{fmt(ordered.filter(x => isCarriedEntry(x) === isCarriedEntry(e)).reduce((s, x) => s + Number(x.balance), 0))}</span>
+                                  </p>
+                                )}
+                                <label className={`flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer border-l-2 transition-colors ${
                                   e.source_academic_year
                                     ? (collectChecked.has(e.id) ? 'bg-amber-50 border-amber-400 hover:bg-amber-100' : 'bg-amber-50/40 border-amber-200 hover:bg-amber-50')
                                     : (collectChecked.has(e.id) ? 'bg-blue-50 border-blue-400 hover:bg-blue-100' : 'border-transparent hover:bg-gray-50')
@@ -740,7 +789,7 @@ export default function FeeCollectTab({
                                     className="w-4 h-4 rounded border-gray-300 text-blue-600" />
                                   <span className="flex-1 text-sm text-gray-700">
                                     {e.source_academic_year ? (
-                                      <><span className="text-amber-700 font-medium">⏱ Previous Year Dues</span> · <span className="text-gray-400">{e.notes?.replace(/^Carried from [^:]+:\s*/, '') || e.period_label}</span></>
+                                      <><span className="text-amber-700 font-medium">⏱ Previous Year Dues ({e.source_academic_year})</span> · <span className="text-gray-400">{summarizeCarriedNotes(e.notes, e.period_label)}</span></>
                                     ) : (
                                       <>{e.category_name} · <span className="text-gray-400">{e.period_label}</span></>
                                     )}
@@ -748,6 +797,7 @@ export default function FeeCollectTab({
                                   <span className={`text-xs px-1.5 py-0.5 rounded-full capitalize ${STATUS_COLORS[e.status]}`}>{e.status}</span>
                                   <span className="text-sm font-bold text-gray-800 w-20 text-right">{fmt(e.balance)}</span>
                                 </label>
+                                </Fragment>
                               ))}
                             </div>
 
@@ -840,7 +890,7 @@ export default function FeeCollectTab({
                               </button>
                               <button
                                 data-testid="btn-grant-waiver"
-                                onClick={() => { waiverIdemKeyRef.current = null; setSelectedEntry(row.open_entries[0]); setWaiverForm({ waiver_type: 'percentage', waiver_value: '', reason: '', granted_by_name: adminName || '' }); setWaiverError(''); setShowWaiver(true) }}
+                                onClick={() => { waiverIdemKeyRef.current = null; setSelectedEntry(row.open_entries[0]); setWaiverForm({ waiver_type: 'percentage', waiver_value: '', reason: '' }); setWaiverError(''); setShowWaiver(true) }}
                                 className="px-3 py-2.5 border border-purple-200 text-purple-700 bg-purple-50 hover:bg-purple-100 rounded-lg text-sm font-medium whitespace-nowrap">
                                 Grant Waiver
                               </button>
@@ -877,7 +927,7 @@ export default function FeeCollectTab({
                                     </button>
                                     <button
                                       data-testid="btn-grant-waiver"
-                                      onClick={() => { waiverIdemKeyRef.current = null; setSelectedEntry(row.open_entries[0]); setWaiverForm({ waiver_type: 'percentage', waiver_value: '', reason: '', granted_by_name: adminName || '' }); setWaiverError(''); setShowWaiver(true) }}
+                                      onClick={() => { waiverIdemKeyRef.current = null; setSelectedEntry(row.open_entries[0]); setWaiverForm({ waiver_type: 'percentage', waiver_value: '', reason: '' }); setWaiverError(''); setShowWaiver(true) }}
                                       className="px-3 py-2 border border-purple-200 text-purple-700 bg-purple-50 hover:bg-purple-100 rounded-lg text-sm font-medium">
                                       Grant Waiver
                                     </button>
@@ -1115,7 +1165,7 @@ export default function FeeCollectTab({
             return (
               <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
                 <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-100 flex justify-between">
-                  <p className="text-sm text-gray-500">{defaulters.length} students with outstanding dues</p>
+                  <p className="text-sm text-gray-500">{plural(defaulters.length, 'student')} with outstanding dues</p>
                   <p className="text-sm font-bold text-red-600">Total: {fmt(defaulters.reduce((s, r) => s + r.outstanding, 0))}</p>
                 </div>
                 <div className="overflow-x-auto max-h-[600px]">
@@ -1200,7 +1250,7 @@ export default function FeeCollectTab({
                     <div key={e.id} className="flex items-center justify-between text-sm">
                       <span className="text-gray-600">
                         {e.source_academic_year ? (
-                          <><span className="text-amber-700 font-medium">⏱ Previous Year Dues</span> · {e.notes?.replace(/^Carried from [^:]+:\s*/, '') || e.period_label}</>
+                          <><span className="text-amber-700 font-medium">⏱ Previous Year Dues ({e.source_academic_year})</span> · {summarizeCarriedNotes(e.notes, e.period_label)}</>
                         ) : (
                           <>{e.category_name} · {e.period_label}</>
                         )}
@@ -1401,14 +1451,8 @@ export default function FeeCollectTab({
                   className="w-full mt-1.5 border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400" />
               </div>
 
-              {/* Granted by */}
-              <div>
-                <label className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Granted By</label>
-                <input type="text"
-                  value={waiverForm.granted_by_name}
-                  onChange={e => setWaiverForm(f => ({ ...f, granted_by_name: e.target.value }))}
-                  className="w-full mt-1.5 border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400" />
-              </div>
+              {/* The server records the logged-in staff member, so this is shown, not editable. */}
+              <p className="text-xs text-gray-500">Granted by: <span className="font-semibold text-gray-700">{adminName || 'you'}</span> (recorded from your login)</p>
 
               {/* Error */}
               {waiverError && (

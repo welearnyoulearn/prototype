@@ -1,6 +1,7 @@
 'use client'
 
-import { rollLabel } from './format'
+import { rollLabel, plural } from './format'
+import PriorDuesBanner from './PriorDuesBanner'
 import { useCallback, useEffect, useState } from 'react'
 import { GRADE_SEQUENCE } from '@/lib/grades'
 import type { ReportData } from './types'
@@ -351,10 +352,18 @@ export default function FeeReportsTab({
               <div key={s.label} className={`${s.bg} rounded-xl border border-gray-100 p-4`}>
                 <p className="text-xs text-gray-400 font-medium uppercase tracking-wide">{s.label}</p>
                 <p className={`text-2xl font-bold mt-1 ${s.color}`}>{fmt(s.val)}</p>
-                <p className="text-xs text-gray-400 mt-1">{reportData.balance.total_students} students</p>
+                <p className="text-xs text-gray-400 mt-1">
+                  {s.label === 'Total Billed' && Number(reportData.balance.carried_in_due) > 0
+                    ? `${fmt(Number(reportData.balance.total_billed) - Number(reportData.balance.carried_in_due))} this year + ${fmt(reportData.balance.carried_in_due!)} carried`
+                    : s.label === 'Total Outstanding' && Number(reportData.balance.carried_in_outstanding) > 0
+                    ? `incl. ${fmt(reportData.balance.carried_in_outstanding!)} from earlier years`
+                    : plural(reportData.balance.total_students, 'student')}
+                </p>
               </div>
             ))}
           </div>
+
+          <PriorDuesBanner year={academicYear} current={reportData.balance.total_outstanding} prior={reportData.balance.prior_unresolved_outstanding} priorStudents={reportData.balance.prior_unresolved_students} priorFrom={reportData.balance.prior_unresolved_from} passout={reportData.balance.passout_outstanding} passoutStudents={reportData.balance.passout_students} />
 
           {/* Dues carried in from earlier years are billed here AND were counted as billed in the year
               they came from — say so, so nobody adds the two years' Billed together. */}
@@ -383,7 +392,7 @@ export default function FeeReportsTab({
                   return (
                     <div key={cls}>
                       <div className="flex justify-between text-xs mb-1">
-                        <span className="font-medium text-gray-700">{cls} <span className="text-gray-400">({g.students} students)</span></span>
+                        <span className="font-medium text-gray-700">{cls} <span className="text-gray-400">({plural(g.students, 'student')})</span></span>
                         <span className="text-gray-500">{fmt(g.total_collected)} / {fmt(g.total_due)} <span className="font-bold text-blue-600">{gradePct}%</span></span>
                       </div>
                       <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
@@ -477,7 +486,7 @@ export default function FeeReportsTab({
                     <tr key={c.category_name} className="border-b border-gray-50 hover:bg-gray-50">
                       <td className="px-4 py-2.5">
                         <p className="font-medium text-gray-800">{c.category_name}</p>
-                        <p className="text-xs text-gray-400 capitalize">{c.frequency.replace('_', ' ')} · {c.students} students</p>
+                        <p className="text-xs text-gray-400 capitalize">{c.frequency.replace('_', ' ')} · {plural(c.students, 'student')}</p>
                       </td>
                       <td className="px-4 py-2.5 text-right text-gray-700">{fmt(c.total_due)}</td>
                       <td className="px-4 py-2.5 text-right text-green-600 font-medium">{fmt(c.total_collected)}</td>
@@ -501,7 +510,7 @@ export default function FeeReportsTab({
           {reportData.defaulters.length > 0 && (
             <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
               <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
-                <p className="text-sm font-semibold text-gray-700">Pending Payments — {reportData.defaulters.length} students</p>
+                <p className="text-sm font-semibold text-gray-700">Pending Payments — {plural(reportData.defaulters.length, 'student')}</p>
                 <a href={`/api/fees/export?school_id=${schoolId}&academic_year=${academicYear}&type=ledger&outstanding=1`} download
                   className="text-xs text-red-600 border border-red-200 px-2.5 py-1 rounded-lg hover:bg-red-50">
                   Export Pending Payments
@@ -527,7 +536,10 @@ export default function FeeReportsTab({
                         </td>
                         <td className="px-4 py-2 text-gray-600">Gr.{d.grade}{d.section}</td>
                         <td className="px-4 py-2 text-xs text-gray-500">{d.parent_name || '—'}{d.parent_phone ? ` · ${d.parent_phone}` : ''}</td>
-                        <td className="px-4 py-2 text-right font-bold text-red-600">{fmt(d.outstanding)}</td>
+                        <td className="px-4 py-2 text-right font-bold text-red-600">
+                          {fmt(d.outstanding)}
+                          {Number(d.carried_outstanding) > 0 && <span className="block text-[10px] font-normal text-amber-700">{fmt(Number(d.carried_outstanding))} from earlier years</span>}
+                        </td>
                         <td className="px-4 py-2 text-center">
                           <span className="text-xs bg-red-100 text-red-600 px-1.5 py-0.5 rounded font-medium">{d.overdue_entries}</span>
                         </td>

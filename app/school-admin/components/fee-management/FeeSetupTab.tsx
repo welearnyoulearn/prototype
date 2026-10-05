@@ -1,8 +1,9 @@
 'use client'
 
-import { rollLabel } from './format'
+import { rollLabel, plural } from './format'
 import { useEffect, useState, Fragment, type Dispatch, type SetStateAction, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { GRADE_SEQUENCE } from '@/lib/grades'
+import AmendFeeDialog, { type AmendRequest } from './AmendFeeDialog'
 import type { FeeCategory, FeeStructure, StructureLock, Amendment, ApplStudent, ApplCategory, FeeStats } from './types'
 import { LoadErrorBanner } from './LoadErrorBanner'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -136,6 +137,7 @@ export default function FeeSetupTab({
   const [showAmendLog, setShowAmendLog] = useState(false)
   // Preview the existing bills that a midyear amount change will update.
   const [checkingImpact, setCheckingImpact] = useState(false)
+  const [amendRequest, setAmendRequest] = useState<AmendRequest | null>(null)
   const [pendingAmountWarning, setPendingAmountWarning] = useState<{
     cat: FeeCategory
     structs: { fee_category_id: number; grade: string; amount: number }[]
@@ -363,6 +365,19 @@ export default function FeeSetupTab({
       await doSaveFeeAmounts(cat, structs)
       return
     }
+    // A locked plan can't be edited directly — changes go through an amendment with a reason.
+    if (structureLock) {
+      setStructureMsg('')
+      setAmendRequest({
+        catName: cat.name,
+        changes: changedGrades.map(grade => ({
+          grade, label: gradeLabel(grade),
+          from: Number(structures.find(s => s.fee_category_id === cat.id && s.grade === grade)!.amount),
+          to: parseFloat(editAmounts[`${cat.id}_${grade}`]),
+        })),
+      })
+      return
+    }
     // Some of these grades already have a saved amount that's being changed —
     // check how many students are already billed under the old amount before
     // committing (reuses the same per-grade impact count the Amend flow computes).
@@ -386,6 +401,33 @@ export default function FeeSetupTab({
     } finally {
       setCheckingImpact(false)
     }
+  }
+
+  // Applies a locked-plan amendment one grade at a time. Returns an error message (the dialog
+  // stays open to show it) or null once every grade has been amended.
+  async function confirmAmendment(cat: FeeCategory, reason: string): Promise<string | null> {
+    if (!amendRequest) return null
+    const done: string[] = []
+    for (const c of amendRequest.changes) {
+      const r = await fetch('/api/fees/structures/amend', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ school_id: schoolId, academic_year: academicYear, fee_category_id: cat.id, grade: c.grade, new_amount: c.to, reason }),
+      })
+      if (!r.ok) {
+        const d = await r.json().catch(() => null)
+        const partial = done.length ? ` (${done.join(', ')} already amended)` : ''
+        if (done.length) onSetupChanged()
+        return `${c.label}: ${d?.error || 'Failed to amend'}${partial}`
+      }
+      done.push(c.label)
+    }
+    setAmendRequest(null)
+    setStructureMsg(`✓ ${cat.name} amended for ${done.join(', ')}; existing bills updated`)
+    onStatsChanged()
+    const feeStore = useFeeStore.getState()
+    feeStore.bumpLedger(); feeStore.bumpReports(); feeStore.bumpYearEnd()
+    onSetupChanged()
+    return null
   }
 
   async function doSaveFeeAmounts(cat: FeeCategory, structs: { fee_category_id: number; grade: string; amount: number }[]) {
@@ -474,7 +516,7 @@ export default function FeeSetupTab({
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ school_id: schoolId, academic_year: academicYear, action: 'lock', locked_by: adminName || 'Admin' }),
     })
-    if (r.ok) onSetupChanged()
+    if (r.ok) { setStructureMsg(''); onSetupChanged() }
     else { const d = await r.json().catch(() => ({})); setStructureMsg(d.error || 'Failed to lock fee plan') }
     setLockingStructure(false)
   }
@@ -486,7 +528,7 @@ export default function FeeSetupTab({
       body: JSON.stringify({ school_id: schoolId, academic_year: academicYear, action: 'unlock', locked_by: adminName || 'Admin' }),
     })
     if (!r.ok) { const d = await r.json().catch(() => ({})); setStructureMsg(d.error || 'Failed to unlock fee plan') }
-    else onSetupChanged()
+    else { setStructureMsg(''); onSetupChanged() }
     setLockingStructure(false)
   }
 
@@ -958,7 +1000,7 @@ export default function FeeSetupTab({
                 {vgStudents.length > 0 && (
                   <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
                     <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-100 flex items-center justify-between">
-                      <p className="text-sm text-gray-600">{vgStudents.length} students · {varHeads.length} variable fees</p>
+                      <p className="text-sm text-gray-600">{plural(vgStudents.length, 'student')} · {plural(varHeads.length, 'variable fee')}</p>
                       {changedCount > 0 && <p className="text-xs text-amber-600 font-medium">{changedCount} unsaved change{changedCount !== 1 ? 's' : ''}</p>}
                     </div>
                     <div className="overflow-x-auto max-h-[540px]">
@@ -1081,6 +1123,8 @@ export default function FeeSetupTab({
                     <div className="flex items-center gap-4 mt-4 text-xs flex-wrap">
                       {cat.is_system ? (
                         <span className="text-gray-400">Billed directly to each student — no setup needed</span>
+                      ) : cat.category_type === 'variable' ? (
+                        <span className="text-gray-500">Amount set per student</span>
                       ) : (
                         <span className={amountsSet ? 'text-green-600' : 'text-amber-600'}>
                           {amountsSet ? '✅ Amounts set' : '⚠ Amounts not set'}
@@ -1258,7 +1302,7 @@ export default function FeeSetupTab({
                             </div>
 
                             {/* Grade group quick-fill */}
-                            <div className="grid grid-cols-2 gap-2">
+                            <div className="grid grid-cols-1 gap-2">
                               {GRADE_GROUPS.map(grp => (
                                 <div key={grp.key} className="flex items-center gap-2 bg-gray-50 rounded-lg px-3 py-2">
                                   <div className="flex-1">
@@ -1284,9 +1328,9 @@ export default function FeeSetupTab({
                             {/* Individual grades */}
                             <div>
                               <p className="text-[10px] text-gray-400 mb-1.5 uppercase tracking-wide">Individual grades (review &amp; adjust)</p>
-                              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                              <div className="grid grid-cols-2 gap-2">
                                 {GRADES.map(g => (
-                                  <div key={g} className="flex items-center gap-1">
+                                  <div key={g} className="flex items-center gap-1 min-w-0">
                                     <span className="text-[10px] text-gray-400 w-10 shrink-0">{/^\d+$/.test(g) ? `Gr.${g}` : g}</span>
                                     <input type="number" min="0" placeholder="0"
                                       value={editAmounts[`${cat.id}_${g}`] || ''}
@@ -1333,22 +1377,27 @@ export default function FeeSetupTab({
             </div>
           )}
 
+          {amendRequest && (() => {
+            const cat = categories.find(c => c.name === amendRequest.catName)
+            return cat ? <AmendFeeDialog request={amendRequest} onCancel={() => setAmendRequest(null)} onConfirm={reason => confirmAmendment(cat, reason)} /> : null
+          })()}
+
           {/* ── Warn before changing an amount students are already billed at ── */}
           {pendingAmountWarning && (
             <div className="fixed inset-0 bg-black/40 z-[100] flex items-center justify-center p-4" onClick={() => setPendingAmountWarning(null)}>
               <div className="bg-white rounded-2xl w-full max-w-md shadow-xl" onClick={e => e.stopPropagation()}>
                 <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
-                  <p className="font-semibold text-amber-700">⚠ Students already billed at the old amount</p>
+                  <p className="font-semibold text-amber-700">⚠ Existing bills at the old amount</p>
                   <button onClick={() => setPendingAmountWarning(null)} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
                 </div>
                 <div className="p-5 space-y-3">
                   <p className="text-sm text-gray-600">
-                    <strong>{pendingAmountWarning.totalAffected}</strong> student{pendingAmountWarning.totalAffected === 1 ? '' : 's'} already {pendingAmountWarning.totalAffected === 1 ? 'has' : 'have'} a bill for{' '}
-                    <strong>{pendingAmountWarning.cat.name}</strong> at the current amount:
+                    <strong>{pendingAmountWarning.totalAffected}</strong> existing bill{pendingAmountWarning.totalAffected === 1 ? '' : 's'} for{' '}
+                    <strong>{pendingAmountWarning.cat.name}</strong> {pendingAmountWarning.totalAffected === 1 ? 'is' : 'are'} billed at the current amount:
                   </p>
                   <ul className="text-sm text-gray-700 bg-amber-50 border border-amber-100 rounded-lg px-4 py-2.5 space-y-1">
                     {pendingAmountWarning.byGrade.map(g => (
-                      <li key={g.grade}>{gradeLabel(g.grade)}: <strong>{g.count}</strong> student{g.count === 1 ? '' : 's'}</li>
+                      <li key={g.grade}>{gradeLabel(g.grade)}: <strong>{g.count}</strong> bill{g.count === 1 ? '' : 's'}</li>
                     ))}
                   </ul>
                   <p className="text-sm text-gray-500">

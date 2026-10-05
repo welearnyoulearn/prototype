@@ -27,6 +27,19 @@ export async function GET(req: NextRequest) {
     )
     if (!student) return NextResponse.json({ error: 'Student not found' }, { status: 404 })
 
+    // The class they were in during each academic year that has been rolled over. Receipts and
+    // statements for an old year should show that class, not wherever the student is today.
+    // Years with no history row (the current, un-rolled year) fall back to the live class.
+    const { rows: classRows } = await pool.query(
+      `SELECT ay.label, sch.grade, sch.section, sch.school_roll_number
+       FROM student_class_history sch
+       JOIN academic_years ay ON ay.id = sch.academic_year_id
+       WHERE sch.student_id = $1 AND sch.school_id = $2`,
+      [student_id, school_id]
+    ).catch(() => ({ rows: [] as Array<{ label: string; grade: string; section: string; school_roll_number: number | null }> }))
+    const class_by_year: Record<string, { grade: string; section: string; school_roll_number: number | null }> = {}
+    for (const r of classRows) class_by_year[r.label] = { grade: r.grade, section: r.section, school_roll_number: r.school_roll_number ?? student.school_roll_number ?? null }
+
     // 2. ALL ledger entries across all years — ordered oldest first
     const ledgerRes = await pool.query(
       `SELECT l.id, l.school_id, l.student_id, l.fee_category_id, l.fee_structure_id,
@@ -139,6 +152,8 @@ export async function GET(req: NextRequest) {
       total_paid: number
       total_waived: number
       discretionary_waived: number
+      written_off: number       // year-end write-offs: dues the school gave up collecting
+      carried_forward: number   // balance moved to a new bill elsewhere (not counted in total_billed)
       outstanding: number
       entries: typeof ledger
     }>()
@@ -149,7 +164,7 @@ export async function GET(req: NextRequest) {
         yearMap.set(yr, {
           academic_year: yr,
           is_current: yr === current_year,
-          total_billed: 0, total_paid: 0, total_waived: 0, discretionary_waived: 0, outstanding: 0,
+          total_billed: 0, total_paid: 0, total_waived: 0, discretionary_waived: 0, written_off: 0, carried_forward: 0, outstanding: 0,
           entries: [],
         })
       }
@@ -166,9 +181,11 @@ export async function GET(req: NextRequest) {
     // student) — fee_waivers carries waiver_type, student_fee_ledger doesn't, so
     // this is computed from the waivers list rather than inside the ledger loop above.
     for (const w of waivers as Array<{ bill_year: string; waiver_amount: string; waiver_type: string }>) {
-      if (w.waiver_type === 'carry_forward' || w.waiver_type === 'writeoff') continue
       const g = yearMap.get(w.bill_year)
-      if (g) g.discretionary_waived += parseFloat(w.waiver_amount)
+      if (!g) continue
+      if (w.waiver_type === 'carry_forward') g.carried_forward += parseFloat(w.waiver_amount)
+      else if (w.waiver_type === 'writeoff') g.written_off += parseFloat(w.waiver_amount)
+      else g.discretionary_waived += parseFloat(w.waiver_amount)
     }
 
     // Sort years chronologically
@@ -292,6 +309,11 @@ export async function GET(req: NextRequest) {
       .filter(w => w.waiver_type !== 'carry_forward' && w.waiver_type !== 'writeoff')
       .reduce((s, w) => s + parseFloat(w.waiver_amount), 0)
 
+    const sumWaivers = (type: string) => (waivers as Array<{ waiver_amount: string; waiver_type: string }>)
+      .filter(w => w.waiver_type === type).reduce((s, w) => s + parseFloat(w.waiver_amount), 0)
+    const writtenOff = sumWaivers('writeoff')
+    const carriedForward = sumWaivers('carry_forward')
+
     // 10. Prior year unresolved dues (years before current_year with outstanding > 0)
     const priorUnresolved = ledgerByYear.filter(y =>
       y.academic_year !== current_year &&
@@ -301,8 +323,9 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       student,
+      class_by_year,
       current_year,
-      summary: { total_billed: totalBilled, total_paid: totalPaid, total_waived: totalWaived, discretionary_waived: discretionaryWaived, outstanding },
+      summary: { total_billed: totalBilled, total_paid: totalPaid, total_waived: totalWaived, discretionary_waived: discretionaryWaived, written_off: writtenOff, carried_forward: carriedForward, outstanding },
       ledger_by_year: ledgerByYear,   // grouped by year with headers
       ledger,                          // flat list (for backward compat)
       payments,

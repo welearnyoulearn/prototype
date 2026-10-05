@@ -1,6 +1,6 @@
 'use client'
 
-import { rollLabel } from './format'
+import { rollLabel, plural } from './format'
 import { useCallback, useEffect, useState } from 'react'
 import { FINAL_GRADE } from '@/lib/grades'
 import type { ReceiptHeaderBlock } from './types'
@@ -296,7 +296,7 @@ export default function FeeYearEndTab({
               ))}
             </div>
             <p className="text-xs text-gray-400 mt-3">
-              {yearEnd.students.length} students have unpaid dues ({yearEnd.unpaid_count} bills). Decide what to do with each below.
+              {plural(yearEnd.students.length, 'student')} {yearEnd.students.length === 1 ? 'has' : 'have'} unpaid dues ({plural(yearEnd.unpaid_count, 'bill')}). Decide what to do with each below.
             </p>
           </div>
 
@@ -384,6 +384,7 @@ export default function FeeYearEndTab({
                                 <button
                                   data-testid={`btn-yearend-decision-open-${s.student_id}`}
                                   onClick={() => setYeDecisions(p => ({ ...p, [s.student_id]: 'open' }))}
+                                  title="The dues stay in this year only — they will NOT appear in next year's totals or the parent's next-year bills"
                                   className={`px-2.5 py-1 border-l border-gray-200 transition-colors ${decision === 'open' ? 'bg-gray-600 text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}>
                                   Leave Open
                                 </button>
@@ -455,7 +456,7 @@ export default function FeeYearEndTab({
               <p className="text-xs font-bold text-gray-400 uppercase tracking-wide">Step 4 · Statement &amp; Close</p>
               <p className="text-xs text-gray-500">
                 Print the year-end financial statement for your records, then close the year. Closing locks {academicYear} —
-                no further payments or edits until reopened. Any students still “Leave Open” keep their dues unresolved.
+                no further payments or edits until reopened. Students still “Leave Open” keep their dues in this year only — those dues will not appear in next year’s totals or in the parent’s next-year bills, so collect or carry them first if you want them followed up.
               </p>
               <div className="flex items-center gap-2">
                 <button onClick={printYearEndStatement}

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { LoadErrorBanner } from './LoadErrorBanner'
+import { plural } from './format'
 
 export type ArchiveYear = {
   academic_year: string
@@ -87,9 +88,9 @@ export default function FeeArchiveTab({
                     <p className="text-base font-bold text-gray-900">{y.academic_year}</p>
                     <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${status.cls}`}>{status.label}</span>
                   </div>
-                  <p className="text-xs text-gray-400">{y.student_count} students billed</p>
+                  <p className="text-xs text-gray-400">{plural(y.student_count, 'student')} billed</p>
                 </div>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-4">
+                <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-2 xl:grid-cols-4 gap-2 mt-4">
                   {[
                     { l: 'Billed',    v: y.summary.total_billed,    c: 'text-gray-900' },
                     { l: 'Collected', v: y.summary.total_collected, c: 'text-green-700' },

@@ -1,6 +1,7 @@
 'use client'
 
-import { rollLabel } from './format'
+import { rollLabel, classForYear } from './format'
+import { carriedBilled } from './dues'
 import { useCallback, useEffect, useState, Fragment, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { GRADE_SEQUENCE } from '@/lib/grades'
 import type {
@@ -71,7 +72,7 @@ export default function FeePassbookTab({
     err: string
     section: 'timeline' | 'bills' | 'payments' | 'waivers' | 'receipts'
     setSection: (s: 'timeline' | 'bills' | 'payments' | 'waivers' | 'receipts') => void
-    summary: { total_billed: number; total_paid: number; total_waived: number; discretionary_waived: number; outstanding: number }
+    summary: { total_billed: number; total_paid: number; total_waived: number; discretionary_waived: number; written_off?: number; carried_forward?: number; outstanding: number }
     yearOnly: PassbookYearGroup[]
     payments: PaymentRecord[]
     receipts: PassbookReceipt[]
@@ -194,7 +195,7 @@ export default function FeePassbookTab({
             <div className="flex items-start justify-between">
               <div>
                 <h3 className="text-lg font-bold text-gray-900">{pbData.student.name}</h3>
-                <p className="text-sm text-gray-500 [overflow-wrap:anywhere]">Grade {pbData.student.grade}{pbData.student.section}{rollLabel(pbData.student.school_roll_number) ? ` · ${rollLabel(pbData.student.school_roll_number)}` : ''}{pbData.student.roll_number ? ` · System ID ${pbData.student.roll_number}` : ''}</p>
+                <p className="text-sm text-gray-500 [overflow-wrap:anywhere]">Grade {classForYear(pbData.student, pbData.class_by_year, academicYear).grade}{classForYear(pbData.student, pbData.class_by_year, academicYear).section}{rollLabel(classForYear(pbData.student, pbData.class_by_year, academicYear).school_roll_number) ? ` · ${rollLabel(classForYear(pbData.student, pbData.class_by_year, academicYear).school_roll_number)}` : ''}{pbData.student.roll_number ? ` · System ID ${pbData.student.roll_number}` : ''}</p>
                 {(pbData.student.parent_name || pbData.student.parent_phone) && (
                   <p className="text-xs text-gray-400 mt-1">
                     Parent: {pbData.student.parent_name || '—'}{pbData.student.parent_phone ? ` · 📞 ${pbData.student.parent_phone}` : ''}
@@ -204,11 +205,12 @@ export default function FeePassbookTab({
               <button onClick={onPrintStatement}
                 className="text-sm border border-gray-200 text-gray-600 px-3 py-1.5 rounded-lg hover:bg-gray-50">🖨 Print Statement</button>
             </div>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4">
+            <div className={`grid grid-cols-2 ${pbSummary.written_off ? 'sm:grid-cols-5' : 'sm:grid-cols-4'} gap-3 mt-4`}>
               {[
                 { l: 'Total Billed', v: pbSummary.total_billed, c: 'text-gray-900' },
                 { l: 'Paid',         v: pbSummary.total_paid,    c: 'text-green-700' },
                 { l: 'Waived',       v: pbSummary.discretionary_waived,  c: 'text-purple-700' },
+                ...(pbSummary.written_off ? [{ l: 'Written off', v: pbSummary.written_off, c: 'text-amber-700' }] : []),
                 { l: 'Outstanding',  v: pbSummary.outstanding,   c: 'text-red-600' },
               ].map(s => (
                 <div key={s.l} className="bg-gray-50 rounded-lg px-3 py-2.5 text-center">
@@ -216,6 +218,8 @@ export default function FeePassbookTab({
                   <p className={`text-lg font-bold mt-0.5 ${s.c}`}>{fmt(s.v)}</p>
                 </div>
               ))}
+              {pbSummary.carried_forward ? <p className="col-span-full text-center text-[11px] text-gray-400">{fmt(pbSummary.carried_forward)} moved to the next year's bills — not counted in Billed.</p> : null}
+              {(() => { const c = carriedBilled(pbYearOnly.flatMap(y => y.entries)); return c > 0 ? <p data-testid="passbook-carried-in" className="col-span-full text-center text-[11px] text-amber-700">Billed includes {fmt(c)} carried in from earlier years.</p> : null })()}
             </div>
           </div>
 
