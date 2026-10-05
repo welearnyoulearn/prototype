@@ -710,10 +710,23 @@ export default function FeeYearEndTab({
             {(yearEnd?.students.length ?? 0) > 0 && (
               <div data-testid="close-gate" className="rounded-xl border border-amber-200 bg-amber-50 p-3 space-y-2">
                 <p className="text-sm font-semibold text-amber-900">
-                  {plural(yearEnd!.students.length, 'student')} still on Leave Open — {fmt(yearEnd!.students.reduce((s, x) => s + x.total_unpaid, 0))}
+                  {plural(yearEnd!.students.length, 'student')} still owe {fmt(yearEnd!.students.reduce((s, x) => s + x.total_unpaid, 0))} and will be closed as Leave Open
                 </p>
+                {(() => {
+                  const chosen = yearEnd!.students.filter(s => ['carry', 'writeoff', 'passout'].includes(yeDecisions[s.student_id] ?? ''))
+                  return chosen.length > 0 && (
+                    <p data-testid="close-gate-unapplied" className="text-xs font-semibold text-red-700 bg-red-50 border border-red-200 rounded-lg px-2 py-1.5">
+                      {plural(chosen.length, 'student')} {chosen.length === 1 ? 'has' : 'have'} a carry-forward, write-off or passout selected that has not been applied. Closing now ignores {chosen.length === 1 ? 'it' : 'them'}
+                      and leaves the dues open — cancel and click Apply first if that is not what you want.
+                    </p>
+                  )
+                })()}
                 <ul className="text-xs text-amber-900 max-h-28 overflow-y-auto space-y-0.5">
-                  {yearEnd!.students.map(s => <li key={s.student_id}>{s.student_name} · Gr.{s.grade}{s.section} · {fmt(s.total_unpaid)}</li>)}
+                  {yearEnd!.students.map(s => {
+                    const pick = yeDecisions[s.student_id]
+                    const label = pick === 'carry' ? 'carry selected, not applied' : pick === 'writeoff' ? 'write-off selected, not applied' : pick === 'passout' ? 'passout selected, not applied' : 'Leave Open'
+                    return <li key={s.student_id}>{s.student_name} · Gr.{s.grade}{s.section} · {fmt(s.total_unpaid)} · <span className={label === 'Leave Open' ? '' : 'font-semibold text-red-700'}>{label}</span></li>
+                  })}
                 </ul>
                 <p className="text-xs text-amber-800">
                   These dues stay in {academicYear} only — they will not appear in next year&apos;s totals or in the parents&apos; next-year bills.

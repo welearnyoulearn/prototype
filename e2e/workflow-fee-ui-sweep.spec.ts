@@ -60,3 +60,19 @@ for (const [label, size] of [['desktop', { width: 1366, height: 800 }], ['phone'
     expect(problems).toEqual([])
   })
 }
+
+test('FEEUI-closegate selected-but-unapplied decisions are called out when closing', async ({ page }) => {
+  await page.setViewportSize({ width: 1366, height: 800 })
+  await open(page)
+  await page.getByTestId('tab-yearend').click()
+  const carry = page.locator('[data-testid^="btn-yearend-decision-carry-"]').first()
+  await expect(carry).toBeVisible({ timeout: 30000 })
+  await page.getByTestId('btn-close-year').click()
+  await expect(page.getByTestId('close-gate')).toBeVisible()
+  await expect(page.getByTestId('close-gate-unapplied')).toHaveCount(0)
+  await page.getByRole('button', { name: 'Cancel' }).last().click()
+  await carry.click()
+  await page.getByTestId('btn-close-year').click()
+  await expect(page.getByTestId('close-gate-unapplied')).toContainText('has not been applied')
+  await expect(page.getByTestId('close-gate')).toContainText('carry selected, not applied')
+})
