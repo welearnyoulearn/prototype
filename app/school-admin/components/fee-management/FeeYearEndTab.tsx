@@ -8,6 +8,8 @@ import { escapeHtml, renderHeaderBlocks, writeAndPrint } from './receipts'
 import { useFeeStore } from '@/lib/stores/feeStore'
 import { LoadErrorBanner } from './LoadErrorBanner'
 import OpenDuesRegister from './OpenDuesRegister'
+import YearEndChecklist from './YearEndChecklist'
+import { buildChecklist } from '@/lib/feeYearEndChecklist'
 
 function fmt(n: number | string) {
   return `₹${Number(n).toLocaleString('en-IN')}`
@@ -30,7 +32,7 @@ type YearEndState = {
 }
 
 type SignoffRequest = { id: number; student_id: number; student_name: string; grade: string; section: string; amount: string; reason: string | null; status: 'pending' | 'approved' | 'rejected' | 'applied'; requested_by: string | null; decided_by: string | null; decision_note: string | null }
-type Signoff = { approval_required: boolean; settings: { writeoff_limit: number }; approver_name: string | null; owner_name: string | null; can_approve: boolean; my_user_id: number; requests: SignoffRequest[] }
+type Signoff = { approval_required: boolean; settings: { writeoff_limit: number; leave_open_days: number }; approver_name: string | null; owner_name: string | null; can_approve: boolean; my_user_id: number; requests: SignoffRequest[] }
 
 // Year-end closure: review outstanding dues, decide per-student (carry/write-off/
 // passout/leave-open), apply, then close the year. Creating the next academic year, promoting
@@ -88,6 +90,10 @@ export default function FeeYearEndTab({
   // Close year confirm modal
   const [showCloseConfirm, setShowCloseConfirm] = useState(false)
   const [closeReason, setCloseReason] = useState('')
+  // Checklist inputs that aren't part of the year-end payload
+  const [statementDone, setStatementDone] = useState(false)
+  const [rolledOver, setRolledOver] = useState<boolean | null>(null)
+  const [registerOverdue, setRegisterOverdue] = useState(0)
   // Apply decisions confirm modal
   const [showApplyConfirm, setShowApplyConfirm] = useState(false)
 
@@ -110,6 +116,36 @@ export default function FeeYearEndTab({
   }, [schoolId, academicYear])
 
   useEffect(() => { loadYearEnd() }, [loadYearEnd, yearEndVersion])
+
+  // "Statement printed" is remembered per device and year (sessionStorage) — it is a prompt, not a record.
+  const statementKey = `ye-statement-${schoolId}-${academicYear}`
+  useEffect(() => {
+    try { setStatementDone(sessionStorage.getItem(statementKey) === '1') } catch { setStatementDone(false) }
+  }, [statementKey])
+  function markStatementDone() {
+    setStatementDone(true)
+    try { sessionStorage.setItem(statementKey, '1') } catch { /* private mode — prompt only */ }
+  }
+
+  // Has this year been rolled over (it is closed and no longer the current year)? How many open-dues rows are late?
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const [yr, od] = await Promise.all([
+          fetch(`/api/academic-years?school_id=${schoolId}`),
+          fetch(`/api/fees/open-dues?school_id=${schoolId}&academic_year=${academicYear}`),
+        ])
+        if (!cancelled && yr.ok) {
+          const years = await yr.json() as Array<{ label: string; is_current: boolean }>
+          const me = Array.isArray(years) ? years.find(y => y.label === academicYear) : undefined
+          setRolledOver(!!me && !me.is_current)
+        }
+        if (!cancelled && od.ok) setRegisterOverdue(Number((await od.json()).summary?.overdue ?? 0))
+      } catch { /* checklist degrades to "unknown" */ }
+    })()
+    return () => { cancelled = true }
+  }, [schoolId, academicYear, yearEndVersion, yearEnd?.is_closed])
 
   const loadSignoff = useCallback(async () => {
     if (!academicYear) return
@@ -262,6 +298,7 @@ export default function FeeYearEndTab({
 
   function printYearEndStatement() {
     if (!yearEnd) return
+    markStatementDone()
     const s = yearEnd.summary
     const carryN = Object.values(yeDecisions).filter(d => d === 'carry').length
     const woN = Object.values(yeDecisions).filter(d => d === 'writeoff').length
@@ -325,6 +362,30 @@ export default function FeeYearEndTab({
         </div>
       ) : (
         <>
+          {/* Where are we? Live checklist with the owner and sign-off shown */}
+          <YearEndChecklist
+            year={academicYear}
+            steps={buildChecklist({
+              year: academicYear,
+              isClosed: yearEnd.is_closed,
+              openStudents: yearEnd.students.length,
+              openTotal: yearEnd.students.reduce((s, x) => s + x.total_unpaid, 0),
+              signoff: {
+                required: !!signoff?.approval_required,
+                waiting: signoff?.requests.filter(r => r.status === 'pending').length ?? 0,
+                approverName: signoff?.approver_name ?? null,
+              },
+              statementDone,
+              rolledOver,
+              registerOverdue,
+            })}
+            ownerName={signoff?.owner_name ?? null}
+            approverName={signoff?.approver_name ?? null}
+            signoffOn={!!signoff?.approval_required}
+            leaveOpenDays={signoff?.settings.leave_open_days ?? 30}
+            onOpenRollover={onGoToYearRollover}
+          />
+
           {/* Closed banner */}
           {yearEnd.is_closed && (
             <div className="bg-gray-800 text-white rounded-xl px-5 py-4">
@@ -596,7 +657,7 @@ export default function FeeYearEndTab({
               <div className="flex items-center gap-2">
                 <button onClick={printYearEndStatement}
                   className="text-sm border border-gray-200 text-gray-600 px-4 py-2 rounded-lg hover:bg-gray-50">🖨 Print Statement</button>
-                <a href={`/api/fees/export?school_id=${schoolId}&academic_year=${academicYear}&type=ledger`} download
+                <a href={`/api/fees/export?school_id=${schoolId}&academic_year=${academicYear}&type=ledger`} download onClick={markStatementDone}
                   className="text-sm border border-gray-200 text-gray-600 px-4 py-2 rounded-lg hover:bg-gray-50">Export Ledger CSV</a>
                 <button data-testid="btn-close-year" onClick={() => setShowCloseConfirm(true)}
                   disabled={yeClosing}
