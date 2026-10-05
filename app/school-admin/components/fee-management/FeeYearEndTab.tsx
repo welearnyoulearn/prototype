@@ -7,6 +7,7 @@ import type { ReceiptHeaderBlock } from './types'
 import { escapeHtml, renderHeaderBlocks, writeAndPrint } from './receipts'
 import { useFeeStore } from '@/lib/stores/feeStore'
 import { LoadErrorBanner } from './LoadErrorBanner'
+import OpenDuesRegister from './OpenDuesRegister'
 
 function fmt(n: number | string) {
   return `₹${Number(n).toLocaleString('en-IN')}`
@@ -86,6 +87,7 @@ export default function FeeYearEndTab({
   const [reopenReason, setReopenReason]       = useState('')
   // Close year confirm modal
   const [showCloseConfirm, setShowCloseConfirm] = useState(false)
+  const [closeReason, setCloseReason] = useState('')
   // Apply decisions confirm modal
   const [showApplyConfirm, setShowApplyConfirm] = useState(false)
 
@@ -224,12 +226,15 @@ export default function FeeYearEndTab({
     setYeClosing(true); setYeMsg('')
     const r = await fetch('/api/fees/year-end', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'close', school_id: schoolId, from_year: academicYear, done_by: adminName || 'Admin' }),
+      body: JSON.stringify({ action: 'close', school_id: schoolId, from_year: academicYear, done_by: adminName || 'Admin', reason: closeReason.trim() || undefined }),
     })
     const d = await r.json()
-    setYeMsg(r.ok ? '✓ Financial year closed and locked' : (d.error || 'Failed to close'))
+    setYeMsg(r.ok
+      ? `✓ Financial year closed and locked${d.open_registered > 0 ? ` — ${plural(d.open_registered, 'student')} added to the open-dues register` : ''}`
+      : (d.error || 'Failed to close'))
     setYeClosing(false)
     if (r.ok) {
+      setCloseReason('')
       loadYearEnd()
     }
   }
@@ -577,6 +582,9 @@ export default function FeeYearEndTab({
             </>
           )}
 
+          {/* Students left open at an earlier close: who follows up, what was promised, by when */}
+          <OpenDuesRegister schoolId={schoolId} />
+
           {/* STEP 4 & 5 — Statement + Close */}
           {!yearEnd.is_closed && (
             <div className="bg-white rounded-xl border border-gray-100 p-5 space-y-3">
@@ -629,14 +637,33 @@ export default function FeeYearEndTab({
       {/* ══ Close Year Confirm Modal ══════════════════════════════════════════════ */}
       {showCloseConfirm && (
         <div className="fixed inset-0 z-[300] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={() => setShowCloseConfirm(false)}>
-          <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl p-6 space-y-4" onClick={e => e.stopPropagation()}>
+          <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl p-6 space-y-4" onClick={e => e.stopPropagation()}>
             <div>
               <p className="text-base font-bold text-gray-900">Close {academicYear}?</p>
               <p className="text-sm text-gray-500 mt-1">This locks the year — no new payments or waivers can be added. You can reopen it later if needed.</p>
             </div>
+            {/* Close gate: dues still open are hidden from next year's totals and the parents' bills, so say why. */}
+            {(yearEnd?.students.length ?? 0) > 0 && (
+              <div data-testid="close-gate" className="rounded-xl border border-amber-200 bg-amber-50 p-3 space-y-2">
+                <p className="text-sm font-semibold text-amber-900">
+                  {plural(yearEnd!.students.length, 'student')} still on Leave Open — {fmt(yearEnd!.students.reduce((s, x) => s + x.total_unpaid, 0))}
+                </p>
+                <ul className="text-xs text-amber-900 max-h-28 overflow-y-auto space-y-0.5">
+                  {yearEnd!.students.map(s => <li key={s.student_id}>{s.student_name} · Gr.{s.grade}{s.section} · {fmt(s.total_unpaid)}</li>)}
+                </ul>
+                <p className="text-xs text-amber-800">
+                  These dues stay in {academicYear} only — they will not appear in next year&apos;s totals or in the parents&apos; next-year bills.
+                  Each one is added to the open-dues register with a follow-up owner and a deadline.
+                </p>
+                <input data-testid="close-gate-reason" type="text" value={closeReason} onChange={e => setCloseReason(e.target.value)}
+                  placeholder="Why are you closing with dues still open? (required)"
+                  className="w-full text-sm border border-amber-300 rounded-lg px-3 py-2 bg-white focus:ring-2 focus:ring-amber-300" />
+              </div>
+            )}
             <div className="flex gap-2">
               <button onClick={() => setShowCloseConfirm(false)} className="flex-1 border border-gray-200 text-gray-600 py-2 rounded-xl text-sm hover:bg-gray-50">Cancel</button>
-              <button onClick={() => { setShowCloseConfirm(false); closeYear() }} disabled={yeClosing}
+              <button data-testid="close-gate-confirm" onClick={() => { setShowCloseConfirm(false); closeYear() }}
+                disabled={yeClosing || ((yearEnd?.students.length ?? 0) > 0 && closeReason.trim().length < 3)}
                 className="flex-1 bg-gray-800 text-white py-2 rounded-xl text-sm font-semibold hover:bg-gray-700 disabled:opacity-50">
                 {yeClosing ? 'Closing…' : `Close ${academicYear}`}
               </button>

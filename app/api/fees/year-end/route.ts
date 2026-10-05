@@ -3,7 +3,7 @@ import pool, { ensureDB } from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
 import { gradeOrderSql, FINAL_GRADE, isFinalOrBeyondGrade } from '@/lib/grades'
 import { closeOutBill, getOrCreateSystemFeeCategory, getRemainingOpenSummary, lockYearClose, nextAcademicYearLabel, upsertCarryForwardBill } from '@/lib/feeRollover'
-import { loadYearEndSettings, unpaidBalances, writeoffNeedsApproval, writeoffCleared, type WriteoffRequestStatus } from '@/lib/feeYearEnd'
+import { loadYearEndSettings, unpaidBalances, writeoffNeedsApproval, writeoffCleared, openStudentsList, type WriteoffRequestStatus } from '@/lib/feeYearEnd'
 
 // ── GET: student-grouped year-end review ────────────────────────────────────────
 // /api/fees/year-end?school_id=X&academic_year=Y
@@ -533,16 +533,47 @@ export async function POST(req: NextRequest) {
       if (action === 'close') {
         // Snapshot remaining-open totals
         const { count: openCount, total: openTotal } = await getRemainingOpenSummary(client, school_id, from_year)
+        // Close gate (#343): students still on Leave Open drop out of next year's totals and the parents'
+        // next-year bills, so closing with any of them needs a stated reason.
+        const openStudents = openCount > 0 ? await openStudentsList(client, school_id, from_year) : []
+        const closeReason = typeof body.reason === 'string' ? body.reason.trim() : ''
+        if (openCount > 0 && closeReason.length < 3) {
+          await client.query('ROLLBACK')
+          return NextResponse.json({
+            error: `${openCount} student${openCount === 1 ? ' is' : 's are'} still on Leave Open (₹${openTotal.toLocaleString('en-IN')}). Say why you are closing ${from_year} with dues still open.`,
+            needs_reason: true, open_count: openCount, open_total: openTotal, students: openStudents,
+          }, { status: 409 })
+        }
         await client.query(
-          `INSERT INTO fee_year_close (school_id, academic_year, closed_by, open_count, open_total)
-           VALUES ($1, $2, $3, $4, $5)
+          `INSERT INTO fee_year_close (school_id, academic_year, closed_by, open_count, open_total, close_reason)
+           VALUES ($1, $2, $3, $4, $5, $6)
            ON CONFLICT (school_id, academic_year) DO UPDATE
              SET closed_by = $3, closed_at = NOW(), is_reopened = FALSE,
-                 open_count = $4, open_total = $5`,
-          [school_id, from_year, done_by, openCount, openTotal]
+                 open_count = $4, open_total = $5, close_reason = $6`,
+          [school_id, from_year, done_by, openCount, openTotal, closeReason || null]
         )
+        // Open-dues register: every student left open gets a follow-up owner and a deadline.
+        // Existing rows keep whatever the owner already filled in (promised date, note, owner).
+        if (openStudents.length > 0) {
+          const { settings: closeSettings } = await loadYearEndSettings(client, school_id)
+          const { rows: [ownerRow] } = closeSettings.owner_user_id
+            ? await client.query<{ name: string }>(`SELECT COALESCE(full_name, email) AS name FROM users WHERE id = $1`, [closeSettings.owner_user_id])
+            : { rows: [] as Array<{ name: string }> }
+          for (const st of openStudents) {
+            await client.query(
+              `INSERT INTO fee_open_dues (school_id, academic_year, student_id, amount_at_close, owner_user_id, owner_name, deadline)
+               VALUES ($1, $2, $3, $4, $5, $6, (CURRENT_DATE + ($7 || ' days')::interval)::date)
+               ON CONFLICT (school_id, academic_year, student_id) DO UPDATE
+                 SET amount_at_close = EXCLUDED.amount_at_close,
+                     deadline = EXCLUDED.deadline,
+                     owner_user_id = COALESCE(fee_open_dues.owner_user_id, EXCLUDED.owner_user_id),
+                     owner_name = COALESCE(fee_open_dues.owner_name, EXCLUDED.owner_name)`,
+              [school_id, from_year, st.student_id, st.amount, closeSettings.owner_user_id, ownerRow?.name ?? null, String(closeSettings.leave_open_days)]
+            )
+          }
+        }
         await client.query('COMMIT')
-        return NextResponse.json({ closed: true })
+        return NextResponse.json({ closed: true, open_registered: openStudents.length })
       }
 
       await client.query('ROLLBACK')

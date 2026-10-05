@@ -63,6 +63,21 @@ export function validateSettings(next: YearEndSettings, staff: StaffLogin[]): st
   return null
 }
 
+// Students still owing in a year, with their balance — the "Leave Open" group at close time.
+export async function openStudentsList(db: Db, schoolId: number, year: string): Promise<Array<{ student_id: number; student_name: string; grade: string; amount: number }>> {
+  const { rows } = await db.query<{ student_id: number; student_name: string; grade: string; balance: string }>(
+    `SELECT l.student_id, s.name AS student_name, s.grade,
+            SUM(GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0)) AS balance
+     FROM student_fee_ledger l JOIN students s ON s.id = l.student_id
+     WHERE l.school_id = $1 AND l.academic_year = $2 AND l.status IN ('pending', 'overdue', 'partial')
+     GROUP BY l.student_id, s.name, s.grade
+     HAVING SUM(GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0)) > 0
+     ORDER BY s.name`,
+    [schoolId, year]
+  )
+  return rows.map(r => ({ student_id: r.student_id, student_name: r.student_name, grade: r.grade, amount: Number(r.balance) }))
+}
+
 // Unpaid balance per student for one academic year — the amount a year-end write-off would clear.
 // Same bills the year-end apply step looks at (pending / overdue / partial with something still owed).
 export async function unpaidBalances(db: Db, schoolId: number, year: string, studentIds?: number[]): Promise<Map<number, number>> {

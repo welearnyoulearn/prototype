@@ -1,6 +1,7 @@
 'use client'
 
 import { rollLabel, plural } from './format'
+import OpenDuesRegister from './OpenDuesRegister'
 import type { FeeStats, GradeStat, PassoutData, PassoutStudent, RecentPayment } from './types'
 import { LoadErrorBanner } from './LoadErrorBanner'
 import { useFeeStore } from '@/lib/stores/feeStore'
@@ -129,6 +130,7 @@ export default function FeeOverviewTab({
         </div>
       ) : stats?.summary ? (
         <>
+          <OpenDuesRegister schoolId={schoolId} compact onManage={onGoToYearEnd} />
           <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
             {[
               { label: 'Total Billed',  value: stats.summary.total_due,                                                                    sub: plural(stats.summary.total_students, 'student'),           border: 'border-gray-100',   text: 'text-gray-900',   sub_color: 'text-gray-400' },

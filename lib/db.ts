@@ -87,7 +87,7 @@ const BOOTSTRAP_MARKER_KEY   = 'initial_schema_bootstrap'
 // silently never runs anywhere, and you will chase a "column does not exist" 500
 // that reproduces on production but never locally against a fresh DB.
 // Adding a migration statement and bumping this number is ONE change, not two.
-const SCHEMA_VERSION = 50
+const SCHEMA_VERSION = 51
 
 // Records the schema level this build finished applying, on the same row as the
 // bootstrap marker (no extra row, no extra round-trip to read it back).
@@ -1777,6 +1777,8 @@ const SYLLABUS_SCHEMA: string[] = [
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       PRIMARY KEY (school_id, academic_year, kind)
     )`,
+    // Why a year was closed with students still on Leave Open.
+    `ALTER TABLE fee_year_close ADD COLUMN IF NOT EXISTS close_reason TEXT`,
 ]
 
 async function runIncrementalMigrations() {
