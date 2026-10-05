@@ -163,6 +163,17 @@ test('YEP-07 the register can be edited, and rejects an owner who is not a staff
   expect((await admin('/api/fees/open-dues', 'PATCH', { school_id: schoolId, id: row.id, promised_date: 'soon' })).status).toBe(400)
 })
 
+test('YEP-07b the register shows who last collected, and nothing collected yet', async () => {
+  const row = (await admin(`/api/fees/open-dues?school_id=${schoolId}`)).data.rows[0]
+  expect(row).toMatchObject({ last_collected_by: null, last_collected_on: null, last_collected_amount: null })
+  const { rows: [l] } = await db().query(`SELECT id FROM student_fee_ledger WHERE school_id = $1 AND student_id = $2 AND academic_year = $3 LIMIT 1`, [schoolId, row.student_id, YEAR])
+  await db().query(`INSERT INTO fee_payments (school_id, student_id, ledger_id, amount, payment_mode, payment_status, paid_date, collected_by_name, receipt_number)
+                    VALUES ($1, $2, $3, 250, 'cash', 'completed', CURRENT_DATE, 'Front Desk Meena', $4)`, [schoolId, row.student_id, l.id, `RCP-YEP-${Date.now()}`])
+  const after = (await admin(`/api/fees/open-dues?school_id=${schoolId}`)).data.rows[0]
+  expect(after).toMatchObject({ last_collected_by: 'Front Desk Meena', last_collected_amount: 250 })
+  await db().query(`DELETE FROM fee_payments WHERE school_id = $1 AND collected_by_name = 'Front Desk Meena'`, [schoolId])
+})
+
 test('YEP-08 the year-end pack is one workbook that reconciles — and needs a login', async () => {
   const anon = await fetch(`${BASE}/api/fees/year-end/pack?school_id=${schoolId}&academic_year=${YEAR}`)
   expect([401, 403]).toContain(anon.status)

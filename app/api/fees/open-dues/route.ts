@@ -18,6 +18,7 @@ type Row = {
   owner_user_id: number | null; owner_name: string | null
   promised_date: string | null; deadline: string | null; note: string | null
   age_days: number; days_to_deadline: number | null
+  last_collected_by: string | null; last_collected_on: string | null; last_collected_amount: string | null
 }
 
 async function handleGET(req: NextRequest) {
@@ -37,12 +38,20 @@ async function handleGET(req: NextRequest) {
               od.promised_date::text AS promised_date, od.deadline::text AS deadline, od.note,
               (CURRENT_DATE - od.created_at::date) AS age_days,
               (od.deadline - CURRENT_DATE) AS days_to_deadline,
+              lp.collected_by_name AS last_collected_by, lp.paid_date::text AS last_collected_on, lp.amount AS last_collected_amount,
               (SELECT SUM(GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0))
                FROM student_fee_ledger l
                WHERE l.school_id = od.school_id AND l.academic_year = od.academic_year AND l.student_id = od.student_id
                  AND l.status IN ('pending', 'overdue', 'partial')) AS balance_now
        FROM fee_open_dues od
        JOIN students s ON s.id = od.student_id
+       LEFT JOIN LATERAL (
+         SELECT fp.collected_by_name, fp.paid_date, fp.amount FROM fee_payments fp
+         JOIN student_fee_ledger pl ON pl.id = fp.ledger_id
+         WHERE pl.school_id = od.school_id AND pl.academic_year = od.academic_year AND pl.student_id = od.student_id
+           AND fp.payment_status = 'completed'
+         ORDER BY fp.paid_date DESC, fp.id DESC LIMIT 1
+       ) lp ON TRUE
        WHERE od.school_id = $1 AND ($2::text IS NULL OR od.academic_year = $2)
        ORDER BY od.academic_year, s.name`,
       [access.schoolId, year]
@@ -56,6 +65,8 @@ async function handleGET(req: NextRequest) {
         amount_at_close: Number(r.amount_at_close), balance_now: balance, resolved,
         owner_user_id: r.owner_user_id, owner_name: r.owner_name,
         promised_date: r.promised_date, deadline: r.deadline, note: r.note,
+        last_collected_by: r.last_collected_by, last_collected_on: r.last_collected_on,
+        last_collected_amount: r.last_collected_amount == null ? null : Number(r.last_collected_amount),
         age_days: Number(r.age_days), days_to_deadline: r.days_to_deadline == null ? null : Number(r.days_to_deadline),
         overdue: !resolved && r.days_to_deadline != null && Number(r.days_to_deadline) < 0,
       }

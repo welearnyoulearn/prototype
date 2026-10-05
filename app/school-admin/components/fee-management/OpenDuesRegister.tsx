@@ -9,7 +9,12 @@ type Row = {
   owner_user_id: number | null; owner_name: string | null
   promised_date: string | null; deadline: string | null; note: string | null
   age_days: number; days_to_deadline: number | null; overdue: boolean
+  last_collected_by: string | null; last_collected_on: string | null; last_collected_amount: number | null
 }
+const collectedLabel = (r: Row) => r.last_collected_on
+  ? `Last collected ${fmt(r.last_collected_amount ?? 0)} on ${r.last_collected_on}${r.last_collected_by ? ` by ${r.last_collected_by}` : ''}`
+  : 'Nothing collected yet'
+
 type Staff = { id: number; name: string; role: string }
 type Payload = { rows: Row[]; staff: Staff[]; summary: { open: number; overdue: number; total: number } }
 
@@ -79,6 +84,7 @@ export default function OpenDuesRegister({ schoolId, compact = false, onManage }
               <div className="min-w-0">
                 <p className="font-medium text-gray-800 truncate">{r.student_name} <span className="text-xs text-gray-400">{r.academic_year}</span></p>
                 <p className="text-xs text-gray-400">{r.owner_name ? `Owner: ${r.owner_name}` : 'No owner yet'} · open {plural(r.age_days, 'day')}</p>
+                <p className="text-xs text-gray-400" data-testid={`open-dues-collected-${r.student_id}`}>{collectedLabel(r)}</p>
               </div>
               <div className="text-right flex-shrink-0">
                 <p className="font-bold text-red-600">{fmt(r.balance_now)}</p>
@@ -120,6 +126,7 @@ export default function OpenDuesRegister({ schoolId, compact = false, onManage }
                   <td className="py-2 pr-3">
                     <p className="font-medium text-gray-800">{r.student_name}</p>
                     <p className="text-xs text-gray-400">Gr.{r.grade}{r.section} · {r.academic_year}</p>
+                    <p className="text-[10px] text-gray-400" data-testid={`open-dues-collected-${r.student_id}`}>{collectedLabel(r)}</p>
                   </td>
                   <td className="py-2 pr-3 text-right font-bold text-red-600 whitespace-nowrap">{fmt(r.balance_now)}</td>
                   <td className="py-2 pr-3 text-gray-600 whitespace-nowrap">{plural(r.age_days, 'day')}</td>

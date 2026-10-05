@@ -69,14 +69,20 @@ async function handleGET(req: NextRequest) {
     // Everyone still owing from this year, from the live ledger — so years closed before the register
     // existed are covered too — with the register's owner / promise / note where one was recorded.
     const owing = await openStudentsList(pool, sid, year)
-    const { rows: regRows } = await pool.query<{ student_id: number; owner_name: string | null; promised: string | null; deadline: string | null; note: string | null; amount_at_close: string }>(
-      `SELECT student_id, owner_name, promised_date::text AS promised, deadline::text AS deadline, note, amount_at_close
-       FROM fee_open_dues WHERE school_id = $1 AND academic_year = $2`, [sid, year])
+    const { rows: regRows } = await pool.query<{ student_id: number; owner_name: string | null; promised: string | null; deadline: string | null; note: string | null; amount_at_close: string; collected_by: string | null; collected_on: string | null }>(
+      `SELECT student_id, owner_name, promised_date::text AS promised, deadline::text AS deadline, note, amount_at_close,
+              (SELECT fp.collected_by_name FROM fee_payments fp JOIN student_fee_ledger pl ON pl.id = fp.ledger_id
+                WHERE pl.school_id = od.school_id AND pl.academic_year = od.academic_year AND pl.student_id = od.student_id AND fp.payment_status = 'completed'
+                ORDER BY fp.paid_date DESC, fp.id DESC LIMIT 1) AS collected_by,
+              (SELECT fp.paid_date::text FROM fee_payments fp JOIN student_fee_ledger pl ON pl.id = fp.ledger_id
+                WHERE pl.school_id = od.school_id AND pl.academic_year = od.academic_year AND pl.student_id = od.student_id AND fp.payment_status = 'completed'
+                ORDER BY fp.paid_date DESC, fp.id DESC LIMIT 1) AS collected_on
+       FROM fee_open_dues od WHERE od.school_id = $1 AND od.academic_year = $2`, [sid, year])
     const reg = new Map(regRows.map(r => [r.student_id, r]))
     const open = owing.map(o => {
       const r = reg.get(o.student_id)
       return { student_name: o.student_name, amount_at_close: r ? Number(r.amount_at_close) : '', balance_now: o.amount,
-               owner_name: r?.owner_name ?? '', promised: r?.promised ?? '', deadline: r?.deadline ?? '', note: r?.note ?? (r ? '' : 'Not in the open-dues register (year closed before it existed)') }
+               owner_name: r?.owner_name ?? '', collected: r?.collected_on ? `${r.collected_on}${r.collected_by ? ` — ${r.collected_by}` : ''}` : '', promised: r?.promised ?? '', deadline: r?.deadline ?? '', note: r?.note ?? (r ? '' : 'Not in the open-dues register (year closed before it existed)') }
     })
 
     // ── workbook ──
@@ -137,8 +143,8 @@ async function handleGET(req: NextRequest) {
       writeoffs.map(w => { const q = reqBy.get(w.student_id); return [w.name, w.cls, w.amount, w.note, q?.requested_by || '', q?.decided_by || (settings.approver_user_id ? 'no approval recorded' : 'no sign-off step'), q?.decided_at ? formatISTDateTime(q.decided_at) : '', w.by] }), [3], 3)
     sheet('Passout moves', `MOVED TO THE PASSOUT LEDGER — ${year}`, ['Student', 'Class (that year)', 'Amount moved', 'Done by'], [28, 18, 18, 36],
       passout.map(c => [c.name, c.cls, c.amount, c.by]), [3], 3)
-    sheet('Left open', `LEFT OPEN AT CLOSE (open-dues register) — ${year}`, ['Student', 'Owed at close', 'Owes now', 'Owner', 'Promised by', 'Deadline', 'Note'], [28, 16, 16, 30, 14, 14, 44],
-      open.map(o => [o.student_name, o.amount_at_close, o.balance_now, o.owner_name, o.promised, o.deadline, o.note]), [2, 3], 3)
+    sheet('Left open', `LEFT OPEN AT CLOSE (open-dues register) — ${year}`, ['Student', 'Owed at close', 'Owes now', 'Owner', 'Last collected', 'Promised by', 'Deadline', 'Note'], [28, 16, 16, 30, 30, 14, 14, 44],
+      open.map(o => [o.student_name, o.amount_at_close, o.balance_now, o.owner_name, o.collected, o.promised, o.deadline, o.note]), [2, 3], 3)
 
     const buf = await wb.xlsx.writeBuffer()
     return new NextResponse(buf, {
