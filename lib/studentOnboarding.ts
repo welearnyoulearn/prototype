@@ -1,20 +1,43 @@
 import { PoolClient } from 'pg'
-import { randomBytes } from 'crypto'
+import { randomInt } from 'crypto'
 import pool from './db'
 import { hashPortalPassword, generateTempPassword } from './auth'
 import { sendStudentWelcomeEmail, sendParentWelcomeEmail, sendChildCredentialsToParentEmail } from './email'
 import { sendWhatsappMessage } from './whatsapp'
 
-// The system-generated student login id — random enough for uniqueness
-// (retried on collision by callers), but still readable/greppable in support
-// contexts. Shared by every place a student row gets created without an
-// explicit roll_number: bulk import, single-add, and the backfill flow.
-export function generateStudentId(schoolName: string): string {
-  const slug = schoolName.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 10)
-  // 48 bits of cryptographic randomness plus the database collision guard.
-  // The former five-digit Math.random suffix had only 90,000 possibilities.
-  const suffix = randomBytes(6).toString('hex')
-  return `wlyl-stu-${slug}-${suffix}`
+// System ID = students.roll_number, the student's permanent id and login. Short enough to type
+// and to fit in a layout: "WLYL-" + 8 characters from an alphabet without look-alikes
+// (no I, L, O, 0, 1) = 31^8 (~8.5e11) values. Old IDs (wlyl-stu-<school>-<hex>) stay valid —
+// they are logins / printed credentials — and the two formats coexist. Uniqueness is NOT left
+// to chance: generateUniqueStudentIds checks the database first, and the
+// enforce_unique_student_login_id trigger (lib/db.ts) rejects any duplicate that slips through.
+const SYSTEM_ID_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'
+const SYSTEM_ID_LENGTH = 8
+
+export function generateStudentId(): string {
+  let out = 'WLYL-'
+  for (let i = 0; i < SYSTEM_ID_LENGTH; i++) out += SYSTEM_ID_ALPHABET[randomInt(SYSTEM_ID_ALPHABET.length)]
+  return out
+}
+
+// Returns `count` new system IDs, distinct from each other and from every student id already
+// stored (compared case-insensitively, as the login does). Collisions are regenerated.
+export async function generateUniqueStudentIds(
+  db: { query: (sql: string, params: unknown[]) => Promise<{ rows: { id: string }[] }> },
+  count: number
+): Promise<string[]> {
+  const ids = new Set<string>()
+  for (let attempt = 0; attempt < 8; attempt++) {
+    while (ids.size < count) ids.add(generateStudentId())
+    const { rows } = await db.query(
+      'SELECT LOWER(roll_number) AS id FROM students WHERE LOWER(roll_number) = ANY($1::text[])',
+      [[...ids].map(i => i.toLowerCase())]
+    )
+    if (rows.length === 0) return [...ids]
+    const taken = new Set(rows.map(r => r.id))
+    for (const id of [...ids]) if (taken.has(id.toLowerCase())) ids.delete(id)
+  }
+  throw new Error('Could not allocate unique student ids')
 }
 
 export type ParentInfo = {

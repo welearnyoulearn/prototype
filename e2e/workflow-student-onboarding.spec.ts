@@ -128,7 +128,7 @@ test.describe.serial('Student Onboarding — Full Lifecycle (UI)', () => {
     await expect(page.getByText('Enrollment Complete — Credentials')).toBeVisible({ timeout: 30000 })
     await expect(page.getByText('Student Credentials')).toBeVisible()
     // Email is optional; the generated globally unique WLYL student id is the login.
-    await expect(page.getByText(/wlyl-stu-/i).first()).toBeVisible()
+    await expect(page.getByText(/wlyl-/i).first()).toBeVisible()
 
     const found = await studentIdsByNames(['Mehta Arjun'])
     found.forEach((s: { id: number }) => createdStudentIds.push(s.id))

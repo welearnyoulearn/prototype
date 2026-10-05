@@ -8,7 +8,7 @@ import {
 import { STUDENT_READ_FEATURES } from '@/lib/featureRoutes'
 import { sendStudentWelcomeEmail, sendParentWelcomeEmail, sendChildCredentialsToParentEmail } from '@/lib/email'
 import { sendWhatsappMessage } from '@/lib/whatsapp'
-import { findOrCreateParent, linkStudentParent, generateStudentId } from '@/lib/studentOnboarding'
+import { findOrCreateParent, linkStudentParent, generateUniqueStudentIds } from '@/lib/studentOnboarding'
 import { gradeOrderSql } from '@/lib/grades'
 import { normalizeStudentInput } from '@/lib/studentValidation'
 import { withWatchline } from '@/lib/logger'
@@ -154,7 +154,6 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
     const school_id = Number(body.school_id)
-    const roll_number = typeof body.roll_number === 'string' ? body.roll_number : ''
     if (!Number.isInteger(school_id)) return NextResponse.json({ error: 'Valid school_id is required' }, { status: 400 })
     if (admin.schoolId !== school_id) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     if (!await schoolHasFeature(school_id, 'students')) return NextResponse.json({ error: 'Feature not enabled' }, { status: 403 })
@@ -212,12 +211,10 @@ export async function POST(req: NextRequest) {
     const tempPassword = studentPortalEnabled ? generateTempPassword(8) : null
     const passwordHash = tempPassword ? await hashPortalPassword(tempPassword) : null
 
-    // roll_number is the system login id — auto-generate it the same way
-    // bulk import does (via generateStudentId) whenever the caller doesn't
-    // supply one explicitly. Without this, a student created through this
-    // route ended up with roll_number NULL and could never log in even when
-    // the student-portal feature was enabled and a password was generated.
-    const effectiveRollNumber: string = roll_number?.trim() || generateStudentId(await getSchoolName())
+    // roll_number is the system ID — the student's permanent id and login. It is always
+    // generated server-side (never taken from the request: nothing enforced uniqueness of a
+    // caller-supplied value, so it could duplicate another student's login) and is not editable.
+    const [effectiveRollNumber] = await generateUniqueStudentIds(pool, 1)
 
     const client = await pool.connect()
     let result

@@ -45,7 +45,7 @@ export default function StudentForgotPasswordPage() {
           <AuthError message={error} />
           <form onSubmit={handleSubmit} className="space-y-4">
             <AuthInput label="WLYL Student ID" type="text" value={rollNumber} onChange={setRollNumber}
-          required={false} placeholder="e.g. wlyl-stu-school-a1b2c3d4" ring={theme.ring} />
+          required={false} placeholder="e.g. WLYL-K7M2P9XQ" ring={theme.ring} />
             <div className="relative flex items-center gap-3">
               <div className="flex-1 h-px bg-gray-200" />
               <span className="text-xs text-gray-400 font-medium">or</span>
