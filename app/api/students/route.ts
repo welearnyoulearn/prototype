@@ -92,6 +92,25 @@ async function handleGET(req: NextRequest) {
         return NextResponse.json(rows.map(r => r.grade))
       }
 
+      // Summary mode: counts and the grade/section/status breakdown, so a paginated
+      // directory can show accurate totals and filter options without the full roster.
+      if (searchParams.get('summary') === '1') {
+        if (teacher) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+        const { rows } = await pool.query(
+          `SELECT grade, UPPER(section) AS section, COALESCE(status, 'active') AS status, COUNT(*)::int AS count
+           FROM students WHERE school_id = $1
+           GROUP BY grade, UPPER(section), COALESCE(status, 'active')`,
+          [scopedSchoolId]
+        )
+        const counts = { total: 0, active: 0, inactive: 0 }
+        for (const r of rows) {
+          counts.total += r.count
+          if (r.status === 'inactive') counts.inactive += r.count
+          else counts.active += r.count
+        }
+        return NextResponse.json({ counts, classes: rows })
+      }
+
       // Lightweight mode: only the roll-number fields, for onboarding duplicate checks.
       if (searchParams.get('rolls_only') === '1') {
         if (teacher) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
@@ -108,8 +127,27 @@ async function handleGET(req: NextRequest) {
       const values: (string | number)[] = [scopedSchoolId]
       const conditions: string[] = ['school_id = $1']
 
+      // Directory filters are opt-in via `status` / `q`. Section matching turns
+      // case-insensitive alongside them, because the directory treats "a" and "A" as one class.
+      const status = searchParams.get('status')
+      if (status !== null && !['active', 'inactive', 'all'].includes(status)) {
+        return NextResponse.json({ error: 'status must be active, inactive or all' }, { status: 400 })
+      }
+
       if (grade) { values.push(grade); conditions.push(`grade = $${values.length}`) }
-      if (section) { values.push(section); conditions.push(`section = $${values.length}`) }
+      if (section) {
+        values.push(section)
+        conditions.push(status !== null ? `UPPER(section) = UPPER($${values.length})` : `section = $${values.length}`)
+      }
+      if (status === 'active') conditions.push(`(status IS NULL OR status = 'active')`)
+      else if (status === 'inactive') conditions.push(`status = 'inactive'`)
+
+      const q = (searchParams.get('q') ?? '').trim().slice(0, 100)
+      if (q) {
+        values.push(`%${q.replace(/[\\%_]/g, '\\$&')}%`)
+        const n = values.length
+        conditions.push(`(name ILIKE $${n} OR roll_number ILIKE $${n} OR school_roll_number::text LIKE $${n})`)
+      }
 
       const where = `WHERE ${conditions.join(' AND ')}`
 

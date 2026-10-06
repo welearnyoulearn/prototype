@@ -6,6 +6,12 @@ All finished features and bug fixes. Most recent first.
 
 <!-- Add new entries at the top -->
 
+### 2026-10-06 — Student List pagination (#352)
+**Type:** Feature (performance)
+**Portal:** School Admin
+**Summary:** Student List shows 50 students per page with server-side search and status/grade/section filters; counts and filter options come from `?summary=1`. Unpaginated reads are unchanged for fee screens. Staff directory pagination and deferring staff subject-options are follow-ups.
+**PR:** #352
+
 ### 2026-10-06 — Faster Staff/Student onboarding tabs (#348)
 **Type:** Bug fix (performance)
 **Portal:** School Admin
