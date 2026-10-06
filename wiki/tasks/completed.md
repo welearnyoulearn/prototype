@@ -6,6 +6,12 @@ All finished features and bug fixes. Most recent first.
 
 <!-- Add new entries at the top -->
 
+### 2026-10-06 — Faster Staff/Student onboarding tabs (#348)
+**Type:** Bug fix (performance)
+**Portal:** School Admin
+**Summary:** Onboarding panels mount lazily on first open of their sub-tab, and student onboarding fetches only roll numbers (`/api/students?rolls_only=1`) instead of the full roster.
+**PR:** #348
+
 ### 2026-10-05 — Fee year-end process (#343)
 **Type:** Feature
 **Portal:** School Admin
