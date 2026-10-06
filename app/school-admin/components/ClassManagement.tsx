@@ -352,6 +352,7 @@ export default function ClassManagement({ schoolId, onNavigate }: Props) {
             teachers={teachers}
             allClasses={classes}
             onClassUpdated={(updates) => setClasses(prev => prev.map(c => c.id === updates.id ? { ...c, ...updates } : c))}
+            onTeacherGradesUpdated={(teacherId, teachesGrades) => setTeachers(prev => prev.map(t => t.id === teacherId ? { ...t, teaches_grades: teachesGrades } : t))}
             onNavigate={onNavigate}
           />
         ) : (
@@ -458,13 +459,14 @@ export default function ClassManagement({ schoolId, onNavigate }: Props) {
 
 // ─── Class Detail (right panel) ────────────────────────────────────────────────
 function ClassDetail({
-  cls, schoolId, teachers, allClasses, onClassUpdated, onNavigate
+  cls, schoolId, teachers, allClasses, onClassUpdated, onTeacherGradesUpdated, onNavigate
 }: {
   cls: ClassRow
   schoolId: number
   teachers: Teacher[]
   allClasses: ClassRow[]
   onClassUpdated: (updates: Partial<ClassRow> & { id: number }) => void
+  onTeacherGradesUpdated: (teacherId: number, teachesGrades: string) => void
   onNavigate?: (tab: string, subTab?: string) => void
 }) {
   const hasAttendance = useFeature('attendance')
@@ -594,13 +596,14 @@ function ClassDetail({
     if (!inlineTeacher) return
     setSavingSubjectTeacher(true)
     try {
-      await fetchJson(`/api/classes/${cls.id}/subjects`, {
+      const data = await fetchJson<{ teacher_grades_updated?: { teacher_id: number; teaches_grades: string } | null }>(`/api/classes/${cls.id}/subjects`, {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ subject_id: subjectId, teacher_id: parseInt(inlineTeacher) }),
       })
+      if (data?.teacher_grades_updated) onTeacherGradesUpdated(data.teacher_grades_updated.teacher_id, data.teacher_grades_updated.teaches_grades)
       await loadSubjects()
       setAssigningTeacherId(null); setInlineTeacher('')
-      setSubjectMsg({ text: 'Subject teacher assigned', ok: true })
+      setSubjectMsg({ text: data?.teacher_grades_updated ? `Subject teacher assigned — Grade ${cls.grade} added to their details` : 'Subject teacher assigned', ok: true })
     } catch (assignError) {
       setSubjectMsg({ text: assignError instanceof Error ? assignError.message : 'Could not assign subject teacher', ok: false })
     } finally { setSavingSubjectTeacher(false) }
@@ -878,8 +881,26 @@ function ClassDetail({
                               className="border border-violet-300 rounded-lg px-2 py-1 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-violet-400 max-w-[180px]">
                               <option value="">Select teacher...</option>
                               {(() => {
-                                const eligible = teachers.filter(t => t.staff_type !== 'non_teaching' && canTeachGrade(t.teaches_grades, cls.grade) && canTeachSubject(t.subject, s.subject_name))
-                                return eligible.map(t => <option key={t.id} value={t.id}>{t.name}{t.subject ? ` · ${t.subject}` : ''}</option>)
+                                // Every teaching staff member is listed with their subject. A subject
+                                // match is required; a missing grade is added to their details on assign.
+                                const teaching = teachers.filter(t => t.staff_type !== 'non_teaching')
+                                const matching = teaching.filter(t => canTeachSubject(t.subject, s.subject_name))
+                                const inGrade = matching.filter(t => canTeachGrade(t.teaches_grades, cls.grade))
+                                const otherGrade = matching.filter(t => !canTeachGrade(t.teaches_grades, cls.grade))
+                                const otherSubject = teaching.filter(t => !canTeachSubject(t.subject, s.subject_name))
+                                return (
+                                  <>
+                                    {inGrade.length > 0 && <optgroup label={`Grade ${cls.grade} · ${s.subject_name}`}>
+                                      {inGrade.map(t => <option key={t.id} value={t.id}>{t.name}{t.subject ? ` · ${t.subject}` : ''}</option>)}
+                                    </optgroup>}
+                                    {otherGrade.length > 0 && <optgroup label={`Grade ${cls.grade} will be added to their details`}>
+                                      {otherGrade.map(t => <option key={t.id} value={t.id}>{t.name}{t.subject ? ` · ${t.subject}` : ''} (Gr {t.teaches_grades})</option>)}
+                                    </optgroup>}
+                                    {otherSubject.length > 0 && <optgroup label="Different subject">
+                                      {otherSubject.map(t => <option key={t.id} value={t.id} disabled>{t.name}{t.subject ? ` · ${t.subject}` : ''}</option>)}
+                                    </optgroup>}
+                                  </>
+                                )
                               })()}
                             </select>
                             <button aria-label={`Save teacher for ${s.subject_name}`} onClick={() => assignTeacherInline(s.id)} disabled={!inlineTeacher || savingSubjectTeacher}
