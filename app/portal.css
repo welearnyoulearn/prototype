@@ -112,24 +112,31 @@
 }
 .portal-identity { padding: 24px 20px 20px; border-bottom: 1px solid var(--border); }
 .portal-account { margin-top: auto; padding: 16px 20px; border-top: 1px solid var(--border); }
-.portal-nav-label { padding: 20px 12px 8px; color: #637066; font-size: 11px; font-weight: 600; letter-spacing: .06em; line-height: 1.4; text-transform: uppercase; }
+.portal-nav-label { padding: 20px 12px 8px; color: #55635a; font-size: 11px; font-weight: 700; letter-spacing: .08em; line-height: 1.4; text-transform: uppercase; }
 .portal-nav-item {
   display: flex;
   position: relative;
   align-items: center;
   gap: 10px;
   width: 100%;
-  min-height: 42px;
+  min-height: 44px;
   padding: 10px 12px;
-  border-radius: 6px;
-  color: #47574c;
-  font-size: 13px;
+  margin-bottom: 2px;
+  border-radius: 8px;
+  color: #3b4a40;
+  font-size: 14px;
   line-height: 1.4;
   text-align: left;
   transition: background-color var(--motion-micro) ease, color var(--motion-micro) ease, transform var(--motion-micro) var(--ease-standard);
 }
-.portal-nav-item:hover { background: color-mix(in srgb, var(--portal-accent-soft) 68%, white); color: var(--portal-accent-deep); transform: translateX(3px); }
-.portal-nav-item:active { transform: translateX(1px) scale(.99); }
+.portal-nav-item:hover { background: color-mix(in srgb, var(--portal-accent-soft) 68%, white); color: var(--portal-accent-deep); }
+.portal-nav-item:active { transform: scale(.99); }
+.portal-nav-item:focus-visible { outline: 2px solid var(--portal-accent); outline-offset: -2px; }
+.portal-nav-item[aria-current="page"] svg { color: var(--portal-accent); }
+.portal-sidebar nav { scrollbar-width: thin; scrollbar-color: #b8c4bb transparent; scroll-behavior: smooth; overscroll-behavior: contain; }
+.portal-sidebar nav::-webkit-scrollbar { width: 6px; }
+.portal-sidebar nav::-webkit-scrollbar-thumb { background: #b8c4bb; border-radius: 3px; }
+.portal-sidebar nav::-webkit-scrollbar-thumb:hover { background: #8fa096; }
 .portal-nav-item[aria-current="page"] { background: var(--portal-accent-soft); color: var(--portal-accent-deep); font-weight: 650; }
 .portal-nav-item[aria-current="page"]::before { content: ''; position: absolute; top: 12px; bottom: 12px; left: 0; width: 3px; background: var(--portal-accent); border-radius: 2px; animation: portal-indicator-in 180ms var(--ease-standard) both; transform-origin: center; }
 .portal-nav-item:disabled { cursor: not-allowed; opacity: .55; }
