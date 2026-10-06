@@ -145,7 +145,7 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
 
   const fetchExistingRolls = useCallback(async () => {
     try {
-      const res = await fetch(`/api/students?school_id=${schoolId}`)
+      const res = await fetch(`/api/students?school_id=${schoolId}&rolls_only=1`)
       if (!res.ok) return
       const list: { grade: string | null; section: string | null; school_roll_number: number | null; status?: string }[] = await res.json()
       const keys = new Set<string>()
