@@ -271,6 +271,22 @@ function SchoolAdmin() {
   // Onboarding panels mount on first open of their sub-tab (then stay mounted to keep form state).
   const [onboardOpened, setOnboardOpened] = useState<{ staff: boolean; students: boolean }>({ staff: false, students: false })
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [navQuery, setNavQuery] = useState('')
+  // Sidebar only renders after the school loads client-side, so reading storage here is hydration-safe
+  const [collapsedSections, setCollapsedSections] = useState<Set<string>>(() => {
+    try {
+      const raw = typeof window !== 'undefined' ? localStorage.getItem('wlyl_sa_nav_collapsed') : null
+      return new Set(raw ? (JSON.parse(raw) as string[]) : [])
+    } catch { return new Set() }
+  })
+  const toggleSection = (label: string) => {
+    setCollapsedSections(prev => {
+      const next = new Set(prev)
+      if (next.has(label)) next.delete(label); else next.add(label)
+      try { localStorage.setItem('wlyl_sa_nav_collapsed', JSON.stringify([...next])) } catch { /* ignore */ }
+      return next
+    })
+  }
 
   const [myRole, setMyRole] = useState<string>('school_admin')
   const [loading, setLoading] = useState(true)
@@ -527,7 +543,7 @@ function SchoolAdmin() {
                   </div>
                 )}
                 <div className="min-w-0">
-                  <p className="text-sm font-semibold text-foreground leading-tight truncate">{selectedSchool.name}</p>
+                  <p className="text-sm font-semibold text-foreground leading-tight truncate" title={selectedSchool.name}>{selectedSchool.name}</p>
                   <p className="text-xs text-muted-foreground mt-0.5 truncate">{[selectedSchool.city, selectedSchool.country].filter(Boolean).join(', ') || selectedSchool.type || 'School'}</p>
                 </div>
               </div>
@@ -549,21 +565,50 @@ function SchoolAdmin() {
                 </div>
               ) : (
                 <>
+                  <div className="px-1 pt-1 pb-2">
+                    <input
+                      type="search"
+                      value={navQuery}
+                      onChange={e => setNavQuery(e.target.value)}
+                      placeholder="Search menu…"
+                      aria-label="Search menu"
+                      data-testid="nav-search"
+                      className="w-full h-9 px-3 rounded-lg border border-[#dce2db] bg-white text-[13px] text-[#3b4a40] placeholder:text-[#7a867e] focus-visible:outline-2 focus-visible:outline-[#235b46]"
+                    />
+                  </div>
+                  {navQuery.trim() && !enabledNavItems.some(i => i.label.toLowerCase().includes(navQuery.trim().toLowerCase())) && (
+                    <p className="px-3 py-2 text-xs text-[#55635a]" data-testid="nav-search-empty">No menu items match “{navQuery.trim()}”.</p>
+                  )}
                   {NAV_SECTIONS.map(section => {
+                    const q = navQuery.trim().toLowerCase()
                     const sectionEnabled = section.keys
                       .map(key => enabledNavItems.find(i => i.key === key))
                       .filter((i): i is NavItem => i !== undefined)
+                      .filter(i => !q || i.label.toLowerCase().includes(q))
                     if (sectionEnabled.length === 0) return null
+                    const collapsed = !q && collapsedSections.has(section.label)
                     return (
                       <div key={section.label} className="mb-1">
-                        <p className="portal-nav-label">{section.label}</p>
-                        {sectionEnabled.map(item => {
+                        <button
+                          type="button"
+                          onClick={() => toggleSection(section.label)}
+                          aria-expanded={!collapsed}
+                          data-testid={`nav-section-${section.label.toLowerCase()}`}
+                          className="portal-nav-label w-full flex items-center justify-between text-left rounded hover:text-[#235b46] focus-visible:outline-2 focus-visible:outline-[#235b46]"
+                        >
+                          <span>{section.label}</span>
+                          <svg className={`w-3 h-3 transition-transform ${collapsed ? '-rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" />
+                          </svg>
+                        </button>
+                        {!collapsed && sectionEnabled.map(item => {
                           const isActive = activeNav === item.key
                           return (
                             <motion.button
                               key={item.key}
                               onClick={() => navigateTo(item.key)}
-
+                              data-testid={`nav-${item.key}`}
+                              title={item.label}
                               whileTap={{ scale: 0.98 }}
                               className="portal-nav-item"
                               aria-current={isActive ? 'page' : undefined}
@@ -594,7 +639,8 @@ function SchoolAdmin() {
                             <motion.button
                               key={item.key}
                               onClick={() => navigateTo(item.key)}
-
+                              data-testid={`nav-${item.key}`}
+                              title={item.label}
                               whileTap={{ scale: 0.98 }}
                               className="portal-nav-item"
                               aria-current={isActive ? 'page' : undefined}
@@ -643,7 +689,7 @@ function SchoolAdmin() {
                   <span className="relative">My Profile</span>
                 </motion.button>
               )}
-              <p className="text-xs text-[#67736b] pt-1">WLYL School Management</p>
+              <p className="text-xs text-[#55635a] pt-1">WLYL School Management</p>
             </div>
           </PortalSidebar>
 
