@@ -205,7 +205,9 @@ function CreateExamWizard({ schoolId, classes, onDone }: { schoolId: number; cla
     const d = new Date(start + 'T00:00:00')
     const last = new Date(end + 'T00:00:00')
     while (d <= last) {
-      out.push(d.toISOString().slice(0, 10))
+      // Local-date parts, not toISOString(): that converts to UTC and shifts
+      // every date back a day in timezones ahead of UTC (e.g. IST).
+      out.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`)
       d.setDate(d.getDate() + 1)
     }
     return out
@@ -387,16 +389,16 @@ function CreateExamWizard({ schoolId, classes, onDone }: { schoolId: number; cla
     ? (!timeSlots[0].start || !timeSlots[0].end || timeSlots[0].start < timeSlots[0].end)
     : (timeSlots.length >= 2 && timeSlots.every(t => t.start && t.end && t.start < t.end) && overlappingSlotIndices.size === 0)
   const step1Valid = form.exam_name.trim().length > 0 && dateValid && timeSlotsValid
-  const step2Valid = selectedClasses.length > 0 && (studentScope === 'all' || selectedStudentIds.length > 0)
   // A class "uses the board" once at least one subject has been dragged
-  // anywhere for it — from then on every slot for that class is exactly
-  // what was dragged there (an untouched slot means 0 subjects, not "all of
-  // them"). A class the admin never touched keeps the original default:
-  // every one of its subjects, on every session. Lets a plain single-date
-  // exam stay a one-click flow while still allowing the same picking UI.
+  // anywhere for it — every slot for that class is exactly what was dragged
+  // there (an untouched slot means 0 subjects, not "all of them").
   function classUsesBoard(classId: number): boolean {
     return Object.values(subjectAssignments[classId] ?? {}).some(slots => Object.keys(slots).length > 0)
   }
+  // Every selected class must have at least one subject dragged onto a date
+  // before moving on — no silent "all subjects" fallback.
+  const classesMissingSubjects = selectedClasses.filter(id => !classUsesBoard(id))
+  const step2Valid = selectedClasses.length > 0 && (studentScope === 'all' || selectedStudentIds.length > 0) && classesMissingSubjects.length === 0
   const totalSubjectSlots = selectedClasses.reduce((sum, id) => {
     if (classUsesBoard(id)) {
       return sum + Object.values(subjectAssignments[id] ?? {}).flatMap(slots => Object.values(slots)).length
@@ -637,7 +639,7 @@ function CreateExamWizard({ schoolId, classes, onDone }: { schoolId: number; cla
             <h3 className="text-sm font-bold text-gray-800 mb-1">Select Classes *</h3>
             <p className="text-xs text-muted-foreground mb-3">Pick one class, several, or a whole grade — every class gets exactly the subjects it teaches.</p>
             <div className="space-y-3 max-h-96 overflow-y-auto pr-1">
-              {Object.entries(byGrade).sort().map(([grade, gradeClasses]) => (
+              {Object.entries(byGrade).sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true })).map(([grade, gradeClasses]) => (
                 <div key={grade}>
                   <div className="flex items-center justify-between mb-1.5">
                     <p className="text-xs font-semibold text-gray-500">{grade}</p>
@@ -707,7 +709,7 @@ function CreateExamWizard({ schoolId, classes, onDone }: { schoolId: number; cla
                 {dailySessions === 'single'
                   ? 'Drag one subject onto each date — only one exam is conducted that day, so each date takes exactly one subject.'
                   : 'Each date shows its available time slots — drag one subject into each slot, since only one exam is conducted per slot.'}
-                {' '}Click a date to see what else is already scheduled that day. Leave a class untouched here and it keeps getting every one of its subjects, same as before — drag at least one subject for a class to switch it to picking exactly which subjects are examined on which slot. Works the same way for every class selected.
+                {' '}Click a date to see what else is already scheduled that day. Every selected class needs at least one subject dragged onto a date before you can continue.
               </p>
               <div className="space-y-5">
                 {selectedClasses.map(classId => {
@@ -846,6 +848,12 @@ function CreateExamWizard({ schoolId, classes, onDone }: { schoolId: number; cla
                 <p className="text-xs text-amber-500 mt-2">Select at least one student.</p>
               )}
             </div>
+          )}
+
+          {selectedClasses.length > 0 && classesMissingSubjects.length > 0 && (
+            <p className="lg:col-span-2 text-xs text-amber-600" data-testid="missing-subjects-hint">
+              Drag at least one subject onto a date for: {classesMissingSubjects.map(classLabel).join(', ')}.
+            </p>
           )}
 
           <div className="lg:col-span-2 flex justify-between pt-1">
@@ -997,7 +1005,7 @@ function ManageExams({ schoolId }: { schoolId: number }) {
   }
   useEffect(() => { load() }, [schoolId]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const grades = Array.from(new Set(exams.map(e => e.grade))).sort()
+  const grades = Array.from(new Set(exams.map(e => e.grade))).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
   const sections = Array.from(new Set(exams.filter(e => !filterGrade || e.grade === filterGrade).map(e => e.section))).sort()
   const subjects = Array.from(new Set(exams.flatMap(e => e.subjects ?? []))).sort()
   const teacherOptions = Array.from(
