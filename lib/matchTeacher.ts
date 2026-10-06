@@ -46,20 +46,6 @@ function gradeInRange(teachesGrades: string | null, grade: string): boolean {
 
 export type ClassSubjectRow = { id: number; class_id: number; subject_name: string; grade: string }
 
-// After a teacher's subject/grades are edited, find the subject rows they're
-// currently assigned to that fit their OLD details but not the NEW ones. Rows
-// an admin assigned by hand outside the old details are left alone — only
-// assignments the old details would have produced are released.
-export function findStaleAssignments(
-  oldDetails: { subject: string | null; teaches_grades: string | null },
-  newDetails: { subject: string | null; teaches_grades: string | null },
-  assigned: ClassSubjectRow[]
-): ClassSubjectRow[] {
-  const fits = (d: { subject: string | null; teaches_grades: string | null }, s: ClassSubjectRow) =>
-    !!d.subject?.trim() && gradeInRange(d.teaches_grades, s.grade) && subjectMatchesTeacher(s.subject_name, d.subject)
-  return assigned.filter(s => fits(oldDetails, s) && !fits(newDetails, s))
-}
-
 // Given a newly-onboarded (or edited) teacher, find every class_subjects row
 // at their school that (a) has no teacher assigned yet, (b) is in a grade
 // they're eligible to teach (teaches_grades, or unrestricted), and (c) has a
