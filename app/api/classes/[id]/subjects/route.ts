@@ -196,10 +196,12 @@ export async function PATCH(req: NextRequest, { params }: RouteContext) {
       await client.query('ROLLBACK')
       return NextResponse.json({ error: teacherId.error ?? periods.error }, { status: 422 })
     }
+    let teacherGrades: { teacher_id: number; teaches_grades: string } | null = null
     if (teacherId.value) {
-      await validateTeacherForClass(client, {
-        teacherId: teacherId.value, schoolId: sub.school_id, grade: sub.grade, subjectName,
+      const validated = await validateTeacherForClass(client, {
+        teacherId: teacherId.value, schoolId: sub.school_id, grade: sub.grade, subjectName, addGradeIfMissing: true,
       })
+      if (validated.grades_added && validated.teaches_grades) teacherGrades = { teacher_id: validated.id, teaches_grades: validated.teaches_grades }
     }
     const { rows: [updated] } = await client.query(
       `UPDATE class_subjects SET subject_name = $1, teacher_id = $2, periods_per_week = $3
@@ -212,7 +214,12 @@ export async function PATCH(req: NextRequest, { params }: RouteContext) {
     await client.query('COMMIT')
     invalidateCache(`subjects:class:${id}`)
     invalidateCache(`health:${sub.school_id}`)
-    return NextResponse.json({ ...updated, teacher_name: teacherName })
+    if (teacherGrades) {
+      invalidateCache(`teachers:${sub.school_id}:all`)
+      invalidateCache(`teachers:${sub.school_id}:teaching`)
+      invalidateCache(`teachers:${sub.school_id}:non_teaching`)
+    }
+    return NextResponse.json({ ...updated, teacher_name: teacherName, teacher_grades_updated: teacherGrades })
   } catch (error) {
     await client.query('ROLLBACK').catch(() => {})
     if (error instanceof ClassWorkflowError) return NextResponse.json({ error: error.message, code: error.code }, { status: error.status })

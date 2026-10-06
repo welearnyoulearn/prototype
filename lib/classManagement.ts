@@ -41,7 +41,7 @@ function gradeAllowed(teachesGrades: string | null, grade: string): boolean {
 
 export async function validateTeacherForClass(
   client: PoolClient,
-  options: { teacherId: number; schoolId: number; grade: string; subjectName?: string },
+  options: { teacherId: number; schoolId: number; grade: string; subjectName?: string; addGradeIfMissing?: boolean },
 ) {
   const { rows: [teacher] } = await client.query<{
     id: number
@@ -68,8 +68,14 @@ export async function validateTeacherForClass(
   if (teacher.staff_type === 'non_teaching') {
     throw new ClassWorkflowError('Only teaching staff can be assigned to a class', 422, 'TEACHER_NOT_TEACHING')
   }
+  let gradesAdded: string | null = null
   if (!gradeAllowed(teacher.teaches_grades, options.grade)) {
-    throw new ClassWorkflowError(`Teacher is not assigned to Grade ${options.grade}`, 422, 'TEACHER_GRADE_MISMATCH')
+    if (!options.addGradeIfMissing) {
+      throw new ClassWorkflowError(`Teacher is not assigned to Grade ${options.grade}`, 422, 'TEACHER_GRADE_MISMATCH')
+    }
+    // Explicit admin assignment: add the grade to the teacher's details so
+    // Staff Management stays in step with the class timetable.
+    gradesAdded = `${(teacher.teaches_grades ?? '').trim()},${options.grade.trim()}`
   }
   if (options.subjectName && !teacherMatchesSubject(options.subjectName, teacher.subject ?? '')) {
     throw new ClassWorkflowError(
@@ -78,7 +84,11 @@ export async function validateTeacherForClass(
       'TEACHER_SUBJECT_MISMATCH',
     )
   }
-  return teacher
+  if (gradesAdded) {
+    await client.query('UPDATE teachers SET teaches_grades = $1 WHERE id = $2', [gradesAdded, teacher.id])
+    teacher.teaches_grades = gradesAdded
+  }
+  return { ...teacher, grades_added: gradesAdded !== null }
 }
 
 async function currentAcademicYear(client: PoolClient, schoolId: number): Promise<string | null> {

@@ -8,7 +8,7 @@ import {
   sendStaffRemovedEmail, sendStaffReactivatedEmail, sendStaffContactChangedEmail,
 } from '@/lib/email'
 import { sendWhatsappMessage } from '@/lib/whatsapp'
-import { findAutoAssignableSubjects, type ClassSubjectRow } from '@/lib/matchTeacher'
+import { findAutoAssignableSubjects, findStaleAssignments, type ClassSubjectRow } from '@/lib/matchTeacher'
 import { normalizeStaffInput, validateStaffStatus } from '@/lib/staffValidation'
 import { invalidateCache } from '@/lib/responseCache'
 import { canonicalStaffSubject, getStaffSubjectOptions } from '@/lib/staffSubjectOptions'
@@ -177,6 +177,25 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     }
     if (becomingInactive || becomingActive) await revokePortalSessions('teacher', id, undefined, client)
 
+    if ((subjectChanged || gradesChanged) && teacher.staff_type === 'teaching' && teacher.status === 'active') {
+      // Release subjects the updated details no longer fit, so the teacher is
+      // re-assigned purely from their current subject/grades.
+      const { rows: current } = await client.query<ClassSubjectRow>(
+        `SELECT cs.id, cs.class_id, cs.subject_name, c.grade FROM class_subjects cs
+         JOIN classes c ON c.id=cs.class_id
+         WHERE c.school_id=$1 AND c.deleted_at IS NULL AND cs.teacher_id=$2`, [teacher.school_id, id],
+      )
+      const stale = findStaleAssignments(
+        { subject: existing.subject, teaches_grades: existing.teaches_grades },
+        { subject: teacher.subject, teaches_grades: teacher.teaches_grades },
+        current,
+      )
+      for (const row of stale) {
+        await client.query('UPDATE class_subjects SET teacher_id=NULL WHERE id=$1 AND teacher_id=$2', [row.id, id])
+        invalidateCache(`subjects:class:${row.class_id}`)
+      }
+      if (stale.length) invalidateCache(`health:${teacher.school_id}`)
+    }
     if ((subjectChanged || gradesChanged) && teacher.staff_type === 'teaching' && teacher.status === 'active' && teacher.subject) {
       const { rows: unfilled } = await client.query<ClassSubjectRow>(
         `SELECT cs.id, cs.class_id, cs.subject_name, c.grade FROM class_subjects cs
