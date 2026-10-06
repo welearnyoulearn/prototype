@@ -20,6 +20,7 @@ School admin.
 - Add one student or bulk-upload a CSV/Excel template; duplicates are detected before saving and can be cleaned up.
 - Each student gets a system id and a class roll number (unique within grade + section); the parent phone must be a valid 10-digit Indian mobile.
 - Parent accounts are created and linked automatically; student and parent login credentials are issued and can be reset.
+- The **Student List** loads 50 students per page (Previous/Next). Search, status (Active/Removed/All), grade and section filtering run on the server (`GET /api/students?limit&offset&status&q&grade&section`), and the totals and grade/section options come from `GET /api/students?summary=1`, so they stay accurate across pages. The plain unpaginated read still returns the full roster for screens that aggregate over it (fees).
 - Edit, promote, deactivate. Click a name to open the **Student 360 profile** (`GET /api/students/{id}/profile`): talking points for the parent meeting, contacts, attendance, marks, fees, activity, and a year switcher for past years.
 
 ## Rules and limits
@@ -63,3 +64,4 @@ API routes these screens call (all exist):
 | Date | Change | Issue |
 |------|--------|-------|
 | 2026-09-21 | Doc created from the code; status checked with `scripts/product-docs.mjs` | #162 |
+| 2026-10-06 | Student List paginated (50/page) with server-side search, filters and summary counts | #352 |

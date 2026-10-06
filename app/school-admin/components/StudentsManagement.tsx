@@ -1,6 +1,6 @@
 ﻿'use client'
 
-import { useEffect, useState, useCallback, useMemo } from 'react'
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import dynamic from 'next/dynamic'
 import { Users } from 'lucide-react'
 import { isValidName, NAME_INVALID_MESSAGE } from '@/lib/nameValidation'
@@ -9,6 +9,10 @@ import { EmptyState } from '@/components/ui/empty-state'
 import { useConfirm } from '@/components/ui/use-confirm'
 
 type Props = { schoolId: number; refreshKey?: number }
+
+const PAGE_SIZE = 50
+type ClassCount = { grade: string | null; section: string | null; status: string; count: number }
+type Summary = { counts: { total: number; active: number; inactive: number }; classes: ClassCount[] }
 
 type Student = {
   id: number
@@ -276,8 +280,14 @@ const StudentProfile = dynamic(() => import('./StudentProfile'), { ssr: false })
 
 export default function StudentsManagement({ schoolId, refreshKey }: Props) {
   const { confirm, ConfirmDialog } = useConfirm()
-  const [students, setStudents] = useState<Student[]>([])
+  const [students, setStudents] = useState<Student[]>([])   // the current page only
+  const [total, setTotal] = useState(0)                      // rows matching the filters, across all pages
+  const [summary, setSummary] = useState<Summary | null>(null)
+  const [page, setPage] = useState(0)
+  const [reloadTick, setReloadTick] = useState(0)
   const [loading, setLoading] = useState(true)
+  const [initialLoading, setInitialLoading] = useState(true)
+  const requestId = useRef(0)
   const [error, setError] = useState('')
   const [gradeFilter, setGradeFilter] = useState('all')
   const [sectionFilter, setSectionFilter] = useState('all')
@@ -295,6 +305,7 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
   const [dupConfirm, setDupConfirm] = useState<'selected' | 'all' | null>(null)
   const [dupDeleting, setDupDeleting] = useState(false)
   const [search, setSearch] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
   const [selected, setSelected] = useState<Student | null>(null)
   const [profileId, setProfileId] = useState<number | null>(null)
   const [editing, setEditing] = useState(false)
@@ -307,22 +318,42 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
   }, [])
 
   useEffect(() => {
-    fetch(`/api/students?school_id=${schoolId}`).then(r => r.json()).then(stu => {
-      // Normalise section to uppercase so "a" and "A" are the same class
-      const normStu = Array.isArray(stu) ? stu.map((s: Student) => ({ ...s, section: s.section?.toUpperCase() ?? s.section })) : []
-      setStudents(normStu)
-    }).catch(() => setError('Failed to load students')).finally(() => setLoading(false))
-  }, [schoolId, refreshKey])
+    const t = setTimeout(() => { setDebouncedSearch(search.trim()); setPage(0) }, 300)
+    return () => clearTimeout(t)
+  }, [search])
 
-  async function reloadStudents() {
-    setLoading(true)
-    try {
-      const res = await fetch(`/api/students?school_id=${schoolId}`)
-      const data = await res.json()
-      setStudents(Array.isArray(data) ? data : [])
-    } catch { setError('Failed to refresh students') }
-    finally { setLoading(false) }
-  }
+  // Counts and grade/section options come from a small summary, not the roster.
+  useEffect(() => {
+    fetch(`/api/students?school_id=${schoolId}&summary=1`).then(r => r.json())
+      .then((d: Summary) => { if (d?.counts) setSummary(d) })
+      .catch(() => { /* non-critical: counts and filter options stay as they were */ })
+  }, [schoolId, refreshKey, reloadTick])
+
+  useEffect(() => {
+    if (statusFilter === 'duplicates') return
+    const params = new URLSearchParams({
+      school_id: String(schoolId), limit: String(PAGE_SIZE), offset: String(page * PAGE_SIZE), status: statusFilter,
+    })
+    if (gradeFilter !== 'all') params.set('grade', gradeFilter)
+    if (sectionFilter !== 'all') params.set('section', sectionFilter)
+    if (debouncedSearch) params.set('q', debouncedSearch)
+    const timer = setTimeout(() => {
+      const id = ++requestId.current
+      setLoading(true)
+      fetch(`/api/students?${params}`).then(r => r.json()).then(res => {
+        if (id !== requestId.current) return   // a newer request superseded this one
+        if (!Array.isArray(res?.data)) throw new Error('bad response')
+        // Normalise section to uppercase so "a" and "A" are the same class
+        setStudents(res.data.map((s: Student) => ({ ...s, section: s.section?.toUpperCase() ?? s.section })))
+        setTotal(res.total ?? res.data.length)
+        setError('')
+      }).catch(() => { if (id === requestId.current) setError('Failed to load students') })
+        .finally(() => { if (id === requestId.current) { setLoading(false); setInitialLoading(false) } })
+    }, 0)
+    return () => clearTimeout(timer)
+  }, [schoolId, refreshKey, reloadTick, statusFilter, gradeFilter, sectionFilter, debouncedSearch, page])
+
+  function reloadStudents() { setReloadTick(t => t + 1) }
 
   const loadDuplicates = useCallback(async () => {
     setDupLoading(true); setDupError(''); setDupResult(null)
@@ -410,6 +441,7 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
       setStudents(prev => prev.map(s => s.id === selected.id ? { ...s, ...data } : s))
       setSelected({ ...selected, ...data })
       setSearch('')
+      reloadStudents()   // grade/section edits change the counts and filter options
       setEditing(false)
       setEditForm({})
     } catch (err: unknown) {
@@ -451,38 +483,25 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
     }
   }
 
-  // Memoized — the whole roster gets re-filtered/re-grouped on every search
-  // keystroke and every grade/section/status filter click, so without this
-  // it re-scans the full student list on every render for no reason.
-  const activeStudents = useMemo(() => students.filter(s => s.status === 'active' || !s.status), [students])
-  const inactiveStudents = useMemo(() => students.filter(s => s.status === 'inactive'), [students])
+  const counts = summary?.counts ?? { total: 0, active: 0, inactive: 0 }
+  const classRows = useMemo(() => (summary?.classes ?? []).filter(c =>
+    statusFilter === 'inactive' ? c.status === 'inactive' : statusFilter === 'all' ? true : c.status !== 'inactive'
+  ), [summary, statusFilter])
 
-  const displayStudents = statusFilter === 'active' ? activeStudents
-    : statusFilter === 'inactive' ? inactiveStudents
-    : statusFilter === 'duplicates' ? activeStudents
-    : students
-
-  const grades = useMemo(() => ['all', ...Array.from(new Set(displayStudents.map(s => s.grade).filter(Boolean)))
-    .sort((a, b) => (parseInt(a) || 0) - (parseInt(b) || 0))], [displayStudents])
-  // Sections are already normalised to uppercase; show only sections for the selected grade
+  const grades = useMemo(() => ['all', ...Array.from(new Set(classRows.map(c => c.grade).filter((g): g is string => !!g)))
+    .sort((a, b) => (parseInt(a) || 0) - (parseInt(b) || 0))], [classRows])
   const sections = useMemo(() => ['all', ...Array.from(new Set(
-    displayStudents
-      .filter(s => gradeFilter === 'all' || s.grade === gradeFilter)
-      .map(s => (s.section ?? '').toUpperCase())
-      .filter(Boolean)
-  )).sort()], [displayStudents, gradeFilter])
+    classRows.filter(c => gradeFilter === 'all' || c.grade === gradeFilter).map(c => c.section ?? '').filter(Boolean)
+  )).sort()], [classRows, gradeFilter])
 
-  const filtered = useMemo(() => displayStudents.filter(s => {
-    const sec = (s.section ?? '').toUpperCase()
-    const matchesGrade   = gradeFilter === 'all' || s.grade === gradeFilter
-    const matchesSection = sectionFilter === 'all' || sec === sectionFilter.toUpperCase()
-    const matchesSearch  = !search || s.name.toLowerCase().includes(search.toLowerCase()) ||
-      (s.roll_number || '').toLowerCase().includes(search.toLowerCase()) ||
-      (s.school_roll_number != null && String(s.school_roll_number).includes(search))
-    return matchesGrade && matchesSection && matchesSearch
-  }), [displayStudents, gradeFilter, sectionFilter, search])
+  // Students in a class across all pages, for the group header (a class can span pages).
+  const classTotal = (grade: string, section: string) =>
+    classRows.filter(c => c.grade === grade && (c.section ?? '') === section).reduce((n, c) => n + c.count, 0)
 
-  // Group by grade-section, sort numerically by grade then alphabetically by section
+  const filtered = students
+  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE))
+
+  // Group the current page by grade-section; sorted numerically by grade then section
   const grouped: Record<string, Student[]> = useMemo(() => {
     const g: Record<string, Student[]> = {}
     filtered.forEach(s => {
@@ -503,7 +522,7 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
 
   const inputCls = 'w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-green-300'
 
-  if (loading) return <div className="py-12 text-center text-muted-foreground">Loading students...</div>
+  if (initialLoading) return <div className="py-12 text-center text-muted-foreground">Loading students...</div>
 
   return (
     <div className="flex flex-col xl:flex-row gap-6">
@@ -514,7 +533,7 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-xl font-bold text-gray-900">Students</h2>
           <div className="flex items-center gap-3 flex-wrap justify-end">
-            <span className="text-sm text-muted-foreground">{students.length} total · {activeStudents.length} active · {inactiveStudents.length} removed</span>
+            <span className="text-sm text-muted-foreground">{counts.total} total · {counts.active} active · {counts.inactive} removed</span>
             <button onClick={reloadStudents} disabled={loading}
               title="Refresh student list"
               className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 text-gray-500 rounded-lg text-xs hover:bg-gray-50 transition-colors disabled:opacity-40">
@@ -531,11 +550,11 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
           {(['active', 'inactive', 'all'] as const).map(key => {
             const labels: Record<string, string> = { active: 'Active', inactive: 'Removed', all: 'All' }
             return (
-              <button key={key} onClick={() => { setStatusFilter(key); setGradeFilter('all'); setSectionFilter('all') }}
+              <button key={key} onClick={() => { setStatusFilter(key); setGradeFilter('all'); setSectionFilter('all'); setPage(0) }}
                 className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${statusFilter === key ? 'bg-white text-gray-900 ' : 'text-gray-500 hover:text-gray-700'}`}>
                 {labels[key]}
-                {key === 'inactive' && inactiveStudents.length > 0 && (
-                  <span className="ml-1.5 bg-red-100 text-red-600 text-xs px-1.5 py-0.5 rounded-full">{inactiveStudents.length}</span>
+                {key === 'inactive' && counts.inactive > 0 && (
+                  <span className="ml-1.5 bg-red-100 text-red-600 text-xs px-1.5 py-0.5 rounded-full">{counts.inactive}</span>
                 )}
               </button>
             )
@@ -591,11 +610,11 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
         <div className="flex gap-3 mb-4 flex-wrap">
           <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by name or ID..."
             className="flex-1 min-w-[160px] border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-green-300" />
-          <select value={gradeFilter} onChange={e => { setGradeFilter(e.target.value); setSectionFilter('all') }}
+          <select value={gradeFilter} onChange={e => { setGradeFilter(e.target.value); setSectionFilter('all'); setPage(0) }}
             className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-green-300">
             {grades.map(g => <option key={g} value={g}>{g === 'all' ? 'All Grades' : `Grade ${g}`}</option>)}
           </select>
-          <select value={sectionFilter} onChange={e => setSectionFilter(e.target.value)}
+          <select value={sectionFilter} onChange={e => { setSectionFilter(e.target.value); setPage(0) }}
             className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-green-300">
             {sections.map(s => <option key={s} value={s}>{s === 'all' ? 'All Sections' : `Section ${s}`}</option>)}
           </select>
@@ -614,7 +633,7 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
               <div key={group} className="bg-white rounded-md border border-gray-200 overflow-hidden">
                 <div className="px-5 py-3 bg-green-50 border-b border-green-100 flex items-center justify-between">
                   <span className="font-semibold text-green-800 text-sm">{group}</span>
-                  <span className="text-xs text-green-600 font-medium">{members.length} student{members.length !== 1 ? 's' : ''}</span>
+                  <span className="text-xs text-green-600 font-medium">{(() => { const n = Math.max(members.length, classTotal(members[0].grade, (members[0].section ?? '').toUpperCase())); return `${n} student${n !== 1 ? 's' : ''}` })()}</span>
                 </div>
                 <div className="overflow-x-auto">
                 <table className="w-full text-sm">
@@ -660,14 +679,26 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
           </div>
         )}
 
+        {total > PAGE_SIZE && (
+          <div className="mt-4 flex items-center justify-between text-sm text-gray-600" data-testid="students-pagination">
+            <span data-testid="students-page-range">Showing {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, total)} of {total}</span>
+            <div className="flex items-center gap-2">
+              <button type="button" data-testid="students-prev-page" disabled={page === 0 || loading} onClick={() => setPage(p => Math.max(0, p - 1))}
+                className="px-3 py-1.5 border border-gray-200 rounded-lg text-xs hover:bg-gray-50 disabled:opacity-40">Previous</button>
+              <span>Page {page + 1} of {pageCount}</span>
+              <button type="button" data-testid="students-next-page" disabled={page + 1 >= pageCount || loading} onClick={() => setPage(p => p + 1)}
+                className="px-3 py-1.5 border border-gray-200 rounded-lg text-xs hover:bg-gray-50 disabled:opacity-40">Next</button>
+            </div>
+          </div>
+        )}
+
         {/* Removed Classes section — shows class-groups from inactive students */}
-        {statusFilter === 'active' && inactiveStudents.length > 0 && (() => {
+        {statusFilter === 'active' && counts.inactive > 0 && (() => {
           const removedGroups: Record<string, number> = {}
-          inactiveStudents.forEach(s => {
-            const sec = (s.section ?? '').toUpperCase()
-            if (s.grade && sec) {
-              const key = `${s.grade}-${sec}`
-              removedGroups[key] = (removedGroups[key] || 0) + 1
+          ;(summary?.classes ?? []).filter(c => c.status === 'inactive').forEach(c => {
+            if (c.grade && c.section) {
+              const key = `${c.grade}-${c.section}`
+              removedGroups[key] = (removedGroups[key] || 0) + c.count
             }
           })
           const keys = Object.keys(removedGroups).sort((a, b) => {
@@ -679,7 +710,7 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
             <div className="mt-4 bg-white rounded-md border border-red-100 overflow-hidden">
               <div className="px-5 py-3 bg-red-50 border-b border-red-100 flex items-center justify-between">
                 <span className="font-semibold text-red-700 text-sm">Removed Classes</span>
-                <span className="text-xs text-red-500">{keys.length} class{keys.length !== 1 ? 'es' : ''} · {inactiveStudents.length} students deactivated</span>
+                <span className="text-xs text-red-500">{keys.length} class{keys.length !== 1 ? 'es' : ''} · {counts.inactive} students deactivated</span>
               </div>
               <div className="divide-y divide-gray-100">
                 {keys.map(k => (
