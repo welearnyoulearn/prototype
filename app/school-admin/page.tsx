@@ -84,6 +84,49 @@ const NAV_SECTIONS = [
   { label: 'TOOLS',         keys: ['export', 'settings', 'year-rollover'] },
 ]
 
+type NavOrder = { sections: string[]; items: Record<string, string[]> }
+const NAV_ORDER_KEY = 'wlyl_sa_nav_order'
+const NAV_RECENT_KEY = 'wlyl_sa_nav_recent'
+const NAV_RECENT_MAX = 3
+
+// Saved order first (in saved sequence); anything new or unsaved keeps its default position at the end.
+function applyOrder<T>(defaults: T[], saved: string[] | undefined, keyOf: (t: T) => string): T[] {
+  if (!saved || saved.length === 0) return defaults
+  const rank = (t: T) => { const i = saved.indexOf(keyOf(t)); return i === -1 ? saved.length + defaults.indexOf(t) : i }
+  return [...defaults].sort((a, b) => rank(a) - rank(b))
+}
+
+function readStored<T>(key: string, fallback: T): T {
+  try {
+    const raw = typeof window !== 'undefined' ? localStorage.getItem(key) : null
+    return raw ? (JSON.parse(raw) as T) : fallback
+  } catch { return fallback }
+}
+
+function writeStored(key: string, value: unknown) {
+  try { localStorage.setItem(key, JSON.stringify(value)) } catch { /* storage unavailable */ }
+}
+
+function MoveButtons({ label, testId, canUp, canDown, onMove }: {
+  label: string
+  testId: string
+  canUp: boolean
+  canDown: boolean
+  onMove: (dir: -1 | 1) => void
+}) {
+  const cls = 'w-7 h-7 flex items-center justify-center rounded text-[#3b4a40] hover:bg-[#cfdcd2] disabled:opacity-30 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-[#235b46]'
+  return (
+    <span className="flex flex-shrink-0">
+      <button type="button" className={cls} disabled={!canUp} onClick={() => onMove(-1)} aria-label={`Move ${label} up`} data-testid={`${testId}-up`}>
+        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 15l7-7 7 7" /></svg>
+      </button>
+      <button type="button" className={cls} disabled={!canDown} onClick={() => onMove(1)} aria-label={`Move ${label} down`} data-testid={`${testId}-down`}>
+        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" /></svg>
+      </button>
+    </span>
+  )
+}
+
 const NAV_ITEMS: NavItem[] = [
   {
     key: 'overview',
@@ -288,6 +331,22 @@ function SchoolAdmin() {
     })
   }
 
+  const [arranging, setArranging] = useState(false)
+  const [navOrder, setNavOrder] = useState<NavOrder>(() => readStored<NavOrder>(NAV_ORDER_KEY, { sections: [], items: {} }))
+  const [recentNav, setRecentNav] = useState<string[]>(() => readStored<string[]>(NAV_RECENT_KEY, []))
+  const saveNavOrder = (next: NavOrder) => { setNavOrder(next); writeStored(NAV_ORDER_KEY, next) }
+  const resetNavOrder = () => saveNavOrder({ sections: [], items: {} })
+  const moveInList = (list: string[], key: string, dir: -1 | 1) => {
+    const i = list.indexOf(key), j = i + dir
+    if (i < 0 || j < 0 || j >= list.length) return list
+    const next = [...list]; [next[i], next[j]] = [next[j], next[i]]
+    return next
+  }
+  const moveSection = (visible: string[], label: string, dir: -1 | 1) =>
+    saveNavOrder({ ...navOrder, sections: moveInList(visible, label, dir) })
+  const moveItem = (sectionLabel: string, visible: string[], key: string, dir: -1 | 1) =>
+    saveNavOrder({ ...navOrder, items: { ...navOrder.items, [sectionLabel]: moveInList(visible, key, dir) } })
+
   const [myRole, setMyRole] = useState<string>('school_admin')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -329,6 +388,13 @@ function SchoolAdmin() {
     if (key === 'students') setStudentsSubTab((subTab as 'list' | 'onboard') || 'list')
     navigateSection(key)
     trackOpen(key)
+    if (key !== 'overview' && key !== 'profile') {
+      setRecentNav(prev => {
+        const next = [key, ...prev.filter(k => k !== key)].slice(0, NAV_RECENT_MAX + 1)
+        writeStored(NAV_RECENT_KEY, next)
+        return next
+      })
+    }
   }, [navigateSection, trackOpen])
 
   useUsageHeartbeat()
@@ -579,51 +645,139 @@ function SchoolAdmin() {
                   {navQuery.trim() && !enabledNavItems.some(i => i.label.toLowerCase().includes(navQuery.trim().toLowerCase())) && (
                     <p className="px-3 py-2 text-xs text-[#55635a]" data-testid="nav-search-empty">No menu items match “{navQuery.trim()}”.</p>
                   )}
-                  {NAV_SECTIONS.map(section => {
-                    const q = navQuery.trim().toLowerCase()
-                    const sectionEnabled = section.keys
-                      .map(key => enabledNavItems.find(i => i.key === key))
+                  {!navQuery.trim() && !arranging && (() => {
+                    const recent = recentNav
+                      .filter(k => k !== activeNav)
+                      .map(k => enabledNavItems.find(i => i.key === k))
                       .filter((i): i is NavItem => i !== undefined)
-                      .filter(i => !q || i.label.toLowerCase().includes(q))
-                    if (sectionEnabled.length === 0) return null
-                    const collapsed = !q && collapsedSections.has(section.label)
+                      .slice(0, NAV_RECENT_MAX)
+                    if (recent.length === 0) return null
                     return (
-                      <div key={section.label} className="mb-1">
-                        <button
-                          type="button"
-                          onClick={() => toggleSection(section.label)}
-                          aria-expanded={!collapsed}
-                          data-testid={`nav-section-${section.label.toLowerCase()}`}
-                          className="portal-nav-label w-full flex items-center justify-between text-left rounded hover:text-[#235b46] focus-visible:outline-2 focus-visible:outline-[#235b46]"
-                        >
-                          <span>{section.label}</span>
-                          <svg className={`w-3 h-3 transition-transform ${collapsed ? '-rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" />
-                          </svg>
-                        </button>
-                        {!collapsed && sectionEnabled.map(item => {
-                          const isActive = activeNav === item.key
-                          return (
-                            <motion.button
+                      <div className="px-1 pb-1" data-testid="nav-recent">
+                        <p className="portal-nav-label !pt-1">Recent</p>
+                        <div className="flex flex-wrap gap-1.5 px-2">
+                          {recent.map(item => (
+                            <button
                               key={item.key}
+                              type="button"
                               onClick={() => navigateTo(item.key)}
-                              data-testid={`nav-${item.key}`}
-                              title={item.label}
-                              whileTap={{ scale: 0.98 }}
-                              className="portal-nav-item"
-                              aria-current={isActive ? 'page' : undefined}
+                              data-testid={`nav-recent-${item.key}`}
+                              className="px-2.5 py-1 rounded-full border border-[#dce2db] bg-white text-xs text-[#3b4a40] hover:bg-[#e3ece4] focus-visible:outline-2 focus-visible:outline-[#235b46]"
                             >
-
-                              <span className="relative flex-shrink-0">
-                                {item.icon}
-                              </span>
-                              <span className="relative truncate">{item.label}</span>
-                            </motion.button>
-                          )
-                        })}
+                              {item.label}
+                            </button>
+                          ))}
+                        </div>
                       </div>
                     )
-                  })}
+                  })()}
+                  {(() => {
+                    const q = navQuery.trim().toLowerCase()
+                    const visibleSections = applyOrder(
+                      NAV_SECTIONS.filter(sec => sec.keys.some(k => enabledNavItems.some(i => i.key === k))),
+                      navOrder.sections,
+                      sec => sec.label,
+                    )
+                    const visibleLabels = visibleSections.map(sec => sec.label)
+                    return visibleSections.map((section, sIdx) => {
+                      const orderedKeys = applyOrder(
+                        section.keys.filter(k => enabledNavItems.some(i => i.key === k)),
+                        navOrder.items[section.label],
+                        k => k,
+                      )
+                      const sectionEnabled = orderedKeys
+                        .map(key => enabledNavItems.find(i => i.key === key))
+                        .filter((i): i is NavItem => i !== undefined)
+                        .filter(i => !q || i.label.toLowerCase().includes(q))
+                      if (sectionEnabled.length === 0) return null
+                      const collapsed = !q && !arranging && collapsedSections.has(section.label)
+                      return (
+                        <div key={section.label} className="mb-1">
+                          <div className="flex items-center">
+                            <button
+                              type="button"
+                              onClick={() => toggleSection(section.label)}
+                              aria-expanded={!collapsed}
+                              data-testid={`nav-section-${section.label.toLowerCase()}`}
+                              className="portal-nav-label flex-1 flex items-center justify-between text-left rounded hover:text-[#235b46] focus-visible:outline-2 focus-visible:outline-[#235b46]"
+                            >
+                              <span>{section.label}</span>
+                              <svg className={`w-3 h-3 transition-transform ${collapsed ? '-rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" />
+                              </svg>
+                            </button>
+                            {arranging && (
+                              <span className="flex pt-3 pl-1">
+                                <MoveButtons
+                                  label={`${section.label} section`}
+                                  testId={`nav-move-section-${section.label.toLowerCase()}`}
+                                  canUp={sIdx > 0}
+                                  canDown={sIdx < visibleLabels.length - 1}
+                                  onMove={dir => moveSection(visibleLabels, section.label, dir)}
+                                />
+                              </span>
+                            )}
+                          </div>
+                          {!collapsed && sectionEnabled.map((item, iIdx) => {
+                            const isActive = activeNav === item.key
+                            if (arranging) {
+                              return (
+                                <div key={item.key} className="portal-nav-item cursor-default" data-testid={`nav-arrange-${item.key}`}>
+                                  <span className="relative flex-shrink-0">{item.icon}</span>
+                                  <span className="relative truncate flex-1">{item.label}</span>
+                                  <MoveButtons
+                                    label={item.label}
+                                    testId={`nav-move-${item.key}`}
+                                    canUp={iIdx > 0}
+                                    canDown={iIdx < sectionEnabled.length - 1}
+                                    onMove={dir => moveItem(section.label, orderedKeys, item.key, dir)}
+                                  />
+                                </div>
+                              )
+                            }
+                            return (
+                              <motion.button
+                                key={item.key}
+                                onClick={() => navigateTo(item.key)}
+                                data-testid={`nav-${item.key}`}
+                                title={item.label}
+                                whileTap={{ scale: 0.98 }}
+                                className="portal-nav-item"
+                                aria-current={isActive ? 'page' : undefined}
+                              >
+                                <span className="relative flex-shrink-0">
+                                  {item.icon}
+                                </span>
+                                <span className="relative truncate">{item.label}</span>
+                              </motion.button>
+                            )
+                          })}
+                        </div>
+                      )
+                    })
+                  })()}
+
+                  <div className="px-2 pt-2 pb-1 flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setArranging(a => !a)}
+                      data-testid="nav-arrange-toggle"
+                      aria-pressed={arranging}
+                      className="text-xs font-medium text-[#235b46] hover:underline focus-visible:outline-2 focus-visible:outline-[#235b46] rounded"
+                    >
+                      {arranging ? 'Done' : 'Arrange menu'}
+                    </button>
+                    {arranging && (
+                      <button
+                        type="button"
+                        onClick={resetNavOrder}
+                        data-testid="nav-arrange-reset"
+                        className="text-xs text-[#55635a] hover:underline focus-visible:outline-2 focus-visible:outline-[#235b46] rounded"
+                      >
+                        Reset order
+                      </button>
+                    )}
+                  </div>
 
                   {/* Items with no section mapping */}
                   {(() => {
