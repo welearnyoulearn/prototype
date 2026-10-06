@@ -6,6 +6,11 @@ All finished features and bug fixes. Most recent first.
 
 <!-- Add new entries at the top -->
 
+### 2026-10-06 — School Admin sidebar UX (#353)
+**Type:** Enhancement
+**Portal:** School Admin
+**Summary:** Larger, higher-contrast sidebar; focus rings; collapsible sections; menu search; recently-visited chips; per-user arrangeable order (saved in browser); distinct lucide icons.
+
 ### 2026-10-06 — Student List pagination (#352)
 **Type:** Feature (performance)
 **Portal:** School Admin
