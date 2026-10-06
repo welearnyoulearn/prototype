@@ -5,7 +5,7 @@ import {
   sendStaffRemovedEmail, sendStaffReactivatedEmail, sendStaffContactChangedEmail,
 } from '@/lib/email'
 import { sendWhatsappMessage } from '@/lib/whatsapp'
-import { findAutoAssignableSubjects, type ClassSubjectRow } from '@/lib/matchTeacher'
+import { findAutoAssignableSubjects, findStaleAssignments, type ClassSubjectRow } from '@/lib/matchTeacher'
 import { isValidName, NAME_INVALID_MESSAGE } from '@/lib/nameValidation'
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -194,6 +194,27 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       // it matches on actually changed — a corrected subject spelling or a
       // widened grade range can newly match class subjects that sat
       // unassigned since class creation, same as a brand-new teacher would.
+      if ((subjectChanged || teachesGradesChanged) && teacher.staff_type === 'teaching' && teacher.status === 'active') {
+        // First release subjects the updated details no longer fit, so the
+        // teacher is re-assigned purely from their current subject/grades.
+        const { rows: current } = await pool.query<ClassSubjectRow>(
+          `SELECT cs.id, cs.class_id, cs.subject_name, c.grade
+           FROM class_subjects cs
+           JOIN classes c ON c.id = cs.class_id
+           WHERE c.school_id = $1 AND c.deleted_at IS NULL AND cs.teacher_id = $2`,
+          [schoolId, teacher.id]
+        )
+        const stale = findStaleAssignments(
+          { subject: existing.subject, teaches_grades: existing.teaches_grades },
+          { subject: teacher.subject, teaches_grades: teacher.teaches_grades },
+          current
+        )
+        for (const s of stale) {
+          await pool.query('UPDATE class_subjects SET teacher_id = NULL WHERE id = $1', [s.id])
+          invalidateCache(`subjects:class:${s.class_id}`)
+        }
+        if (stale.length > 0) invalidateCache(`health:${schoolId}`)
+      }
       if ((subjectChanged || teachesGradesChanged) && teacher.staff_type === 'teaching' && teacher.status === 'active' && teacher.subject) {
         const { rows: unfilled } = await pool.query<ClassSubjectRow>(
           `SELECT cs.id, cs.class_id, cs.subject_name, c.grade

@@ -181,9 +181,33 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         }
         updates.push(`subject_name = $${values.length + 1}`); values.push(newName)
       }
+      let gradeAddedTo: { teacher_id: number; teaches_grades: string } | null = null
       if (teacher_id !== undefined) {
         const tid = teacher_id ? Number(teacher_id) : null
         updates.push(`teacher_id = $${values.length + 1}`); values.push(tid)
+
+        // Assigning a teacher to a grade they aren't listed for adds that grade
+        // to their profile, so Staff details stay in step with the timetable.
+        // An empty teaches_grades means "no restriction" — left untouched.
+        if (tid) {
+          const { rows: [t] } = await pool.query(
+            'SELECT teaches_grades FROM teachers WHERE id = $1 AND school_id = $2',
+            [tid, sub.school_id]
+          )
+          if (!t) return NextResponse.json({ error: 'Teacher not found' }, { status: 404 })
+          const current = (t.teaches_grades as string | null)?.trim()
+          if (current) {
+            const list = current.split(',').map((g: string) => g.trim()).filter(Boolean)
+            if (!list.some((g: string) => g.toUpperCase() === String(sub.grade).trim().toUpperCase())) {
+              const next = [...list, String(sub.grade).trim()].join(',')
+              await pool.query('UPDATE teachers SET teaches_grades = $1 WHERE id = $2', [next, tid])
+              gradeAddedTo = { teacher_id: tid, teaches_grades: next }
+              invalidateCache(`teachers:${sub.school_id}:all`)
+              invalidateCache(`teachers:${sub.school_id}:teaching`)
+              invalidateCache(`teachers:${sub.school_id}:non_teaching`)
+            }
+          }
+        }
       }
       if (periods_per_week !== undefined) {
         const ppw = Math.min(12, Math.max(1, parseInt(periods_per_week) || 4))
@@ -204,7 +228,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       const teacherName = tid
         ? (await pool.query('SELECT name FROM teachers WHERE id = $1', [tid])).rows[0]?.name ?? null
         : null
-      return NextResponse.json({ subject_id, teacher_id: tid, teacher_name: teacherName, subject_name: effectiveName })
+      return NextResponse.json({ subject_id, teacher_id: tid, teacher_name: teacherName, subject_name: effectiveName, teacher_grades_updated: gradeAddedTo })
     } catch (error) {
       console.error(error)
       return NextResponse.json({ error: 'Failed to update subject' }, { status: 500 })

@@ -309,6 +309,7 @@ export default function ClassManagement({ schoolId, onNavigate }: Props) {
             teachers={teachers}
             allClasses={classes}
             onClassUpdated={(updates) => setClasses(prev => prev.map(c => c.id === updates.id ? { ...c, ...updates } : c))}
+            onTeacherGradesUpdated={(teacherId, teachesGrades) => setTeachers(prev => prev.map(t => t.id === teacherId ? { ...t, teaches_grades: teachesGrades } : t))}
             onNavigate={onNavigate}
           />
         ) : (
@@ -415,13 +416,14 @@ export default function ClassManagement({ schoolId, onNavigate }: Props) {
 
 // ─── Class Detail (right panel) ────────────────────────────────────────────────
 function ClassDetail({
-  cls, schoolId, teachers, allClasses, onClassUpdated, onNavigate
+  cls, schoolId, teachers, allClasses, onClassUpdated, onTeacherGradesUpdated, onNavigate
 }: {
   cls: ClassRow
   schoolId: number
   teachers: Teacher[]
   allClasses: ClassRow[]
   onClassUpdated: (updates: Partial<ClassRow> & { id: number }) => void
+  onTeacherGradesUpdated: (teacherId: number, teachesGrades: string) => void
   onNavigate?: (tab: string, subTab?: string) => void
 }) {
   const hasAttendance = useFeature('attendance')
@@ -553,10 +555,13 @@ function ClassDetail({
   async function assignTeacherInline(subjectId: number) {
     if (!inlineTeacher) return
     try {
-      await fetch(`/api/classes/${cls.id}/subjects`, {
+      const res = await fetch(`/api/classes/${cls.id}/subjects`, {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ subject_id: subjectId, teacher_id: parseInt(inlineTeacher) }),
       })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) return
+      if (data.teacher_grades_updated) onTeacherGradesUpdated(data.teacher_grades_updated.teacher_id, data.teacher_grades_updated.teaches_grades)
       await loadSubjects()
       setAssigningTeacherId(null); setInlineTeacher('')
     } catch { /* silent */ }
@@ -846,8 +851,8 @@ function ClassDetail({
                                     {eligible.length > 0 && <optgroup label={`Grade ${cls.grade} teachers`}>
                                       {eligible.map(t => <option key={t.id} value={t.id}>{t.name}{t.subject ? ` · ${t.subject}` : ''}</option>)}
                                     </optgroup>}
-                                    {ineligible.length > 0 && <optgroup label="Other grades (not assigned)">
-                                      {ineligible.map(t => <option key={t.id} value={t.id}>{t.name}{t.subject ? ` · ${t.subject}` : ''}</option>)}
+                                    {ineligible.length > 0 && <optgroup label={`Other grades (Grade ${cls.grade} will be added to their details)`}>
+                                      {ineligible.map(t => <option key={t.id} value={t.id}>{t.name}{t.subject ? ` · ${t.subject}` : ''} (Gr {t.teaches_grades})</option>)}
                                     </optgroup>}
                                   </>
                                 )
