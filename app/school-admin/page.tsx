@@ -79,7 +79,7 @@ type NavItem = {
 const NAV_SECTIONS = [
   { label: 'OVERVIEW',      keys: ['overview'] },
   { label: 'PEOPLE',        keys: ['staff', 'students', 'class-management'] },
-  { label: 'MANAGEMENT',    keys: ['fee-management'] },
+  { label: 'MONEY MANAGEMENT', keys: ['fee-management', 'expenses'] },
   { label: 'SCHEDULING',    keys: ['curriculum', 'library', 'attendance', 'academic-calendar', 'exam-schedule'] },
   { label: 'COMMUNICATION', keys: ['announcements', 'feedback-management'] },
   { label: 'TOOLS',         keys: ['export', 'settings', 'year-rollover'] },
@@ -265,7 +265,13 @@ function SchoolAdmin() {
   }
 
   const [arranging, setArranging] = useState(false)
-  const [navOrder, setNavOrder] = useState<NavOrder>(() => readStored<NavOrder>(NAV_ORDER_KEY, { sections: [], items: {} }))
+  const [navOrder, setNavOrder] = useState<NavOrder>(() => {
+    const saved = readStored<NavOrder>(NAV_ORDER_KEY, { sections: [], items: {} })
+    // 'MANAGEMENT' section was renamed 'MONEY MANAGEMENT' — carry any saved order over
+    const items = { ...saved.items }
+    if (items['MANAGEMENT']) { items['MONEY MANAGEMENT'] = items['MANAGEMENT']; delete items['MANAGEMENT'] }
+    return { sections: saved.sections.map(l => (l === 'MANAGEMENT' ? 'MONEY MANAGEMENT' : l)), items }
+  })
   const [recentNav, setRecentNav] = useState<string[]>(() => readStored<string[]>(NAV_RECENT_KEY, []))
   const saveNavOrder = (next: NavOrder) => { setNavOrder(next); writeStored(NAV_ORDER_KEY, next) }
   const resetNavOrder = () => saveNavOrder({ sections: [], items: {} })
