@@ -25,6 +25,11 @@ const FREQ_LABEL: Record<string, string> = {
 const FREQ_HELP: Record<string, string> = {
   monthly: '12 bills/year (Apr–Mar)', quarterly: '4 bills/year', half_yearly: '2 bills/year (Apr & Oct)', annual: '1 bill/year, repeats', one_time: '1 bill ever, never repeats',
 }
+// What one entered amount covers, per billing frequency
+const FREQ_PERIOD: Record<string, { per: string; bills: number }> = {
+  monthly: { per: 'month', bills: 12 }, quarterly: { per: 'quarter', bills: 4 }, half_yearly: { per: 'half-year', bills: 2 },
+  annual: { per: 'year', bills: 1 }, one_time: { per: 'one-time', bills: 1 },
+}
 const FEE_ICONS: Record<string, string> = {
   tuition: '📘', transport: '🚌', exam: '📝', admission: '🎓', hostel: '🏠',
   book: '📚', uniform: '👕', sport: '⚽', activity: '⚽', annual: '📅',
@@ -1298,8 +1303,23 @@ export default function FeeSetupTab({
                           /* ── Fixed: grade-group amounts ── */
                           <div className="space-y-4">
                             <div className="flex items-center justify-between">
-                              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Set amounts by grade</p>
+                              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Set amounts by grade{FREQ_PERIOD[cat.frequency] && FREQ_PERIOD[cat.frequency].bills > 1 ? ` (per ${FREQ_PERIOD[cat.frequency].per})` : ''}</p>
                             </div>
+                            {(() => {
+                              const pd = FREQ_PERIOD[cat.frequency]
+                              const unit = !pd ? '' : pd.bills > 1 ? `per ${pd.per}` : pd.per === 'year' ? 'for the full year' : 'one time'
+                              return (
+                                <div data-testid={`notice-amount-for-${cat.id}`} role="note"
+                                  className="flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2.5">
+                                  <span className="text-lg" aria-hidden="true">{FEE_ICONS[cat.name.toLowerCase().split(' ')[0]] || '💰'}</span>
+                                  <div className="min-w-0 text-xs text-amber-900">
+                                    <p className="font-semibold">Setting amounts for: {cat.name}</p>
+                                    <p>{FREQ_LABEL[cat.frequency]} billing — type the amount <strong>{unit}</strong>
+                                      {pd && pd.bills > 1 ? <>; it is billed <strong>{pd.bills} times a year</strong>. The yearly total shows under each grade.</> : '.'}</p>
+                                  </div>
+                                </div>
+                              )
+                            })()}
 
                             {/* Grade group quick-fill */}
                             <div className="grid grid-cols-1 gap-2">
@@ -1332,11 +1352,19 @@ export default function FeeSetupTab({
                                 {GRADES.map(g => (
                                   <div key={g} className="flex items-center gap-1 min-w-0">
                                     <span className="text-[10px] text-gray-400 w-10 shrink-0">{/^\d+$/.test(g) ? `Gr.${g}` : g}</span>
+                                    <div className="w-full">
                                     <input type="number" min="0" placeholder="0"
                                       value={editAmounts[`${cat.id}_${g}`] || ''}
                                       onKeyDown={blockNonNumericKeys}
                                       onChange={e => setEditAmounts(p => ({ ...p, [`${cat.id}_${g}`]: sanitizeMoney(e.target.value) }))}
                                       className="w-full text-center border border-gray-200 rounded px-1 py-1 text-xs" />
+                                    {(() => {
+                                      const pd = FREQ_PERIOD[cat.frequency]
+                                      const amt = Number(editAmounts[`${cat.id}_${g}`] || 0)
+                                      if (!pd || pd.bills < 2 || !(amt > 0)) return null
+                                      return <p data-testid={`yearly-total-${cat.id}-${g}`} className="text-[10px] text-gray-400 text-center mt-0.5">× {pd.bills} = <span className="font-semibold text-gray-600">₹{(amt * pd.bills).toLocaleString('en-IN')}</span>/yr</p>
+                                    })()}
+                                    </div>
                                   </div>
                                 ))}
                               </div>
