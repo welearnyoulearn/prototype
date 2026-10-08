@@ -1050,7 +1050,8 @@ ${Number(pbSummary.carried_forward) > 0 ? `<p style="font-size:11px;color:#92400
       {/* ══ LEAVERS & DUES ════════════════════════════════════════════════════════ */}
       {leaversVisited && (
         <div hidden={activeTab !== 'leavers'}>
-          <FeeLeaversTab schoolId={schoolId} onCollect={collectRemovedStudent} />
+          <FeeLeaversTab schoolId={schoolId} onCollect={collectRemovedStudent}
+            onOpenPassbook={(studentId) => { loadPassbook(studentId); setShowPassbookModal(true); setPbSection('payments') }} />
         </div>
       )}
 
@@ -1088,6 +1089,25 @@ ${Number(pbSummary.carried_forward) > 0 ? `<p style="font-size:11px;color:#92400
                   className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100 text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
               </div>
             </div>
+
+            {/* Student personal details */}
+            {pbData && (
+              <div data-testid="passbook-student-details" className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-2 px-5 py-3 border-b border-gray-100 flex-shrink-0 text-xs">
+                {[
+                  { l: 'Status', v: pbData.student.status ? pbData.student.status.charAt(0).toUpperCase() + pbData.student.status.slice(1) : '' },
+                  { l: 'Parent / Guardian', v: pbData.student.parent_name },
+                  { l: 'Parent phone', v: pbData.student.parent_phone },
+                  { l: 'Parent email', v: pbData.student.parent_email },
+                  { l: 'Student phone', v: pbData.student.phone },
+                  { l: 'Student email', v: pbData.student.email },
+                ].map(d => (
+                  <div key={d.l} className="min-w-0">
+                    <p className="text-[10px] text-gray-400 uppercase tracking-wide">{d.l}</p>
+                    <p className="text-gray-800 font-medium [overflow-wrap:anywhere]">{d.v || '—'}</p>
+                  </div>
+                ))}
+              </div>
+            )}
 
             {/* Summary bar */}
             {pbData && (

@@ -170,7 +170,7 @@ export type PassbookYearGroup = {
   entries: LedgerEntry[]
 }
 export type PassbookData = {
-  student: { id: number; name: string; roll_number: string; school_roll_number?: number | null; grade: string; section: string; parent_name: string | null; parent_phone: string | null; parent_email: string | null }
+  student: { id: number; name: string; roll_number: string; school_roll_number?: number | null; grade: string; section: string; parent_name: string | null; parent_phone: string | null; parent_email: string | null; status?: string; email?: string | null; phone?: string | null }
   class_by_year?: Record<string, { grade: string; section: string; school_roll_number: number | null }>
   current_year: string | null
   summary: { total_billed: number; total_paid: number; total_waived: number; discretionary_waived?: number; written_off?: number; carried_forward?: number; outstanding: number }
