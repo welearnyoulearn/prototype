@@ -906,12 +906,13 @@ ${Number(pbSummary.carried_forward) > 0 ? `<p style="font-size:11px;color:#92400
               <button
                 data-testid="tab-more"
                 onClick={() => setMoreTabsOpen(o => !o)}
+                onKeyDown={e => { if (e.key === 'Escape') setMoreTabsOpen(false) }}
                 aria-haspopup="menu" aria-expanded={moreTabsOpen}
                 className={`px-4 py-2.5 text-sm font-bold rounded-t-lg transition-colors ${
                   activeMore ? 'text-blue-700 bg-blue-50 border-b-2 border-blue-600' : 'text-gray-500 hover:text-gray-900 hover:bg-gray-50'
                 }`}
               >
-                {activeMore ? activeMore.label : 'More'} <span className="text-xs">▾</span>
+                More{activeMore && <span className="font-semibold"> · {activeMore.label}</span>} <span className="text-xs">▾</span>
               </button>
               {moreTabsOpen && (
                 <>
@@ -925,7 +926,7 @@ ${Number(pbSummary.carried_forward) > 0 ? `<p style="font-size:11px;color:#92400
                         onClick={() => { setActiveTab(t.key as Tab); setMoreTabsOpen(false) }}
                         className={`w-full text-left px-4 py-2 text-sm hover:bg-gray-50 ${activeTab === t.key ? 'font-bold text-blue-700 bg-blue-50' : 'text-gray-700'}`}
                       >
-                        {t.label}
+                        {activeTab === t.key ? '✓ ' : ''}{t.label}
                       </button>
                     ))}
                   </div>
