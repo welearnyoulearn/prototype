@@ -62,6 +62,7 @@ export default function FeeManagement({
 }) {
   type Tab = 'overview' | 'setup' | 'applicability' | 'ledger' | 'collect' | 'students' | 'reports' | 'yearend' | 'leavers' | 'archive'
   const [activeTab, setActiveTab] = useState<Tab>('overview')
+  const [moreTabsOpen, setMoreTabsOpen] = useState(false)
 
   const hasOnlinePayments = useFeature('online-payments')
 
@@ -868,34 +869,72 @@ ${Number(pbSummary.carried_forward) > 0 ? `<p style="font-size:11px;color:#92400
         })()
       )}
 
-      {/* Tabs */}
-      <div className="flex gap-1 border-b border-gray-200 flex-wrap">
-        {([
-          { key: 'overview',         label: 'Overview' },
-          { key: 'setup',            label: 'Fee Plan' },
-          { key: 'collect',          label: pendingPayments.length > 0 ? `Ledger ● ${pendingPayments.length}` : 'Ledger' },
-          { key: 'students',         label: 'Student Passbook' },
-          { key: 'reports',          label: 'Reports' },
-          { key: 'yearend',          label: 'Year-End' },
-          { key: 'archive',          label: 'Past Records' },
-          { key: 'leavers',          label: 'Leavers & Dues' },
-        ] as const).map(t => (
-          <button
-            key={t.key}
-            data-testid={`tab-${t.key}`}
-            onClick={() => setActiveTab(t.key as Tab)}
-            className={`px-4 py-2.5 text-sm font-bold rounded-t-lg transition-colors ${
-              activeTab === t.key
-                ? 'text-blue-700 bg-blue-50 border-b-2 border-blue-600'
-                : t.key === 'collect' && pendingPayments.length > 0
-                  ? 'text-red-600 hover:bg-red-50'
-                  : 'text-gray-700 hover:text-gray-900 hover:bg-gray-50'
-            }`}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
+      {/* Tabs — daily use (Overview, Ledger) stay visible; the rest live under "More" */}
+      {(() => {
+        const mainTabs = [
+          { key: 'overview', label: 'Overview' },
+          { key: 'collect',  label: pendingPayments.length > 0 ? `Ledger ● ${pendingPayments.length}` : 'Ledger' },
+        ] as const
+        const moreTabs = [
+          { key: 'setup',    label: 'Fee Plan' },
+          { key: 'students', label: 'Student Passbook' },
+          { key: 'reports',  label: 'Reports' },
+          { key: 'yearend',  label: 'Year-End' },
+          { key: 'archive',  label: 'Past Records' },
+          { key: 'leavers',  label: 'Leavers & Dues' },
+        ] as const
+        const activeMore = moreTabs.find(t => t.key === activeTab)
+        return (
+          <div className="relative z-30 flex gap-1 border-b border-gray-200 items-center">
+            {mainTabs.map(t => (
+              <button
+                key={t.key}
+                data-testid={`tab-${t.key}`}
+                onClick={() => { setActiveTab(t.key as Tab); setMoreTabsOpen(false) }}
+                className={`px-4 py-2.5 text-sm font-bold rounded-t-lg transition-colors ${
+                  activeTab === t.key
+                    ? 'text-blue-700 bg-blue-50 border-b-2 border-blue-600'
+                    : t.key === 'collect' && pendingPayments.length > 0
+                      ? 'text-red-600 hover:bg-red-50'
+                      : 'text-gray-700 hover:text-gray-900 hover:bg-gray-50'
+                }`}
+              >
+                {t.label}
+              </button>
+            ))}
+            <div className="relative">
+              <button
+                data-testid="tab-more"
+                onClick={() => setMoreTabsOpen(o => !o)}
+                aria-haspopup="menu" aria-expanded={moreTabsOpen}
+                className={`px-4 py-2.5 text-sm font-bold rounded-t-lg transition-colors ${
+                  activeMore ? 'text-blue-700 bg-blue-50 border-b-2 border-blue-600' : 'text-gray-500 hover:text-gray-900 hover:bg-gray-50'
+                }`}
+              >
+                {activeMore ? activeMore.label : 'More'} <span className="text-xs">▾</span>
+              </button>
+              {moreTabsOpen && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setMoreTabsOpen(false)} />
+                  <div role="menu" className="absolute left-0 top-full mt-1 z-50 w-52 bg-white border border-gray-200 rounded-xl shadow-lg py-1">
+                    {moreTabs.map(t => (
+                      <button
+                        key={t.key}
+                        role="menuitem"
+                        data-testid={`tab-${t.key}`}
+                        onClick={() => { setActiveTab(t.key as Tab); setMoreTabsOpen(false) }}
+                        className={`w-full text-left px-4 py-2 text-sm hover:bg-gray-50 ${activeTab === t.key ? 'font-bold text-blue-700 bg-blue-50' : 'text-gray-700'}`}
+                      >
+                        {t.label}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        )
+      })()}
 
       {/* ═══ OVERVIEW ═══════════════════════════════════════════════════════════ */}
       {activeTab === 'overview' && (
