@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback, Fragment } from 'react'
+import { useEffect, useRef, useState, useCallback, Fragment } from 'react'
 import { useFeature } from '@/lib/features-context'
 import type {
   FeeCategory, FeeStructure, StructureLock, Amendment,
@@ -63,6 +63,23 @@ export default function FeeManagement({
   type Tab = 'overview' | 'setup' | 'applicability' | 'ledger' | 'collect' | 'students' | 'reports' | 'yearend' | 'leavers' | 'archive'
   const [activeTab, setActiveTab] = useState<Tab>('overview')
   const [moreTabsOpen, setMoreTabsOpen] = useState(false)
+  // Tabs picked from More stay in the bar (like browser tabs) until closed with ×
+  const [openedTabs, setOpenedTabs] = useState<Tab[]>([])
+  const moreTabsRef = useRef<HTMLDivElement>(null)
+  // Any route into a More tab (e.g. Overview shortcuts) also pins it to the bar
+  useEffect(() => {
+    if (!['overview', 'collect'].includes(activeTab)) setOpenedTabs(o => o.includes(activeTab) ? o : [...o, activeTab])
+  }, [activeTab])
+  // Close the More menu on an outside click — without a full-screen backdrop, which would
+  // swallow the first click on Overview / Ledger instead of navigating.
+  useEffect(() => {
+    if (!moreTabsOpen) return
+    const onDown = (e: MouseEvent) => { if (!moreTabsRef.current?.contains(e.target as Node)) setMoreTabsOpen(false) }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setMoreTabsOpen(false) }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey) }
+  }, [moreTabsOpen])
 
   const hasOnlinePayments = useFeature('online-payments')
 
@@ -883,7 +900,6 @@ ${Number(pbSummary.carried_forward) > 0 ? `<p style="font-size:11px;color:#92400
           { key: 'archive',  label: 'Past Records' },
           { key: 'leavers',  label: 'Leavers & Dues' },
         ] as const
-        const activeMore = moreTabs.find(t => t.key === activeTab)
         return (
           <div className="relative z-30 flex gap-1 border-b border-gray-200 items-center">
             {mainTabs.map(t => (
@@ -902,28 +918,40 @@ ${Number(pbSummary.carried_forward) > 0 ? `<p style="font-size:11px;color:#92400
                 {t.label}
               </button>
             ))}
-            <div className="relative">
+            {openedTabs.map(k => {
+              const t = moreTabs.find(m => m.key === k)
+              if (!t) return null
+              return (
+                <div key={k} className={`flex items-center rounded-t-lg ${activeTab === k ? 'bg-blue-50 border-b-2 border-blue-600' : 'hover:bg-gray-50'}`}>
+                  <button data-testid={`tab-open-${k}`} onClick={() => { setActiveTab(k); setMoreTabsOpen(false) }}
+                    className={`pl-4 pr-2 py-2.5 text-sm font-bold ${activeTab === k ? 'text-blue-700' : 'text-gray-700'}`}>{t.label}</button>
+                  <button data-testid={`tab-close-${k}`} aria-label={`Close ${t.label}`} title="Close tab"
+                    onClick={() => { setOpenedTabs(o => o.filter(x => x !== k)); if (activeTab === k) setActiveTab('overview') }}
+                    className="pr-3 pl-1 py-2.5 text-gray-400 hover:text-gray-700 text-base leading-none">×</button>
+                </div>
+              )
+            })}
+            <div className="relative" ref={moreTabsRef}>
               <button
                 data-testid="tab-more"
                 onClick={() => setMoreTabsOpen(o => !o)}
                 onKeyDown={e => { if (e.key === 'Escape') setMoreTabsOpen(false) }}
                 aria-haspopup="menu" aria-expanded={moreTabsOpen}
                 className={`px-4 py-2.5 text-sm font-bold rounded-t-lg transition-colors ${
-                  activeMore ? 'text-blue-700 bg-blue-50 border-b-2 border-blue-600' : 'text-gray-500 hover:text-gray-900 hover:bg-gray-50'
+                  moreTabsOpen ? 'text-gray-900 bg-gray-100' : 'text-gray-500 hover:text-gray-900 hover:bg-gray-50'
                 }`}
               >
-                More{activeMore && <span className="font-semibold"> · {activeMore.label}</span>} <span className="text-xs">▾</span>
+                More <span className="text-xs">▾</span>
               </button>
               {moreTabsOpen && (
                 <>
-                  <div className="fixed inset-0 z-40" onClick={() => setMoreTabsOpen(false)} />
                   <div role="menu" className="absolute left-0 top-full mt-1 z-50 w-52 bg-white border border-gray-200 rounded-xl shadow-lg py-1">
                     {moreTabs.map(t => (
                       <button
                         key={t.key}
                         role="menuitem"
                         data-testid={`tab-${t.key}`}
-                        onClick={() => { setActiveTab(t.key as Tab); setMoreTabsOpen(false) }}
+                        onClick={() => { setOpenedTabs(o => o.includes(t.key) ? o : [...o, t.key]); setActiveTab(t.key as Tab); setMoreTabsOpen(false) }}
                         className={`w-full text-left px-4 py-2 text-sm hover:bg-gray-50 ${activeTab === t.key ? 'font-bold text-blue-700 bg-blue-50' : 'text-gray-700'}`}
                       >
                         {activeTab === t.key ? '✓ ' : ''}{t.label}

@@ -52,6 +52,7 @@ for (const [label, size] of [['desktop', { width: 1366, height: 800 }], ['phone'
     page.on('response', r => { if (r.url().includes('/api/') && r.status() >= 400 && r.status() !== 401) problems.push(`${r.status()} ${r.url().replace(BASE, '')}`) })
     await open(page)
     for (const t of TABS) {
+      if (!['overview', 'collect'].includes(t)) await page.getByTestId('tab-more').click()
       await page.getByTestId(`tab-${t}`).click()
       await page.waitForTimeout(1200)
       const sideways = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
@@ -76,4 +77,39 @@ test('FEEUI-closegate selected-but-unapplied decisions are called out when closi
   await page.getByTestId('btn-close-year').click()
   await expect(page.getByTestId('close-gate-unapplied')).toContainText('has not been applied')
   await expect(page.getByTestId('close-gate')).toContainText('carry selected, not applied')
+})
+
+test('FEEUI-more-tabs stay open in the bar and the menu does not swallow clicks', async ({ page }) => {
+  await page.setViewportSize({ width: 1366, height: 800 })
+  await open(page)
+  // pick Leavers & Dues from More -> it becomes its own tab
+  await page.getByTestId('tab-more').click()
+  await page.getByTestId('tab-leavers').click()
+  await expect(page.getByTestId('tab-open-leavers')).toBeVisible()
+  // opening More then clicking Ledger switches on the FIRST click and keeps Leavers in the bar
+  await page.getByTestId('tab-more').click()
+  await page.getByTestId('tab-collect').click()
+  await expect(page.getByTestId('tab-open-leavers')).toBeVisible()
+  await expect(page.getByTestId('tab-collect')).toHaveClass(/text-blue-700/)
+  // a second More tab sits beside the first
+  await page.getByTestId('tab-more').click()
+  await page.getByTestId('tab-yearend').click()
+  await expect(page.getByTestId('tab-open-leavers')).toBeVisible()
+  await expect(page.getByTestId('tab-open-yearend')).toBeVisible()
+  // × closes a tab; closing the active one returns to Overview
+  await page.getByTestId('tab-close-yearend').click()
+  await expect(page.getByTestId('tab-open-yearend')).toHaveCount(0)
+  await expect(page.getByTestId('tab-open-leavers')).toBeVisible()
+  // Escape closes the menu
+  await page.getByTestId('tab-more').click()
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('menu')).toHaveCount(0)
+})
+
+test('FEEUI-ledger student name opens details', async ({ page }) => {
+  await page.setViewportSize({ width: 1366, height: 800 })
+  await open(page)
+  await page.getByTestId('tab-collect').click()
+  await page.locator('[data-testid^="btn-ledger-details-"]').first().click({ timeout: 30000 })
+  await expect(page.getByTestId('passbook-student-details')).toBeVisible({ timeout: 30000 })
 })
