@@ -210,7 +210,7 @@ h1.portal-section-heading { margin-bottom: 8px; font-size: 26px; line-height: 1.
 .portal-metric:active { transform: scale(.99); }
 .portal-main > :not([hidden]),
 .portal-main > div > :not([hidden]),
-.portal-main > div > div > :not([hidden]) { animation: portal-view-in 220ms var(--ease-standard) both; }
+.portal-main > div > div > :not([hidden]) { animation: portal-view-in 220ms var(--ease-standard) backwards; }
 .portal-main :where(h1, h2, h3) { text-wrap: balance; }
 .portal-main :where(p, td, li) { text-wrap: pretty; }
 
