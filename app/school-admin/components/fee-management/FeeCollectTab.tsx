@@ -24,6 +24,24 @@ const STATUS_COLORS: Record<string, string> = {
   passout:  'bg-indigo-100 text-indigo-700',
 }
 
+// A stable colour per fee type, so Tuition / Transport / etc. are easy to tell apart in the collect list.
+// Classes are written out in full so Tailwind picks them up.
+const FEE_TYPE_COLORS = [
+  { dot: 'bg-blue-500',    text: 'text-blue-700',    border: 'border-blue-400',    tint: 'bg-blue-50',    tintHover: 'hover:bg-blue-100' },
+  { dot: 'bg-emerald-500', text: 'text-emerald-700', border: 'border-emerald-400', tint: 'bg-emerald-50', tintHover: 'hover:bg-emerald-100' },
+  { dot: 'bg-violet-500',  text: 'text-violet-700',  border: 'border-violet-400',  tint: 'bg-violet-50',  tintHover: 'hover:bg-violet-100' },
+  { dot: 'bg-rose-500',    text: 'text-rose-700',    border: 'border-rose-400',    tint: 'bg-rose-50',    tintHover: 'hover:bg-rose-100' },
+  { dot: 'bg-teal-500',    text: 'text-teal-700',    border: 'border-teal-400',    tint: 'bg-teal-50',    tintHover: 'hover:bg-teal-100' },
+  { dot: 'bg-orange-500',  text: 'text-orange-700',  border: 'border-orange-400',  tint: 'bg-orange-50',  tintHover: 'hover:bg-orange-100' },
+  { dot: 'bg-cyan-500',    text: 'text-cyan-700',    border: 'border-cyan-400',    tint: 'bg-cyan-50',    tintHover: 'hover:bg-cyan-100' },
+  { dot: 'bg-pink-500',    text: 'text-pink-700',    border: 'border-pink-400',    tint: 'bg-pink-50',    tintHover: 'hover:bg-pink-100' },
+]
+function feeTypeColor(name: string) {
+  let h = 0
+  for (const ch of name.toLowerCase()) h = (h * 31 + ch.charCodeAt(0)) >>> 0
+  return FEE_TYPE_COLORS[h % FEE_TYPE_COLORS.length]
+}
+
 // Keeps only digits and a single decimal point (max 2 dp) — type="number" alone
 // allows "e", "+", "-" and pasted text; this closes those gaps.
 function sanitizeMoney(raw: string): string {
@@ -763,6 +781,31 @@ export default function FeeCollectTab({
                                 ))}
                               </div>
                             )}
+                            {(() => {
+                              const total = row.open_entries.length
+                              const picked = row.open_entries.filter(x => collectChecked.has(x.id)).length
+                              const setAll = (on: boolean) => {
+                                const ids = on ? row.open_entries.map(x => x.id) : []
+                                setCollectChecked(new Set(ids))
+                                setPayAmount(on ? String(row.open_entries.reduce((t, x) => t + Number(x.balance), 0)) : '0')
+                              }
+                              return (
+                                <div data-testid="collect-select-bar" className="flex items-center justify-between gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2">
+                                  <label className="flex items-center gap-2 text-sm font-semibold text-gray-800 cursor-pointer">
+                                    <input type="checkbox" data-testid="collect-select-all" checked={picked === total && total > 0}
+                                      ref={el => { if (el) el.indeterminate = picked > 0 && picked < total }}
+                                      onChange={ev => setAll(ev.target.checked)}
+                                      className="w-4 h-4 rounded border-gray-300 text-blue-600" />
+                                    Select all
+                                  </label>
+                                  <span className="text-xs text-gray-500">{picked} of {total} selected</span>
+                                  <div className="flex gap-2">
+                                    <button type="button" data-testid="collect-btn-deselect-all" onClick={() => setAll(false)} disabled={picked === 0}
+                                      className="rounded-md border border-gray-200 bg-white px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-gray-100 disabled:opacity-40">Deselect all</button>
+                                  </div>
+                                </div>
+                              )
+                            })()}
                             <div className="space-y-1.5">
                               {[...row.open_entries.filter(isCarriedEntry), ...row.open_entries.filter(e => !isCarriedEntry(e))].map((e, idx, ordered) => (
                                 <Fragment key={e.id}>
@@ -778,7 +821,7 @@ export default function FeeCollectTab({
                                 <label className={`flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer border-l-2 transition-colors ${
                                   e.source_academic_year
                                     ? (collectChecked.has(e.id) ? 'bg-amber-50 border-amber-400 hover:bg-amber-100' : 'bg-amber-50/40 border-amber-200 hover:bg-amber-50')
-                                    : (collectChecked.has(e.id) ? 'bg-blue-50 border-blue-400 hover:bg-blue-100' : 'border-transparent hover:bg-gray-50')
+                                    : (collectChecked.has(e.id) ? `${feeTypeColor(e.category_name).tint} ${feeTypeColor(e.category_name).border} ${feeTypeColor(e.category_name).tintHover}` : `${feeTypeColor(e.category_name).border} hover:bg-gray-50`)
                                 }`}>
                                   <input type="checkbox" checked={collectChecked.has(e.id)}
                                     onChange={ev => {
@@ -793,7 +836,7 @@ export default function FeeCollectTab({
                                     {e.source_academic_year ? (
                                       <><span className="text-amber-700 font-medium">⏱ Previous Year Dues ({carriedOriginYears(e).join(' + ')})</span> · <span className="text-gray-400">{summarizeCarriedNotes(e.notes, e.period_label)}</span></>
                                     ) : (
-                                      <>{e.category_name} · <span className="text-gray-400">{e.period_label}</span></>
+                                      <><span className={`inline-block w-2 h-2 rounded-full mr-1.5 ${feeTypeColor(e.category_name).dot}`} aria-hidden="true" /><span className={`font-semibold ${feeTypeColor(e.category_name).text}`}>{e.category_name}</span> · <span className="text-gray-400">{e.period_label}</span></>
                                     )}
                                   </span>
                                   <span className={`text-xs px-1.5 py-0.5 rounded-full capitalize ${STATUS_COLORS[e.status]}`}>{e.status}</span>
