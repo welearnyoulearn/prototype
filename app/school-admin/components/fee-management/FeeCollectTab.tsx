@@ -657,7 +657,9 @@ export default function FeeCollectTab({
                       onClick={() => toggleStudent(row.student_id)}>
                       <div className="sm:col-span-4">
                         <div className="flex items-center gap-2">
-                          <p className="text-sm font-medium text-gray-800">{row.student_name}</p>
+                          <button data-testid={`btn-ledger-details-${row.student_id}`} title="View student details & passbook"
+                            onClick={e => { e.stopPropagation(); onOpenPassbook(row.student_id) }}
+                            className="text-sm font-medium text-indigo-700 hover:underline text-left">{row.student_name}</button>
                           {row.student_status === 'inactive' && (
                             <span className="text-xs bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded font-medium">Inactive</span>
                           )}

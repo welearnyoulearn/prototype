@@ -62,6 +62,7 @@ export default function FeeManagement({
 }) {
   type Tab = 'overview' | 'setup' | 'applicability' | 'ledger' | 'collect' | 'students' | 'reports' | 'yearend' | 'leavers' | 'archive'
   const [activeTab, setActiveTab] = useState<Tab>('overview')
+  const [moreTabsOpen, setMoreTabsOpen] = useState(false)
 
   const hasOnlinePayments = useFeature('online-payments')
 
@@ -868,34 +869,73 @@ ${Number(pbSummary.carried_forward) > 0 ? `<p style="font-size:11px;color:#92400
         })()
       )}
 
-      {/* Tabs */}
-      <div className="flex gap-1 border-b border-gray-200 flex-wrap">
-        {([
-          { key: 'overview',         label: 'Overview' },
-          { key: 'setup',            label: 'Fee Plan' },
-          { key: 'collect',          label: pendingPayments.length > 0 ? `Ledger ● ${pendingPayments.length}` : 'Ledger' },
-          { key: 'students',         label: 'Student Passbook' },
-          { key: 'reports',          label: 'Reports' },
-          { key: 'yearend',          label: 'Year-End' },
-          { key: 'archive',          label: 'Past Records' },
-          { key: 'leavers',          label: 'Leavers & Dues' },
-        ] as const).map(t => (
-          <button
-            key={t.key}
-            data-testid={`tab-${t.key}`}
-            onClick={() => setActiveTab(t.key as Tab)}
-            className={`px-4 py-2.5 text-sm font-bold rounded-t-lg transition-colors ${
-              activeTab === t.key
-                ? 'text-blue-700 bg-blue-50 border-b-2 border-blue-600'
-                : t.key === 'collect' && pendingPayments.length > 0
-                  ? 'text-red-600 hover:bg-red-50'
-                  : 'text-gray-700 hover:text-gray-900 hover:bg-gray-50'
-            }`}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
+      {/* Tabs — daily use (Overview, Ledger) stay visible; the rest live under "More" */}
+      {(() => {
+        const mainTabs = [
+          { key: 'overview', label: 'Overview' },
+          { key: 'collect',  label: pendingPayments.length > 0 ? `Ledger ● ${pendingPayments.length}` : 'Ledger' },
+        ] as const
+        const moreTabs = [
+          { key: 'setup',    label: 'Fee Plan' },
+          { key: 'students', label: 'Student Passbook' },
+          { key: 'reports',  label: 'Reports' },
+          { key: 'yearend',  label: 'Year-End' },
+          { key: 'archive',  label: 'Past Records' },
+          { key: 'leavers',  label: 'Leavers & Dues' },
+        ] as const
+        const activeMore = moreTabs.find(t => t.key === activeTab)
+        return (
+          <div className="relative z-30 flex gap-1 border-b border-gray-200 items-center">
+            {mainTabs.map(t => (
+              <button
+                key={t.key}
+                data-testid={`tab-${t.key}`}
+                onClick={() => { setActiveTab(t.key as Tab); setMoreTabsOpen(false) }}
+                className={`px-4 py-2.5 text-sm font-bold rounded-t-lg transition-colors ${
+                  activeTab === t.key
+                    ? 'text-blue-700 bg-blue-50 border-b-2 border-blue-600'
+                    : t.key === 'collect' && pendingPayments.length > 0
+                      ? 'text-red-600 hover:bg-red-50'
+                      : 'text-gray-700 hover:text-gray-900 hover:bg-gray-50'
+                }`}
+              >
+                {t.label}
+              </button>
+            ))}
+            <div className="relative">
+              <button
+                data-testid="tab-more"
+                onClick={() => setMoreTabsOpen(o => !o)}
+                onKeyDown={e => { if (e.key === 'Escape') setMoreTabsOpen(false) }}
+                aria-haspopup="menu" aria-expanded={moreTabsOpen}
+                className={`px-4 py-2.5 text-sm font-bold rounded-t-lg transition-colors ${
+                  activeMore ? 'text-blue-700 bg-blue-50 border-b-2 border-blue-600' : 'text-gray-500 hover:text-gray-900 hover:bg-gray-50'
+                }`}
+              >
+                More{activeMore && <span className="font-semibold"> · {activeMore.label}</span>} <span className="text-xs">▾</span>
+              </button>
+              {moreTabsOpen && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setMoreTabsOpen(false)} />
+                  <div role="menu" className="absolute left-0 top-full mt-1 z-50 w-52 bg-white border border-gray-200 rounded-xl shadow-lg py-1">
+                    {moreTabs.map(t => (
+                      <button
+                        key={t.key}
+                        role="menuitem"
+                        data-testid={`tab-${t.key}`}
+                        onClick={() => { setActiveTab(t.key as Tab); setMoreTabsOpen(false) }}
+                        className={`w-full text-left px-4 py-2 text-sm hover:bg-gray-50 ${activeTab === t.key ? 'font-bold text-blue-700 bg-blue-50' : 'text-gray-700'}`}
+                      >
+                        {activeTab === t.key ? '✓ ' : ''}{t.label}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        )
+      })()}
 
       {/* ═══ OVERVIEW ═══════════════════════════════════════════════════════════ */}
       {activeTab === 'overview' && (
@@ -1011,7 +1051,8 @@ ${Number(pbSummary.carried_forward) > 0 ? `<p style="font-size:11px;color:#92400
       {/* ══ LEAVERS & DUES ════════════════════════════════════════════════════════ */}
       {leaversVisited && (
         <div hidden={activeTab !== 'leavers'}>
-          <FeeLeaversTab schoolId={schoolId} onCollect={collectRemovedStudent} />
+          <FeeLeaversTab schoolId={schoolId} onCollect={collectRemovedStudent}
+            onOpenPassbook={(studentId) => { loadPassbook(studentId); setShowPassbookModal(true); setPbSection('payments') }} />
         </div>
       )}
 
@@ -1049,6 +1090,25 @@ ${Number(pbSummary.carried_forward) > 0 ? `<p style="font-size:11px;color:#92400
                   className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100 text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
               </div>
             </div>
+
+            {/* Student personal details */}
+            {pbData && (
+              <div data-testid="passbook-student-details" className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-2 px-5 py-3 border-b border-gray-100 flex-shrink-0 text-xs">
+                {[
+                  { l: 'Status', v: pbData.student.status ? pbData.student.status.charAt(0).toUpperCase() + pbData.student.status.slice(1) : '' },
+                  { l: 'Parent / Guardian', v: pbData.student.parent_name },
+                  { l: 'Parent phone', v: pbData.student.parent_phone },
+                  { l: 'Parent email', v: pbData.student.parent_email },
+                  { l: 'Student phone', v: pbData.student.phone },
+                  { l: 'Student email', v: pbData.student.email },
+                ].map(d => (
+                  <div key={d.l} className="min-w-0">
+                    <p className="text-[10px] text-gray-400 uppercase tracking-wide">{d.l}</p>
+                    <p className="text-gray-800 font-medium [overflow-wrap:anywhere]">{d.v || '—'}</p>
+                  </div>
+                ))}
+              </div>
+            )}
 
             {/* Summary bar */}
             {pbData && (

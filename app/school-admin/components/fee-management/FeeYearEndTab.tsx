@@ -76,6 +76,8 @@ export default function FeeYearEndTab({
   const [yeDecisions, setYeDecisions]       = useState<Record<number, 'carry' | 'writeoff' | 'open' | 'passout'>>({})
   const [yeReasons, setYeReasons]           = useState<Record<number, string>>({})
   const [yeFilter, setYeFilter]             = useState<'all' | 'leavers' | 'continuing'>('all')
+  const [yeClass, setYeClass]               = useState('')
+  const [yeSearch, setYeSearch]             = useState('')
   const [yeProcessing, setYeProcessing]     = useState(false)
   const [yeMsg, setYeMsg]                   = useState('')
   // Write-off sign-off (only when the school has an approver and at least two logins)
@@ -291,9 +293,36 @@ export default function FeeYearEndTab({
   }
 
   // Year-end view helpers
-  const visibleYeStudents = (yearEnd?.students || []).filter(s =>
+  const yeSearchTerm = yeSearch.trim().toLowerCase()
+  const groupFilteredYeStudents = (yearEnd?.students || []).filter(s =>
     yeFilter === 'all' ? true : yeFilter === 'leavers' ? s.is_leaver : !s.is_leaver
   )
+  const yeClassOptions = [...new Set(groupFilteredYeStudents.map(s => `${s.grade}|${s.section}`))]
+    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+  // '' = not chosen yet → start on the first class; 'all' stays selectable (last in the list)
+  const effectiveYeClass = yeClass === 'all' || yeClassOptions.includes(yeClass) ? yeClass : (yeClassOptions[0] ?? 'all')
+  const visibleYeStudents = groupFilteredYeStudents.filter(s =>
+    (effectiveYeClass === 'all' || `${s.grade}|${s.section}` === effectiveYeClass) &&
+    (!yeSearchTerm || s.student_name.toLowerCase().includes(yeSearchTerm) || String(s.roll_number ?? '').toLowerCase().includes(yeSearchTerm) || String(s.school_roll_number ?? '') === yeSearchTerm)
+  )
+  const decisionOf = (id: number) => yeDecisions[id] || 'open'
+  const countDecisions = (list: { student_id: number }[]) => ({
+    carry: list.filter(s => decisionOf(s.student_id) === 'carry').length,
+    writeoff: list.filter(s => decisionOf(s.student_id) === 'writeoff').length,
+    open: list.filter(s => decisionOf(s.student_id) === 'open').length,
+    passout: list.filter(s => decisionOf(s.student_id) === 'passout').length,
+  })
+  const yeGroups = (() => {
+    const map = new Map<string, { key: string; grade: string; section: string; students: typeof visibleYeStudents }>()
+    for (const s of visibleYeStudents) {
+      const key = `${s.grade}|${s.section}`
+      if (!map.has(key)) map.set(key, { key, grade: String(s.grade), section: String(s.section ?? ''), students: [] })
+      map.get(key)!.students.push(s)
+    }
+    return [...map.values()].sort((a, b) =>
+      a.grade.localeCompare(b.grade, undefined, { numeric: true }) || a.section.localeCompare(b.section))
+  })()
+  const visibleCounts = countDecisions(visibleYeStudents)
   function startYearLabel(label: string) { return label.split('-')[0] }
 
   function printYearEndStatement() {
@@ -352,6 +381,7 @@ export default function FeeYearEndTab({
       <div>
         <h2 className="text-base font-semibold text-gray-800">Year-End Closure — {academicYear}</h2>
         <p className="text-xs text-gray-400 mt-0.5">Decide each student’s dues, then close the year. Once it is closed, run the Year Rollover tab to promote students and move the whole school to the new year.</p>
+        <p className="text-sm font-semibold text-indigo-600 mt-2" data-testid="year-end-follow-steps-hint">👇 Follow the steps below, in order</p>
       </div>
 
       {yearEndLoading ? (
@@ -429,7 +459,7 @@ export default function FeeYearEndTab({
 
           {/* STEP 1 — Review summary */}
           <div className="bg-white rounded-xl border border-gray-100 p-5">
-            <p className="text-xs font-bold text-gray-400 uppercase tracking-wide mb-3">Step 1 · Review</p>
+            <p className="text-xs font-bold text-indigo-600 uppercase tracking-wide mb-3">Step 1 · Review</p>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               {[
                 { l: 'Total Billed', v: yearEnd.summary.total_billed,    c: 'text-gray-900' },
@@ -458,7 +488,7 @@ export default function FeeYearEndTab({
               {/* STEP 2 — Decide per student */}
               <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
                 <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
-                  <p className="text-xs font-bold text-gray-400 uppercase tracking-wide">Step 2 · Decide each student</p>
+                  <p className="text-xs font-bold text-indigo-600 uppercase tracking-wide">Step 2 · Decide each student</p>
                   <div className="flex gap-1 bg-gray-100 rounded-lg p-0.5">
                     {([
                       { key: 'all', label: `All (${yearEnd.students.length})` },
@@ -478,16 +508,58 @@ export default function FeeYearEndTab({
                   <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-100 flex items-center gap-2 flex-wrap">
                     <span className="text-xs text-gray-400">Bulk set visible:</span>
                     <button data-testid="btn-yearend-bulk-carry" onClick={() => { const next = { ...yeDecisions }; visibleYeStudents.forEach(s => { if (!s.is_leaver) next[s.student_id] = 'carry' }); setYeDecisions(next) }}
-                      className="text-xs border border-blue-200 text-blue-600 px-2.5 py-1 rounded-lg hover:bg-blue-50">All → Carry Forward</button>
+                      className="text-xs font-semibold bg-white border border-blue-300 text-blue-700 shadow-sm px-3 py-1.5 rounded-lg hover:bg-blue-50 active:scale-95">All → Carry Forward</button>
                     <button data-testid="btn-yearend-bulk-writeoff" onClick={() => { const next = { ...yeDecisions }; visibleYeStudents.forEach(s => { next[s.student_id] = 'writeoff' }); setYeDecisions(next) }}
-                      className="text-xs border border-red-200 text-red-600 px-2.5 py-1 rounded-lg hover:bg-red-50">All → Write Off</button>
+                      className="text-xs font-semibold bg-white border border-red-300 text-red-700 shadow-sm px-3 py-1.5 rounded-lg hover:bg-red-50 active:scale-95">All → Write Off</button>
                     <button data-testid="btn-yearend-bulk-open" onClick={() => { const next = { ...yeDecisions }; visibleYeStudents.forEach(s => { next[s.student_id] = 'open' }); setYeDecisions(next) }}
-                      className="text-xs border border-gray-200 text-gray-500 px-2.5 py-1 rounded-lg hover:bg-gray-100">All → Leave Open</button>
+                      className="text-xs font-semibold bg-white border border-gray-300 text-gray-700 shadow-sm px-3 py-1.5 rounded-lg hover:bg-gray-100 active:scale-95">All → Leave Open</button>
                   </div>
                 )}
 
-                <div className="divide-y divide-gray-50 max-h-[460px] overflow-y-auto">
-                  {visibleYeStudents.map(s => {
+                {/* Class + student search */}
+                <div className="px-4 py-2.5 border-b border-gray-100 flex items-center gap-2 flex-wrap">
+                  <select data-testid="select-yearend-class" value={effectiveYeClass} onChange={e => setYeClass(e.target.value)}
+                    className="text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 bg-white text-gray-700 focus:ring-2 focus:ring-indigo-300">
+                    {yeClassOptions.map(c => { const [g, sec] = c.split('|'); return <option key={c} value={c}>Class {g}{sec}</option> })}
+                    <option value="all">All classes</option>
+                  </select>
+                  <input data-testid="input-yearend-student-search" type="search" value={yeSearch} onChange={e => setYeSearch(e.target.value)}
+                    placeholder="Search student name or roll…"
+                    className="text-xs border border-gray-200 rounded-lg px-3 py-1.5 w-full sm:w-64 focus:ring-2 focus:ring-indigo-300" />
+                  {(yeSearch || effectiveYeClass !== (yeClassOptions[0] ?? 'all')) && (
+                    <button data-testid="btn-yearend-clear-filters" onClick={() => { setYeClass(''); setYeSearch('') }}
+                      className="text-xs text-indigo-600 hover:underline">Clear</button>
+                  )}
+                  <span className="text-xs text-gray-400 ml-auto">{visibleYeStudents.length} of {groupFilteredYeStudents.length} students</span>
+                </div>
+
+                {visibleYeStudents.length === 0 && <p data-testid="yearend-no-match" className="px-4 py-6 text-center text-sm text-gray-400">No students match.</p>}
+
+                {/* Overall decision counts */}
+                <div data-testid="yearend-decision-summary" className="px-4 py-2 border-b border-gray-100 flex items-center gap-x-4 gap-y-1 flex-wrap text-xs text-gray-500">
+                  <span className="font-semibold uppercase tracking-wide text-gray-400">Summary</span>
+                  <span><span className="text-blue-600">●</span> Carry Forward: <b className="text-gray-800">{visibleCounts.carry}</b></span>
+                  <span><span className="text-red-600">●</span> Write Off: <b className="text-gray-800">{visibleCounts.writeoff}</b></span>
+                  <span><span className="text-gray-400">●</span> Leave Open: <b className="text-gray-800">{visibleCounts.open}</b></span>
+                  {visibleCounts.passout > 0 && <span><span className="text-indigo-600">●</span> Passout: <b className="text-gray-800">{visibleCounts.passout}</b></span>}
+                </div>
+
+                <div className="max-h-[460px] overflow-y-auto">
+                  {yeGroups.map(g => {
+                    const gc = countDecisions(g.students)
+                    return (
+                  <div key={g.key} data-testid={`yearend-class-${g.grade}${g.section}`}>
+                  <div className="sticky top-0 z-10 px-4 py-2 bg-indigo-50 border-y border-indigo-100 flex items-center justify-between gap-2 flex-wrap">
+                    <p className="text-xs font-bold text-indigo-700">Class {g.grade}{g.section} · {g.students.length} student{g.students.length > 1 ? 's' : ''}</p>
+                    <div className="flex items-center gap-3 text-[11px] text-gray-500">
+                      <span><span className="text-blue-600">●</span> Carry Forward: <b className="text-gray-800">{gc.carry}</b></span>
+                      <span><span className="text-red-600">●</span> Write Off: <b className="text-gray-800">{gc.writeoff}</b></span>
+                      <span><span className="text-gray-400">●</span> Leave Open: <b className="text-gray-800">{gc.open}</b></span>
+                      {gc.passout > 0 && <span><span className="text-indigo-600">●</span> Passout: <b className="text-gray-800">{gc.passout}</b></span>}
+                    </div>
+                  </div>
+                  <div className="divide-y divide-gray-50">
+                  {g.students.map(s => {
                     const decision = yeDecisions[s.student_id] || 'open'
                     return (
                       <div key={s.student_id} className="px-4 py-3">
@@ -561,6 +633,10 @@ export default function FeeYearEndTab({
                       </div>
                     )
                   })}
+                  </div>
+                  </div>
+                    )
+                  })}
                 </div>
               </div>
 
@@ -605,7 +681,7 @@ export default function FeeYearEndTab({
               {/* STEP 3 — Carry target + apply */}
               {!yearEnd.is_closed && (
                 <div className="bg-white rounded-xl border border-gray-100 p-5 space-y-3">
-                  <p className="text-xs font-bold text-gray-400 uppercase tracking-wide">Step 3 · Carry-forward target</p>
+                  <p className="text-xs font-bold text-indigo-600 uppercase tracking-wide">Step 3 · Carry-forward target</p>
                   <div className="flex items-center gap-3 flex-wrap">
                     <span className="text-sm text-gray-600">Carry unpaid dues forward to:</span>
                     <span className="text-sm font-bold text-gray-800">{yearEnd.target_year}</span>
@@ -653,7 +729,7 @@ export default function FeeYearEndTab({
           {/* STEP 4 & 5 — Statement + Close */}
           {!yearEnd.is_closed && (
             <div className="bg-white rounded-xl border border-gray-100 p-5 space-y-3">
-              <p className="text-xs font-bold text-gray-400 uppercase tracking-wide">Step 4 · Statement &amp; Close</p>
+              <p className="text-xs font-bold text-indigo-600 uppercase tracking-wide">Step 4 · Statement &amp; Close</p>
               <p className="text-xs text-gray-500">
                 Print the year-end financial statement for your records, then close the year. Closing locks {academicYear} —
                 no further payments or edits until reopened. Students still “Leave Open” keep their dues in this year only — those dues will not appear in next year’s totals or in the parent’s next-year bills, so collect or carry them first if you want them followed up.

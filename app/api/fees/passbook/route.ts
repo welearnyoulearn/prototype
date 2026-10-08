@@ -20,7 +20,7 @@ export async function GET(req: NextRequest) {
     // 1. Student info
     const { rows: [student] } = await pool.query(
       `SELECT id, school_id, name, roll_number, school_roll_number, grade, section,
-              parent_name, parent_phone, parent_email
+              parent_name, parent_phone, parent_email, status, email, phone
        FROM students
        WHERE id = $1 AND school_id = $2`,
       [student_id, school_id]
