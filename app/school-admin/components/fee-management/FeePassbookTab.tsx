@@ -96,6 +96,8 @@ export default function FeePassbookTab({
   const [pbAllStudents, setPbAllStudents] = useState<PassbookSearchResult[]>([])
   const [pbAllLoading, setPbAllLoading]   = useState(false)
   const [pbGrade, setPbGrade]             = useState('')
+  const [pbPage, setPbPage]               = useState(1)
+  const PB_PAGE_SIZE = 25
 
   const loadPbAllStudents = useCallback(async () => {
     setPbAllLoading(true)
@@ -135,13 +137,13 @@ export default function FeePassbookTab({
             <button onClick={loadPbAllStudents} className="text-xs border border-gray-200 text-gray-500 px-3 py-1.5 rounded-lg hover:bg-gray-50">Refresh</button>
           </div>
           <div className="flex items-center gap-3 mb-3">
-            <select value={pbGrade} onChange={e => setPbGrade(e.target.value)}
+            <select value={pbGrade} onChange={e => { setPbGrade(e.target.value); setPbPage(1) }}
               className="text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white">
               <option value="">All Grades</option>
               {GRADES.map(g => <option key={g} value={g}>{gradeLabel(g)}</option>)}
             </select>
             <input type="text" placeholder="Search name or roll number…" value={pbSearch}
-              onChange={e => setPbSearch(e.target.value)}
+              onChange={e => { setPbSearch(e.target.value); setPbPage(1) }}
               className="flex-1 text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500" />
           </div>
 
@@ -155,11 +157,15 @@ export default function FeePassbookTab({
             )
             if (pbAllStudents.length === 0) return <p className="text-sm text-gray-400 py-8 text-center">No students found for this school.</p>
             if (list.length === 0) return <p className="text-sm text-gray-400 py-8 text-center">No students match your filter.</p>
+            const totalPages = Math.max(1, Math.ceil(list.length / PB_PAGE_SIZE))
+            const page = Math.min(pbPage, totalPages)
+            const start = (page - 1) * PB_PAGE_SIZE
+            const pageRows = list.slice(start, start + PB_PAGE_SIZE)
             return (
               <div className="border border-gray-100 rounded-lg overflow-hidden">
                 <div className="px-3 py-2 bg-gray-50 border-b border-gray-100 text-xs text-gray-500">{list.length} student{list.length !== 1 ? 's' : ''}</div>
-                <div className="divide-y divide-gray-50 max-h-[480px] overflow-y-auto">
-                  {list.map(s => (
+                <div className="divide-y divide-gray-50">
+                  {pageRows.map(s => (
                     <button key={s.id} data-testid={`student-row-${s.id}`} onClick={() => onLoad(s.id)}
                       className="w-full text-left px-4 py-2.5 hover:bg-blue-50 flex items-center justify-between group">
                       <span className="flex items-center gap-2">
@@ -173,6 +179,18 @@ export default function FeePassbookTab({
                     </button>
                   ))}
                 </div>
+                {totalPages > 1 && (
+                  <div data-testid="passbook-pagination" className="flex items-center justify-between gap-2 flex-wrap px-3 py-2 bg-gray-50 border-t border-gray-100 text-xs text-gray-500">
+                    <span>Showing {start + 1}–{Math.min(start + PB_PAGE_SIZE, list.length)} of {list.length}</span>
+                    <div className="flex items-center gap-2">
+                      <button data-testid="btn-passbook-prev" disabled={page <= 1} onClick={() => setPbPage(page - 1)}
+                        className="px-3 py-1 border border-gray-200 bg-white rounded-lg text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed">← Prev</button>
+                      <span>Page {page} of {totalPages}</span>
+                      <button data-testid="btn-passbook-next" disabled={page >= totalPages} onClick={() => setPbPage(page + 1)}
+                        className="px-3 py-1 border border-gray-200 bg-white rounded-lg text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed">Next →</button>
+                    </div>
+                  </div>
+                )}
               </div>
             )
           })()}
