@@ -210,19 +210,54 @@ export default function FeePassbookTab({
 
           {/* Header card */}
           <div className="bg-white rounded-xl border border-gray-100 p-5">
-            <div className="flex items-start justify-between">
-              <div>
-                <h3 className="text-lg font-bold text-gray-900">{pbData.student.name}</h3>
-                <p className="text-sm text-gray-500 [overflow-wrap:anywhere]">Grade {classForYear(pbData.student, pbData.class_by_year, academicYear).grade}{classForYear(pbData.student, pbData.class_by_year, academicYear).section}{rollLabel(classForYear(pbData.student, pbData.class_by_year, academicYear).school_roll_number) ? ` · ${rollLabel(classForYear(pbData.student, pbData.class_by_year, academicYear).school_roll_number)}` : ''}{pbData.student.roll_number ? ` · System ID ${pbData.student.roll_number}` : ''}</p>
-                {(pbData.student.parent_name || pbData.student.parent_phone) && (
-                  <p className="text-xs text-gray-400 mt-1">
-                    Parent: {pbData.student.parent_name || '—'}{pbData.student.parent_phone ? ` · 📞 ${pbData.student.parent_phone}` : ''}
-                  </p>
-                )}
-              </div>
-              <button onClick={onPrintStatement}
-                className="text-sm border border-gray-200 text-gray-600 px-3 py-1.5 rounded-lg hover:bg-gray-50">🖨 Print Statement</button>
-            </div>
+            {(() => {
+              const st = pbData.student
+              const cls = classForYear(st, pbData.class_by_year, academicYear)
+              const chips = [
+                `Grade ${cls.grade}${cls.section}`,
+                rollLabel(cls.school_roll_number),
+                st.roll_number ? `System ID ${st.roll_number}` : '',
+              ].filter(Boolean)
+              const fields: { l: string; v: string | null | undefined; href?: string }[] = [
+                { l: 'Parent / Guardian', v: st.parent_name },
+                { l: 'Parent phone', v: st.parent_phone, href: st.parent_phone ? `tel:${st.parent_phone}` : undefined },
+                { l: 'Parent email', v: st.parent_email, href: st.parent_email ? `mailto:${st.parent_email}` : undefined },
+                { l: 'Student phone', v: st.phone, href: st.phone ? `tel:${st.phone}` : undefined },
+                { l: 'Student email', v: st.email, href: st.email ? `mailto:${st.email}` : undefined },
+              ]
+              return (
+                <>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h3 className="text-lg font-bold text-gray-900">{st.name}</h3>
+                        {st.status && st.status !== 'active' && (
+                          <span data-testid="passbook-student-status" className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-medium capitalize">{st.status}</span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1.5 flex-wrap mt-1.5">
+                        {chips.map(c => <span key={c} className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full [overflow-wrap:anywhere]">{c}</span>)}
+                      </div>
+                    </div>
+                    <button onClick={onPrintStatement}
+                      className="text-sm border border-gray-200 text-gray-600 px-3 py-1.5 rounded-lg hover:bg-gray-50 flex-shrink-0">🖨 Print Statement</button>
+                  </div>
+                  <div data-testid="passbook-personal-details" className="mt-4 rounded-lg border border-gray-100 p-3">
+                    <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wide mb-2">Personal details</p>
+                    <dl className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-2.5">
+                      {fields.map(f => (
+                        <div key={f.l} className="min-w-0">
+                          <dt className="text-xs text-gray-400">{f.l}</dt>
+                          <dd className="text-sm font-medium text-gray-800 [overflow-wrap:anywhere]">
+                            {f.v ? (f.href ? <a href={f.href} className="text-indigo-700 hover:underline">{f.v}</a> : f.v) : <span className="text-gray-300 font-normal">Not provided</span>}
+                          </dd>
+                        </div>
+                      ))}
+                    </dl>
+                  </div>
+                </>
+              )
+            })()}
             <div className={`grid grid-cols-2 ${pbSummary.written_off ? 'sm:grid-cols-5' : 'sm:grid-cols-4'} gap-3 mt-4`}>
               {[
                 { l: 'Total Billed', v: pbSummary.total_billed, c: 'text-gray-900' },
