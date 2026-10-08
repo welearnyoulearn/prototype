@@ -643,11 +643,11 @@ export default function FeeCollectTab({
             </div>
           ) : (
             <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-              <div className="hidden sm:grid px-4 py-2.5 bg-gray-50 border-b border-gray-100 grid-cols-12 gap-2 text-xs font-semibold text-gray-500">
+              <div data-testid="ledger-table-header" className="hidden sm:grid px-4 py-3 bg-slate-100 border-b-2 border-slate-200 grid-cols-12 gap-2 text-xs font-bold uppercase tracking-wider text-slate-700">
                 <div className="col-span-4">Student</div>
                 <div className="col-span-2 text-right">Billed</div>
-                <div className="col-span-2 text-right">Paid+Waived</div>
-                <div className="col-span-2 text-right">Outstanding</div>
+                <div className="col-span-2 text-right text-green-700">Paid + Waived</div>
+                <div className="col-span-2 text-right text-red-700">Outstanding</div>
                 <div className="col-span-2 text-center">Action</div>
               </div>
               <div className="divide-y divide-gray-50 max-h-[600px] overflow-y-auto">
