@@ -87,7 +87,7 @@ const BOOTSTRAP_MARKER_KEY   = 'initial_schema_bootstrap'
 // silently never runs anywhere, and you will chase a "column does not exist" 500
 // that reproduces on production but never locally against a fresh DB.
 // Adding a migration statement and bumping this number is ONE change, not two.
-const SCHEMA_VERSION = 51
+const SCHEMA_VERSION = 53
 
 // Records the schema level this build finished applying, on the same row as the
 // bootstrap marker (no extra row, no extra round-trip to read it back).
@@ -3789,4 +3789,237 @@ async function runIncrementalMigrations() {
   `)
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_school_chapters_name_ci ON school_chapters(school_subject_id, LOWER(TRIM(chapter_name)))`)
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_school_topics_name_ci ON school_topics(school_chapter_id, LOWER(TRIM(topic_name)))`)
+
+  // Usage tracking, prices and limits for paid services (#358). Records hold ids and
+  // counts only — never message text, phone numbers, emails or file names.
+  await pool.query(`
+    -- Billing tables from the fresh-bootstrap migrations[] list: databases bootstrapped
+    -- before they were added never got them, so create them here before altering them.
+    CREATE TABLE IF NOT EXISTS billing_cycles (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      cycle_start DATE NOT NULL,
+      cycle_end DATE NOT NULL,
+      tier VARCHAR(20) NOT NULL,
+      plan_fee NUMERIC(10,2) NOT NULL DEFAULT 0,
+      included_whatsapp INTEGER NOT NULL DEFAULT 0,
+      overage_rate NUMERIC(10,4) NOT NULL DEFAULT 0,
+      status VARCHAR(20) NOT NULL DEFAULT 'active',
+      closed_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS usage_ledger (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      billing_cycle_id INTEGER NOT NULL REFERENCES billing_cycles(id) ON DELETE CASCADE,
+      event_type VARCHAR(50) NOT NULL,
+      quantity NUMERIC(10,2) NOT NULL DEFAULT 1,
+      reference_id INTEGER,
+      reference_type VARCHAR(30),
+      is_billable BOOLEAN NOT NULL DEFAULT TRUE,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS saas_invoices (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      billing_cycle_id INTEGER NOT NULL REFERENCES billing_cycles(id),
+      invoice_number VARCHAR(50) NOT NULL UNIQUE,
+      invoice_date DATE NOT NULL,
+      due_date DATE NOT NULL,
+      status VARCHAR(20) NOT NULL DEFAULT 'DRAFT',
+      plan_fee NUMERIC(10,2) NOT NULL DEFAULT 0,
+      whatsapp_included INTEGER NOT NULL DEFAULT 0,
+      whatsapp_used INTEGER NOT NULL DEFAULT 0,
+      whatsapp_overage INTEGER NOT NULL DEFAULT 0,
+      overage_charge NUMERIC(10,2) NOT NULL DEFAULT 0,
+      total_amount NUMERIC(10,2) NOT NULL DEFAULT 0,
+      paid_amount NUMERIC(10,2) NOT NULL DEFAULT 0,
+      notes TEXT,
+      generated_by TEXT,
+      generated_at TIMESTAMPTZ,
+      sent_at TIMESTAMPTZ,
+      paid_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS saas_invoice_items (
+      id SERIAL PRIMARY KEY,
+      invoice_id INTEGER NOT NULL REFERENCES saas_invoices(id) ON DELETE CASCADE,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      item_type VARCHAR(50) NOT NULL,
+      description TEXT NOT NULL,
+      quantity NUMERIC(10,2) NOT NULL DEFAULT 1,
+      unit_rate NUMERIC(10,4) NOT NULL DEFAULT 0,
+      amount NUMERIC(10,2) NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS saas_payments (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      invoice_id INTEGER NOT NULL REFERENCES saas_invoices(id),
+      amount NUMERIC(10,2) NOT NULL,
+      payment_mode VARCHAR(30) NOT NULL,
+      transaction_ref TEXT,
+      payment_date DATE NOT NULL,
+      recorded_by TEXT NOT NULL,
+      notes TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS usage_meters (
+      key VARCHAR(50) PRIMARY KEY,
+      name VARCHAR(100) NOT NULL,
+      unit_label VARCHAR(40) NOT NULL,
+      unit_size NUMERIC NOT NULL DEFAULT 1 CHECK (unit_size > 0),
+      category VARCHAR(30) NOT NULL,
+      our_cost_per_unit NUMERIC,
+      is_active BOOLEAN NOT NULL DEFAULT TRUE,
+      is_billable BOOLEAN NOT NULL DEFAULT FALSE,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    INSERT INTO usage_meters (key, name, unit_label, unit_size, category, our_cost_per_unit, is_billable, sort_order) VALUES
+      ('whatsapp.message', 'WhatsApp messages', 'message', 1, 'messaging', 0.13, TRUE, 1),
+      ('ai.tokens', 'AI usage', '1,000 tokens', 1000, 'ai', 0.02, TRUE, 2),
+      ('ai.request', 'AI requests', 'request', 1, 'ai', NULL, FALSE, 3),
+      ('email.sent', 'Emails', 'email', 1, 'messaging', 0.08, FALSE, 4),
+      ('export.generated', 'Reports exported', 'export', 1, 'platform', NULL, FALSE, 5),
+      ('storage.upload', 'Files uploaded', 'MB', 1, 'storage', NULL, FALSE, 6)
+    ON CONFLICT (key) DO NOTHING;
+
+    CREATE TABLE IF NOT EXISTS usage_daily (
+      school_id INTEGER NOT NULL,
+      day DATE NOT NULL,
+      meter_key VARCHAR(50) NOT NULL REFERENCES usage_meters(key),
+      quantity NUMERIC(16,4) NOT NULL DEFAULT 0,
+      PRIMARY KEY (school_id, day, meter_key)
+    );
+    CREATE INDEX IF NOT EXISTS idx_usage_daily_day ON usage_daily(day);
+
+    CREATE TABLE IF NOT EXISTS usage_prices (
+      meter_key VARCHAR(50) NOT NULL REFERENCES usage_meters(key),
+      tier VARCHAR(20) NOT NULL,
+      effective_month DATE NOT NULL CHECK (EXTRACT(DAY FROM effective_month) = 1),
+      in_plan BOOLEAN NOT NULL DEFAULT TRUE,
+      included_per_month NUMERIC NOT NULL DEFAULT 0 CHECK (included_per_month >= 0),
+      unit_price NUMERIC(12,4) NOT NULL DEFAULT 0 CHECK (unit_price >= 0),
+      monthly_cap NUMERIC CHECK (monthly_cap IS NULL OR monthly_cap >= 0),
+      at_cap VARCHAR(10) NOT NULL DEFAULT 'block' CHECK (at_cap IN ('block', 'allow', 'notify')),
+      updated_by VARCHAR(255),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (meter_key, tier, effective_month)
+    );
+    INSERT INTO usage_prices (meter_key, tier, effective_month, in_plan, included_per_month, unit_price, monthly_cap, at_cap) VALUES
+      ('whatsapp.message', 'basic',    '2026-01-01', FALSE, 0, 0, NULL, 'block'),
+      ('whatsapp.message', 'standard', '2026-01-01', TRUE, 1000, 0.20, 2000, 'block'),
+      ('whatsapp.message', 'premium',  '2026-01-01', TRUE, 5000, 0.20, 10000, 'block'),
+      ('ai.tokens', 'basic',    '2026-01-01', FALSE, 0, 0, NULL, 'block'),
+      ('ai.tokens', 'standard', '2026-01-01', TRUE, 1000000, 0.05, 5000000, 'block'),
+      ('ai.tokens', 'premium',  '2026-01-01', TRUE, 5000000, 0.04, 25000000, 'block')
+    ON CONFLICT DO NOTHING;
+
+    CREATE TABLE IF NOT EXISTS school_usage_overrides (
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      meter_key VARCHAR(50) NOT NULL REFERENCES usage_meters(key),
+      included_per_month NUMERIC CHECK (included_per_month IS NULL OR included_per_month >= 0),
+      unit_price NUMERIC(12,4) CHECK (unit_price IS NULL OR unit_price >= 0),
+      monthly_cap NUMERIC CHECK (monthly_cap IS NULL OR monthly_cap >= 0),
+      at_cap VARCHAR(10) CHECK (at_cap IS NULL OR at_cap IN ('block', 'allow', 'notify')),
+      note TEXT NOT NULL,
+      updated_by VARCHAR(255),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (school_id, meter_key)
+    );
+
+    CREATE TABLE IF NOT EXISTS usage_alerts_sent (
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      meter_key VARCHAR(50) NOT NULL,
+      month DATE NOT NULL,
+      threshold SMALLINT NOT NULL,
+      sent_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (school_id, meter_key, month, threshold)
+    );
+
+    ALTER TABLE usage_ledger ALTER COLUMN school_id DROP NOT NULL;
+    ALTER TABLE usage_ledger ALTER COLUMN billing_cycle_id DROP NOT NULL;
+    ALTER TABLE usage_ledger ALTER COLUMN quantity TYPE NUMERIC(16,4);
+    ALTER TABLE usage_ledger ADD COLUMN IF NOT EXISTS occurred_at TIMESTAMPTZ DEFAULT NOW();
+    ALTER TABLE usage_ledger ADD COLUMN IF NOT EXISTS source VARCHAR(60);
+    ALTER TABLE usage_ledger ADD COLUMN IF NOT EXISTS actor_role VARCHAR(20);
+    ALTER TABLE usage_ledger ADD COLUMN IF NOT EXISTS actor_id INTEGER;
+    ALTER TABLE usage_ledger ADD COLUMN IF NOT EXISTS idempotency_key TEXT;
+    ALTER TABLE usage_ledger ADD COLUMN IF NOT EXISTS meta JSONB DEFAULT '{}';
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_usage_ledger_idem ON usage_ledger(idempotency_key) WHERE idempotency_key IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS idx_usage_ledger_school_occurred ON usage_ledger(school_id, occurred_at);
+    CREATE INDEX IF NOT EXISTS idx_whatsapp_msg_provider_id ON whatsapp_messages(provider_message_id) WHERE provider_message_id IS NOT NULL;
+  `)
+
+  // Bills and plan prices (#358). Usage bills are keyed by school + month so the
+  // automatic run on the 1st can be repeated safely; plan bills point at a plan term.
+  await pool.query(`
+    ALTER TABLE plan_pricing ADD COLUMN IF NOT EXISTS yearly_price NUMERIC(10,2);
+    ALTER TABLE plan_pricing ADD COLUMN IF NOT EXISTS description TEXT;
+    ALTER TABLE plan_pricing ADD COLUMN IF NOT EXISTS is_public BOOLEAN NOT NULL DEFAULT TRUE;
+    ALTER TABLE plan_pricing ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE;
+    ALTER TABLE plan_pricing ADD COLUMN IF NOT EXISTS sort_order INTEGER NOT NULL DEFAULT 0;
+    UPDATE plan_pricing SET yearly_price = monthly_price * 10, sort_order = CASE tier WHEN 'basic' THEN 1 WHEN 'standard' THEN 2 WHEN 'premium' THEN 3 ELSE 0 END
+     WHERE yearly_price IS NULL;
+
+    CREATE TABLE IF NOT EXISTS school_plan_terms (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      tier VARCHAR(20) NOT NULL,
+      start_date DATE NOT NULL,
+      end_date DATE NOT NULL CHECK (end_date >= start_date),
+      billing_period VARCHAR(10) NOT NULL CHECK (billing_period IN ('monthly', 'yearly')),
+      list_price NUMERIC(10,2) NOT NULL CHECK (list_price >= 0),
+      agreed_price NUMERIC(10,2) NOT NULL CHECK (agreed_price >= 0),
+      discount_reason TEXT,
+      created_by VARCHAR(255),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_school_plan_terms_school ON school_plan_terms(school_id, start_date DESC);
+
+    ALTER TABLE saas_invoices ALTER COLUMN billing_cycle_id DROP NOT NULL;
+    ALTER TABLE saas_invoices ADD COLUMN IF NOT EXISTS kind VARCHAR(10) NOT NULL DEFAULT 'usage';
+    ALTER TABLE saas_invoices ADD COLUMN IF NOT EXISTS bill_month DATE;
+    ALTER TABLE saas_invoices ADD COLUMN IF NOT EXISTS plan_term_id INTEGER REFERENCES school_plan_terms(id) ON DELETE SET NULL;
+    ALTER TABLE saas_invoices ADD COLUMN IF NOT EXISTS subtotal NUMERIC(12,2) NOT NULL DEFAULT 0;
+    ALTER TABLE saas_invoices ADD COLUMN IF NOT EXISTS gst_amount NUMERIC(12,2) NOT NULL DEFAULT 0;
+    ALTER TABLE saas_invoices ADD COLUMN IF NOT EXISTS last_reminder_at TIMESTAMPTZ;
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_saas_invoices_usage_month ON saas_invoices(school_id, bill_month) WHERE kind = 'usage';
+    CREATE INDEX IF NOT EXISTS idx_saas_invoices_month ON saas_invoices(bill_month);
+
+    ALTER TABLE saas_invoice_items ADD COLUMN IF NOT EXISTS meter_key VARCHAR(50);
+    ALTER TABLE saas_invoice_items ADD COLUMN IF NOT EXISTS used NUMERIC(16,4);
+    ALTER TABLE saas_invoice_items ADD COLUMN IF NOT EXISTS included NUMERIC(16,4);
+    ALTER TABLE saas_invoice_items ADD COLUMN IF NOT EXISTS created_by VARCHAR(255);
+    CREATE INDEX IF NOT EXISTS idx_saas_invoice_items_invoice ON saas_invoice_items(invoice_id);
+    CREATE INDEX IF NOT EXISTS idx_saas_payments_invoice ON saas_payments(invoice_id);
+
+    -- Corrections never edit a closed bill: they wait here and land on the school's next usage bill.
+    CREATE TABLE IF NOT EXISTS billing_adjustments (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      source_invoice_id INTEGER REFERENCES saas_invoices(id) ON DELETE SET NULL,
+      amount NUMERIC(12,2) NOT NULL CHECK (amount <> 0),
+      description TEXT NOT NULL,
+      created_by VARCHAR(255),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      applied_invoice_id INTEGER REFERENCES saas_invoices(id) ON DELETE SET NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_billing_adjustments_pending ON billing_adjustments(school_id) WHERE applied_invoice_id IS NULL;
+
+    INSERT INTO usage_meters (key, name, unit_label, unit_size, category, is_billable, sort_order)
+    VALUES ('api.request', 'Platform activity', '1,000 requests', 1000, 'platform', FALSE, 7)
+    ON CONFLICT (key) DO NOTHING;
+
+    CREATE TABLE IF NOT EXISTS billing_runs (
+      id SERIAL PRIMARY KEY,
+      bill_month DATE NOT NULL,
+      ran_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      created INTEGER NOT NULL DEFAULT 0,
+      failed JSONB NOT NULL DEFAULT '[]'
+    );
+  `)
 }

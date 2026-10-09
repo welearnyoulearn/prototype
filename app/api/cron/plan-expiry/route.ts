@@ -74,7 +74,7 @@ async function run() {
       const to = Array.from(new Set([...admins.map(a => a.email), ...(r.email ? [r.email] : [])]))
       const { subject, body } = message(latest, r, st.days_left)
       const html = `<div style="font-family:sans-serif;max-width:520px;padding:24px"><h2 style="color:#7c3aed">Plan reminder</h2>${body}</div>`
-      const results = await Promise.allSettled(to.map(addr => sendMail(addr, subject, html)))
+      const results = await Promise.allSettled(to.map(addr => sendMail(addr, subject, html, { schoolId: r.school_id, source: 'email.plan_expiry' })))
       // Record only if at least one mail went out; otherwise the next run retries.
       if (to.length > 0 && results.some(x => x.status === 'fulfilled')) {
         for (const k of reached) {

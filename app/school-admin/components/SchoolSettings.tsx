@@ -4,6 +4,11 @@ import { useEffect, useState, useCallback, useRef } from 'react'
 import { ExportButtons, useRenewalRequest } from '@/components/PlanNotice'
 import { useRouter } from 'next/navigation'
 import { ALL_FEATURES, CATEGORY_ORDER } from '@/lib/features'
+import { BillStatusChip, UsageBar, extraPrice, fetchJSON, firstOfMonth, priceText } from '@/components/billing/parts'
+import { inr, qty } from '@/lib/billingFormat'
+import type { Bill, MyUsageResponse, PlanTerm } from '@/lib/billingTypes'
+import { Skeleton } from '@/components/ui/skeleton'
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { useConfirm } from '@/components/ui/use-confirm'
 import YearEndResponsibilities from './YearEndResponsibilities'
 
@@ -582,7 +587,7 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
   const TABS: { key: SettingsTab; label: string; icon: string }[] = [
     { key: 'profile',        label: 'School Profile',   icon: '🏫' },
     { key: 'academic-years', label: 'Academic Years',   icon: '📅' },
-    { key: 'plan',           label: 'Plan & Features',  icon: '⭐' },
+    { key: 'plan',           label: 'Plan & Billing',   icon: '⭐' },
     { key: 'staff',          label: 'Staff Accounts',   icon: '👥' },
     { key: 'security',       label: 'Security',         icon: '🔒' },
   ]
@@ -1135,6 +1140,17 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
                 </div>
               )}
 
+              {/* Price, this month's usage and bills — school administrator / principal only */}
+              {canRequestPlan && subscription?.tier !== 'none' && (
+                <div className="bg-white border border-gray-100 rounded-md p-5 space-y-4" data-testid="plan-billing-card">
+                  <MyPlanPrice />
+
+                  <MyUsage />
+
+                  <MyBills />
+                </div>
+              )}
+
               {canRequestPlan && (
                 <div className="bg-white border border-gray-100 rounded-md p-5" data-testid="plan-export-card">
                   <p className="text-sm font-semibold text-gray-800">Export your school’s data</p>
@@ -1406,6 +1422,163 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
         </div>
       )}
 
+    </div>
+  )
+}
+
+const fmtDay = (d: string) => new Date(`${d}T00:00:00Z`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })
+
+// "You pay ₹8,500 / year + GST · renews 31 Oct 2027 · reason" from the school's current plan term; hidden without one.
+function MyPlanPrice() {
+  const [term, setTerm] = useState<PlanTerm | null>(null)
+  useEffect(() => {
+    fetchJSON<{ tier: string; name: string; term: PlanTerm | null }>('/api/billing/plan')
+      .then(r => setTerm(r.term))
+      .catch(e => console.error('[plan-billing] plan', e))
+  }, [])
+  if (!term) return null
+  const price = term.agreedPrice === 0 ? 'Complimentary'
+    : `${inr(term.agreedPrice, Number.isInteger(term.agreedPrice) ? 0 : 2)} / ${term.billingPeriod === 'yearly' ? 'year' : 'month'} + GST`
+  return (
+    <div data-testid="plan-billing-price">
+      <p className="text-sm font-semibold text-gray-800">{term.agreedPrice === 0 ? price : `You pay ${price}`}</p>
+      <p className="text-xs text-muted-foreground mt-0.5">renews {fmtDay(term.endDate)}{term.discountReason ? ` · ${term.discountReason}` : ''}</p>
+    </div>
+  )
+}
+
+// The school's own bills, newest first, with a drawer for lines, GST and payments.
+function MyBills() {
+  const [bills, setBills] = useState<Bill[] | null>(null)
+  const [error, setError] = useState('')
+  const [openId, setOpenId] = useState<number | null>(null)
+  const load = useCallback(async () => {
+    setError('')
+    try { setBills(await fetchJSON<Bill[]>('/api/billing/invoices')) }
+    catch (e) { console.error('[plan-billing] bills', e); setError(e instanceof Error ? e.message : 'Something went wrong') }
+  }, [])
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch on mount
+  useEffect(() => { load() }, [load])
+  const open = bills?.find(b => b.id === openId) ?? null
+  const suffix = (b: Bill) => b.status === 'due' ? `by ${fmtDay(b.dueDate)}` : b.status === 'overdue' ? `since ${fmtDay(b.dueDate)}`
+    : b.status === 'part_paid' ? `${inr(Math.round((b.total - b.paid) * 100) / 100)} left` : undefined
+
+  return (
+    <div data-testid="plan-billing-bills">
+      <p className="text-sm font-semibold text-gray-800">Bills</p>
+      <p className="text-xs text-muted-foreground">Created automatically on the 1st of each month and emailed to you.</p>
+      {error && (
+        <p className="mt-2 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2" role="alert" data-testid="plan-billing-bills-error">
+          Couldn&apos;t load bills. <span className="text-xs">({error})</span>{' '}
+          <button data-testid="plan-billing-bills-retry" onClick={load} className="underline font-medium">Try again</button>
+        </p>
+      )}
+      {!bills && !error && <div className="mt-2 space-y-2" data-testid="plan-billing-bills-loading"><Skeleton className="h-8 w-full" /><Skeleton className="h-8 w-full" /></div>}
+      {bills && bills.length === 0 && <p className="text-sm text-muted-foreground mt-2" data-testid="plan-billing-bills-empty">No bills yet.</p>}
+      {bills && bills.length > 0 && (
+        <div className="mt-2 divide-y divide-gray-100">
+          {bills.map(b => (
+            <div key={b.id} className="flex flex-wrap items-center justify-between gap-3 py-2.5 text-sm" data-testid={`plan-billing-bill-${b.id}`}>
+              <span className="text-gray-700">{b.title}<span className="block text-xs text-muted-foreground">{b.number ?? 'Nothing to charge'}</span></span>
+              <span className="flex items-center gap-3">
+                <span className="tabular-nums">{inr(b.total)}</span><BillStatusChip status={b.status} suffix={suffix(b)} />
+                <button data-testid={`plan-billing-bill-view-${b.id}`} onClick={() => setOpenId(b.id)} className="px-2.5 py-1 rounded-md text-xs border border-gray-300 text-gray-700 hover:bg-gray-50">View</button>
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+      <Sheet open={!!open} onOpenChange={o => !o && setOpenId(null)}>
+        <SheetContent className="w-full overflow-y-auto sm:max-w-md" data-testid="plan-billing-bill-drawer">
+          {open && <>
+            <SheetHeader><SheetTitle>{open.title}</SheetTitle><SheetDescription>{open.number ?? 'No bill number (nothing to charge)'} · dated {fmtDay(open.billDate)} · due {fmtDay(open.dueDate)}</SheetDescription></SheetHeader>
+            <div className="px-4 pb-6 space-y-4 text-sm">
+              <BillStatusChip status={open.status} suffix={suffix(open)} />
+              {open.lines.length === 0 ? <p className="text-muted-foreground">Nothing was used beyond your plan, so there is nothing to pay.</p> : (
+                <div className="space-y-2">
+                  {open.lines.map(l => (
+                    <div key={l.id} className="flex justify-between gap-3"><span className="text-gray-800">{l.description}</span><span className="tabular-nums">{inr(l.amount)}</span></div>
+                  ))}
+                  <div className="border-t border-gray-200 pt-2 space-y-1 tabular-nums">
+                    <div className="flex justify-between"><span className="text-muted-foreground">Subtotal</span><span>{inr(open.subtotal)}</span></div>
+                    <div className="flex justify-between"><span className="text-muted-foreground">GST 18%</span><span>{inr(open.gst)}</span></div>
+                    <div className="flex justify-between font-semibold"><span>Total</span><span>{inr(open.total)}</span></div>
+                  </div>
+                </div>
+              )}
+              {open.payments.length > 0 && (
+                <div className="border-t border-gray-200 pt-3">
+                  <p className="font-semibold text-gray-800">Payments received</p>
+                  {open.payments.map(p => (
+                    <div key={p.id} className="flex justify-between gap-3 mt-1"><span className="text-gray-700">{fmtDay(p.paidOn)}{p.reference ? ` · ${p.reference}` : ''}</span><span className="tabular-nums">{inr(p.amount)}</span></div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </>}
+        </SheetContent>
+      </Sheet>
+    </div>
+  )
+}
+
+// This month's usage for the logged-in school (live).
+function MyUsage() {
+  const [data, setData] = useState<MyUsageResponse | null>(null)
+  const [error, setError] = useState('')
+  const load = useCallback(async () => {
+    setError('')
+    try { setData(await fetchJSON<MyUsageResponse>('/api/billing/usage')) }
+    catch (e) { console.error('[plan-billing] usage', e); setError(e instanceof Error ? e.message : 'Something went wrong') }
+  }, [])
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch on mount / month change
+  useEffect(() => { load() }, [load])
+
+  if (error) return (
+    <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2" role="alert" data-testid="plan-billing-usage-error">
+      Couldn&apos;t load this month&apos;s usage. <span className="text-xs">({error})</span>{' '}
+      <button data-testid="plan-billing-usage-retry" onClick={load} className="underline font-medium">Try again</button>
+    </p>
+  )
+  if (!data) return <div className="space-y-2" data-testid="plan-billing-usage-loading"><Skeleton className="h-4 w-48" /><Skeleton className="h-10 w-full" /></div>
+
+  const [y, m] = data.month.split('-').map(Number)
+  const nextFirst = firstOfMonth(new Date(Date.UTC(y, m, 1)).toISOString().slice(0, 7))   // '1 Nov'
+  const capped = data.charged.find(c => c.price.cap != null)
+  const upcoming = data.charged.filter(c => c.nextPrice)
+  return (
+    <div data-testid="plan-billing-usage">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <p className="text-sm font-semibold text-gray-800">This month · {data.monthLabel}</p>
+        <p className="text-xs text-muted-foreground">about <strong>{inr(data.extra)}</strong> extra so far · final on {nextFirst}</p>
+      </div>
+      {data.charged.length === 0 && data.counted.length === 0 && <p className="text-sm text-muted-foreground mt-2">Nothing used yet this month.</p>}
+      <div className="mt-2 divide-y divide-gray-100">
+        {data.charged.map(c => (
+          <div key={c.meter.key} className="flex flex-wrap items-center justify-between gap-3 py-2.5" data-testid={`plan-billing-usage-${c.meter.key}`}>
+            <span className="text-sm text-gray-700 w-40">{c.meter.name}</span>
+            <div className="flex-1 min-w-[160px]"><UsageBar used={c.usage.used} included={c.usage.included} paused={c.usage.paused} unit="included" /></div>
+            <span className="text-sm tabular-nums w-20 text-right">{c.usage.extra > 0 ? inr(c.usage.extra) : '—'}</span>
+          </div>
+        ))}
+        {data.counted.map(c => (
+          <div key={c.meter.key} className="flex justify-between py-2.5 text-sm" data-testid={`plan-billing-counted-${c.meter.key}`}><span className="text-gray-700">{c.meter.name}</span><span className="text-muted-foreground">{qty(c.quantity)} · included</span></div>
+        ))}
+      </div>
+      {data.charged.filter(c => c.usage.paused).map(c => (
+        <p key={c.meter.key} className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mt-2" role="status" data-testid={`plan-billing-paused-${c.meter.key}`}>
+          {c.meter.name} reached this month&apos;s limit and {c.meter.key === 'whatsapp.message' ? 'sending is' : 'it is'} paused until {nextFirst}.{c.meter.key === 'whatsapp.message' ? ' Login and password messages still go out.' : ''}
+        </p>
+      ))}
+      {capped && (
+        <p className="text-xs text-muted-foreground mt-2">
+          Extra {capped.meter.name.replace(/^[A-Z][a-z]+(?=\s|$)/, w => w.toLowerCase())} cost {capped.meter.unitSize > 1 ? extraPrice(capped.meter, capped.price.unitPrice) : `${inr(capped.price.unitPrice)} each`}.
+          {capped.price.atCap === 'block' && ` Sending pauses at ${(capped.price.cap ?? 0).toLocaleString('en-IN')} this month.`}
+        </p>
+      )}
+      {upcoming.map(c => (
+        <p key={c.meter.key} className="text-xs text-amber-700 mt-1" data-testid={`plan-billing-next-${c.meter.key}`}>From {nextFirst}: {c.meter.name} {priceText(c.meter, c.nextPrice!)}</p>
+      ))}
     </div>
   )
 }

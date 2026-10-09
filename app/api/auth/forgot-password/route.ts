@@ -13,7 +13,7 @@ export async function POST(req: NextRequest) {
     const id = identifier.trim().toLowerCase()
     if (!await checkAuthRateLimit(req, 'staff-recovery', id, RECOVERY_LIMIT)) return NextResponse.json({ success: true })
     const result = await pool.query(
-      `SELECT u.id, u.email, up.full_name, s.name AS school_name
+      `SELECT u.id, u.email, u.school_id, up.full_name, s.name AS school_name
        FROM users u
        LEFT JOIN user_profiles up ON up.user_id = u.id
        LEFT JOIN schools s ON s.id = u.school_id
@@ -33,7 +33,7 @@ export async function POST(req: NextRequest) {
     const emailTo = user.email
 
     if (emailTo) {
-      await sendPasswordResetEmail({ to: emailTo, name, resetUrl }).catch(console.error)
+      await sendPasswordResetEmail({ to: emailTo, name, resetUrl, schoolId: user.school_id }).catch(console.error)
     }
 
     return NextResponse.json({ success: true })

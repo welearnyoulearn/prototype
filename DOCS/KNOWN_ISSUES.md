@@ -40,6 +40,24 @@ Current bugs and workarounds for the WLYL School prototype.
 
 ## Active Issues
 
+### [#358] Two upload screens aren't counted as storage usage
+- **Severity:** Low (track-only service, nothing is billed)
+- **Detail:** School logos (School Profile) and platform curriculum images upload to Cloudinary, but their save calls don't send the file size, so `storage.upload` misses them.
+- **Workaround:** None needed.
+- **Status:** Send Cloudinary's `bytes` with those saves when storage starts being charged.
+
+### [#358] Billing must not go live on Vercel Hobby
+- **Severity:** High before the first school is charged
+- **Detail:** Vercel's Hobby plan forbids commercial use. The monthly bill run, the WhatsApp sends and the plan bills are all commercial.
+- **Workaround:** Keep `usage_meters.is_billable` false, or don't assign billed plans, until production is on Vercel Pro or Cloudflare.
+- **Status:** Hosting decision Q21 in the platform handoff.
+
+### Local dev DB has an incomplete `plan_features` table
+- **Severity:** Low (local only)
+- **Detail:** `wlyl_dev` has only 10 rows per tier, so school admins are locked out of most tabs, including School Profile, and land on the Library.
+- **Workaround:** Insert the missing keys from `lib/features.ts` (enabled) for each tier in the local DB.
+- **Status:** Refresh the local DB from a production-shaped seed.
+
 ### [#116] Syllabus Translate relies on Google's undocumented Input Tools endpoint
 - **Severity:** Medium
 - **Detail:** `GET /api/transliterate` proxies `inputtools.google.com`, which has no published quota, SLA, pricing or API terms. Google can throttle or block it at any time, and on Vercel all schools share the same outbound IPs.

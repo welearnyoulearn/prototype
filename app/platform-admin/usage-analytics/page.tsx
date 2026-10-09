@@ -11,6 +11,7 @@ type Overview = {
   trend: Trend[]
   by_role: RoleBreakdown[]
   by_school: SchoolRow[]
+  by_hour: { hour: number; sessions: number }[]
 }
 
 type Segment = 'active' | 'cooling' | 'at_risk'
@@ -85,6 +86,10 @@ function fmtDateTime(s: string) {
 function fmtMonth(s: string) {
   return new Date(s).toLocaleDateString('en-IN', { month: 'short', year: '2-digit' })
 }
+
+const hourLabel = (h: number) => `${h % 12 || 12}${h < 12 ? 'am' : 'pm'}`
+// Inlined at build time; set means the beacon is on the public pages.
+const CF_ANALYTICS_ON = Boolean(process.env.NEXT_PUBLIC_CF_WEB_ANALYTICS_TOKEN)
 
 function Sparkline({ trend, valueKey }: { trend: Trend[]; valueKey: keyof Trend }) {
   if (trend.length === 0) return <div className="h-32 flex items-center justify-center text-gray-300 text-sm">No data yet</div>
@@ -170,14 +175,17 @@ export default function UsageAnalyticsPage() {
   }, [])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch-on-change loaders
     if (view === 'adoption') loadAdoption()
     if (view === 'health') loadHealth()
     if (view === 'growth') loadGrowth()
   }, [view, loadAdoption, loadHealth, loadGrowth])
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch-on-change loaders
   useEffect(() => { loadOverview() }, [loadOverview])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch-on-change loaders
     if (!selectedSchool) { setDetail(null); return }
     setDetailLoading(true)
     setSegmentFilter(null)
@@ -206,7 +214,7 @@ export default function UsageAnalyticsPage() {
         {/* Header */}
         <div className="flex items-start justify-between flex-wrap gap-3">
           <div>
-            <h1 className="text-xl font-bold text-gray-900">Usage Analytics</h1>
+            <h1 className="text-xl font-bold text-gray-900">Traffic</h1>
             <p className="text-muted-foreground text-sm mt-0.5">Logins and time spent across every school, all portals</p>
           </div>
           <div className="flex items-center gap-2">
@@ -503,6 +511,49 @@ export default function UsageAnalyticsPage() {
                 </div>
               </div>
               <Sparkline trend={overview.trend} valueKey={metric} />
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-3">
+              {/* Busiest hours */}
+              <div className="bg-white rounded-md border border-gray-200 p-5 md:col-span-2" data-testid="traffic-busiest-hours">
+                <p className="text-sm font-semibold text-gray-700 mb-4">Busiest hours <span className="font-normal text-muted-foreground">(sessions started, IST)</span></p>
+                {overview.by_hour.every(h => h.sessions === 0) ? (
+                  <div className="h-24 flex items-center justify-center text-gray-300 text-sm">No data yet</div>
+                ) : (
+                  <div className="flex items-end gap-0.5 h-24">
+                    {overview.by_hour.map(h => {
+                      const max = Math.max(...overview.by_hour.map(x => x.sessions), 1)
+                      return (
+                        <div key={h.hour} className="flex-1 flex flex-col items-center justify-end h-full group relative">
+                          <div className="absolute -top-7 hidden group-hover:block bg-gray-900 text-white text-xs rounded px-2 py-1 whitespace-nowrap z-10">
+                            {hourLabel(h.hour)}: {fmt(h.sessions)}
+                          </div>
+                          <div className="w-full bg-indigo-400 group-hover:bg-indigo-500 rounded-t transition-colors"
+                            style={{ height: `${h.sessions ? Math.max((h.sessions / max) * 100, 4) : 0}%` }} />
+                          {h.hour % 3 === 0 && <span className="text-xs text-muted-foreground mt-1 whitespace-nowrap">{hourLabel(h.hour)}</span>}
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Website visitors (public pages, Cloudflare — nothing stored by us) */}
+              <div className="bg-white rounded-md border border-gray-200 p-5" data-testid="traffic-website-visitors">
+                <p className="text-sm font-semibold text-gray-700 mb-2">Website visitors</p>
+                {CF_ANALYTICS_ON ? (
+                  <>
+                    <p className="text-sm text-gray-500">Counted by Cloudflare Web Analytics (no cookies).</p>
+                    <a href="https://dash.cloudflare.com/?to=/:account/web-analytics" target="_blank" rel="noopener noreferrer"
+                      data-testid="traffic-cf-dashboard-link"
+                      className="inline-block mt-3 text-sm font-medium text-indigo-600 hover:underline">
+                      Open Cloudflare dashboard ↗
+                    </a>
+                  </>
+                ) : (
+                  <p className="text-sm text-gray-500">Not set up: add NEXT_PUBLIC_CF_WEB_ANALYTICS_TOKEN</p>
+                )}
+              </div>
             </div>
 
             {/* Role breakdown */}

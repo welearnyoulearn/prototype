@@ -1,8 +1,13 @@
 // AI powered by Groq (llama-3.3-70b-versatile) — free tier: 14,400 req/day
 // Key: https://console.groq.com → API Keys → add as GROQ_API_KEY env var
 
+import { checkAllowance, recordUsage } from './usage'
+
 const GROQ_URL   = 'https://api.groq.com/openai/v1/chat/completions'
 const GROQ_MODEL = 'llama-3.3-70b-versatile'
+
+// Which school an AI call is metered against (#358). Omitted = not metered.
+export type AIUsage = { schoolId: number; source: string }
 
 // ─── Internal helpers ──────────────────────────────────────────────────────
 
@@ -10,10 +15,17 @@ async function callAI(
   systemPrompt: string,
   userPrompt: string,
   maxTokens = 1024,
-  jsonMode = false
+  jsonMode = false,
+  usage?: AIUsage
 ): Promise<string> {
   const key = process.env.GROQ_API_KEY
   if (!key) throw new Error('GROQ_API_KEY not set')
+  if (usage) {
+    const allowance = await checkAllowance(usage.schoolId, 'ai.tokens', 1)
+    if (!allowance.allowed) {
+      throw new Error(allowance.reason === 'not_in_plan' ? 'AI is not included in your plan.' : 'This month\'s AI limit is reached.')
+    }
+  }
 
   const body: Record<string, unknown> = {
     model: GROQ_MODEL,
@@ -41,6 +53,11 @@ async function callAI(
   }
 
   const data = await res.json()
+  if (usage) {
+    const totalTokens = Number(data.usage?.total_tokens)
+    await recordUsage({ schoolId: usage.schoolId, meterKey: 'ai.request', quantity: 1, source: usage.source })
+    if (totalTokens > 0) await recordUsage({ schoolId: usage.schoolId, meterKey: 'ai.tokens', quantity: totalTokens, source: usage.source })
+  }
   return (data.choices?.[0]?.message?.content ?? '').trim()
 }
 
@@ -50,7 +67,8 @@ async function callAI(
 export async function draftAnnouncement(
   type: string,
   topic: string,
-  audience: string
+  audience: string,
+  usage?: AIUsage
 ): Promise<{ title: string; content: string }> {
   const raw = await callAI(
     'You are a school administrator. Write professional but warm school announcements. Always respond with valid JSON only.',
@@ -65,7 +83,8 @@ Return a JSON object:
   "content": "50-80 word announcement body, professional but warm, no markdown"
 }`,
     400,
-    true  // json mode
+    true,  // json mode
+    usage
   )
   const cleaned = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```$/i, '').trim()
   return JSON.parse(cleaned) as { title: string; content: string }
@@ -82,7 +101,7 @@ export async function generateSchoolInsights(context: {
   attendancePct?: number
   uncoveredPeriods?: number
   upcomingExams?: number
-}): Promise<string> {
+}, usage?: AIUsage): Promise<string> {
   const lines = [
     `${context.teachers} teachers, ${context.students} students, ${context.classes} classes`,
     `Pending leave requests: ${context.pendingLeaves}`,
@@ -94,7 +113,9 @@ export async function generateSchoolInsights(context: {
   return callAI(
     'You are a school management assistant. Write concise, actionable summaries for school principals. Plain text only, no markdown.',
     `Generate a brief daily summary for ${context.date}.\n\nSchool data:\n${lines}\n\nWrite 3-4 sentences: highlight what needs immediate attention, what looks good, and one suggested action for the day.`,
-    200
+    200,
+    false,
+    usage
   )
 }
 
@@ -104,7 +125,8 @@ export async function generateCoverageSuggestion(
   absentTeacher: string,
   subject: string,
   periods: { class: string; day: string; time: string }[],
-  availableTeachers: { name: string; subject: string }[]
+  availableTeachers: { name: string; subject: string }[],
+  usage?: AIUsage
 ): Promise<string> {
   const periodsList = periods.map(p => `  - ${p.class} on ${p.day} at ${p.time}`).join('\n')
   const teachersList = availableTeachers.map(t => `  - ${t.name} (teaches ${t.subject})`).join('\n')
@@ -118,7 +140,9 @@ Available teachers:
 ${teachersList}
 
 Write 2-3 sentences: suggest the best coverage arrangement, mention any subject mismatch risks, and recommend any self-study alternatives if no suitable cover is available.`,
-    180
+    180,
+    false,
+    usage
   )
 }
 
@@ -133,7 +157,8 @@ export async function generateParentMessage(
     pendingTasks?: number
     lastActive?: string
     concern?: string
-  }
+  },
+  usage?: AIUsage
 ): Promise<string> {
   const lines = [
     stats.attendancePct !== undefined ? `Attendance this month: ${stats.attendancePct}%` : null,
@@ -151,7 +176,9 @@ Student data:
 ${lines}
 
 Write 2-3 sentences: start with something positive, mention any concern naturally, end with one actionable suggestion for the parent. Warm but professional tone.`,
-    160
+    160,
+    false,
+    usage
   )
 }
 
@@ -169,7 +196,7 @@ export async function generateSchoolHealthReport(data: {
   testsCompleted: number
   feeCollected?: number
   feeOutstanding?: number
-}): Promise<string> {
+}, usage?: AIUsage): Promise<string> {
   const lines = [
     `Week: ${data.weekLabel}`,
     `Teacher attendance: ${data.totalTeachers - data.absentTeachers}/${data.totalTeachers} present (${Math.round(((data.totalTeachers - data.absentTeachers) / data.totalTeachers) * 100)}%)`,
@@ -184,7 +211,9 @@ export async function generateSchoolHealthReport(data: {
   return callAI(
     'You are a school management consultant. Write concise weekly school health summaries for principals. Plain text only, no markdown, no bullet points.',
     `Generate a weekly school health summary.\n\n${lines}\n\nWrite 4-5 sentences covering: what went well, what needs attention, the top priority for next week, and end with one data-driven observation that would surprise most principals.`,
-    220
+    220,
+    false,
+    usage
   )
 }
 
@@ -199,7 +228,8 @@ export interface SyllabusChapter {
 export async function extractSyllabusFromPDF(
   pdfText: string,
   subject: string,
-  grade: string
+  grade: string,
+  usage?: AIUsage
 ): Promise<SyllabusChapter[]> {
   // Trim to fit in context while keeping enough to identify all chapters
   const text = pdfText.slice(0, 40000)
@@ -231,7 +261,8 @@ Rules:
 - Return all chapters found — do not truncate
 - If exact chapters cannot be identified, group related topics logically into chapters`,
     3000,
-    true
+    true,
+    usage
   )
 
   const cleaned = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```$/i, '').trim()

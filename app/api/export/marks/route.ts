@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 import { requireExamsAdmin } from '@/lib/examsAuth'
+import { recordUsage } from '@/lib/usage'
 
 // GET /api/export/marks?school_id=&exam_id=
 // Returns CSV with per-student per-subject marks for the given exam.
@@ -92,6 +93,7 @@ export async function GET(req: NextRequest) {
     const examLabel = `${exam.exam_name} | ${exam.grade}-${exam.section} | ${exam.exam_date ?? ''}`
     const csv = [`"${examLabel}"`, header1.join(','), header2.join(','), ...csvRows].join('\r\n')
 
+    await recordUsage({ schoolId: actor.schoolId, meterKey: 'export.generated', quantity: 1, source: 'export.marks', actor: { role: actor.role, id: actor.userId } })
     return new NextResponse(csv, {
       status: 200,
       headers: {

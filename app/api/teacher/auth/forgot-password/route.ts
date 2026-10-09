@@ -24,7 +24,7 @@ export async function POST(req: NextRequest) {
     const token = await issueResetToken('teacher', teacher.id)
 
     const resetUrl = `${process.env.APP_URL || 'http://localhost:3000'}/teacher/reset-password?token=${token}`
-    sendPasswordResetEmail({ to: teacher.email, name: teacher.name, resetUrl, role: 'teacher' }).catch(console.error)
+    sendPasswordResetEmail({ to: teacher.email, name: teacher.name, resetUrl, role: 'teacher', schoolId: teacher.school_id }).catch(console.error)
     // Login stays email-only (lookup above), but WhatsApp is still a useful
     // second channel for actually receiving the link if their inbox is
     // slow/unchecked — same reasoning as student/parent onboarding delivery.

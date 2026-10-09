@@ -17,7 +17,7 @@ export async function GET(req: NextRequest) {
   try {
     const days = Math.min(Math.max(Number(req.nextUrl.searchParams.get('days')) || 30, 1), 90)
 
-    const [activeNow, trend, byRole, bySchool, totals] = await Promise.all([
+    const [activeNow, trend, byRole, bySchool, totals, byHour] = await Promise.all([
       pool.query(`
         SELECT COUNT(*) AS count
         FROM usage_sessions
@@ -92,7 +92,15 @@ export async function GET(req: NextRequest) {
           WHERE started_at::date = CURRENT_DATE
         ) combined
       `, [days]),
+      // Busiest hours: sessions started per hour of day (IST), raw table — the rollup has no hour grain.
+      pool.query(`
+        SELECT EXTRACT(HOUR FROM started_at AT TIME ZONE 'Asia/Kolkata')::int AS hour, COUNT(*) AS sessions
+        FROM usage_sessions
+        WHERE started_at >= CURRENT_DATE - $1::int
+        GROUP BY hour
+      `, [days]),
     ])
+    const perHour = new Map<number, number>(byHour.rows.map(r => [r.hour, Number(r.sessions)]))
 
     return NextResponse.json({
       active_now: Number(activeNow.rows[0].count),
@@ -113,6 +121,7 @@ export async function GET(req: NextRequest) {
         unique_actors: Number(r.unique_actors),
         total_duration_seconds: Number(r.total_duration_seconds),
       })),
+      by_hour: Array.from({ length: 24 }, (_, hour) => ({ hour, sessions: perHour.get(hour) ?? 0 })),
       by_school: bySchool.rows.map(r => ({
         school_id: r.school_id,
         school_name: r.school_name,

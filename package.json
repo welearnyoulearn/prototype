@@ -12,6 +12,8 @@
     "test:e2e:headed": "playwright test --headed",
     "sync": "node scripts/sync-local.mjs",
     "migrate": "tsx scripts/run-migrations.ts",
+    "check:usage": "tsx scripts/check-usage.ts",
+    "check:bills": "tsx scripts/check-bills.ts",
     "prepare": "husky"
   },
   "engines": {

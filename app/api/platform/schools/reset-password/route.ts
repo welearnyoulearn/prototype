@@ -44,6 +44,7 @@ export async function POST(req: NextRequest) {
       await sendPasswordResetEmail({
         to: updated.rows[0].email,
         name: school.name,
+        schoolId: school.id,
         resetUrl: `${process.env.APP_URL || 'http://localhost:3000'}/reset-password?token=${token}`,
       })
 

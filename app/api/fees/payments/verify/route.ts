@@ -212,6 +212,7 @@ async function handlePOST(req: NextRequest) {
           if (detail?.parent_email) {
             sendFeePaymentConfirmedEmail({
               to: detail.parent_email,
+              schoolId: pmtRow.school_id,
               parentName: detail.parent_name || 'Parent',
               studentName: detail.student_name,
               schoolName: detail.school_name,
@@ -257,6 +258,7 @@ async function handlePOST(req: NextRequest) {
           if (detail?.parent_email) {
             sendFeePaymentRejectedEmail({
               to: detail.parent_email,
+              schoolId: pmtRow.school_id,
               parentName: detail.parent_name || 'Parent',
               studentName: detail.student_name,
               schoolName: detail.school_name,
