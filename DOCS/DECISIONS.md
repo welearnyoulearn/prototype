@@ -12,6 +12,16 @@ Non-obvious technical decisions and their reasoning for the WLYL School prototyp
 -->
 
 
+## 2026-10-09 — Usage is recorded per service in one place, priced per plan by month (#358)
+
+**Context:** Paid services (WhatsApp, AI, email, exports) had no usage record, so nothing could be limited or billed, and the old `plan_pricing` columns only knew about WhatsApp.
+
+**Decision:** `lib/usage.ts` is the only writer: `recordUsage()` after the provider accepts (idempotency key per provider id, daily totals in `usage_daily`), `checkAllowance()` before costly actions. Services live in `usage_meters`; prices in `usage_prices` keyed by plan and `effective_month`, so a price edit always lands on next month and a month's price never changes once it starts. A school's own price (`school_usage_overrides`) wins field by field and applies at once. Open questions in the platform handoff were answered with their recommended options: WhatsApp and AI charged, AI per 1,000 tokens, exact paisa rounding, login/password WhatsApp messages exempt from the limit, usage visible to school admin and principal only, our provider cost never shown to schools.
+
+**Alternatives considered:** one shared credit for all services (rejected: unclear on bills); snapshotting prices into each billing cycle (not needed while prices are already versioned by month).
+
+**Consequences:** a new paid service is a `usage_meters` row plus one `recordUsage()` call at its shared helper. `recordUsage()` takes its own pool connection, so call it after the caller's transaction commits. Metering failures are logged and never block the action (checkAllowance fails open).
+
 ## 2026-09-28 — Plan features are enforced centrally in proxy.ts (#253)
 
 **Context:** Plan features only hid navigation tabs. Of roughly 95 feature API routes, only the fee and portal-access ones called `schoolHasFeature`, so a school on a lower plan could use any feature by calling its API directly. Adding a check to every handler would be easy to forget on the next new route.

@@ -4,6 +4,7 @@ import { gradeOrderSql } from '@/lib/grades'
 import { getAdminActor } from '@/lib/attendanceAuth'
 import { getClassForSchool, nonWorkingDaysMap } from '@/lib/attendance'
 import { addDays, isValidDateStr } from '@/lib/attendanceRules'
+import { recordUsage } from '@/lib/usage'
 
 // School admins only. The school comes from the login; a class of another school is "not found".
 //
@@ -47,6 +48,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
     const schoolId = admin.schoolId
+    const recordExport = () => recordUsage({ schoolId, meterKey: 'export.generated', quantity: 1, source: 'export.attendance', actor: { role: admin.role, id: admin.userId } })
 
     // ── Daily absentee list
     if (p.get('mode') === 'absentees') {
@@ -73,6 +75,7 @@ export async function GET(req: NextRequest) {
          ORDER BY ${gradeOrderSql('c.grade')}, c.section, s.roll_number NULLS LAST, s.name`,
         [schoolId, date, classId]
       )
+      await recordExport()
       return csv(
         ['Grade', 'Section', 'Roll No', 'Student', 'Absent in', 'Parent', 'Parent phone'],
         rows.map(r => [
@@ -112,6 +115,7 @@ export async function GET(req: NextRequest) {
       nonWorkingDaysMap(schoolId, from, to),
     ])
 
+    await recordExport()
     return csv(
       ['Date', 'Student Name', 'Roll No', 'Grade', 'Section', 'Morning', 'Afternoon', 'Day type'],
       rows.map(r => {
