@@ -1,5 +1,6 @@
 'use client'
 
+import { feeTypeColor } from './feeTypeColor'
 import { rollLabel, classForYear } from './format'
 import { carriedBilled } from './dues'
 import { useCallback, useEffect, useState, Fragment, type KeyboardEvent as ReactKeyboardEvent } from 'react'
@@ -354,7 +355,7 @@ export default function FeePassbookTab({
                       {yearGroup.entries.map(e => (
                         <tr key={e.id} className="border-b border-gray-50 hover:bg-gray-50">
                           <td className="px-4 py-2.5 text-gray-700">
-                            {e.category_name} · <span className="text-gray-400">{e.period_label}</span>
+                            <span className={`inline-block w-2 h-2 rounded-full mr-1.5 ${feeTypeColor(e.category_name).dot}`} aria-hidden="true" /><span className={`font-semibold ${feeTypeColor(e.category_name).text}`}>{e.category_name}</span> · <span className="text-gray-400">{e.period_label}</span>
                             {e.source_academic_year && (
                               <span className="ml-2 text-xs bg-amber-50 text-amber-700 border border-amber-200 px-1.5 py-0.5 rounded font-medium" title={`Carried from ${e.source_academic_year}`}>↩ {e.source_academic_year}</span>
                             )}
