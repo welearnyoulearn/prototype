@@ -12,6 +12,7 @@ import { classForYear } from './fee-management/format'
 import { carriedBilled } from './fee-management/dues'
 import { escapeHtml, printDualCopyReceipt, writeAndPrint, renderHeaderBlocks } from './fee-management/receipts'
 import FeeArchiveTab from './fee-management/FeeArchiveTab'
+import { feeColorMap } from './fee-management/feeTypeColor'
 import FeeLeaversTab, { type RemovedStudent } from './fee-management/FeeLeaversTab'
 import FeeReportsTab from './fee-management/FeeReportsTab'
 import FeeYearEndTab from './fee-management/FeeYearEndTab'
@@ -178,6 +179,7 @@ export default function FeeManagement({
   const pbWaivers   = pbData?.waivers.filter(w => w.bill_year === academicYear) ?? []
   const pbTimeline  = pbData?.timeline.filter(t => t.academic_year === academicYear) ?? []
   const pbYearOnly  = pbYearGroup ? [pbYearGroup] : []
+  const feeColors = feeColorMap(pbYearOnly.flatMap(y => y.entries.map(e => e.category_name)))
   // Revoked waivers — fetched lazily on first "Show Revoked" click, shared by the
   // Modal here and FeePassbookTab (which keeps its own local copy since it also
   // needs this outside the modal flow).
@@ -1228,7 +1230,7 @@ ${Number(pbSummary.carried_forward) > 0 ? `<p style="font-size:11px;color:#92400
                                 {yearGroup.entries.map(e => (
                                   <tr key={e.id} className="hover:bg-gray-50">
                                     <td className="px-4 py-2.5 text-gray-700">
-                                      {e.category_name} · <span className="text-gray-400">{e.period_label}</span>
+                                      <span className={`inline-block w-2 h-2 rounded-full mr-1.5 ${feeColors(e.category_name).dot}`} aria-hidden="true" /><span className={`font-semibold ${feeColors(e.category_name).text}`}>{e.category_name}</span> · <span className="text-gray-400">{e.period_label}</span>
                                       {e.source_academic_year && (
                                         <span className="ml-2 text-xs bg-amber-50 text-amber-700 border border-amber-200 px-1.5 py-0.5 rounded font-medium" title={`Carried from ${e.source_academic_year}`}>↩ {e.source_academic_year}</span>
                                       )}
