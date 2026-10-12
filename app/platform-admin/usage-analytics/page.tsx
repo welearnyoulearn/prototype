@@ -520,21 +520,28 @@ export default function UsageAnalyticsPage() {
                 {overview.by_hour.every(h => h.sessions === 0) ? (
                   <div className="h-24 flex items-center justify-center text-gray-300 text-sm">No data yet</div>
                 ) : (
-                  <div className="flex items-end gap-0.5 h-24">
-                    {overview.by_hour.map(h => {
-                      const max = Math.max(...overview.by_hour.map(x => x.sessions), 1)
-                      return (
-                        <div key={h.hour} className="flex-1 flex flex-col items-center justify-end h-full group relative">
-                          <div className="absolute -top-7 hidden group-hover:block bg-gray-900 text-white text-xs rounded px-2 py-1 whitespace-nowrap z-10">
-                            {hourLabel(h.hour)}: {fmt(h.sessions)}
+                  <>
+                    <div className="flex items-end gap-0.5 h-24">
+                      {overview.by_hour.map(h => {
+                        const max = Math.max(...overview.by_hour.map(x => x.sessions), 1)
+                        return (
+                          <div key={h.hour} className="flex-1 flex flex-col items-center justify-end h-full group relative">
+                            <div className="absolute -top-7 hidden group-hover:block bg-gray-900 text-white text-xs rounded px-2 py-1 whitespace-nowrap z-10">
+                              {hourLabel(h.hour)}: {fmt(h.sessions)}
+                            </div>
+                            <div className="w-full bg-indigo-400 group-hover:bg-indigo-500 rounded-t transition-colors"
+                              style={{ height: `${h.sessions ? Math.max((h.sessions / max) * 100, 4) : 0}%` }} />
                           </div>
-                          <div className="w-full bg-indigo-400 group-hover:bg-indigo-500 rounded-t transition-colors"
-                            style={{ height: `${h.sessions ? Math.max((h.sessions / max) * 100, 4) : 0}%` }} />
-                          {h.hour % 3 === 0 && <span className="text-xs text-muted-foreground mt-1 whitespace-nowrap">{hourLabel(h.hour)}</span>}
-                        </div>
-                      )
-                    })}
-                  </div>
+                        )
+                      })}
+                    </div>
+                    {/* Labels in their own row so they never sit beside a neighbouring bar. */}
+                    <div className="flex gap-0.5 mt-1">
+                      {overview.by_hour.map(h => (
+                        <span key={h.hour} className="flex-1 text-xs text-muted-foreground whitespace-nowrap">{h.hour % 3 === 0 ? hourLabel(h.hour) : ''}</span>
+                      ))}
+                    </div>
+                  </>
                 )}
               </div>
 
