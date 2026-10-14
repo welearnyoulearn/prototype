@@ -53,6 +53,7 @@ export async function POST(req: NextRequest) {
       name: user.full_name,
       roleLabel: ROLE_LABELS[user.role] || user.role,
       schoolName: user.school_name,
+      schoolId: user.school_id,
       inviteUrl: `${appUrl}/reset-password?token=${token}`,
       hours: INVITE_LINK_HOURS,
     }).catch(console.error)

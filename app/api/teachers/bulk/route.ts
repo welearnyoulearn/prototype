@@ -173,7 +173,7 @@ export async function POST(req: NextRequest) {
   const loginUrl = `${process.env.APP_URL || 'http://localhost:3000'}/teacher/login`
   inserted.forEach((teacher, i) => {
     const row = normalized[i]
-    sendTeacherWelcomeEmail({ to: row.email, name: String(teacher.name), schoolName, tempPassword: tempPasswords[i], loginUrl }).catch(console.error)
+    sendTeacherWelcomeEmail({ schoolId, to: row.email, name: String(teacher.name), schoolName, tempPassword: tempPasswords[i], loginUrl }).catch(console.error)
     sendWhatsappMessage({
       schoolId, to: row.phone, templateName: 'staff_credentials', recipientName: String(teacher.name),
       templateParams: { staff_name: String(teacher.name), school_name: schoolName, login: row.email, temp_password: tempPasswords[i], login_url: loginUrl },

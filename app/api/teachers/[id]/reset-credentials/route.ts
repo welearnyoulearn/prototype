@@ -67,7 +67,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   const appUrl = process.env.APP_URL || 'http://localhost:3000'
   sendTeacherWelcomeEmail({
-    to: teacher.email, name: teacher.name, schoolName: teacher.school_name,
+    schoolId: teacher.school_id, to: teacher.email, name: teacher.name, schoolName: teacher.school_name,
     tempPassword, loginUrl: `${appUrl}/teacher/login`,
   }).catch(console.error)
 
