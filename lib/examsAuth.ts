@@ -25,10 +25,12 @@ export type ExamActor =
 
 const SCHOOL_STAFF_ROLES = ['school_admin', 'principal', 'vice_principal']
 
-// Read-only access: any school-scoped role (admin staff, teacher, student,
-// parent) whose own session's school matches the requested one. Platform
-// admin may access any school.
-export async function requireExamsAccess(requestedSchoolId: string | number | null | undefined): Promise<ExamActor | null> {
+// Each role-specific guard resolves only its own portal's cookie. A browser can
+// hold several portal logins at once (cookies are shared per host, e.g. every
+// tab on localhost), so an admin-only or teacher-only check must not be decided
+// by whichever other portal's cookie happens to be inspected first.
+async function resolveAdminActor(requestedSchoolId: string | number | null | undefined):
+  Promise<Extract<ExamActor, { kind: 'admin' }> | null> {
   const platform = await getPlatformSession()
   if (platform?.role === 'platform_admin') {
     const sid = requestedSchoolId != null ? Number(requestedSchoolId) : (platform.schoolId ?? 0)
@@ -36,11 +38,33 @@ export async function requireExamsAccess(requestedSchoolId: string | number | nu
     return { kind: 'admin', schoolId: sid, userId: platform.userId, role: 'platform_admin', actorName: 'Platform Admin' }
   }
 
-  const teacher = await getTeacherSession()
-  if (teacher) {
-    if (requestedSchoolId != null && Number(requestedSchoolId) !== Number(teacher.schoolId)) return null
-    return { kind: 'teacher', schoolId: teacher.schoolId, teacherId: teacher.teacherId, actorName: teacher.name }
+  const admin = await getSession()
+  if (admin && admin.schoolId && SCHOOL_STAFF_ROLES.includes(admin.role)) {
+    if (requestedSchoolId != null && Number(requestedSchoolId) !== Number(admin.schoolId)) return null
+    return { kind: 'admin', schoolId: admin.schoolId, userId: admin.userId, role: admin.role, actorName: 'School Admin' }
   }
+
+  return null
+}
+
+async function resolveTeacherActor(requestedSchoolId: string | number | null | undefined):
+  Promise<Extract<ExamActor, { kind: 'teacher' }> | null> {
+  const teacher = await getTeacherSession()
+  if (!teacher) return null
+  if (requestedSchoolId != null && Number(requestedSchoolId) !== Number(teacher.schoolId)) return null
+  return { kind: 'teacher', schoolId: teacher.schoolId, teacherId: teacher.teacherId, actorName: teacher.name }
+}
+
+// Read-only access: any school-scoped role (admin staff, teacher, student,
+// parent) whose own session's school matches the requested one. Platform
+// admin may access any school. Admin sessions are checked first so a stray
+// teacher/student/parent cookie in the same browser can't downgrade them.
+export async function requireExamsAccess(requestedSchoolId: string | number | null | undefined): Promise<ExamActor | null> {
+  const admin = await resolveAdminActor(requestedSchoolId)
+  if (admin) return admin
+
+  const teacher = await resolveTeacherActor(requestedSchoolId)
+  if (teacher) return teacher
 
   const student = await getStudentSession()
   if (student) {
@@ -54,12 +78,6 @@ export async function requireExamsAccess(requestedSchoolId: string | number | nu
     return { kind: 'parent', schoolId: parent.schoolId, parentId: parent.parentId, actorName: parent.name }
   }
 
-  const admin = await getSession()
-  if (admin && admin.schoolId && SCHOOL_STAFF_ROLES.includes(admin.role)) {
-    if (requestedSchoolId != null && Number(requestedSchoolId) !== Number(admin.schoolId)) return null
-    return { kind: 'admin', schoolId: admin.schoolId, userId: admin.userId, role: admin.role, actorName: 'School Admin' }
-  }
-
   return null
 }
 
@@ -67,17 +85,13 @@ export async function requireExamsAccess(requestedSchoolId: string | number | nu
 // and the final release step are admin actions in the v2 flow.
 export async function requireExamsAdmin(requestedSchoolId: string | number | null | undefined):
   Promise<Extract<ExamActor, { kind: 'admin' }> | null> {
-  const actor = await requireExamsAccess(requestedSchoolId)
-  if (!actor || actor.kind !== 'admin') return null
-  return actor
+  return resolveAdminActor(requestedSchoolId)
 }
 
 // Teacher-only — marks entry, subject submission, class-teacher review.
 export async function requireExamsTeacher(requestedSchoolId: string | number | null | undefined):
   Promise<Extract<ExamActor, { kind: 'teacher' }> | null> {
-  const actor = await requireExamsAccess(requestedSchoolId)
-  if (!actor || actor.kind !== 'teacher') return null
-  return actor
+  return resolveTeacherActor(requestedSchoolId)
 }
 
 // True if this teacher is the official class teacher of classId (checked
