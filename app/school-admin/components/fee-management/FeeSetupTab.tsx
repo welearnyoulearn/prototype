@@ -318,7 +318,9 @@ export default function FeeSetupTab({
     setStructureMsg(r.ok
       ? d.created > 0
         ? `✓ Created ${d.created} new bill${d.created !== 1 ? 's' : ''}${d.skipped > 0 ? ` · ${d.skipped} existing bills unchanged` : ''}`
-        : '✓ All active students already billed — no new entries needed'
+        : (stats?.unbilled_no_plan?.count ?? 0) > 0
+          ? `No new bills created — ${stats!.unbilled_no_plan!.count} student(s) are in grade(s) with no fee amount set (${stats!.unbilled_no_plan!.grades.join(', ')}). Set amounts for those grades first.`
+          : '✓ All active students already billed — no new entries needed'
       : d.error || 'Failed')
     if (r.ok) {
       const feeStore = useFeeStore.getState()
@@ -876,6 +878,11 @@ export default function FeeSetupTab({
                     className="text-xs bg-green-600 text-white px-3 py-1.5 rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed font-medium">
                     {generatingLedger ? 'Generating…' : `Generate for New${stats && (stats.unbilled_students ?? 0) > 0 ? ` (${stats.unbilled_students})` : ''}`}
                   </button>
+                  {(stats?.unbilled_no_plan?.count ?? 0) > 0 && (
+                    <span data-testid="unbilled-no-plan" className="text-xs text-amber-700">
+                      ⚠ {stats!.unbilled_no_plan!.count} student(s) can&apos;t be billed — no fee amount set for grade {stats!.unbilled_no_plan!.grades.join(', ')}
+                    </span>
+                  )}
                   <button onClick={() => setShowAmendLog(p => !p)} className="text-xs text-amber-700 border border-amber-300 px-3 py-1.5 rounded-lg hover:bg-amber-100">
                     {showAmendLog ? 'Hide' : 'View'} Amendments ({amendments.length})
                   </button>

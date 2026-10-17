@@ -257,9 +257,18 @@ async function handleGET(req: NextRequest) {
         [school_id, academic_year]
       )
 
-      // Students who are active but have NO ledger rows for this year (need billing)
-      const { rows: [{ unbilled_students }] } = await pool.query(
-        `SELECT COUNT(*) AS unbilled_students
+      // Students who are active but have NO ledger rows for this year. Split into those Generate can
+      // bill (their grade has a fee structure, or they have a variable-fee assignment) and those it
+      // can't (no fee amount set for their grade) — the latter would otherwise show as "unbilled"
+      // forever, because generating creates nothing for them.
+      const { rows: unbilledRows } = await pool.query(
+        `SELECT s.grade,
+                (EXISTS (SELECT 1 FROM fee_structures fs
+                         JOIN fee_categories fc ON fc.id = fs.fee_category_id AND fc.is_active = TRUE
+                         WHERE fs.school_id = s.school_id AND fs.academic_year = $2 AND fs.grade = s.grade)
+                 OR EXISTS (SELECT 1 FROM student_fee_category_assignments a
+                            WHERE a.school_id = s.school_id AND a.academic_year = $2
+                              AND a.student_id = s.id AND a.amount > 0)) AS billable
          FROM students s
          WHERE s.school_id = $1 AND s.status = 'active'
            AND NOT EXISTS (
@@ -267,7 +276,13 @@ async function handleGET(req: NextRequest) {
              WHERE l.student_id = s.id AND l.academic_year = $2
            )`,
         [school_id, academic_year]
-      )
+      ).catch(() => ({ rows: [] as Array<{ grade: string | null; billable: boolean }> }))
+      const unbilled_students = unbilledRows.filter(r => r.billable).length
+      const noPlanRows = unbilledRows.filter(r => !r.billable)
+      const unbilled_no_plan = {
+        count: noPlanRows.length,
+        grades: [...new Set(noPlanRows.map(r => String(r.grade ?? '—')))],
+      }
 
       return NextResponse.json({
         summary,
@@ -276,7 +291,8 @@ async function handleGET(req: NextRequest) {
         top_defaulters,
         by_payment_mode,
         by_class,
-        unbilled_students: Number(unbilled_students),
+        unbilled_students,
+        unbilled_no_plan,
       })
     } catch (e) { console.error(e); return NextResponse.json({ error: 'Failed' }, { status: 500 }) }
 } catch (err: unknown) {

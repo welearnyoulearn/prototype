@@ -59,6 +59,7 @@ export type FeeStats = {
   by_payment_mode: Array<{ payment_mode: string; count: number; total: number }>
   by_class?: Array<{ grade: string; section?: string; students: number; total_due: number; total_collected: number; outstanding: number; fully_paid_students?: number; defaulter_students?: number }>
   unbilled_students?: number
+  unbilled_no_plan?: { count: number; grades: string[] }
 }
 
 export type PendingPayment = {
