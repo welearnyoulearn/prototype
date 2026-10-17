@@ -769,9 +769,9 @@ function SchoolAdmin() {
                       onClick={() => setLauncherOpen(true)}
                       data-testid="nav-launcher"
                       aria-haspopup="dialog"
-                      className="flex h-9 w-full items-center gap-2 rounded-lg border border-[#c5d8c8] bg-[#dce9dc] px-3 text-[13px] font-semibold text-[#173e2f] transition-colors hover:bg-[#cfe1d0] focus-visible:outline-2 focus-visible:outline-[#235b46]"
+                      className="flex h-10 w-full items-center gap-2.5 rounded-lg border border-[#c5d8c8] bg-[#dce9dc] px-3 text-[14px] font-semibold text-[#173e2f] transition-colors hover:bg-[#cfe1d0] focus-visible:outline-2 focus-visible:outline-[#235b46]"
                     >
-                      <LayoutGrid className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
+                      <LayoutGrid className="h-5 w-5 flex-shrink-0" aria-hidden="true" />
                       <span className="flex-1 text-left">All features</span>
                       <NavBadge navKey="launcher" count={totalUnread} className="!ml-0" />
                     </button>
