@@ -124,7 +124,7 @@ test.describe('Student List pagination (#352)', () => {
     await page.getByRole('button', { name: 'Student List', exact: true }).click()   // Onboard Students is the default sub-tab
     await expect(page.getByText('100 active')).toBeVisible({ timeout: 60000 })
 
-    const rows = page.locator('tbody tr')
+    const rows = page.locator('[data-testid^="student-row-"]')   // not bare tbody tr: the hidden onboarding grid is mounted too
     await expect(page.getByTestId('students-page-range')).toHaveText('Showing 1–50 of 100')
     await expect(rows).toHaveCount(50)
     await expect(page.getByTestId('students-prev-page')).toBeDisabled()
