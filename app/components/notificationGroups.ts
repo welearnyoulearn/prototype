@@ -2,6 +2,9 @@
 // The bell groups by this so "12 notifications" reads as "Exams · 7, Marks & Results · 5".
 // One primary group per type, so nothing is ever counted twice.
 
+// Fired on window whenever the bell marks notifications read, so sidebar badges refresh at once.
+export const NOTIFICATIONS_CHANGED_EVENT = 'wlyl:notifications-changed'
+
 export type NotificationGroupId = 'exams' | 'marks' | 'messages' | 'timetable' | 'syllabus' | 'attendance' | 'birthdays' | 'fees' | 'other'
 
 export const NOTIFICATION_GROUP_LABELS: Record<NotificationGroupId, string> = {
