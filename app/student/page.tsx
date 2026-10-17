@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, Suspense } from 'react'
 import { useRouter } from 'next/navigation'
 import dynamic from 'next/dynamic'
 import NotificationBell from '../components/NotificationBell'
+import { useNavNotificationCounts, NavBadge } from '../components/navNotifications'
 import { useUsageHeartbeat } from '@/lib/useUsageHeartbeat'
 import { useFeatureTracking } from '@/lib/useFeatureTracking'
 import { useSectionNav } from '@/lib/useSectionNav'
@@ -131,6 +132,7 @@ function StudentPortal() {
     setVisitedNav(prev => (prev.has(activeNav) ? prev : new Set([...prev, activeNav])))
   }, [activeNav])
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const navCounts = useNavNotificationCounts('student')
   const [loading,     setLoading]     = useState(true)
   const [enabledFeatures, setEnabledFeatures] = useState<Set<string> | null>(null)
   const [aiAccessTier, setAiAccessTier] = useState<'ai_basic' | 'ai_pro' | 'none' | null>(null)
@@ -285,6 +287,7 @@ function StudentPortal() {
                     <button key={item.key} onClick={() => { if (!item.comingSoon) navigateTo(item.key) }} className="portal-nav-item" aria-current={activeNav === item.key ? 'page' : undefined} disabled={item.comingSoon} data-testid={`student-nav-${item.key}`}>
                       <Sticker name={item.sticker} size="sm" />
                       <span className="flex-1">{item.label}</span>
+                      <NavBadge count={navCounts[item.key]} navKey={item.key} />
                       {item.comingSoon && <span className="text-xs">Soon</span>}
                     </button>
                   ))}

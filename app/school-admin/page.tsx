@@ -6,6 +6,7 @@ import dynamic from 'next/dynamic'
 import { motion, MotionConfig } from 'framer-motion'
 import { FeaturesProvider } from '@/lib/features-context'
 import NotificationBell from '../components/NotificationBell'
+import { useNavNotificationCounts, NavBadge } from '../components/navNotifications'
 import CommandBar from './components/CommandBar'
 import { useRouter } from 'next/navigation'
 import { FullPageLoader } from '@/components/loaders'
@@ -247,6 +248,7 @@ function SchoolAdmin() {
   // Onboarding panels mount on first open of their sub-tab (then stay mounted to keep form state).
   const [onboardOpened, setOnboardOpened] = useState<{ staff: boolean; students: boolean }>({ staff: false, students: false })
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const navCounts = useNavNotificationCounts('admin')
   const [navQuery, setNavQuery] = useState('')
   // Sidebar only renders after the school loads client-side, so reading storage here is hydration-safe
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(() => {
@@ -640,7 +642,10 @@ function SchoolAdmin() {
                               data-testid={`nav-section-${section.label.toLowerCase()}`}
                               className="portal-nav-label flex-1 flex items-center justify-between text-left rounded hover:text-[#235b46] focus-visible:outline-2 focus-visible:outline-[#235b46]"
                             >
-                              <span>{section.label}</span>
+                              <span className="flex items-center gap-2">
+                                {section.label}
+                                {collapsed && <NavBadge navKey={`section-${section.label.toLowerCase()}`} count={sectionEnabled.reduce((n, i) => n + (navCounts[i.key] ?? 0), 0)} className="!ml-0" />}
+                              </span>
                               <svg className={`w-3 h-3 transition-transform ${collapsed ? '-rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" />
                               </svg>
@@ -688,6 +693,7 @@ function SchoolAdmin() {
                                   {item.icon}
                                 </span>
                                 <span className="relative truncate">{item.label}</span>
+                              <NavBadge count={navCounts[item.key]} navKey={item.key} />
                               </motion.button>
                             )
                           })}
@@ -741,6 +747,7 @@ function SchoolAdmin() {
 
                               <span className="relative">{item.icon}</span>
                               <span className="relative truncate">{item.label}</span>
+                            <NavBadge count={navCounts[item.key]} navKey={item.key} />
                             </motion.button>
                           )
                         })}

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
 import { Bell, CalendarDays, Check, ChevronLeft, ChevronRight, ClipboardList, Clock, Megaphone, RefreshCw, UserRound, XCircle, type LucideIcon } from 'lucide-react'
-import { buildGroups, groupOf, NOTIFICATION_GROUP_LABELS, type NotificationGroupId } from './notificationGroups'
+import { buildGroups, groupOf, NOTIFICATION_GROUP_LABELS, NOTIFICATIONS_CHANGED_EVENT, type NotificationGroupId } from './notificationGroups'
 
 type Notification = {
   id: number
@@ -98,9 +98,11 @@ const TYPE_NAV: Record<string, string> = {
   fee_writeoff_decided: 'fee-management',
 }
 
-function notificationDestination(
+export type NotificationPortal = 'teacher' | 'admin' | 'student' | 'parent'
+
+export function notificationDestination(
   type: string,
-  portal: 'teacher' | 'admin' | 'student' | 'parent',
+  portal: NotificationPortal,
 ): string | undefined {
   const scheduleTypes = new Set(['exam_scheduled', 'exam_updated', 'exam_cancelled', 'exam_reminder_7day', 'exam_reminder_1day', 'exam_reminder_today'])
   if (scheduleTypes.has(type)) {
@@ -171,6 +173,7 @@ export default function NotificationBell({ teacherId, schoolId, studentId, paren
         ),
       })
       setNotifications([])
+      window.dispatchEvent(new Event(NOTIFICATIONS_CHANGED_EVENT))
     } catch { /* silent */ }
   }
 
@@ -184,6 +187,7 @@ export default function NotificationBell({ teacherId, schoolId, studentId, paren
       })
       const done = new Set(ids)
       setNotifications(prev => prev.filter(n => !done.has(n.id)))
+      window.dispatchEvent(new Event(NOTIFICATIONS_CHANGED_EVENT))
     } catch { /* silent */ }
   }
 
@@ -195,6 +199,7 @@ export default function NotificationBell({ teacherId, schoolId, studentId, paren
         body: JSON.stringify({ notification_id: id }),
       })
       setNotifications(prev => prev.filter(n => n.id !== id))
+      window.dispatchEvent(new Event(NOTIFICATIONS_CHANGED_EVENT))
     } catch { /* silent */ }
   }
 
