@@ -465,11 +465,10 @@ export default function FeeManagement({
     } catch { setSetupStatus(null) }
     finally { setSetupStatusLoading(false) }
   }, [schoolId, academicYear])
-  // Also refetch on every tab change (not just academicYear) — otherwise leaving
-  // the Setup tab after creating categories/amounts/bills/lock would show a stale
-  // banner on Overview until academicYear happened to change again. This endpoint
-  // is cheap enough that refetching on tab switches is a non-issue.
-  useEffect(() => { if (academicYear) loadSetupStatus() }, [academicYear, activeTab, loadSetupStatus])
+  // Refetched when the year changes, and (via the effect below) whenever the Fee Plan data changes
+  // — head added, amounts saved, bills generated, plan locked. Not on every tab switch: those are
+  // the only things that change it, and the Fee Plan tab reports each one.
+  useEffect(() => { if (academicYear) loadSetupStatus() }, [academicYear, loadSetupStatus])
   // Fee Plan edits (head added, amounts saved, bills generated, plan locked) reload the plan data
   // without changing tab; refresh the banner's status then too so it doesn't contradict the checklist.
   useEffect(() => { if (academicYear && activeTab === 'setup') loadSetupStatus() }, [categories, structures, structureLock, academicYear, activeTab, loadSetupStatus])

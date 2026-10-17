@@ -6,6 +6,7 @@ import dynamic from 'next/dynamic'
 import { FullPageLoader } from '@/components/loaders'
 import { FeaturesProvider } from '@/lib/features-context'
 import NotificationBell from '../components/NotificationBell'
+import { useNavNotificationCounts, NavBadge } from '../components/navNotifications'
 import { useUsageHeartbeat } from '@/lib/useUsageHeartbeat'
 import { useFeatureTracking } from '@/lib/useFeatureTracking'
 import { useSectionNav } from '@/lib/useSectionNav'
@@ -121,6 +122,7 @@ function TeacherPortal() {
     return () => window.clearTimeout(update)
   }, [activeNav])
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const navCounts = useNavNotificationCounts('teacher')
   const [selectedClass, setSelectedClass] = useState<{ id: number; grade: string; section: string; class_teacher_name: string | null; class_teacher_id?: number | null } | null>(null)
   const [classViewInitialTab, setClassViewInitialTab] = useState<string | undefined>(undefined)
   const [classViewOpenExamId, setClassViewOpenExamId] = useState<number | undefined>(undefined)
@@ -309,6 +311,7 @@ function TeacherPortal() {
                     <button key={item.key} onClick={() => { if (!item.comingSoon) navigateTo(item.key) }} className="portal-nav-item" aria-current={activeNav === item.key ? 'page' : undefined} disabled={item.comingSoon}>
                       <span className="shrink-0" aria-hidden="true">{item.icon}</span>
                       <span className="flex-1">{item.label}</span>
+                      <NavBadge count={navCounts[item.key]} navKey={item.key} />
                       {item.comingSoon && <span className="text-xs">Soon</span>}
                     </button>
                   ))}
