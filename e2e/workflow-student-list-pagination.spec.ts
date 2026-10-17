@@ -121,6 +121,7 @@ test.describe('Student List pagination (#352)', () => {
     await uiLogin(page)
     await expect(page.getByRole('button', { name: /Student Management/i })).toBeVisible({ timeout: 60000 })
     await page.getByRole('button', { name: /Student Management/i }).click()
+    await page.getByRole('button', { name: 'Student List', exact: true }).click()   // Onboard Students is the default sub-tab
     await expect(page.getByText('100 active')).toBeVisible({ timeout: 60000 })
 
     const rows = page.locator('tbody tr')
