@@ -19,7 +19,7 @@ import PortalSidebar from '@/components/portal/PortalSidebar'
 import { Skeleton } from '@/components/ui/skeleton'
 
 // Always-loaded (small, needed immediately)
-import { Building2, CalendarDays, ClipboardCheck, Download, GraduationCap, LayoutDashboard, Library, ListChecks, Megaphone, MessageSquareText, NotebookPen, Receipt, RefreshCcw, School, SlidersHorizontal, Users, Wallet } from 'lucide-react'
+import { BookOpen, Building2, CalendarDays, ChevronDown, ClipboardCheck, Download, GraduationCap, LayoutDashboard, Library, ListChecks, Megaphone, MessageSquareText, NotebookPen, Receipt, RefreshCcw, School, SlidersHorizontal, Users, Wallet, Wrench } from 'lucide-react'
 import Overview from './components/Overview'
 import StaffProfile from './components/StaffProfile'
 
@@ -79,14 +79,14 @@ type NavItem = {
 // Section grouping for sidebar — ordered by how often a school admin reaches for each
 // area: who (people) → money → the school day → teaching content → outreach → admin tools.
 // Within a section, the most-used / primary item comes first.
-const NAV_SECTIONS = [
-  { label: 'OVERVIEW',      keys: ['overview'] },
-  { label: 'PEOPLE',        keys: ['students', 'staff', 'class-management'] },
-  { label: 'MONEY MANAGEMENT', keys: ['fee-management', 'expenses'] },
-  { label: 'SCHEDULING',    keys: ['attendance', 'academic-calendar', 'exam-schedule'] },
-  { label: 'ACADEMICS',     keys: ['curriculum', 'syllabus-tracking', 'library'] },
-  { label: 'COMMUNICATION', keys: ['announcements', 'feedback-management'] },
-  { label: 'TOOLS',         keys: ['settings', 'export', 'year-rollover'] },
+const NAV_SECTIONS: { label: string; keys: string[]; icon: React.ReactNode }[] = [
+  { label: 'OVERVIEW',      keys: ['overview'], icon: <LayoutDashboard className="w-3.5 h-3.5" aria-hidden="true" /> },
+  { label: 'PEOPLE',        keys: ['students', 'staff', 'class-management'], icon: <Users className="w-3.5 h-3.5" aria-hidden="true" /> },
+  { label: 'MONEY MANAGEMENT', keys: ['fee-management', 'expenses'], icon: <Wallet className="w-3.5 h-3.5" aria-hidden="true" /> },
+  { label: 'SCHEDULING',    keys: ['attendance', 'academic-calendar', 'exam-schedule'], icon: <CalendarDays className="w-3.5 h-3.5" aria-hidden="true" /> },
+  { label: 'ACADEMICS',     keys: ['curriculum', 'syllabus-tracking', 'library'], icon: <BookOpen className="w-3.5 h-3.5" aria-hidden="true" /> },
+  { label: 'COMMUNICATION', keys: ['announcements', 'feedback-management'], icon: <Megaphone className="w-3.5 h-3.5" aria-hidden="true" /> },
+  { label: 'TOOLS',         keys: ['settings', 'export', 'year-rollover'], icon: <Wrench className="w-3.5 h-3.5" aria-hidden="true" /> },
 ]
 
 type NavOrder = { sections: string[]; items: Record<string, string[]> }
@@ -636,38 +636,54 @@ function SchoolAdmin() {
                         .filter((i): i is NavItem => i !== undefined)
                         .filter(i => !q || i.label.toLowerCase().includes(q))
                       if (sectionEnabled.length === 0) return null
-                      const collapsed = !q && !arranging && collapsedSections.has(section.label)
+                      // A section with one item (Overview) needs no collapsible header.
+                      const solo = section.keys.length === 1 && !arranging
+                      const collapsed = !solo && !q && !arranging && collapsedSections.has(section.label)
+                      // A collapsed section never hides what needs attention: the open page and any
+                      // item with unread updates stay listed under the header; the rest fold away.
+                      const shownItems = collapsed
+                        ? sectionEnabled.filter(i => activeNav === i.key || (navCounts[i.key] ?? 0) > 0)
+                        : sectionEnabled
+                      const hiddenCount = sectionEnabled.length - shownItems.length
+                      const sectionUnread = sectionEnabled.reduce((n, i) => n + (navCounts[i.key] ?? 0), 0)
                       return (
-                        <div key={section.label} className="mb-1">
-                          <div className="flex items-center">
-                            <button
-                              type="button"
-                              onClick={() => toggleSection(section.label)}
-                              aria-expanded={!collapsed}
-                              data-testid={`nav-section-${section.label.toLowerCase()}`}
-                              className="portal-nav-label flex-1 flex items-center justify-between text-left rounded hover:text-[#235b46] focus-visible:outline-2 focus-visible:outline-[#235b46]"
-                            >
-                              <span className="flex items-center gap-2">
-                                {section.label}
-                                {collapsed && <NavBadge navKey={`section-${section.label.toLowerCase()}`} count={sectionEnabled.reduce((n, i) => n + (navCounts[i.key] ?? 0), 0)} className="!ml-0" />}
-                              </span>
-                              <svg className={`w-3 h-3 transition-transform ${collapsed ? '-rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" />
-                              </svg>
-                            </button>
-                            {arranging && (
-                              <span className="flex pt-3 pl-1">
-                                <MoveButtons
-                                  label={`${section.label} section`}
-                                  testId={`nav-move-section-${section.label.toLowerCase()}`}
-                                  canUp={sIdx > 0}
-                                  canDown={sIdx < visibleLabels.length - 1}
-                                  onMove={dir => moveSection(visibleLabels, section.label, dir)}
-                                />
-                              </span>
-                            )}
-                          </div>
-                          {!collapsed && sectionEnabled.map((item, iIdx) => {
+                        <div key={section.label} className="mb-2">
+                          {!solo && (
+                            <div className="flex items-center">
+                              <button
+                                type="button"
+                                onClick={() => toggleSection(section.label)}
+                                aria-expanded={!collapsed}
+                                data-testid={`nav-section-${section.label.toLowerCase()}`}
+                                title={collapsed && hiddenCount > 0 ? `${hiddenCount} hidden — click to expand` : undefined}
+                                className="group flex flex-1 items-center gap-2.5 rounded-xl px-2 py-1.5 text-left transition-colors hover:bg-white/70 focus-visible:outline-2 focus-visible:outline-[#235b46]"
+                              >
+                                <span className={`flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md ring-1 transition-colors ${collapsed ? 'bg-white/60 text-[#67736b] ring-[#dce2db]' : 'bg-[#dce9dc] text-[#235b46] ring-[#c5d8c8]'}`}>
+                                  {section.icon}
+                                </span>
+                                <span className="flex-1 truncate text-[11px] font-bold uppercase tracking-[.08em] text-[#3b4a40] group-hover:text-[#235b46]">{section.label}</span>
+                                {collapsed && sectionUnread > 0 && <NavBadge navKey={`section-${section.label.toLowerCase()}`} count={sectionUnread} className="!ml-0" />}
+                                {collapsed && hiddenCount > 0 && (
+                                  <span data-testid={`nav-section-hidden-${section.label.toLowerCase()}`} className="flex-shrink-0 rounded-full bg-white px-2 py-0.5 text-[10px] font-semibold text-[#55635a] ring-1 ring-[#dce2db]">
+                                    {hiddenCount} hidden
+                                  </span>
+                                )}
+                                <ChevronDown className={`h-3.5 w-3.5 flex-shrink-0 text-[#67736b] transition-transform ${collapsed ? '-rotate-90' : ''}`} aria-hidden="true" />
+                              </button>
+                              {arranging && (
+                                <span className="flex pl-1">
+                                  <MoveButtons
+                                    label={`${section.label} section`}
+                                    testId={`nav-move-section-${section.label.toLowerCase()}`}
+                                    canUp={sIdx > 0}
+                                    canDown={sIdx < visibleLabels.length - 1}
+                                    onMove={dir => moveSection(visibleLabels, section.label, dir)}
+                                  />
+                                </span>
+                              )}
+                            </div>
+                          )}
+                          {shownItems.map((item, iIdx) => {
                             const isActive = activeNav === item.key
                             if (arranging) {
                               return (
@@ -691,14 +707,14 @@ function SchoolAdmin() {
                                 data-testid={`nav-${item.key}`}
                                 title={item.label}
                                 whileTap={{ scale: 0.98 }}
-                                className="portal-nav-item"
+                                className="portal-nav-item group !min-h-10 !gap-3 !rounded-xl !py-1.5"
                                 aria-current={isActive ? 'page' : undefined}
                               >
-                                <span className="relative flex-shrink-0">
+                                <span className={`relative flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg transition-colors ${isActive ? 'bg-[#235b46] text-white [&_svg]:!text-white' : 'bg-white/70 text-[#3b4a40] ring-1 ring-[#dce2db] group-hover:bg-white group-hover:text-[#235b46]'}`}>
                                   {item.icon}
                                 </span>
                                 <span className="relative truncate">{item.label}</span>
-                              <NavBadge count={navCounts[item.key]} navKey={item.key} />
+                                <NavBadge count={navCounts[item.key]} navKey={item.key} className="shadow-sm ring-2 ring-[#edf2eb]" />
                               </motion.button>
                             )
                           })}
