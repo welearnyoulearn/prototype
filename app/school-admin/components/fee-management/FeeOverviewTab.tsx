@@ -37,6 +37,9 @@ export default function FeeOverviewTab({
   passoutError,
   passoutCollectLoading,
   passoutCollectError,
+  detailsLoaded,
+  detailsLoading,
+  onLoadDetails,
   onRetryStats,
   onRetryPassout,
   onCollectPassout,
@@ -59,6 +62,10 @@ export default function FeeOverviewTab({
   passoutError?: string
   passoutCollectLoading: number | null
   passoutCollectError: string
+  // The class-wise / fee-head / defaulter / payment sections load on demand (see FeeManagement.loadDetails)
+  detailsLoaded: boolean
+  detailsLoading: boolean
+  onLoadDetails: () => void
   onRetryStats: () => void
   onRetryPassout: () => void
   onCollectPassout: (s: PassoutStudent) => void
@@ -181,6 +188,21 @@ export default function FeeOverviewTab({
             </div>
           </div>
 
+          {/* ── Details on demand: keeps the first load light ── */}
+          {!detailsLoaded ? (
+            <div data-testid="overview-details-cta" className="bg-white rounded-xl border border-blue-100 p-8 text-center">
+              <p className="text-base font-semibold text-gray-800">Want the full picture?</p>
+              <p className="text-sm text-gray-500 mt-1 mb-5 max-w-xl mx-auto">
+                Class-wise collection, fee-head health, top defaulters, recent payments, payment modes and passout dues.
+                They load only when you ask, so this page opens faster.
+              </p>
+              <button data-testid="btn-overview-load-details" onClick={onLoadDetails} disabled={detailsLoading}
+                className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-3 rounded-xl text-sm font-bold disabled:opacity-60">
+                {detailsLoading ? 'Loading details…' : 'View detailed breakdown'}
+              </button>
+            </div>
+          ) : (
+            <>
           {/* ── Class-wise Analysis ── */}
           {gradeStats.length > 0 && (() => {
             const label = (g: GradeStat) => g.section ? `${g.grade}-${g.section}` : `Grade ${g.grade}`
@@ -521,6 +543,8 @@ export default function FeeOverviewTab({
               )}
             </div>
           </div>
+            </>
+          )}
         </>
       ) : (
         <div className="bg-white rounded-xl border border-dashed border-gray-200 p-16 text-center">
