@@ -76,14 +76,17 @@ type NavItem = {
   tier?: Tier[]  // kept for reference only — actual visibility driven by platform feature config
 }
 
-// Section grouping for sidebar — Management first, then Scheduling
+// Section grouping for sidebar — ordered by how often a school admin reaches for each
+// area: who (people) → money → the school day → teaching content → outreach → admin tools.
+// Within a section, the most-used / primary item comes first.
 const NAV_SECTIONS = [
   { label: 'OVERVIEW',      keys: ['overview'] },
-  { label: 'PEOPLE',        keys: ['staff', 'students', 'class-management'] },
+  { label: 'PEOPLE',        keys: ['students', 'staff', 'class-management'] },
   { label: 'MONEY MANAGEMENT', keys: ['fee-management', 'expenses'] },
-  { label: 'SCHEDULING',    keys: ['curriculum', 'library', 'attendance', 'academic-calendar', 'exam-schedule'] },
+  { label: 'SCHEDULING',    keys: ['attendance', 'academic-calendar', 'exam-schedule'] },
+  { label: 'ACADEMICS',     keys: ['curriculum', 'syllabus-tracking', 'library'] },
   { label: 'COMMUNICATION', keys: ['announcements', 'feedback-management'] },
-  { label: 'TOOLS',         keys: ['export', 'settings', 'year-rollover'] },
+  { label: 'TOOLS',         keys: ['settings', 'export', 'year-rollover'] },
 ]
 
 type NavOrder = { sections: string[]; items: Record<string, string[]> }
@@ -246,7 +249,9 @@ function SchoolAdmin() {
   const { current: requestedNav, navigate: navigateSection, reset: resetSection } = useSectionNav<string>('overview')
   const [visited, setVisited] = useState<Set<string>>(new Set([requestedNav]))
   // Onboarding panels mount on first open of their sub-tab (then stay mounted to keep form state).
-  const [onboardOpened, setOnboardOpened] = useState<{ staff: boolean; students: boolean }>({ staff: false, students: false })
+  const [onboardOpened, setOnboardOpened] = useState<{ staff: boolean; students: boolean }>({ staff: false, students: true })
+  // The student list likewise mounts (and fetches) on first open of its sub-tab, since Onboard Students is the default.
+  const [studentListOpened, setStudentListOpened] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const navCounts = useNavNotificationCounts('admin')
   const [navQuery, setNavQuery] = useState('')
@@ -292,7 +297,7 @@ function SchoolAdmin() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [staffSubTab, setStaffSubTab] = useState<'directory' | 'onboard'>('directory')
-  const [studentsSubTab, setStudentsSubTab] = useState<'list' | 'onboard'>('list')
+  const [studentsSubTab, setStudentsSubTab] = useState<'list' | 'onboard'>('onboard')
   const [staffRefreshKey, setStaffRefreshKey] = useState(0)
   const [studentRefreshKey, setStudentRefreshKey] = useState(0)
 
@@ -321,12 +326,12 @@ function SchoolAdmin() {
 
   // `subTab` lets a caller land directly on a specific sub-tab (e.g. Class
   // Management's "Add Student" jumping straight to Students > Onboard
-  // instead of the default List) — optional, existing callers that only
+  // instead of the default sub-tab) — optional, existing callers that only
   // pass `key` keep the previous always-reset-to-default behavior.
   const navigateTo = useCallback((key: string, subTab?: string) => {
     setSidebarOpen(false)
     if (key === 'staff') setStaffSubTab((subTab as 'directory' | 'onboard') || 'directory')
-    if (key === 'students') setStudentsSubTab((subTab as 'list' | 'onboard') || 'list')
+    if (key === 'students') setStudentsSubTab((subTab as 'list' | 'onboard') || 'onboard')
     navigateSection(key)
     trackOpen(key)
     if (key !== 'overview' && key !== 'profile') {
@@ -702,28 +707,6 @@ function SchoolAdmin() {
                     })
                   })()}
 
-                  <div className="px-2 pt-2 pb-1 flex items-center gap-3">
-                    <button
-                      type="button"
-                      onClick={() => setArranging(a => !a)}
-                      data-testid="nav-arrange-toggle"
-                      aria-pressed={arranging}
-                      className="text-xs font-medium text-[#235b46] hover:underline focus-visible:outline-2 focus-visible:outline-[#235b46] rounded"
-                    >
-                      {arranging ? 'Done' : 'Arrange menu'}
-                    </button>
-                    {arranging && (
-                      <button
-                        type="button"
-                        onClick={resetNavOrder}
-                        data-testid="nav-arrange-reset"
-                        className="text-xs text-[#55635a] hover:underline focus-visible:outline-2 focus-visible:outline-[#235b46] rounded"
-                      >
-                        Reset order
-                      </button>
-                    )}
-                  </div>
-
                   {/* Items with no section mapping */}
                   {(() => {
                     const allSectioned = NAV_SECTIONS.flatMap(s => s.keys)
@@ -769,6 +752,29 @@ function SchoolAdmin() {
                       ))}
                     </div>
                   )}
+
+                  {/* Menu customisation lives at the very bottom — it's a rare, secondary action */}
+                  <div className="mt-3 px-2 pt-3 pb-1 flex items-center gap-3 border-t border-[#dce2db]">
+                    <button
+                      type="button"
+                      onClick={() => setArranging(a => !a)}
+                      data-testid="nav-arrange-toggle"
+                      aria-pressed={arranging}
+                      className="text-xs font-medium text-[#235b46] hover:underline focus-visible:outline-2 focus-visible:outline-[#235b46] rounded"
+                    >
+                      {arranging ? 'Done' : 'Arrange menu'}
+                    </button>
+                    {arranging && (
+                      <button
+                        type="button"
+                        onClick={resetNavOrder}
+                        data-testid="nav-arrange-reset"
+                        className="text-xs text-[#55635a] hover:underline focus-visible:outline-2 focus-visible:outline-[#235b46] rounded"
+                      >
+                        Reset order
+                      </button>
+                    )}
+                  </div>
                 </>
               )}
             </nav>
@@ -845,15 +851,15 @@ function SchoolAdmin() {
                     <div className="mb-5">
                       <h2 className="text-xl font-bold text-gray-900 mb-1">Student Management</h2>
                       <div className="flex max-w-full gap-1 overflow-x-auto border-b border-[#dce2db]">
-                        {([['list', 'Student List'], ['onboard', 'Onboard Students']] as const).map(([key, label]) => (
-                          <button key={key} onClick={() => { setStudentsSubTab(key); if (key === 'onboard') setOnboardOpened(o => ({ ...o, students: true })) }}
+                        {([['onboard', 'Onboard Students'], ['list', 'Student List']] as const).map(([key, label]) => (
+                          <button key={key} onClick={() => { setStudentsSubTab(key); if (key === 'onboard') setOnboardOpened(o => ({ ...o, students: true })); else setStudentListOpened(true) }}
                             aria-pressed={studentsSubTab === key} className={`min-h-11 whitespace-nowrap border-b-2 px-4 text-sm font-medium transition-colors ${studentsSubTab === key ? 'border-[#235b46] text-[#235b46]' : 'border-transparent text-gray-600 hover:text-gray-900'}`}>
                             {label}
                           </button>
                         ))}
                       </div>
                     </div>
-                    <div hidden={studentsSubTab !== 'list'}><StudentsManagement schoolId={selectedSchool.id} refreshKey={studentRefreshKey} /></div>
+                    <div hidden={studentsSubTab !== 'list'}>{(studentListOpened || studentsSubTab === 'list') && <StudentsManagement schoolId={selectedSchool.id} refreshKey={studentRefreshKey} />}</div>
                     <div hidden={studentsSubTab !== 'onboard'}>{(onboardOpened.students || studentsSubTab === 'onboard') && <StudentOnboarding schoolId={selectedSchool.id} onRefresh={() => { setStudentRefreshKey(k => k + 1); setStudentsSubTab('list') }} />}</div>
                   </div>
                 )}
