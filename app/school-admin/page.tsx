@@ -19,7 +19,7 @@ import PortalSidebar from '@/components/portal/PortalSidebar'
 import { Skeleton } from '@/components/ui/skeleton'
 
 // Always-loaded (small, needed immediately)
-import { BookOpen, Building2, CalendarDays, ChevronDown, ClipboardCheck, Download, GraduationCap, LayoutDashboard, Library, ListChecks, Megaphone, MessageSquareText, NotebookPen, Receipt, RefreshCcw, School, SlidersHorizontal, Users, Wallet, Wrench } from 'lucide-react'
+import { BookOpen, Building2, CalendarDays, ChevronDown, ClipboardCheck, Download, GraduationCap, LayoutDashboard, Library, GripVertical, ListChecks, Megaphone, MessageSquareText, NotebookPen, Receipt, RefreshCcw, School, SlidersHorizontal, Users, Wallet, Wrench } from 'lucide-react'
 import Overview from './components/Overview'
 import StaffProfile from './components/StaffProfile'
 
@@ -79,10 +79,11 @@ type NavItem = {
 // Section grouping for sidebar — ordered by how often a school admin reaches for each
 // area: who (people) → money → the school day → teaching content → outreach → admin tools.
 // Within a section, the most-used / primary item comes first.
-const NAV_SECTIONS: { label: string; keys: string[]; icon: React.ReactNode }[] = [
+// `label` is the stable key (saved order, test ids); `shortLabel` is what the header shows when it must fit 240px.
+const NAV_SECTIONS: { label: string; shortLabel?: string; keys: string[]; icon: React.ReactNode }[] = [
   { label: 'OVERVIEW',      keys: ['overview'], icon: <LayoutDashboard className="w-3.5 h-3.5" aria-hidden="true" /> },
   { label: 'PEOPLE',        keys: ['students', 'staff', 'class-management'], icon: <Users className="w-3.5 h-3.5" aria-hidden="true" /> },
-  { label: 'MONEY MANAGEMENT', keys: ['fee-management', 'expenses'], icon: <Wallet className="w-3.5 h-3.5" aria-hidden="true" /> },
+  { label: 'MONEY MANAGEMENT', shortLabel: 'MONEY', keys: ['fee-management', 'expenses'], icon: <Wallet className="w-3.5 h-3.5" aria-hidden="true" /> },
   { label: 'SCHEDULING',    keys: ['attendance', 'academic-calendar', 'exam-schedule'], icon: <CalendarDays className="w-3.5 h-3.5" aria-hidden="true" /> },
   { label: 'ACADEMICS',     keys: ['curriculum', 'syllabus-tracking', 'library'], icon: <BookOpen className="w-3.5 h-3.5" aria-hidden="true" /> },
   { label: 'COMMUNICATION', keys: ['announcements', 'feedback-management'], icon: <Megaphone className="w-3.5 h-3.5" aria-hidden="true" /> },
@@ -288,6 +289,36 @@ function SchoolAdmin() {
     const next = [...list]; [next[i], next[j]] = [next[j], next[i]]
     return next
   }
+  // Drag-and-drop reordering (arrange mode). `scope` is '' for sections, the section label for items,
+  // so an item can only be dropped inside its own section.
+  const [dragging, setDragging] = useState<{ scope: string; key: string } | null>(null)
+  const [dragOver, setDragOver] = useState<string | null>(null)
+  const dropBefore = (list: string[], from: string, to: string) => {
+    if (from === to || !list.includes(from) || !list.includes(to)) return list
+    const next = list.filter(k => k !== from)
+    next.splice(list.indexOf(to), 0, from)
+    return next
+  }
+  const dragProps = (scope: string, key: string, onDropOn: (from: string) => void) => ({
+    draggable: true,
+    onDragStart: (e: React.DragEvent) => {
+      setDragging({ scope, key })
+      e.dataTransfer.effectAllowed = 'move'
+      e.dataTransfer.setData('text/plain', key) // Firefox needs data set to start a drag
+    },
+    onDragOver: (e: React.DragEvent) => {
+      if (dragging && dragging.scope === scope) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setDragOver(key) }
+    },
+    onDrop: (e: React.DragEvent) => {
+      e.preventDefault()
+      if (dragging && dragging.scope === scope) onDropOn(dragging.key)
+      setDragging(null); setDragOver(null)
+    },
+    onDragEnd: () => { setDragging(null); setDragOver(null) },
+  })
+  const dropClass = (scope: string, key: string) =>
+    dragging?.scope === scope && dragging.key === key ? 'opacity-40'
+      : dragging?.scope === scope && dragOver === key ? 'ring-2 ring-[#235b46] ring-offset-1 ring-offset-[#edf2eb]' : ''
   const moveSection = (visible: string[], label: string, dir: -1 | 1) =>
     saveNavOrder({ ...navOrder, sections: moveInList(visible, label, dir) })
   const moveItem = (sectionLabel: string, visible: string[], key: string, dir: -1 | 1) =>
@@ -562,7 +593,7 @@ function SchoolAdmin() {
             </div>
 
             {/* Nav */}
-            <nav className="flex-1 min-h-0 px-3 py-3 overflow-y-auto" aria-label="School sections">
+            <nav className="flex-1 min-h-0 px-3 py-3 overflow-y-auto overflow-x-hidden" aria-label="School sections">
               {tier === 'none' ? (
                 <div className="px-4 py-4">
                   <div className="flex items-start gap-2">
@@ -591,6 +622,11 @@ function SchoolAdmin() {
                   {navQuery.trim() && !enabledNavItems.some(i => i.label.toLowerCase().includes(navQuery.trim().toLowerCase())) && (
                     <p className="px-3 py-2 text-xs text-[#55635a]" data-testid="nav-search-empty">No menu items match “{navQuery.trim()}”.</p>
                   )}
+                  {arranging && (
+                    <p className="mx-1 mb-2 rounded-lg bg-[#dce9dc] px-3 py-2 text-xs text-[#173e2f]" data-testid="nav-arrange-hint">
+                      Drag sections or items to reorder them, or use the arrows. Tap <strong>Done</strong> when finished.
+                    </p>
+                  )}
                   {!navQuery.trim() && !arranging && (() => {
                     const recent = recentNav
                       .filter(k => k !== activeNav)
@@ -608,7 +644,7 @@ function SchoolAdmin() {
                               type="button"
                               onClick={() => navigateTo(item.key)}
                               data-testid={`nav-recent-${item.key}`}
-                              className="px-2.5 py-1 rounded-full border border-[#dce2db] bg-white text-xs text-[#3b4a40] hover:bg-[#e3ece4] focus-visible:outline-2 focus-visible:outline-[#235b46]"
+                              className="px-2 py-0.5 rounded-full border border-[#dce2db] bg-white text-xs text-[#3b4a40] hover:bg-[#e3ece4] focus-visible:outline-2 focus-visible:outline-[#235b46]"
                             >
                               {item.label}
                             </button>
@@ -647,25 +683,30 @@ function SchoolAdmin() {
                       const hiddenCount = sectionEnabled.length - shownItems.length
                       const sectionUnread = sectionEnabled.reduce((n, i) => n + (navCounts[i.key] ?? 0), 0)
                       return (
-                        <div key={section.label} className="mb-2">
+                        <div key={section.label} className={solo ? 'mb-2 mt-3' : 'mb-2'}>
                           {!solo && (
-                            <div className="flex items-center">
+                            <div
+                              className={`flex items-center rounded-xl ${arranging ? `cursor-grab active:cursor-grabbing ${dropClass('', section.label)}` : ''}`}
+                              data-testid={arranging ? `nav-drag-section-${section.label.toLowerCase()}` : undefined}
+                              {...(arranging ? dragProps('', section.label, from => saveNavOrder({ ...navOrder, sections: dropBefore(visibleLabels, from, section.label) })) : {})}
+                            >
+                              {arranging && <GripVertical className="h-4 w-4 flex-shrink-0 text-[#7a867e]" aria-hidden="true" />}
                               <button
                                 type="button"
                                 onClick={() => toggleSection(section.label)}
                                 aria-expanded={!collapsed}
                                 data-testid={`nav-section-${section.label.toLowerCase()}`}
-                                title={collapsed && hiddenCount > 0 ? `${hiddenCount} hidden — click to expand` : undefined}
-                                className="group flex flex-1 items-center gap-2.5 rounded-xl px-2 py-1.5 text-left transition-colors hover:bg-white/70 focus-visible:outline-2 focus-visible:outline-[#235b46]"
+                                title={collapsed && hiddenCount > 0 ? `Show ${hiddenCount} more` : undefined}
+                                className="group flex min-w-0 flex-1 items-center gap-2.5 rounded-xl px-2 py-1.5 text-left transition-colors hover:bg-white/70 focus-visible:outline-2 focus-visible:outline-[#235b46]"
                               >
                                 <span className={`flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md ring-1 transition-colors ${collapsed ? 'bg-white/60 text-[#67736b] ring-[#dce2db]' : 'bg-[#dce9dc] text-[#235b46] ring-[#c5d8c8]'}`}>
                                   {section.icon}
                                 </span>
-                                <span className="flex-1 truncate text-[11px] font-bold uppercase tracking-[.08em] text-[#3b4a40] group-hover:text-[#235b46]">{section.label}</span>
+                                <span className="min-w-0 flex-1 truncate text-[11px] font-bold uppercase tracking-[.05em] text-[#3b4a40] group-hover:text-[#235b46]">{section.shortLabel ?? section.label}</span>
                                 {collapsed && sectionUnread > 0 && <NavBadge navKey={`section-${section.label.toLowerCase()}`} count={sectionUnread} className="!ml-0" />}
                                 {collapsed && hiddenCount > 0 && (
-                                  <span data-testid={`nav-section-hidden-${section.label.toLowerCase()}`} className="flex-shrink-0 rounded-full bg-white px-2 py-0.5 text-[10px] font-semibold text-[#55635a] ring-1 ring-[#dce2db]">
-                                    {hiddenCount} hidden
+                                  <span data-testid={`nav-section-hidden-${section.label.toLowerCase()}`} aria-label={`${hiddenCount} more items`} className="flex-shrink-0 text-[11px] font-semibold tabular-nums text-[#7a867e]">
+                                    +{hiddenCount}
                                   </span>
                                 )}
                                 <ChevronDown className={`h-3.5 w-3.5 flex-shrink-0 text-[#67736b] transition-transform ${collapsed ? '-rotate-90' : ''}`} aria-hidden="true" />
@@ -687,7 +728,13 @@ function SchoolAdmin() {
                             const isActive = activeNav === item.key
                             if (arranging) {
                               return (
-                                <div key={item.key} className="portal-nav-item cursor-default" data-testid={`nav-arrange-${item.key}`}>
+                                <div
+                                  key={item.key}
+                                  className={`portal-nav-item !min-h-9 !gap-2 !rounded-lg !px-2 !py-1 cursor-grab active:cursor-grabbing ${dropClass(section.label, item.key)}`}
+                                  data-testid={`nav-arrange-${item.key}`}
+                                  {...dragProps(section.label, item.key, from => saveNavOrder({ ...navOrder, items: { ...navOrder.items, [section.label]: dropBefore(orderedKeys, from, item.key) } }))}
+                                >
+                                  <GripVertical className="!h-4 !w-4 text-[#7a867e]" aria-hidden="true" />
                                   <span className="relative flex-shrink-0">{item.icon}</span>
                                   <span className="relative truncate flex-1">{item.label}</span>
                                   <MoveButtons
@@ -707,10 +754,10 @@ function SchoolAdmin() {
                                 data-testid={`nav-${item.key}`}
                                 title={item.label}
                                 whileTap={{ scale: 0.98 }}
-                                className="portal-nav-item group !min-h-10 !gap-3 !rounded-xl !py-1.5"
+                                className="portal-nav-item group !min-h-9 !gap-2.5 !rounded-lg !px-2 !py-1 !text-[13.5px]"
                                 aria-current={isActive ? 'page' : undefined}
                               >
-                                <span className={`relative flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg transition-colors ${isActive ? 'bg-[#235b46] text-white [&_svg]:!text-white' : 'bg-white/70 text-[#3b4a40] ring-1 ring-[#dce2db] group-hover:bg-white group-hover:text-[#235b46]'}`}>
+                                <span className={`relative flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md transition-colors [&_svg]:!h-3.5 [&_svg]:!w-3.5 ${isActive ? 'bg-[#235b46] text-white [&_svg]:!text-white' : 'bg-white/70 text-[#3b4a40] ring-1 ring-[#dce2db] group-hover:bg-white group-hover:text-[#235b46]'}`}>
                                   {item.icon}
                                 </span>
                                 <span className="relative truncate">{item.label}</span>
