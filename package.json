@@ -13,9 +13,9 @@
     "sync": "node scripts/sync-local.mjs",
     "migrate": "tsx scripts/run-migrations.ts",
     "prepare": "husky",
-    "preview": "CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE=postgres://build:unused@localhost:5432/unused opennextjs-cloudflare build && opennextjs-cloudflare preview",
-    "deploy": "CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE=postgres://build:unused@localhost:5432/unused opennextjs-cloudflare build && opennextjs-cloudflare deploy",
-    "upload": "CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE=postgres://build:unused@localhost:5432/unused opennextjs-cloudflare build && opennextjs-cloudflare upload",
+    "preview": "CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE=postgres://build:unused@localhost:5432/unused opennextjs-cloudflare build && CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE=postgres://build:unused@localhost:5432/unused opennextjs-cloudflare preview",
+    "deploy": "CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE=postgres://build:unused@localhost:5432/unused opennextjs-cloudflare build && CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE=postgres://build:unused@localhost:5432/unused opennextjs-cloudflare deploy",
+    "upload": "CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE=postgres://build:unused@localhost:5432/unused opennextjs-cloudflare build && CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE=postgres://build:unused@localhost:5432/unused opennextjs-cloudflare upload",
     "cf-typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts",
     "check:usage": "tsx scripts/check-usage.ts",
     "check:bills": "tsx scripts/check-bills.ts"
