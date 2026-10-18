@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 import { requireExamsAccess, requireExamsAdmin, isClassTeacherOf, isTeacherLinkedToExam } from '@/lib/examsAuth'
 import { findExamConflicts } from '@/lib/examConflicts'
@@ -311,12 +311,13 @@ export async function PUT(
       }
       if (roomChanged) changes.push(`room changed to ${room || 'TBA'}`)
       if (instructionsChanged) changes.push('instructions updated')
-      await notifyExamChange(
+      // After COMMIT, on the pool: notifyExamChange swallows insert errors, and one failing
+      // inside the edit transaction would abort it, turning COMMIT into a silent ROLLBACK.
+      after(() => notifyExamChange(
         exam.id, exam.class_id, actor.schoolId, studentIds, exam.class_teacher_id, updated.assigned_teacher_id,
         `${exam.exam_name} updated`,
         `${exam.exam_name} has been updated: ${changes.join('; ')}. Please review the latest details.`,
-        editClient,
-      )
+      ))
     }
 
     return NextResponse.json(updated)
