@@ -1,0 +1,39 @@
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"main": "custom-worker.js",
+	"name": "wlyl",
+	// DB is in Mumbai (Supabase ap-south-1); run the Worker next to it instead of next to the visitor.
+	"placement": { "mode": "smart" },
+	"compatibility_date": "2026-09-18",
+	"compatibility_flags": [
+		"nodejs_compat",
+		"global_fetch_strictly_public"
+	],
+	// Phase 1: workers.dev URL only, no custom domain/zone routes yet.
+	"workers_dev": true,
+	"assets": {
+		"directory": ".open-next/assets",
+		"binding": "ASSETS"
+	},
+	"triggers": {
+		"crons": [
+			"30 1 * * 0", // weekly-test
+			"30 3 * * 1", // usage-digest
+			"0 2 * * *",  // log-cleanup
+			"30 2 * * *"  // backup
+		]
+	},
+	"services": [
+		{
+			// Self-reference service binding, the service name must match the worker name
+			// see https://opennext.js.org/cloudflare/caching
+			"binding": "WORKER_SELF_REFERENCE",
+			"service": "wlyl"
+		}
+	],
+	"images": {
+		// Enable image optimization
+		// see https://opennext.js.org/cloudflare/howtos/image
+		"binding": "IMAGES"
+	}
+}

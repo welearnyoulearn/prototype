@@ -47,3 +47,10 @@ dump.sql
 
 # Database backups
 backup_*.sql
+
+# OpenNext
+.open-next
+
+# wrangler files
+.wrangler
+.dev.vars*
