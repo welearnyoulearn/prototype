@@ -1,6 +1,7 @@
 /**
- * Watchline logger — fire-and-forget inserts into request_logs and error_events.
- * Never awaited by callers; a logging failure never breaks a user request.
+ * Watchline logger — inserts into request_logs and error_events. Callers must
+ * either await the returned promise or schedule it with next/server's after()
+ * so Workers/serverless platforms don't kill it once the response is sent.
  *
  * Manual usage in an API route:
  *   const start = Date.now()
@@ -9,11 +10,11 @@
  *     // ... route logic ...
  *   } catch (err) {
  *     status = 500
- *     logError({ school_id, severity: 'error', source: 'api', route: '/api/fees/stats', error: err })
+ *     after(() => logError({ school_id, severity: 'error', source: 'api', route: '/api/fees/stats', error: err }))
  *     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
  *   } finally {
- *     logRequest({ school_id, route: '/api/fees/stats', method: 'GET', status_code: status,
- *                  duration_ms: Date.now() - start })
+ *     after(() => logRequest({ school_id, route: '/api/fees/stats', method: 'GET', status_code: status,
+ *                  duration_ms: Date.now() - start }))
  *   }
  *
  * Preferred usage — wrap the route with withWatchline() instead of hand-rolling the
@@ -22,12 +23,6 @@
 import pool from './db'
 import { NextRequest, NextResponse, after } from 'next/server'
 import { getSession } from './auth'
-
-// In-memory buffer — drained every FLUSH_INTERVAL ms or when BUFFER_SIZE is hit.
-// This keeps PgBouncer pressure negligible (one bulk INSERT instead of one per request).
-const REQUEST_BUFFER: RequestLogRow[] = []
-const FLUSH_INTERVAL = 10_000 // 10 seconds
-const BUFFER_SIZE    = 20
 
 type RequestLogRow = {
   school_id?:     number | null
@@ -41,45 +36,21 @@ type RequestLogRow = {
   error_message?: string | null
 }
 
-let _flushTimer: ReturnType<typeof setTimeout> | null = null
-
-function scheduleFlush() {
-  if (_flushTimer) return
-  _flushTimer = setTimeout(flush, FLUSH_INTERVAL)
-}
-
-function flush() {
-  _flushTimer = null
-  if (REQUEST_BUFFER.length === 0) return
-  const rows = REQUEST_BUFFER.splice(0, REQUEST_BUFFER.length)
-  // Build a bulk INSERT with numbered placeholders
-  const values: unknown[] = []
-  const placeholders = rows.map((r, i) => {
-    const base = i * 9
-    values.push(
-      r.school_id ?? null, r.route, r.method, r.status_code, r.duration_ms,
-      r.actor_role ?? null, r.actor_email ?? null,
-      r.error_code ?? null, r.error_message ?? null,
-    )
-    return `($${base+1},$${base+2},$${base+3},$${base+4},$${base+5},$${base+6},$${base+7},$${base+8},$${base+9})`
-  }).join(',')
-
-  pool.query(
-    `INSERT INTO request_logs (school_id,route,method,status_code,duration_ms,actor_role,actor_email,error_code,error_message)
-     VALUES ${placeholders}`,
-    values,
-  ).catch(err => console.error('[Watchline] request_logs flush failed:', err))
-}
-
 /**
- * Buffer a request log row. Flushed in bulk — never blocks the caller.
- * Only call when the school has api-monitoring enabled, except for errors
- * (errors are always logged regardless of toggle).
+ * Insert a request log row immediately. Only call when the school has
+ * api-monitoring enabled, except for errors (errors are always logged
+ * regardless of toggle). Callers must await this or schedule it with after().
  */
-export function logRequest(params: RequestLogRow): void {
-  REQUEST_BUFFER.push(params)
-  if (REQUEST_BUFFER.length >= BUFFER_SIZE) flush()
-  else scheduleFlush()
+export function logRequest(params: RequestLogRow): Promise<void> {
+  return pool.query(
+    `INSERT INTO request_logs (school_id,route,method,status_code,duration_ms,actor_role,actor_email,error_code,error_message)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+    [
+      params.school_id ?? null, params.route, params.method, params.status_code, params.duration_ms,
+      params.actor_role ?? null, params.actor_email ?? null,
+      params.error_code ?? null, params.error_message ?? null,
+    ],
+  ).then(() => undefined).catch(err => console.error('[Watchline] request_logs insert failed:', err))
 }
 
 /** Sanitise a stack trace: strip absolute file paths and anything that looks like a secret. */
@@ -108,13 +79,13 @@ type ErrorLogParams = {
  * Insert an error event immediately (not batched — errors are low-volume and
  * high-value; we want them in the DB before the function cold-exits).
  */
-export function logError(params: ErrorLogParams): void {
+export function logError(params: ErrorLogParams): Promise<void> {
   const err = params.error
   const name    = err instanceof Error ? err.constructor.name : typeof err
   const message = err instanceof Error ? err.message : String(err)
   const stack   = sanitiseStack(err)
 
-  pool.query(
+  return pool.query(
     `INSERT INTO error_events
        (school_id, severity, source, route, error_name, error_message, stack_trace, context, actor_email, request_log_id)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
@@ -130,7 +101,7 @@ export function logError(params: ErrorLogParams): void {
       params.actor_email ?? null,
       params.request_log_id ?? null,
     ],
-  ).catch(e => console.error('[Watchline] error_events insert failed:', e))
+  ).then(() => undefined).catch(e => console.error('[Watchline] error_events insert failed:', e))
 }
 
 // ── In-memory monitoring flag cache ──────────────────────────────────────────
@@ -240,7 +211,7 @@ export function withWatchline(
       } catch { /* non-critical */ }
 
       if (errorMessage) {
-        logError({
+        await logError({
           school_id: schoolId,
           severity:  thrown ? 'critical' : 'error',
           source:    'api',
@@ -252,7 +223,7 @@ export function withWatchline(
       if (schoolId != null) {
         await refreshMonitoredSchools()
         if (status >= 400 || isSchoolMonitored(schoolId)) {
-          logRequest({
+          await logRequest({
             school_id: schoolId, route: opts.route, method, status_code: status,
             duration_ms: duration, actor_role: actorRole,
             error_message: errorMessage,

@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
 import { ledgerStatusSql } from '@/lib/feeLedgerStatus'
 import pool from '@/lib/db'
 import { sendFeePaymentConfirmedEmail, sendFeePaymentRejectedEmail } from '@/lib/email'
@@ -210,7 +210,7 @@ async function handlePOST(req: NextRequest) {
              WHERE fp.id = $1`, [payment_id]
           )
           if (detail?.parent_email) {
-            sendFeePaymentConfirmedEmail({
+            after(() => sendFeePaymentConfirmedEmail({
               to: detail.parent_email,
               parentName: detail.parent_name || 'Parent',
               studentName: detail.student_name,
@@ -222,7 +222,7 @@ async function handlePOST(req: NextRequest) {
               paymentMode: detail.payment_mode,
               paidDate: detail.paid_date,
               verifiedBy: verified_by,
-            }).catch(() => {})
+            }).catch(() => {}))
           }
         } catch { /* email failure must not block the response */ }
 
@@ -255,7 +255,7 @@ async function handlePOST(req: NextRequest) {
              WHERE fp.id = $1`, [payment_id]
           )
           if (detail?.parent_email) {
-            sendFeePaymentRejectedEmail({
+            after(() => sendFeePaymentRejectedEmail({
               to: detail.parent_email,
               parentName: detail.parent_name || 'Parent',
               studentName: detail.student_name,
@@ -265,7 +265,7 @@ async function handlePOST(req: NextRequest) {
               categoryName: detail.category_name,
               periodLabel: detail.period_label,
               rejectionReason: rejection_reason || 'Rejected by admin',
-            }).catch(() => {})
+            }).catch(() => {}))
           }
         } catch { /* non-blocking */ }
 

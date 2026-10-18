@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
 import pool from '@/lib/db'
 import {
   generateTempPassword, getPlatformSession, hashPortalPassword, requireFeeAccess, requireSchoolAdmin,
@@ -218,22 +218,26 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     invalidateCache(`teachers:${teacher.school_id}:non_teaching`)
 
     const loginUrl = `${process.env.APP_URL || 'http://localhost:3000'}/teacher/login`
+    const notifications: Promise<unknown>[] = []
     if (becomingActive && tempPassword) {
-      sendStaffReactivatedEmail({ to: teacher.email, name: teacher.name, schoolName, tempPassword, loginUrl }).catch(console.error)
-      sendWhatsappMessage({ schoolId: teacher.school_id, to: teacher.phone, templateName: 'staff_reactivated', recipientName: teacher.name,
-        templateParams: { staff_name: teacher.name, school_name: schoolName, login: teacher.email, temp_password: tempPassword, login_url: loginUrl } }).catch(console.error)
+      notifications.push(
+        sendStaffReactivatedEmail({ to: teacher.email, name: teacher.name, schoolName, tempPassword, loginUrl }).catch(console.error),
+        sendWhatsappMessage({ schoolId: teacher.school_id, to: teacher.phone, templateName: 'staff_reactivated', recipientName: teacher.name,
+          templateParams: { staff_name: teacher.name, school_name: schoolName, login: teacher.email, temp_password: tempPassword, login_url: loginUrl } }).catch(console.error),
+      )
     } else {
       if (emailChanged) {
-        sendStaffContactChangedEmail({ to: teacher.email, name: teacher.name, schoolName, field: 'email', newValue: teacher.email }).catch(console.error)
-        if (existing.email && existing.email !== teacher.email) sendStaffContactChangedEmail({ to: existing.email, name: teacher.name, schoolName, field: 'email', newValue: teacher.email }).catch(console.error)
+        notifications.push(sendStaffContactChangedEmail({ to: teacher.email, name: teacher.name, schoolName, field: 'email', newValue: teacher.email }).catch(console.error))
+        if (existing.email && existing.email !== teacher.email) notifications.push(sendStaffContactChangedEmail({ to: existing.email, name: teacher.name, schoolName, field: 'email', newValue: teacher.email }).catch(console.error))
       }
       if (phoneChanged) {
         for (const phone of new Set([teacher.phone, existing.phone].filter(Boolean))) {
-          sendWhatsappMessage({ schoolId: teacher.school_id, to: phone, templateName: 'contact_info_changed', recipientName: teacher.name,
-            templateParams: { name: teacher.name, school_name: schoolName, field: 'phone', new_value: teacher.phone } }).catch(console.error)
+          notifications.push(sendWhatsappMessage({ schoolId: teacher.school_id, to: phone, templateName: 'contact_info_changed', recipientName: teacher.name,
+            templateParams: { name: teacher.name, school_name: schoolName, field: 'phone', new_value: teacher.phone } }).catch(console.error))
         }
       }
     }
+    after(() => Promise.allSettled(notifications))
     return NextResponse.json({ ...teacher, ...(tempPassword ? { temporary_credential: { email: teacher.email, temp_password: tempPassword } } : {}) })
   } catch (error) {
     await client.query('ROLLBACK').catch(() => {})
@@ -334,15 +338,17 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
       const removedTeacher = result.rows[0]
       const schoolNameRes = await pool.query('SELECT name FROM schools WHERE id = $1', [schoolId])
       const schoolName = schoolNameRes.rows[0]?.name || 'Your School'
+      const notifications: Promise<unknown>[] = []
       if (removedTeacher.email) {
-        sendStaffRemovedEmail({ to: removedTeacher.email, name: removedTeacher.name, schoolName }).catch(console.error)
+        notifications.push(sendStaffRemovedEmail({ to: removedTeacher.email, name: removedTeacher.name, schoolName }).catch(console.error))
       }
       if (removedTeacher.phone) {
-        sendWhatsappMessage({
+        notifications.push(sendWhatsappMessage({
           schoolId, to: removedTeacher.phone, templateName: 'staff_removed', recipientName: removedTeacher.name,
           templateParams: { staff_name: removedTeacher.name, school_name: schoolName },
-        }).catch(console.error)
+        }).catch(console.error))
       }
+      after(() => Promise.allSettled(notifications))
 
       return NextResponse.json({ message: 'Teacher removed', teacher: removedTeacher })
     } catch (error) {

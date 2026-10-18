@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 import fs from 'fs/promises'
 import { requireSchoolAdmin } from '@/lib/auth'
@@ -22,7 +22,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
       if (!lib) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
       // Delete file from disk (best-effort)
-      if (lib.file_path) fs.unlink(lib.file_path).catch(() => {})
+      if (lib.file_path) after(() => fs.unlink(lib.file_path).catch(() => {}))
 
       // Cascade deletes chunks via FK
       await pool.query(`DELETE FROM textbook_library WHERE id=$1 AND school_id=$2`, [id, school_id])

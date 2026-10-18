@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
 import pool from '@/lib/db'
 import { sendPlanActivationEmail } from '@/lib/email'
 import { requirePlatformAdmin, getSession } from '@/lib/auth'
@@ -142,7 +142,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       // The school's own administrators are told what happened and what to do — they would
       // otherwise only find out when an Add or Reactivate is refused.
       if (tier !== fromTier && over > 0 && newLimit !== null) {
-        void notifySeatOverage(schoolId, { schoolName: school?.name ?? 'Your school', tier, limit: newLimit, active })
+        after(() => notifySeatOverage(schoolId, { schoolName: school?.name ?? 'Your school', tier, limit: newLimit, active }))
       }
 
       if (term) {
@@ -155,10 +155,10 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         const endChanged = term.end !== (dates?.e ?? null)
         if ((term.started || endChanged || tier !== fromTier) && school?.email && school?.school_code) {
           const fmt = (d: string | null) => !d ? 'No end date' : new Date(d + 'T00:00:00Z').toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric', timeZone: 'UTC' })
-          sendPlanActivationEmail({
+          after(() => sendPlanActivationEmail({
             to: school.email, schoolName: school.name, schoolCode: school.school_code,
             tier, startDate: fmt(term.start), endDate: fmt(term.end),
-          }).catch(err => console.error('[email/plan]', err))
+          }).catch(err => console.error('[email/plan]', err)))
         }
 
         // A renewal request that was waiting for this school is now answered: record what was agreed

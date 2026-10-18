@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 import { requireFeeAccess, schoolHasFeature } from '@/lib/auth'
 import { backfillPortalCredentials } from '@/lib/studentOnboarding'
@@ -73,7 +73,7 @@ export async function POST(req: NextRequest) {
     const result = await backfillPortalCredentials({ schoolId: access.schoolId, wantStudent, wantParent })
 
     const schoolRes = await pool.query('SELECT name FROM schools WHERE id = $1', [access.schoolId])
-    pool.query(
+    after(() => pool.query(
       `INSERT INTO platform_audit_log (actor_id, action, entity_type, entity_id, entity_name, details)
        VALUES ($1, 'backfill_portal_access', 'school', $2, $3, $4)`,
       [access.userId, access.schoolId, schoolRes.rows[0]?.name || '', JSON.stringify({
@@ -83,7 +83,7 @@ export async function POST(req: NextRequest) {
         students_credentialed: result.studentCredentials.length,
         parents_credentialed: result.parentCredentials.length,
       })]
-    ).catch(() => {})
+    ).catch(() => {}))
 
     return NextResponse.json({
       backfilled: result.backfilled,

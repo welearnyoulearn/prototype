@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
 import pool from '@/lib/db'
 import { requirePlatformAdmin, hashPassword, generateTempPassword } from '@/lib/auth'
 import { sendPasswordResetEmail } from '@/lib/email'
@@ -52,7 +52,7 @@ export async function POST(req: NextRequest) {
 
       const token = await issueResetToken('user', result.rows[0].id)
       const resetUrl = `${process.env.APP_URL || 'http://localhost:3000'}/reset-password?token=${token}`
-      sendPasswordResetEmail({ to: email.trim(), name: full_name.trim(), resetUrl }).catch(console.error)
+      after(() => sendPasswordResetEmail({ to: email.trim(), name: full_name.trim(), resetUrl }).catch(console.error))
 
       return NextResponse.json(result.rows[0], { status: 201 })
     } catch (error) {

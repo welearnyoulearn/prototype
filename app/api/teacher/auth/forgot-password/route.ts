@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 import { sendPasswordResetEmail } from '@/lib/email'
 import { sendWhatsappMessage } from '@/lib/whatsapp'
@@ -24,15 +24,15 @@ export async function POST(req: NextRequest) {
     const token = await issueResetToken('teacher', teacher.id)
 
     const resetUrl = `${process.env.APP_URL || 'http://localhost:3000'}/teacher/reset-password?token=${token}`
-    sendPasswordResetEmail({ to: teacher.email, name: teacher.name, resetUrl, role: 'teacher' }).catch(console.error)
+    after(() => sendPasswordResetEmail({ to: teacher.email, name: teacher.name, resetUrl, role: 'teacher' }).catch(console.error))
     // Login stays email-only (lookup above), but WhatsApp is still a useful
     // second channel for actually receiving the link if their inbox is
     // slow/unchecked — same reasoning as student/parent onboarding delivery.
     if (teacher.phone) {
-      sendWhatsappMessage({
+      after(() => sendWhatsappMessage({
         schoolId: teacher.school_id, to: teacher.phone, templateName: 'password_reset', recipientName: teacher.name,
         templateParams: { name: teacher.name, reset_url: resetUrl },
-      }).catch(console.error)
+      }).catch(console.error))
     }
 
     return NextResponse.json({ success: true })

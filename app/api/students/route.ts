@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
 import pool from '@/lib/db'
 import { invalidateCache } from '@/lib/responseCache'
 import {
@@ -300,20 +300,20 @@ export async function POST(req: NextRequest) {
     if (studentPortalEnabled && studentRollNumber && tempPassword) {
       if (email) {
         const name_ = await getSchoolName()
-        sendStudentWelcomeEmail({
+        after(() => sendStudentWelcomeEmail({
           to: email, name, schoolName: name_, rollNumber: studentRollNumber,
           tempPassword, loginUrl: `${appUrl}/student/login`,
-        }).catch(console.error)
+        }).catch(console.error))
       }
       if (phone) {
         const name_ = await getSchoolName()
-        sendWhatsappMessage({
+        after(() => sendWhatsappMessage({
           schoolId: school_id, to: phone, templateName: 'student_credentials', recipientName: name,
           templateParams: {
             student_name: name, school_name: name_, login: studentRollNumber,
             temp_password: tempPassword, login_url: `${appUrl}/student/login`,
           },
-        }).catch(console.error)
+        }).catch(console.error))
       }
     }
 
@@ -341,25 +341,25 @@ export async function POST(req: NextRequest) {
         const parentDisplayName = parentResult.resolvedName || parent_name || parentResult.resolvedEmail || parentResult.resolvedPhone || 'there'
         if (parentResult.resolvedEmail) {
           const name_ = await getSchoolName()
-          sendChildCredentialsToParentEmail({
-            to: parentResult.resolvedEmail,
+          after(() => sendChildCredentialsToParentEmail({
+            to: parentResult.resolvedEmail!,
             parentName: parentDisplayName,
             studentName: name,
             schoolName: name_,
             rollNumber: studentRollNumber,
             tempPassword,
             loginUrl: `${appUrl}/student/login`,
-          }).catch(console.error)
+          }).catch(console.error))
         }
         if (parentResult.resolvedPhone) {
           const name_ = await getSchoolName()
-          sendWhatsappMessage({
-            schoolId: school_id, to: parentResult.resolvedPhone, templateName: 'student_credentials', recipientName: parentDisplayName,
+          after(() => sendWhatsappMessage({
+            schoolId: school_id, to: parentResult.resolvedPhone!, templateName: 'student_credentials', recipientName: parentDisplayName,
             templateParams: {
               student_name: name, school_name: name_, login: studentRollNumber,
               temp_password: tempPassword, login_url: `${appUrl}/student/login`,
             },
-          }).catch(console.error)
+          }).catch(console.error))
         }
       }
     }
@@ -429,19 +429,19 @@ async function provisionParentAccount({
       const schoolName = schoolResult.rows[0]?.name || 'Your School'
       const displayName = parentName || parentEmail || resolvedPhone || 'there'
       if (parentEmail) {
-        sendParentWelcomeEmail({
+        after(() => sendParentWelcomeEmail({
           to: parentEmail, parentName: displayName, studentName, schoolName,
           tempPassword, loginUrl: `${appUrl}/parent/login`,
-        }).catch(console.error)
+        }).catch(console.error))
       }
       if (resolvedPhone) {
-        sendWhatsappMessage({
+        after(() => sendWhatsappMessage({
           schoolId, to: resolvedPhone, templateName: 'parent_credentials', recipientName: displayName,
           templateParams: {
             parent_name: displayName, student_name: studentName, school_name: schoolName,
             login: parentEmail || resolvedPhone, temp_password: tempPassword, login_url: `${appUrl}/parent/login`,
           },
-        }).catch(console.error)
+        }).catch(console.error))
       }
     }
     return { warning: null, resolvedEmail, resolvedPhone, resolvedName }

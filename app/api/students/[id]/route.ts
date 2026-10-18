@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
 import pool from '@/lib/db'
 import { requireSchoolAdmin } from '@/lib/auth'
 import { sendStudentRemovedEmail, sendParentStudentRemovedEmail } from '@/lib/email'
@@ -161,12 +161,13 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
     const schoolRes = await pool.query('SELECT name FROM schools WHERE id = $1', [student.school_id])
     const schoolName = schoolRes.rows[0]?.name || 'Your School'
 
-    if (student.email) sendStudentRemovedEmail({ to: student.email, name: student.name, schoolName }).catch(console.error)
+    const notifications: Promise<unknown>[] = []
+    if (student.email) notifications.push(sendStudentRemovedEmail({ to: student.email, name: student.name, schoolName }).catch(console.error))
     if (student.phone) {
-      sendWhatsappMessage({
+      notifications.push(sendWhatsappMessage({
         schoolId: student.school_id, to: student.phone, templateName: 'student_removed', recipientName: student.name,
         templateParams: { student_name: student.name, school_name: schoolName },
-      }).catch(console.error)
+      }).catch(console.error))
     }
 
     const parentRes = await pool.query(
@@ -176,17 +177,18 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
     for (const parent of parentRes.rows) {
       const parentDisplayName = parent.name || parent.email || parent.phone || 'there'
       if (parent.email) {
-        sendParentStudentRemovedEmail({
+        notifications.push(sendParentStudentRemovedEmail({
           to: parent.email, parentName: parentDisplayName, studentName: student.name, schoolName,
-        }).catch(console.error)
+        }).catch(console.error))
       }
       if (parent.phone) {
-        sendWhatsappMessage({
+        notifications.push(sendWhatsappMessage({
           schoolId: student.school_id, to: parent.phone, templateName: 'student_removed', recipientName: parentDisplayName,
           templateParams: { student_name: student.name, school_name: schoolName },
-        }).catch(console.error)
+        }).catch(console.error))
       }
     }
+    after(() => Promise.allSettled(notifications))
     return NextResponse.json(student)
   } catch (error) {
     console.error('[students/:id DELETE]', error)

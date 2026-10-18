@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 import { sendPasswordResetEmail } from '@/lib/email'
 import { sendWhatsappMessage } from '@/lib/whatsapp'
@@ -35,13 +35,13 @@ export async function POST(req: NextRequest) {
       const url = resetUrl(token)
       const name = parent.name || identifier
       if (parent.email) {
-        sendPasswordResetEmail({ to: parent.email, name, resetUrl: url, role: 'parent' }).catch(console.error)
+        after(() => sendPasswordResetEmail({ to: parent.email, name, resetUrl: url, role: 'parent' }).catch(console.error))
       }
       if (parent.phone) {
-        sendWhatsappMessage({
+        after(() => sendWhatsappMessage({
           schoolId: parent.school_id, to: parent.phone, templateName: 'password_reset', recipientName: name,
           templateParams: { name, reset_url: url },
-        }).catch(console.error)
+        }).catch(console.error))
       }
     }
 

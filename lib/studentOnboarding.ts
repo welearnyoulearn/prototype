@@ -1,5 +1,6 @@
 import { PoolClient } from 'pg'
 import { randomInt } from 'crypto'
+import { after } from 'next/server'
 import pool from './db'
 import { hashPortalPassword, generateTempPassword } from './auth'
 import { sendStudentWelcomeEmail, sendParentWelcomeEmail, sendChildCredentialsToParentEmail } from './email'
@@ -145,7 +146,7 @@ export async function backfillPortalCredentials({
 
     const processedParentIds = new Map<string, number>()
     const credParentsSeen = new Set<string>()
-    const sendsToFire: (() => void)[] = []
+    const sendsToFire: (() => Promise<unknown>)[] = []
 
     for (const student of targets) {
       let studentTempPassword: string | null = null
@@ -166,24 +167,20 @@ export async function backfillPortalCredentials({
         })
 
         if (student.email) {
-          sendsToFire.push(() => {
-            sendStudentWelcomeEmail({
-              to: student.email, name: student.name, schoolName,
-              rollNumber: student.roll_number, tempPassword: studentTempPassword!,
-              loginUrl: `${appUrl}/student/login`,
-            }).catch(console.error)
-          })
+          sendsToFire.push(() => sendStudentWelcomeEmail({
+            to: student.email, name: student.name, schoolName,
+            rollNumber: student.roll_number, tempPassword: studentTempPassword!,
+            loginUrl: `${appUrl}/student/login`,
+          }).catch(console.error))
         }
         if (student.phone) {
-          sendsToFire.push(() => {
-            sendWhatsappMessage({
-              schoolId, to: student.phone, templateName: 'student_credentials', recipientName: student.name,
-              templateParams: {
-                student_name: student.name, school_name: schoolName, login: student.roll_number,
-                temp_password: studentTempPassword!, login_url: `${appUrl}/student/login`,
-              },
-            }).catch(console.error)
-          })
+          sendsToFire.push(() => sendWhatsappMessage({
+            schoolId, to: student.phone, templateName: 'student_credentials', recipientName: student.name,
+            templateParams: {
+              student_name: student.name, school_name: schoolName, login: student.roll_number,
+              temp_password: studentTempPassword!, login_url: `${appUrl}/student/login`,
+            },
+          }).catch(console.error))
         }
       }
 
@@ -233,24 +230,20 @@ export async function backfillPortalCredentials({
             const parentDisplayName = pn || pe || pp || 'there'
             if (pe) {
               const studentName = student.name
-              sendsToFire.push(() => {
-                sendParentWelcomeEmail({
-                  to: pe, parentName: parentDisplayName, studentName, schoolName,
-                  tempPassword: parentTempPassword!, loginUrl: `${appUrl}/parent/login`,
-                }).catch(console.error)
-              })
+              sendsToFire.push(() => sendParentWelcomeEmail({
+                to: pe, parentName: parentDisplayName, studentName, schoolName,
+                tempPassword: parentTempPassword!, loginUrl: `${appUrl}/parent/login`,
+              }).catch(console.error))
             }
             if (pp) {
               const studentName = student.name
-              sendsToFire.push(() => {
-                sendWhatsappMessage({
-                  schoolId, to: pp, templateName: 'parent_credentials', recipientName: parentDisplayName,
-                  templateParams: {
-                    parent_name: parentDisplayName, student_name: studentName, school_name: schoolName,
-                    login: pe || pp, temp_password: parentTempPassword!, login_url: `${appUrl}/parent/login`,
-                  },
-                }).catch(console.error)
-              })
+              sendsToFire.push(() => sendWhatsappMessage({
+                schoolId, to: pp, templateName: 'parent_credentials', recipientName: parentDisplayName,
+                templateParams: {
+                  parent_name: parentDisplayName, student_name: studentName, school_name: schoolName,
+                  login: pe || pp, temp_password: parentTempPassword!, login_url: `${appUrl}/parent/login`,
+                },
+              }).catch(console.error))
             }
           }
         }
@@ -266,31 +259,27 @@ export async function backfillPortalCredentials({
         const tempPassword = studentTempPassword
         const parentDisplayName = contact.name || contact.email || contact.phone || 'there'
         if (contact.email) {
-          sendsToFire.push(() => {
-            sendChildCredentialsToParentEmail({
-              to: contact.email!,
-              parentName: parentDisplayName,
-              studentName, schoolName, rollNumber, tempPassword,
-              loginUrl: `${appUrl}/student/login`,
-            }).catch(console.error)
-          })
+          sendsToFire.push(() => sendChildCredentialsToParentEmail({
+            to: contact.email!,
+            parentName: parentDisplayName,
+            studentName, schoolName, rollNumber, tempPassword,
+            loginUrl: `${appUrl}/student/login`,
+          }).catch(console.error))
         }
         if (contact.phone) {
-          sendsToFire.push(() => {
-            sendWhatsappMessage({
-              schoolId, to: contact.phone!, templateName: 'student_credentials', recipientName: parentDisplayName,
-              templateParams: {
-                student_name: studentName, school_name: schoolName, login: rollNumber,
-                temp_password: tempPassword, login_url: `${appUrl}/student/login`,
-              },
-            }).catch(console.error)
-          })
+          sendsToFire.push(() => sendWhatsappMessage({
+            schoolId, to: contact.phone!, templateName: 'student_credentials', recipientName: parentDisplayName,
+            templateParams: {
+              student_name: studentName, school_name: schoolName, login: rollNumber,
+              temp_password: tempPassword, login_url: `${appUrl}/student/login`,
+            },
+          }).catch(console.error))
         }
       }
     }
 
     await client.query('COMMIT')
-    sendsToFire.forEach(send => send())
+    after(() => Promise.allSettled(sendsToFire.map(send => send())))
 
     return { backfilled: targets.length, studentCredentials, parentCredentials }
   } catch (err) {

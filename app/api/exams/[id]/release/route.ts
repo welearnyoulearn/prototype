@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 import { requireExamsAdmin, getApplicableExamStudentIds } from '@/lib/examsAuth'
 import { isPassing } from '@/lib/examGrading'
@@ -129,12 +129,14 @@ export async function POST(
     }
 
     if (exam) {
+      const awards: Promise<unknown>[] = []
       for (const student of students) {
         const percentage = totalMax > 0 ? (Number(student.total ?? 0) / totalMax) * 100 : 0
         if (percentage >= 80) {
-          awardPoints(student.id, actor.schoolId, 'task_scored_high', Number(exam_id), 'exam').catch(() => undefined)
+          awards.push(awardPoints(student.id, actor.schoolId, 'task_scored_high', Number(exam_id), 'exam').catch(() => undefined))
         }
       }
+      after(() => Promise.allSettled(awards))
     }
     return NextResponse.json({ success: true, recipients_notified: notified, students_released: students.length })
   } catch (err: unknown) {
