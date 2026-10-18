@@ -21,6 +21,13 @@ Non-obvious technical decisions and their reasoning for the WLYL School prototyp
 **Alternatives considered:** `firebase-admin` (large for a serverless cold start, and one more dependency to patch); sending push inside every `INSERT` site (easy to miss one, and a push failure could break the request); a Postgres trigger (cannot call FCM).
 **Consequences:** Delivery is at-most-once: a notification is stamped before it is sent, so a crash mid-send loses it rather than duplicating it. Vercel Hobby cron is daily, so `/api/cron/push-dispatch` is not in `vercel.json`; a new route that inserts into `notifications` must add the `after()` call or its notifications wait for the next dispatch.
 
+## 2026-10-18 — The cross-site guard trusts the parent app by an explicit origin list
+
+**Context:** Sign-in, sign-out and password routes refuse a browser request whose `Origin` host differs from ours (#262), which stops login CSRF. The installed parent app, `wlyl-parent-app`, is a PWA that rewrites `/api/*` to this platform so the parent cookie stays first-party. Its browser sends the PWA's origin, the proxied request arrives with our host, and so every parent sign-in was refused with 403 once #262 reached an environment the app talks to.
+**Decision:** The check moved to `lib/crossSite.ts` (dependency-free, so `proxy.ts` can still run on the Edge) and now allows an `Origin` that exactly matches an entry of `TRUSTED_APP_ORIGINS`. Anything else behaves as before. With the variable unset nothing is trusted.
+**Alternatives considered:** dropping the guard for parent routes (reopens login CSRF for parents); having the app strip `Origin` and `Sec-Fetch-*` before proxying (hides the problem and defeats the guard for every route); wildcard or suffix matching (a look-alike subdomain would pass).
+**Consequences:** Each deployment must set `TRUSTED_APP_ORIGINS` to the parent app's address (and `http://localhost:3002` for local work). Moving the app to a new domain needs a config change here first.
+
 ## 2026-09-28 — Plan features are enforced centrally in proxy.ts (#253)
 
 **Context:** Plan features only hid navigation tabs. Of roughly 95 feature API routes, only the fee and portal-access ones called `schoolHasFeature`, so a school on a lower plan could use any feature by calling its API directly. Adding a check to every handler would be easy to forget on the next new route.
