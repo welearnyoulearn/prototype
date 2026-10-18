@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { jwtVerify } from 'jose'
 import { JWT_SECRET as JWT_SECRET_RAW, INGEST_SECRET, COOKIE_ADMIN, COOKIE_PLATFORM, COOKIE_TEACHER, COOKIE_STUDENT, COOKIE_PARENT } from '@/lib/auth-constants'
 import { featureRequirementForApiPath } from '@/lib/featureRoutes'
+import { isCrossSiteAuthMutation, parseTrustedOrigins } from '@/lib/crossSite'
 
 // Combined middleware: auth routing (formerly proxy.ts) + Watchline observability logging.
 // Edge runtime only — cannot use pg, jsonwebtoken, or lib/auth / lib/db.
@@ -50,18 +51,8 @@ function isPublic(pathname: string): boolean {
   return PUBLIC_PREFIXES.some(p => pathname.startsWith(p))
 }
 
-function isCrossSiteAuthMutation(req: NextRequest, pathname: string): boolean {
-  if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) return false
-  if (!/^\/api\/(auth|teacher\/auth|student\/auth|parent\/auth|teacher-auth)(\/|$)/.test(pathname)) return false
-  if (req.headers.get('sec-fetch-site') === 'cross-site') return true
-  const origin = req.headers.get('origin')
-  if (!origin) return false // non-browser clients do not always send Origin
-  try {
-    return new URL(origin).host !== req.headers.get('host')
-  } catch {
-    return true
-  }
-}
+// Our own parent app (a PWA that proxies /api/* here) is the one trusted cross-origin caller; see lib/crossSite.ts.
+const TRUSTED_APP_ORIGINS = parseTrustedOrigins(process.env.TRUSTED_APP_ORIGINS)
 
 // ── Watchline constants ───────────────────────────────────────────────────────
 // INGEST_SECRET now comes from lib/auth-constants too — it had a third hardcoded copy
@@ -276,7 +267,10 @@ export async function proxy(req: NextRequest) {
   const isAdminSubdomain = host.startsWith('admin.')
   const origin       = req.nextUrl.origin
 
-  if (isCrossSiteAuthMutation(req, pathname)) {
+  if (isCrossSiteAuthMutation({
+    method: req.method, pathname, secFetchSite: req.headers.get('sec-fetch-site'),
+    origin: req.headers.get('origin'), host: req.headers.get('host'), trustedOrigins: TRUSTED_APP_ORIGINS,
+  })) {
     return NextResponse.json({ error: 'Cross-site request rejected' }, { status: 403 })
   }
 
