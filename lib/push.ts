@@ -119,6 +119,27 @@ export async function sendPushToToken(token: string, message: PushMessage): Prom
   }
 }
 
+export type PushDrainOptions = { batchSize?: number; maxBatches?: number }
+
+/**
+ * dispatchPendingPushes() in a loop, for jobs that create many notifications at once (cron sweeps
+ * that notify a whole school). Stops as soon as a batch comes back short, or after maxBatches.
+ */
+export async function drainPendingPushes({ batchSize = 100, maxBatches = 20 }: PushDrainOptions = {}): Promise<number> {
+  if (!isPushConfigured()) return 0
+  let sent = 0
+  try {
+    for (let i = 0; i < maxBatches; i++) {
+      const { rowCount } = await pool.query(`SELECT 1 FROM notifications WHERE push_sent_at IS NULL LIMIT 1`)
+      if (!rowCount) break
+      sent += await dispatchPendingPushes(batchSize)
+    }
+  } catch (e) {
+    console.error('[push] drainPendingPushes failed', e)
+  }
+  return sent
+}
+
 type PendingRow = {
   id: number
   type: string

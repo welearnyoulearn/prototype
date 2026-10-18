@@ -1,4 +1,5 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
+import { dispatchPendingPushes } from '@/lib/push'
 import pool from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
 
@@ -65,6 +66,7 @@ export async function POST(req: NextRequest) {
       ]
     )
 
+    after(() => dispatchPendingPushes())
     return NextResponse.json({ ok: true })
   } catch (err) {
     console.error('[notifications/nudge-teacher]', err)

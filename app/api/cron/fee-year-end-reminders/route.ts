@@ -1,4 +1,5 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
+import { drainPendingPushes } from '@/lib/push'
 import pool, { ensureDB } from '@/lib/db'
 import { checkCronAuth } from '@/lib/backup'
 import { todayIST } from '@/lib/istDate'
@@ -18,7 +19,9 @@ export async function GET(req: NextRequest) {
   }
   try {
     await ensureDB()
-    return NextResponse.json({ ok: true, ...(await runYearEndReminders(pool, todayIST())) })
+    const result = await runYearEndReminders(pool, todayIST())
+    after(() => drainPendingPushes())
+    return NextResponse.json({ ok: true, ...result })
   } catch (err) {
     console.error('[cron/fee-year-end-reminders]', err)
     return NextResponse.json({ error: 'Year-end reminder sweep failed' }, { status: 500 })

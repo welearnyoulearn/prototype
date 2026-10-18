@@ -1,4 +1,5 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
+import { dispatchPendingPushes } from '@/lib/push'
 import pool, { ensureDB } from '@/lib/db'
 import { requireExamsAccess, requireExamsTeacher, isClassTeacherOf, isTeacherLinkedToExam, examAppliesToStudent, getApplicableExamStudentIds } from '@/lib/examsAuth'
 import { isPassing } from '@/lib/examGrading'
@@ -352,6 +353,7 @@ export async function POST(
       }
     }
 
+    after(() => dispatchPendingPushes())
     return NextResponse.json({ success: true, saved: entries.length, submitted_subjects: submittedSubjects })
   } catch (err: unknown) {
     console.error('[API]', err)

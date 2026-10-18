@@ -1,4 +1,5 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
+import { dispatchPendingPushes } from '@/lib/push'
 import pool, { ensureDB } from '@/lib/db'
 import { requireExamsAdmin, examNotificationEnabled } from '@/lib/examsAuth'
 
@@ -93,6 +94,7 @@ export async function POST(
       } catch { /* non-critical */ }
     }
 
+    after(() => dispatchPendingPushes())
     return NextResponse.json({ ...updated, notified })
   } catch (err: unknown) {
     console.error('[API]', err)
