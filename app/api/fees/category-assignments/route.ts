@@ -4,36 +4,10 @@ import { requireFeeAccess } from '@/lib/auth'
 import { lockYearClose } from '@/lib/feeRollover'
 import { syncGeneratedBill } from '@/lib/feeStructureSync'
 
-// student_fee_category_assignments / student_fee_assignment_history table
-// creation lives in lib/db.ts's ensureDB() now (single source of truth); this
-// only carries the idempotent column/constraint backfills for databases that
-// created the tables before those existed. Callers must call ensureDB()
-// themselves BEFORE acquiring a pool client — see the POST handler below for
-// why it can't happen here when `client` is an already-checked-out connection.
-async function ensureSchema(client: { query: (sql: string, params?: unknown[]) => Promise<unknown> }) {
-  // Add missing columns idempotently
-  await client.query(`ALTER TABLE student_fee_category_assignments ADD COLUMN IF NOT EXISTS academic_year TEXT NOT NULL DEFAULT '2025-26'`)
-  await client.query(`ALTER TABLE student_fee_category_assignments ADD COLUMN IF NOT EXISTS amount NUMERIC(10,2) NOT NULL DEFAULT 0`)
-  // Drop old 2-column unique constraint (without academic_year) if it exists, add correct 3-column one
-  await client.query(`
-    DO $$ BEGIN
-      ALTER TABLE student_fee_category_assignments
-        DROP CONSTRAINT IF EXISTS student_fee_category_assignments_fee_category_id_student_id_key;
-    EXCEPTION WHEN others THEN NULL; END $$
-  `)
-  await client.query(`
-    DO $$ BEGIN
-      IF NOT EXISTS (
-        SELECT 1 FROM pg_constraint
-        WHERE conname = 'sfca_cat_student_year_unique'
-      ) THEN
-        ALTER TABLE student_fee_category_assignments
-          ADD CONSTRAINT sfca_cat_student_year_unique
-          UNIQUE (fee_category_id, student_id, academic_year);
-      END IF;
-    EXCEPTION WHEN others THEN NULL; END $$
-  `)
-}
+// student_fee_category_assignments / student_fee_assignment_history schema
+// (columns + the UNIQUE (fee_category_id, student_id, academic_year) constraint)
+// lives in lib/db.ts's migrations only. No per-request DDL here: ALTER TABLE takes
+// an ACCESS EXCLUSIVE lock and ran on every GET/POST.
 
 // GET /api/fees/category-assignments?school_id=X&grade=Y&academic_year=Z&section=A
 // Returns: { students, categories, amounts }
@@ -54,7 +28,6 @@ export async function GET(req: NextRequest) {
     if (!await requireFeeAccess(school_id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     try {
       await ensureDB()
-      await ensureSchema(pool)
 
       const [studentsRes, categoriesRes, amountsRes] = await Promise.all([
         pool.query(
@@ -115,8 +88,6 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: 'school_id, academic_year, assignments required' }, { status: 400 })
       }
 
-      await ensureSchema(client)
-
       // Separate into non-zero (save) and zero (remove)
       const toSave   = assignments.filter((a: {amount: string}) => parseFloat(a.amount) > 0)
       const toRemove = assignments.filter((a: {amount: string}) => !(parseFloat(a.amount) > 0))
@@ -153,7 +124,7 @@ export async function POST(req: NextRequest) {
       // route). Without this, a concurrent close could land between the check
       // just below and this route's amount_due writes further down, leaving a
       // closed year's balances inconsistent with the closure snapshot it just took.
-      await lockYearClose(client, school_id, academic_year)
+      await lockYearClose(client, school_id, academic_year) // exclusive: year-wide bulk write
 
       // Block assignment changes on a closed year — every other mutating fee
       // route already has this guard; this one writes amount_due directly

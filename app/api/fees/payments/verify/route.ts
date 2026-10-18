@@ -73,6 +73,19 @@ async function handlePOST(req: NextRequest) {
       if (!access) { return NextResponse.json({ error: 'Forbidden' }, { status: 403 }) }
       const verified_by = access.actor
 
+      // Plan gate for approve only, checked BEFORE BEGIN/the year lock so a
+      // request that will be refused never queues on (or holds) that lock.
+      // Reject never touches money, so it stays available even for a school
+      // whose plan has since lost online-payments (still need to be able to
+      // clear a stuck queue); approve credits the ledger, so it needs the same
+      // server-side plan gate the self-report endpoint and QR/UPI-ID routes
+      // already have — the UI hides this tab, but that's presentation only.
+      // Pass `client` — the default `pool` would need a second connection
+      // while this handler already holds one.
+      if (action === 'approve' && !await schoolHasFeature(pmtRow.school_id, 'online-payments', client)) {
+        return NextResponse.json({ error: 'Online payments is not enabled for this school' }, { status: 403 })
+      }
+
       await client.query('BEGIN')
 
       // Unlocked pre-lookup of this payment's ledger year, ONLY for approve
@@ -90,7 +103,7 @@ async function handlePOST(req: NextRequest) {
           [payment_id]
         )
         if (yearLookup) {
-          await lockYearClose(client, pmtRow.school_id, yearLookup.academic_year)
+          await lockYearClose(client, pmtRow.school_id, yearLookup.academic_year, { shared: true })
         }
       }
 
@@ -112,20 +125,6 @@ async function handlePOST(req: NextRequest) {
       }
 
       if (action === 'approve') {
-        // Same reasoning as the closed-year guard just below: reject never
-        // touches money, so it stays available even for a school whose plan
-        // has since lost online-payments (still need to be able to clear a
-        // stuck queue); approve credits the ledger, so it needs the same
-        // server-side plan gate the self-report endpoint and QR/UPI-ID routes
-        // already have — the UI hides this tab, but that's presentation only.
-        // Pass `client` — on a max:1 pool, calling this with the default `pool`
-        // while `client` is still held (mid-transaction, since BEGIN above)
-        // deadlocks waiting for a second connection this handler is already using.
-        if (!await schoolHasFeature(pmtRow.school_id, 'online-payments', client)) {
-          await client.query('ROLLBACK')
-          return NextResponse.json({ error: 'Online payments is not enabled for this school' }, { status: 403 })
-        }
-
         // Block crediting a closed year's ledger — reject doesn't touch the
         // ledger at all (only flips payment_status), so it stays allowed
         // regardless of year-close state; approve does, so it needs the same

@@ -57,7 +57,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
         // UPDATE row lock just below alone would serialize this against year-end
         // APPLY (which locks that same row), but not against a plain CLOSE, which
         // doesn't touch any ledger row — only this shared lock does.
-        await lockYearClose(client, school_id, yearLookup.academic_year)
+        await lockYearClose(client, school_id, yearLookup.academic_year, { shared: true })
       }
 
       // FOR UPDATE closes the gap between this check and the DELETE below — without
@@ -154,7 +154,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       // Pass `client` — already held via pool.connect() above; the default
       // `pool` here would deadlock requesting a second connection on Vercel's max:1 pool.
       const access = await requireFeeAccess(school_id, client)
-      if (!access) { client.release(); return NextResponse.json({ error: 'Forbidden' }, { status: 403 }) }
+      if (!access) return NextResponse.json({ error: 'Forbidden' }, { status: 403 }) // finally releases
       const changed_by = access.actor
 
       if (!new_amount || !reason || !school_id) {
@@ -195,7 +195,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         // UPDATE row lock just below alone would serialize this against year-end
         // APPLY (which locks that same row), but not against a plain CLOSE, which
         // doesn't touch any ledger row — only this shared lock does.
-        await lockYearClose(client, school_id, yearLookup.academic_year)
+        await lockYearClose(client, school_id, yearLookup.academic_year, { shared: true })
       }
 
       // Fetch current entry — FOR UPDATE so a concurrent payment/waiver can't land

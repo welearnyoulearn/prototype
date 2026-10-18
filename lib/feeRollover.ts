@@ -138,14 +138,29 @@ export async function claimYearClose(
 // use this exact same key to mutually exclude each other; a hand-typed copy in one
 // route that drifts from the other silently reopens the cross-route double-apply
 // race this exists to close. Must run inside an open transaction; released on
-// COMMIT/ROLLBACK. Session-level advisory lock, not a row lock, because
-// fee_year_close may not have a row yet on a school's first apply/rollover for a year.
+// COMMIT/ROLLBACK (xact-scoped — required under Hyperdrive transaction pooling).
+// An advisory lock, not a row lock, because fee_year_close may not have a row yet
+// on a school's first apply/rollover for a year.
+//
+// `shared: true` is for single-bill writers (payments, waivers, cancel, ledger
+// edit/delete): they only need to exclude year-wide operations (close/reopen/apply,
+// generate, rollover, structure lock), not each other — their own FOR UPDATE row
+// locks already serialize writes to the same bill. Year-wide operations take the
+// default EXCLUSIVE mode, which still waits for every in-flight shared holder.
+//
+// SET LOCAL lock_timeout makes every lock wait in this transaction (this one and
+// the row locks after it) fail fast with SQLSTATE 55P03 instead of queueing for as
+// long as a year-wide job runs. SET LOCAL is transaction-scoped, so it is safe
+// under transaction pooling.
 export async function lockYearClose(
   client: PoolClient,
   schoolId: number | string,
-  academicYear: string
+  academicYear: string,
+  opts: { shared?: boolean } = {}
 ): Promise<void> {
-  await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`fee-year-close:${schoolId}:${academicYear}`])
+  await client.query(`SET LOCAL lock_timeout = '5s'`)
+  const fn = opts.shared ? 'pg_advisory_xact_lock_shared' : 'pg_advisory_xact_lock'
+  await client.query(`SELECT ${fn}(hashtext($1))`, [`fee-year-close:${schoolId}:${academicYear}`])
 }
 
 // Remaining pending/overdue/partial balance for a year, across all students — used
@@ -189,20 +204,23 @@ export async function isYearClosed(
   return !!row
 }
 
-// Locks every academic year the given ledger rows belong to, then reports whether any
-// of them is closed. Years are locked in sorted order so two requests touching the same
-// set of years can never take the locks in opposite order and deadlock.
+// Locks (shared — see lockYearClose) every academic year the given ledger rows of
+// this school belong to, then reports whether any of them is closed. Scoped by
+// school_id so ids from another tenant can never cause their years to be locked.
+// Years are locked in sorted order so two requests touching the same set of years
+// can never take the locks in opposite order and deadlock.
 export async function lockLedgerYearsAndIsClosed(
   client: PoolClient,
+  schoolId: number | string,
   ledgerIds: Array<number | string>
 ): Promise<boolean> {
   if (ledgerIds.length === 0) return false
-  const { rows } = await client.query<{ school_id: number; academic_year: string }>(
-    `SELECT DISTINCT school_id, academic_year FROM student_fee_ledger WHERE id = ANY($1)
-     ORDER BY school_id, academic_year`,
-    [ledgerIds]
+  const { rows } = await client.query<{ academic_year: string }>(
+    `SELECT DISTINCT academic_year FROM student_fee_ledger WHERE id = ANY($1) AND school_id = $2
+     ORDER BY academic_year`,
+    [ledgerIds, schoolId]
   )
-  for (const y of rows) await lockYearClose(client, y.school_id, y.academic_year)
-  for (const y of rows) if (await isYearClosed(client, y.school_id, y.academic_year)) return true
+  for (const y of rows) await lockYearClose(client, schoolId, y.academic_year, { shared: true })
+  for (const y of rows) if (await isYearClosed(client, schoolId, y.academic_year)) return true
   return false
 }

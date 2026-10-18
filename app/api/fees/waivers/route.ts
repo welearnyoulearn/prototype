@@ -94,7 +94,7 @@ async function handlePOST(req: NextRequest) {
         // UPDATE row lock just below alone would serialize this against year-end
         // APPLY (which locks this same row), but not against a plain CLOSE, which
         // doesn't touch any ledger row — only this shared lock does.
-        await lockYearClose(client, school_id, yearLookup.academic_year)
+        await lockYearClose(client, school_id, yearLookup.academic_year, { shared: true })
       }
 
       // #15/#16 — FOR UPDATE locks the row so a concurrent payment can't race with this waiver.
@@ -198,26 +198,39 @@ async function handlePATCH(req: NextRequest) {
 
     const client = await pool.connect()
     try {
-      await client.query('BEGIN')
-
-      // Unlocked pre-lookup — school_id/academic_year, to take lockYearClose
-      // BEFORE any row lock below. This ordering matters: payments/verify and
-      // payments/cancel both lock a row first and lockYearClose second in
-      // earlier code, which could deadlock against a concurrent request that
-      // takes the SAME two locks in the opposite order on the same waiver/year.
-      // Every mutating fee route now takes lockYearClose FIRST, before any row
-      // lock, to keep one consistent global order.
+      // Unlocked pre-lookup — school_id/academic_year, to authorize the caller and
+      // take lockYearClose BEFORE any row lock below. Auth (and the carry_forward
+      // refusal) run here, before BEGIN, so a request that will be refused never
+      // takes or waits on the year lock — including another tenant's year.
+      // Lock ordering: every mutating fee route takes lockYearClose FIRST, before
+      // any row lock, to keep one consistent global order (no deadlocks against
+      // payments/verify or payments/cancel on the same waiver/year).
       const { rows: [preLookup] } = await client.query(
-        `SELECT w.school_id, w.ledger_id, l.academic_year
+        `SELECT w.school_id, w.ledger_id, w.waiver_type, l.academic_year
          FROM fee_waivers w JOIN student_fee_ledger l ON l.id = w.ledger_id
          WHERE w.id = $1`,
         [id]
       )
       if (!preLookup) {
-        await client.query('ROLLBACK')
         return NextResponse.json({ error: 'Waiver not found or already revoked' }, { status: 404 })
       }
-      await lockYearClose(client, preLookup.school_id, preLookup.academic_year)
+      // Pass `client` — already held via pool.connect() above; the default
+      // `pool` here would need a second connection.
+      const access = await requireFeeAccess(preLookup.school_id, client)
+      if (!access) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+
+      // Same reasoning as DELETE: correcting a carry_forward waiver's amount would
+      // change the closed year's debt without touching the matching "Previous Year
+      // Dues" bill already created in the new year. waiver_type never changes after
+      // insert, so the unlocked read is authoritative.
+      if (preLookup.waiver_type === 'carry_forward') {
+        return NextResponse.json({
+          error: 'This waiver was created automatically during year-end closure and cannot be corrected here. It is a year-end carry-forward record and is managed through year-end, not edited per bill.',
+        }, { status: 409 })
+      }
+
+      await client.query('BEGIN')
+      await lockYearClose(client, preLookup.school_id, preLookup.academic_year, { shared: true })
 
       // FOR UPDATE — without this, two concurrent corrections of the same waiver
       // can both pass the is_revoked=FALSE check below before either commits, both
@@ -231,21 +244,6 @@ async function handlePATCH(req: NextRequest) {
       if (!w0) {
         await client.query('ROLLBACK')
         return NextResponse.json({ error: 'Waiver not found or already revoked' }, { status: 404 })
-      }
-
-      // Pass `client` — already held via pool.connect() above, inside an open
-      // transaction; the default `pool` here would deadlock on a max:1 pool.
-      const access = await requireFeeAccess(w0.school_id, client)
-      if (!access) { await client.query('ROLLBACK'); return NextResponse.json({ error: 'Forbidden' }, { status: 403 }) }
-
-      // Same reasoning as DELETE: correcting a carry_forward waiver's amount would
-      // change the closed year's debt without touching the matching "Previous Year
-      // Dues" bill already created in the new year.
-      if (w0.waiver_type === 'carry_forward') {
-        await client.query('ROLLBACK')
-        return NextResponse.json({
-          error: 'This waiver was created automatically during year-end closure and cannot be corrected here. It is a year-end carry-forward record and is managed through year-end, not edited per bill.',
-        }, { status: 409 })
       }
 
       // Validate: new waiver + existing payments + OTHER active waivers on this same
@@ -365,7 +363,7 @@ async function handleDELETE(req: NextRequest) {
       // The ledger row lock further below alone would serialize this against
       // year-end APPLY (which locks that same row), but not against a plain
       // CLOSE, which doesn't touch any ledger row — only this shared lock does.
-      await lockYearClose(client, w0.school_id, w0.academic_year)
+      await lockYearClose(client, w0.school_id, w0.academic_year, { shared: true })
 
       // Block revoking a waiver on a closed year — same guard as every other
       // mutating fee route (payments, waivers POST, structures/amend, etc.).

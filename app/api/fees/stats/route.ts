@@ -182,7 +182,7 @@ async function handleGET(req: NextRequest) {
          FROM fee_waivers w
          JOIN student_fee_ledger l ON l.id = w.ledger_id
          JOIN fee_categories fc ON fc.id = l.fee_category_id
-         WHERE l.school_id = $1 AND l.academic_year = $2
+         WHERE l.school_id = $1 AND w.school_id = $1 AND l.academic_year = $2
            AND COALESCE(w.is_revoked, FALSE) = FALSE
            AND w.waiver_type NOT IN ('carry_forward', 'writeoff')
          GROUP BY fc.id`,

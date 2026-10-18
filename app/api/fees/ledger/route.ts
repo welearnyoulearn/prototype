@@ -33,48 +33,33 @@ async function handleGET(req: NextRequest) {
     // the caller passed nothing at all, never override an explicit value.
     const academic_year = p.get('academic_year') || await resolveAcademicYear(school_id)
 
+    // Overdue is derived at read time (no writes on GET): a pending/overdue bill
+    // shows 'overdue' once its academic year has ended and 'pending' while it
+    // hasn't — the same rule ledgerStatusSql() applies on every money write and
+    // stats' throttled syncOverdueStatus() persists for the aggregate counts.
+    // Bills whose year has no academic_years row keep their stored status.
+    const statusSql = `CASE WHEN l.status IN ('pending', 'overdue') AND ay.end_date IS NOT NULL
+                            THEN CASE WHEN ay.end_date < CURRENT_DATE THEN 'overdue' ELSE 'pending' END
+                            ELSE l.status END`
+
     const conditions = ['l.school_id = $1']
     const values: (string | number)[] = [school_id]
 
     if (academic_year) { values.push(academic_year); conditions.push(`l.academic_year = $${values.length}`) }
     if (grade)         { values.push(grade);          conditions.push(`s.grade = $${values.length}`) }
-    if (status)        { values.push(status);          conditions.push(`l.status = $${values.length}`) }
+    if (status)        { values.push(status);          conditions.push(`(${statusSql}) = $${values.length}`) }
     if (student_id)    { values.push(student_id);      conditions.push(`l.student_id = $${values.length}`) }
 
     try {
-      // Auto-update overdue status based on academic year end date
-      if (academic_year) {
-        // Mark overdue: only after the academic year's end date has passed
-        await pool.query(
-          `UPDATE student_fee_ledger l SET status = 'overdue'
-           WHERE l.school_id = $1 AND l.academic_year = $2 AND l.status = 'pending'
-             AND EXISTS (
-               SELECT 1 FROM academic_years ay
-               WHERE ay.school_id = l.school_id AND ay.label = l.academic_year
-                 AND ay.end_date < CURRENT_DATE
-             )`,
-          [school_id, academic_year]
-        )
-        // Reset stale overdue back to pending if academic year hasn't ended yet
-        await pool.query(
-          `UPDATE student_fee_ledger l SET status = 'pending'
-           WHERE l.school_id = $1 AND l.academic_year = $2 AND l.status = 'overdue'
-             AND EXISTS (
-               SELECT 1 FROM academic_years ay
-               WHERE ay.school_id = l.school_id AND ay.label = l.academic_year
-                 AND ay.end_date >= CURRENT_DATE
-             )`,
-          [school_id, academic_year]
-        )
-      }
-
       const where = `WHERE ${conditions.join(' AND ')}`
-      // Both JOINs are on primary keys (students.id, fee_categories.id), so they
-      // filter but never multiply rows — the count below reuses the exact same
-      // FROM/JOIN/WHERE and therefore agrees with the rows returned.
+      // Every JOIN is on a unique key (students.id, fee_categories.id,
+      // academic_years UNIQUE(school_id, label)), so none multiplies rows — the
+      // count below reuses the exact same FROM/JOIN/WHERE and therefore agrees
+      // with the rows returned.
       const from = `FROM student_fee_ledger l
          JOIN students s ON s.id = l.student_id
-         JOIN fee_categories fc ON fc.id = l.fee_category_id`
+         JOIN fee_categories fc ON fc.id = l.fee_category_id
+         LEFT JOIN academic_years ay ON ay.school_id = l.school_id AND ay.label = l.academic_year`
 
       // Pagination is strictly OPT-IN: with no limit/offset the response stays
       // unbounded and identically shaped. A default cap was tried and reverted —
@@ -98,6 +83,7 @@ async function handleGET(req: NextRequest) {
       const { rows } = await pool.query(
         `SELECT
            l.*,
+           ${statusSql} AS status, -- after l.* so it overrides l.status in the row object
            s.name AS student_name, s.roll_number, s.school_roll_number, s.grade, s.section,
            s.email, s.phone, s.parent_name, s.parent_phone, s.parent_email,
            COALESCE(s.status, 'active') AS student_status,

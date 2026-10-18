@@ -177,6 +177,18 @@ async function handlePOST(req: NextRequest) {
 
       await client.query('BEGIN')
 
+      // Duplicate-submission guard — see lib/idempotency.ts. A network timeout +
+      // retry, or a double-click before the UI's own disable-while-saving state
+      // lands, previously had no protection beyond "does the balance still have
+      // room for this amount", which happily admits a genuine duplicate whenever
+      // it does. Claimed BEFORE the year lock so a duplicate waits on the first
+      // request's claim row without also holding the year lock.
+      const claim = await claimIdempotencyKey(client, { schoolId: school_id, key: idempotency_key, endpoint: '/api/fees/payments' })
+      if (!claim.proceed) {
+        await client.query('ROLLBACK')
+        return NextResponse.json(claim.body as object, { status: claim.status })
+      }
+
       // Serialize against year-end apply/close/reopen for every academic year these
       // ledger rows belong to — the SAME advisory lock those actions take
       // (lib/feeRollover.ts). Without this, the closed-year check just below could
@@ -188,20 +200,9 @@ async function handlePOST(req: NextRequest) {
       // itself locks — the year-end route's own comment on lockYearClose explains why.
       // lockLedgerYearsAndIsClosed takes the year lock(s) first, then checks closed — the
       // lock must precede the check so a concurrent year-end close can't slip in between.
-      if (await lockLedgerYearsAndIsClosed(client, guardIds)) {
+      if (await lockLedgerYearsAndIsClosed(client, school_id, guardIds)) {
         await client.query('ROLLBACK')
         return NextResponse.json({ error: 'This academic year is closed. Reopen it to record payments.' }, { status: 409 })
-      }
-
-      // Duplicate-submission guard — see lib/idempotency.ts. A network timeout +
-      // retry, or a double-click before the UI's own disable-while-saving state
-      // lands, previously had no protection beyond "does the balance still have
-      // room for this amount", which happily admits a genuine duplicate whenever
-      // it does.
-      const claim = await claimIdempotencyKey(client, { schoolId: school_id, key: idempotency_key, endpoint: '/api/fees/payments' })
-      if (!claim.proceed) {
-        await client.query('ROLLBACK')
-        return NextResponse.json(claim.body as object, { status: claim.status })
       }
 
       // Generate one receipt number shared across all allocations

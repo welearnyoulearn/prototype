@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { ledgerStatusSql } from '@/lib/feeLedgerStatus'
 import { todayIST } from '@/lib/istDate'
+import { isValidDateStr } from '@/lib/attendanceRules'
 import pool, { ensureDB } from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
 import { withWatchline } from '@/lib/logger'
@@ -66,7 +67,7 @@ async function handlePOST(req: NextRequest) {
       // cancellation, or a close/apply/reopen) gets there first finish before
       // the other proceeds, instead of both reading a "not closed" state that
       // one of them is about to invalidate.
-      await lockYearClose(client, pmtPreview.school_id, pmtPreview.academic_year)
+      await lockYearClose(client, pmtPreview.school_id, pmtPreview.academic_year, { shared: true })
 
       // Re-fetch WITH a row lock now that we're inside the transaction, so two
       // concurrent cancel/correct requests for the same payment can't both pass
@@ -137,7 +138,7 @@ async function handlePOST(req: NextRequest) {
         const newDate = body.new_paid_date || pmt.paid_date
         // Same date rules as payments POST — an unvalidated date either 500s on a bad
         // string or books a payment into a future day-close.
-        if (body.new_paid_date != null && !(/^d{4}-d{2}-d{2}$/.test(String(body.new_paid_date)) && !isNaN(new Date(body.new_paid_date).getTime()) && body.new_paid_date <= todayIST() && body.new_paid_date >= '2000-01-01')) {
+        if (body.new_paid_date != null && !(isValidDateStr(body.new_paid_date) && body.new_paid_date <= todayIST() && body.new_paid_date >= '2000-01-01')) {
           await client.query('ROLLBACK')
           return NextResponse.json({ error: 'new_paid_date must be a valid past date (YYYY-MM-DD)' }, { status: 400 })
         }

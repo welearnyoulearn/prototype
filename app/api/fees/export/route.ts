@@ -57,7 +57,7 @@ async function handleGET(req: NextRequest) {
              SELECT ledger_id,
                     SUM(waiver_amount) FILTER (WHERE waiver_type = 'carry_forward') AS carried,
                     SUM(waiver_amount) FILTER (WHERE waiver_type = 'writeoff') AS written_off
-             FROM fee_waivers WHERE COALESCE(is_revoked, FALSE) = FALSE GROUP BY ledger_id
+             FROM fee_waivers WHERE school_id = $1 AND COALESCE(is_revoked, FALSE) = FALSE GROUP BY ledger_id
            ) wv ON wv.ledger_id = l.id
            WHERE ${conditions.join(' AND ')}
            ORDER BY ${gradeOrderSql(CLASS_GRADE)}, ${CLASS_SECTION}, s.name, l.due_date, fc.name, l.id`,
