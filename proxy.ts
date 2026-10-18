@@ -194,20 +194,59 @@ async function requestHasFeature(req: NextRequest, origin: string, feature: stri
   // identity this request will actually resolve to matches reality and
   // still stops a forged/irrelevant cookie from mattering, since the route
   // itself never looks at it either.
-  let schoolId: number | null = null
-  for (const cookie of [COOKIE_ADMIN, COOKIE_TEACHER, COOKIE_STUDENT, COOKIE_PARENT]) {
-    const token = req.cookies.get(cookie)?.value
-    if (!token) continue
-    const payload = await getTokenPayload(token)
-    const id = Number(payload?.schoolId)
-    if (Number.isInteger(id) && id > 0) { schoolId = id; break }
-  }
+  const schoolId = await requestSchoolId(req)
 
   // Authentication remains the route handler's responsibility — if no
   // recognizable session cookie is present at all, let the request through
   // and let the handler return its own 401.
   if (schoolId === null) return true
   return schoolFeatureEnabled(origin, schoolId, feature)
+}
+
+// The school this request resolves to (first school-side cookie wins). Memoised per request
+// so the feature check and the request counter share one JWT decode.
+const schoolIdByRequest = new WeakMap<NextRequest, Promise<number | null>>()
+function requestSchoolId(req: NextRequest): Promise<number | null> {
+  let p = schoolIdByRequest.get(req)
+  if (!p) {
+    p = (async () => {
+      for (const cookie of [COOKIE_ADMIN, COOKIE_TEACHER, COOKIE_STUDENT, COOKIE_PARENT]) {
+        const token = req.cookies.get(cookie)?.value
+        if (!token) continue
+        const id = Number((await getTokenPayload(token))?.schoolId)
+        if (Number.isInteger(id) && id > 0) return id
+      }
+      return null
+    })()
+    schoolIdByRequest.set(req, p)
+  }
+  return p
+}
+
+// ── API request counting (api.request meter) ─────────────────────────────────
+// ponytail: counts are per instance and lost on a cold stop; fine for a track-only signal.
+// Skipped: internal/cron/platform routes, and /api/usage/ heartbeats, which would dominate.
+const COUNT_SKIP_PREFIXES = ['/api/internal/', '/api/cron/', '/api/platform/', '/api/usage/']
+const requestCounts = new Map<number, number>()
+let countsFlushedAt = Date.now()
+
+async function countApiRequest(req: NextRequest, origin: string, pathname: string): Promise<void> {
+  if (COUNT_SKIP_PREFIXES.some(p => pathname.startsWith(p))) return
+  const schoolId = await requestSchoolId(req)
+  if (schoolId === null) return
+  const n = (requestCounts.get(schoolId) ?? 0) + 1
+  requestCounts.set(schoolId, n)
+  if (n < 500 && Date.now() - countsFlushedAt < 60_000) return
+  const counts = Array.from(requestCounts, ([id, requests]) => ({ schoolId: id, requests }))
+  requestCounts.clear()
+  countsFlushedAt = Date.now()
+  for (let i = 0; i < counts.length; i += 1000) {
+    fetch(`${origin}/api/internal/usage-ingest`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-ingest-secret': INGEST_SECRET },
+      body: JSON.stringify({ counts: counts.slice(i, i + 1000) }),
+    }).catch(() => { /* counting must never break the request */ })
+  }
 }
 
 async function requestHasAnyFeature(req: NextRequest, origin: string, features: readonly string[]): Promise<boolean> {
@@ -286,6 +325,8 @@ export async function proxy(req: NextRequest) {
   if (requirement && !await requestHasAnyFeature(req, origin, requirement.anyOf)) {
     return NextResponse.json({ error: 'Feature not enabled', code: 'FEATURE_DISABLED', feature: requirement.primary }, { status: 403 })
   }
+
+  if (pathname.startsWith('/api/')) await countApiRequest(req, origin, pathname)
 
   if (isPublic(pathname) || pathname === '/') return NextResponse.next()
 

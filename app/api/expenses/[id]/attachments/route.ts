@@ -1,6 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { z } from 'zod'
 import pool from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
+import { recordUsage } from '@/lib/usage'
+
+const bodySchema = z.object({
+  file_url: z.string().min(1),
+  file_name: z.string().max(255).nullish(),
+  bytes: z.number().int().min(0).max(200 * 1_048_576).optional(), // Cloudinary upload result `bytes`
+})
 
 // POST /api/expenses/[id]/attachments — links one already-uploaded Cloudinary
 // file to an expense. The client uploads directly to Cloudinary via the
@@ -14,15 +22,16 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     if (!expense) return NextResponse.json({ error: 'Expense not found' }, { status: 404 })
     if (!await requireFeeAccess(expense.school_id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
-    const { file_url, file_name } = await req.json()
-    if (!file_url) return NextResponse.json({ error: 'file_url required' }, { status: 400 })
+    const parsed = bodySchema.safeParse(await req.json().catch(() => null))
+    if (!parsed.success) return NextResponse.json({ error: 'file_url required' }, { status: 400 })
+    const { file_url, file_name, bytes } = parsed.data
     // Only a file this school uploaded through /api/upload/sign (folder expense-bills/school-{id}),
     // never an arbitrary URL that would later be shown to staff as "the bill".
     const cloud = process.env.CLOUDINARY_CLOUD_NAME
     const allowedPrefix = new RegExp(
       `^https://res\\.cloudinary\\.com/${cloud}/(image|raw|video)/upload/(v\\d+/)?expense-bills/school-${Number(expense.school_id)}/[^/?#]+$`
     )
-    if (typeof file_url !== 'string' || !cloud || !allowedPrefix.test(file_url)) {
+    if (!cloud || !allowedPrefix.test(file_url)) {
       return NextResponse.json({ error: 'file_url must be an expense bill uploaded for this school' }, { status: 400 })
     }
 
@@ -30,6 +39,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       `INSERT INTO expense_attachments (expense_id, file_url, file_name) VALUES ($1, $2, $3) RETURNING *`,
       [id, file_url, file_name || null]
     )
+    if (bytes) await recordUsage({
+      schoolId: Number(expense.school_id), meterKey: 'storage.upload', quantity: Math.round(bytes / 1_048_576 * 1e4) / 1e4,
+      source: 'upload.expense_bill', idempotencyKey: `upload:${file_url}`,
+    })
     return NextResponse.json(row, { status: 201 })
   } catch (err: unknown) {
     console.error('[API]', err)
