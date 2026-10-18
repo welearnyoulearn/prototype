@@ -19,6 +19,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
+import { pushToParentsAfter } from '@/lib/expoPush'
 
 export async function GET(req: NextRequest) {
   return run(req)
@@ -113,13 +114,16 @@ async function run(req: NextRequest) {
                JOIN parents p ON p.id = sp.parent_id
                WHERE sp.student_id = ANY($1::int[]) AND p.school_id = $2`, [studentIds, exam.school_id]
             )
+            const notifiedParentIds: number[] = []
             for (const link of parentLinks) {
               await pool.query(
                 `INSERT INTO notifications (school_id, recipient_parent_id, type, title, message, data) VALUES ($1, $2, $3, $4, $5, $6)`,
                 [exam.school_id, link.parent_id, reminder.type, title, message, data]
               )
               remindersSent++
+              notifiedParentIds.push(link.parent_id)
             }
+            pushToParentsAfter(notifiedParentIds, { title, body: message, data: { url: '/exams' } })
           } catch { /* non-critical */ }
         }
       }

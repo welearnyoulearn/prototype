@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 import { getTeacherSession } from '@/lib/auth'
 import { isTeacherLinkedToClass } from '@/lib/examsAuth'
+import { pushToParentsAfter } from '@/lib/expoPush'
 
 // POST /api/classes/[id]/broadcast
 // A teacher's "send a message to this class" action — same shape as a school
@@ -72,6 +73,7 @@ export async function POST(
         'SELECT DISTINCT parent_id FROM student_parents WHERE student_id = ANY($1::int[])',
         [studentIds]
       )
+      const notifiedParentIds: number[] = []
       for (const link of parentLinks) {
         try {
           await pool.query(`
@@ -79,8 +81,10 @@ export async function POST(
             VALUES ($1, $2, $3, 'teacher_broadcast', $4, $5, $6)
           `, [teacher.schoolId, link.parent_id, teacher.teacherId, title.trim(), message.trim(), data])
           parentsNotified++
+          notifiedParentIds.push(link.parent_id)
         } catch { /* non-critical */ }
       }
+      pushToParentsAfter(notifiedParentIds, { title: title.trim(), body: message.trim() })
     }
 
     return NextResponse.json({ success: true, students_notified: studentsNotified, parents_notified: parentsNotified })

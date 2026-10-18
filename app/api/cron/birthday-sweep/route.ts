@@ -24,6 +24,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
 import { getOrCreateClassCircle } from '@/lib/classCircle'
 import { getISTDateParts } from '@/lib/birthday'
+import { pushToParentsAfter } from '@/lib/expoPush'
 
 export async function GET(req: NextRequest) {
   return run(req)
@@ -122,6 +123,7 @@ async function run(req: NextRequest) {
            VALUES ($1, $2, 'birthday', '🎉 Happy Birthday!', $3)`,
           [p.school_id, p.id, `Wishing you a wonderful birthday, ${p.name || 'there'}!`]
         )
+        pushToParentsAfter([p.id], { title: '🎉 Happy Birthday!', body: `Wishing you a wonderful birthday, ${p.name || 'there'}!` })
       }
     }
 

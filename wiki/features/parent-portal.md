@@ -19,11 +19,13 @@ Parents (own children only).
 
 - Child summary with a **Contact & Support** card — tap-to-call the class teacher and the school administration, plus the school's address (`GET /api/parent/subjects`, refetched whenever the selected child changes). Syllabus shows each subject's "Taught by …" from the same endpoint. **Attendance** (colour calendar, month/year %, days absent, full-days-in-a-row streak, trend, upcoming holidays), Fees (ledger, waivers, payment history, report a UPI payment), Exam calendar and Results (with acknowledgement), School Calendar, Digital Library.
 - Several children per parent; English and Telugu interface.
+- **Push to the mobile app (#133):** the parent app registers its Expo push token with `POST /api/parent/push/expo` (and `DELETE` on sign-out). Every in-app notification addressed to a parent (`notifications.recipient_parent_id`) is also pushed to that parent's phones via `lib/expoPush.ts` (`pushToParentsAfter`), sent after the response so it never slows or fails the request. Tapping opens the app's Exams screen for exam notifications, otherwise Notifications.
 - Sign-in by phone/email + password. Forgot-password by WhatsApp OTP is a **draft PR (#155)** and not part of dev.
 
 ## Rules and limits
 
 - A parent can read only children linked to them; any other student id is answered as 'not found'.
+- A push token belongs to one parent at a time; registering it again from another account moves it. Tokens Expo reports as `DeviceNotRegistered` are deleted. Announcements and absence emails are not pushed yet.
 
 ## Code evidence
 
@@ -68,3 +70,4 @@ API routes these screens call (all exist):
 | Date | Change | Issue |
 |------|--------|-------|
 | 2026-09-21 | Doc created from the code; status checked with `scripts/product-docs.mjs` | #162 |
+| 2026-10-18 | Expo push to the parent mobile app | #133 |

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 import { requireExamsAccess, isClassTeacherOf, examAppliesToStudent } from '@/lib/examsAuth'
+import { pushToParentsAfter } from '@/lib/expoPush'
 
 // POST /api/exams/[id]/nudge-parent
 // The class teacher's (or admin's) "remind this parent to acknowledge"
@@ -51,6 +52,7 @@ export async function POST(
     const nudgedByTeacherId = actor.kind === 'teacher' ? actor.teacherId : null
     const client = await pool.connect()
     let notified = 0
+    let parentIds: number[] = []
     try {
       await client.query('BEGIN')
       await client.query('SELECT pg_advisory_xact_lock($1, $2)', [Number(exam_id), Number(student_id)])
@@ -82,12 +84,18 @@ export async function POST(
         notified++
       }
       await client.query('COMMIT')
+      parentIds = parentLinks.map(l => l.parent_id)
     } catch (error) {
       await client.query('ROLLBACK').catch(() => undefined)
       throw error
     } finally {
       client.release()
     }
+    pushToParentsAfter(parentIds, {
+      title: `Please acknowledge — ${exam.exam_name}`,
+      body: `${student.name}'s result for ${exam.exam_name} is waiting for your acknowledgement.`,
+      data: { url: '/exams' },
+    })
 
     return NextResponse.json({ success: true, notified })
   } catch (err: unknown) {

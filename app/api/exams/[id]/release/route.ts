@@ -3,6 +3,7 @@ import pool, { ensureDB } from '@/lib/db'
 import { requireExamsAdmin, getApplicableExamStudentIds } from '@/lib/examsAuth'
 import { isPassing } from '@/lib/examGrading'
 import { awardPoints } from '@/lib/rewards'
+import { pushToParentsAfter, type ParentPush } from '@/lib/expoPush'
 
 // POST /api/exams/[id]/release
 // School admin's final action — the only thing that actually makes an
@@ -30,6 +31,7 @@ export async function POST(
     let students: { id: number; name: string; total: string | null }[] = []
     let totalMax = 0
     let notified = 0
+    const parentPushes: [number[], ParentPush][] = [] // sent only after COMMIT
     try {
       await client.query('BEGIN')
       const examResult = await client.query(
@@ -108,11 +110,16 @@ export async function POST(
             SELECT $1, sp.parent_id, 'marks_released', $3, $4, $5
             FROM student_parents sp JOIN parents p ON p.id = sp.parent_id
             WHERE sp.student_id = $2 AND p.school_id = $1
-            RETURNING id
+            RETURNING id, parent_id
           `, [actor.schoolId, student.id, `${lockedExam.exam_name} results released`,
             `${student.name}'s results for ${lockedExam.exam_name} are available. Please review and acknowledge.`,
             JSON.stringify({ exam_id: Number(exam_id), student_id: student.id })])
           notified += parentInsert.rowCount ?? 0
+          parentPushes.push([parentInsert.rows.map(r => r.parent_id), {
+            title: `${lockedExam.exam_name} results released`,
+            body: `${student.name}'s results for ${lockedExam.exam_name} are available. Please review and acknowledge.`,
+            data: { url: '/exams' },
+          }])
         }
       }
       await client.query(`
@@ -127,6 +134,7 @@ export async function POST(
     } finally {
       client.release()
     }
+    for (const [ids, msg] of parentPushes) pushToParentsAfter(ids, msg)
 
     if (exam) {
       for (const student of students) {

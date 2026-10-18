@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 import { requireExamsAdmin, examNotificationEnabled } from '@/lib/examsAuth'
+import { pushToParentsAfter } from '@/lib/expoPush'
 
 // POST /api/exams/[id]/cancel — admin-only. Distinct from DELETE: cancel
 // keeps the row (status='cancelled', a real terminal state the calendar and
@@ -74,12 +75,15 @@ export async function POST(
            JOIN parents p ON p.id = sp.parent_id
            WHERE sp.student_id = ANY($1::int[]) AND p.school_id = $2`, [studentIds, actor.schoolId]
         )
+        const notifiedParentIds: number[] = []
         for (const link of parentLinks) {
           await pool.query(
             `INSERT INTO notifications (school_id, recipient_parent_id, type, title, message, data) VALUES ($1, $2, 'exam_cancelled', $3, $4, $5)`,
             [actor.schoolId, link.parent_id, title, message, data]
           )
+          notifiedParentIds.push(link.parent_id)
         }
+        pushToParentsAfter(notifiedParentIds, { title, body: message, data: { url: '/exams' } })
       } catch { /* non-critical */ }
     }
     // Dedup: a teacher who is both class teacher and assigned invigilator

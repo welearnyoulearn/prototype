@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 import { requireExamsAccess, requireExamsAdmin, isClassTeacherOf, isTeacherLinkedToExam } from '@/lib/examsAuth'
 import { findExamConflicts } from '@/lib/examConflicts'
+import { pushToParentsAfter } from '@/lib/expoPush'
 import type { Pool, PoolClient } from 'pg'
 
 // GET /api/exams/[id]?school_id= — full exam detail with subjects + marks summary
@@ -134,12 +135,15 @@ async function notifyExamChange(
          JOIN parents p ON p.id = sp.parent_id
          WHERE sp.student_id = ANY($1::int[]) AND p.school_id = $2`, [studentIds, schoolId]
       )
+      const notifiedParentIds: number[] = []
       for (const link of parentLinks) {
         await db.query(
           `INSERT INTO notifications (school_id, recipient_parent_id, type, title, message, data) VALUES ($1, $2, 'exam_updated', $3, $4, $5)`,
           [schoolId, link.parent_id, title, message, data]
         )
+        notifiedParentIds.push(link.parent_id)
       }
+      pushToParentsAfter(notifiedParentIds, { title, body: message, data: { url: '/exams' } })
     } catch { /* non-critical */ }
   }
   // Dedup: a teacher who is both the class teacher and the assigned

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 import { requireExamsAdmin } from '@/lib/examsAuth'
 import { findExamConflicts } from '@/lib/examConflicts'
+import { pushToParentsAfter, type ParentPush } from '@/lib/expoPush'
 
 // POST /api/exams/schedule — school admin creates an exam across one or many
 // classes in a single action (e.g. "Half-Yearly" for every Grade 6-10 class
@@ -295,6 +296,7 @@ export async function POST(req: NextRequest) {
       let examsCreated = 0
       let subjectsAssigned = 0
       let notified = 0
+      const parentPushes: [number[], ParentPush][] = [] // sent only after COMMIT
 
       const sortedSessions = [...sessions].sort((a, b) =>
         a.exam_date === b.exam_date ? (a.start_time ?? '').localeCompare(b.start_time ?? '') : a.exam_date.localeCompare(b.exam_date)
@@ -417,6 +419,9 @@ export async function POST(req: NextRequest) {
             ])
             notified++
           }
+          parentPushes.push([parentLinks.map(l => l.parent_id), {
+            title: `${exam_name} scheduled`, body: `${exam_name} is scheduled — ${scheduleLabel}${roomLabel}.`, data: { url: '/exams' },
+          }])
         }
 
         // Notify the class teacher — they'll assign subject teachers once
@@ -451,6 +456,7 @@ export async function POST(req: NextRequest) {
       }
 
       await client.query('COMMIT')
+      for (const [ids, msg] of parentPushes) pushToParentsAfter(ids, msg)
       return NextResponse.json({
         success: true,
         exam_group_id: examGroupId,

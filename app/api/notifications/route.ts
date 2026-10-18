@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import pool from '@/lib/db'
 import { getSession, getTeacherSession, getStudentSession, getParentSession } from '@/lib/auth'
+import { pushToParentsAfter } from '@/lib/expoPush'
 
 export async function GET(req: NextRequest) {
   try {
@@ -127,6 +128,7 @@ export async function POST(req: NextRequest) {
        toSchool ? schoolId : null, teacher?.teacherId ?? null, b.type, b.title ?? null, b.message ?? null,
        b.data ? JSON.stringify(b.data) : null]
     )
+    if (b.recipient_parent_id) pushToParentsAfter([b.recipient_parent_id], { title: b.title ?? 'New notification', body: b.message ?? '' })
     return NextResponse.json(result.rows[0], { status: 201 })
   } catch (error) {
     console.error(error)

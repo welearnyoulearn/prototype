@@ -87,7 +87,7 @@ const BOOTSTRAP_MARKER_KEY   = 'initial_schema_bootstrap'
 // silently never runs anywhere, and you will chase a "column does not exist" 500
 // that reproduces on production but never locally against a fresh DB.
 // Adding a migration statement and bumping this number is ONE change, not two.
-const SCHEMA_VERSION = 51
+const SCHEMA_VERSION = 52
 
 // Records the schema level this build finished applying, on the same row as the
 // bootstrap marker (no extra row, no extra round-trip to read it back).
@@ -3789,4 +3789,18 @@ async function runIncrementalMigrations() {
   `)
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_school_chapters_name_ci ON school_chapters(school_subject_id, LOWER(TRIM(chapter_name)))`)
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_school_topics_name_ci ON school_topics(school_chapter_id, LOWER(TRIM(topic_name)))`)
+
+  // Expo push tokens for the parent mobile app (#133). token is UNIQUE so a phone
+  // that signs in as a different parent moves to that parent (upsert on token).
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS expo_push_tokens (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      parent_id INTEGER NOT NULL REFERENCES parents(id) ON DELETE CASCADE,
+      token TEXT NOT NULL UNIQUE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      last_used_at TIMESTAMPTZ
+    )
+  `)
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_expo_push_tokens_parent ON expo_push_tokens(parent_id)`)
 }
