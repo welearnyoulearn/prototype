@@ -6,6 +6,8 @@ export default {
   },
 
   async scheduled(event, env, ctx) {
+    // Off unless explicitly enabled, so a preview never double-sends the emails Vercel's crons already send.
+    if (env.CRONS_ENABLED !== "true") return;
     const map = {
       "30 3 * * 1": "/api/cron/usage-digest",
       "0 2 * * *": "/api/internal/log-cleanup",
