@@ -6,6 +6,11 @@ All finished features and bug fixes. Most recent first.
 
 <!-- Add new entries at the top -->
 
+### 2026-10-18 — Paginate Platform Admin Billing and Traffic tables (#400)
+**Type:** Enhancement
+**Portal:** Platform Admin
+**Summary:** Billing → Usage/Bills and Traffic → By school/School Health/school users show 50 rows per page with the shared pager; filters, search, month and period reset to page 1.
+
 ### 2026-10-06 — School Admin sidebar UX (#353)
 **Type:** Enhancement
 **Portal:** School Admin

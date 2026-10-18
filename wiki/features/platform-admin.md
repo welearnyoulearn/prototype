@@ -27,6 +27,7 @@ The WLYL team's console: create schools, set plans, switch features per plan and
 - Feature flags are two-layer: tier (`plan_features`) then per-school override (`school_feature_overrides`); Watchline is per school only.
 - The school page's Student/Parent Portal Access toggles (and the AI Access precondition on the same page) show the real gate: an explicit override, or else what the plan tier actually grants — mirroring `schoolHasFeature()`'s tier-inheritance. They used to default to "on" whenever no override existed, even on a plan that didn't include the portal, disagreeing with the school list (which was always correct) and with the login itself. (#251)
 - "Reset password" for a school resets only the owner account.
+- Billing (Usage, Bills) and Traffic (By school, School Health, a school's users) show 50 rows per page with the shared `app/components/Pagination.tsx` pager. Paging is in the browser over the rows already loaded; changing a search, filter, month or period goes back to page 1. (#400)
 - **Known security gap:** several `/api/platform/*` routes and `/api/schools/{id}/subscription` have no auth guard (see `docs/KNOWN_ISSUES.md`).
 
 ## Related

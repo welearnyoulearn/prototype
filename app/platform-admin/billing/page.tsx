@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState, type ChangeEvent } from 'react'
 import Link from 'next/link'
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet'
+import Pagination from '@/app/components/Pagination'
 import { Skeleton } from '@/components/ui/skeleton'
 import { AT_CAP_LABEL, BillStatusChip, UsageBar, currentMonthIST, extraPrice, fetchJSON, monthLabel } from '@/components/billing/parts'
 import { inr, qty } from '@/lib/billingFormat'
@@ -19,6 +20,9 @@ const STATUS_FILTERS: { key: 'all' | BillStatus; label: string }[] = [
 const field = 'block mt-1 border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white'
 const dateIN = (iso: string) => new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: 'Asia/Kolkata' })
 const FIRST_MONTH = '2026-10'
+const PAGE_SIZE = 50
+// Keeps a page offset inside the list when it shrinks (refetch, filter).
+const pageStart = (offset: number, total: number) => Math.min(offset, Math.max(0, Math.floor((total - 1) / PAGE_SIZE) * PAGE_SIZE))
 const tierName = (t: string) => t === 'none' ? 'No plan' : t.charAt(0).toUpperCase() + t.slice(1)
 const errMsg = (e: unknown) => e instanceof Error ? e.message : 'Something went wrong'
 const dateTimeIN = (iso: string) => new Date(iso).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', timeZone: 'Asia/Kolkata' })
@@ -34,6 +38,7 @@ export default function BillingPage() {
   const [month, setMonth] = useState(thisMonth)
   const [search, setSearch] = useState('')
   const [overOnly, setOverOnly] = useState(false)
+  const [offset, setOffset] = useState(0)
   const [school, setSchool] = useState<UsageSchoolRow | null>(null)
   const [usage, setUsage] = useState<UsageResponse | null>(null)
   const [loading, setLoading] = useState(true)
@@ -66,6 +71,7 @@ export default function BillingPage() {
   const hasUsage = !!usage && (Object.values(usage.totals).some(t => t.quantity > 0) || Object.values(usage.platform).some(q => q > 0))
   const rows = (usage?.schools ?? []).filter(r => r.schoolName.toLowerCase().includes(search.trim().toLowerCase()))
     .filter(r => !overOnly || Object.values(r.charged).some(c => c && c.used > c.included))
+  const start = pageStart(offset, rows.length)
   const platformEmails = usage?.platform['email.sent'] ?? 0
   const cols = 4 + chargedMeters.length
 
@@ -78,7 +84,7 @@ export default function BillingPage() {
         </div>
         <label className="text-xs text-gray-600">Month
           <input data-testid="billing-month" type="month" value={month} max={thisMonth} min={FIRST_MONTH}
-            onChange={e => { const v = e.target.value; if (/^\d{4}-\d{2}$/.test(v) && v >= FIRST_MONTH && v <= thisMonth) setMonth(v) }} className={field} />
+            onChange={e => { const v = e.target.value; if (/^\d{4}-\d{2}$/.test(v) && v >= FIRST_MONTH && v <= thisMonth) { setMonth(v); setOffset(0) } }} className={field} />
         </label>
       </div>
 
@@ -111,9 +117,9 @@ export default function BillingPage() {
 
           <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
             <div className="flex flex-wrap items-center gap-3">
-              <input data-testid="usage-search" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search school" aria-label="Search school"
+              <input data-testid="usage-search" value={search} onChange={e => { setSearch(e.target.value); setOffset(0) }} placeholder="Search school" aria-label="Search school"
                 className="border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white w-56" />
-              <label className="flex items-center gap-2 text-sm text-gray-700"><input data-testid="usage-over-only" type="checkbox" checked={overOnly} onChange={e => setOverOnly(e.target.checked)} /> Over included only</label>
+              <label className="flex items-center gap-2 text-sm text-gray-700"><input data-testid="usage-over-only" type="checkbox" checked={overOnly} onChange={e => { setOverOnly(e.target.checked); setOffset(0) }} /> Over included only</label>
             </div>
             {usage && <p className="text-xs text-gray-500">{monthLabel(usage.month)} · {usage.inProgress ? 'month in progress' : 'month closed'}</p>}
           </div>
@@ -136,7 +142,7 @@ export default function BillingPage() {
                 ))}
                 {!loading && usage && !hasUsage && <tr><td colSpan={cols} className="px-4 py-8 text-center text-gray-500" data-testid="usage-empty">No usage recorded in {monthLabel(usage.month)}.</td></tr>}
                 {!loading && hasUsage && rows.length === 0 && <tr><td colSpan={cols} className="px-4 py-8 text-center text-gray-500" data-testid="usage-no-match">No schools match.</td></tr>}
-                {!loading && hasUsage && rows.map(r => (
+                {!loading && hasUsage && rows.slice(start, start + PAGE_SIZE).map(r => (
                   <tr key={r.schoolId} data-testid={`usage-row-${r.schoolId}`} onClick={() => setSchool(r)} className={`cursor-pointer ${r.deactivated ? 'opacity-60' : ''}`}>
                     <td className="px-4 py-3"><button className="text-left font-semibold text-gray-900 hover:text-purple-700" data-testid={`usage-open-${r.schoolId}`}>{r.schoolName}</button>
                       <p className="text-xs text-gray-500">{r.schoolCode}{r.deactivated ? ' · Deactivated' : ''}</p></td>
@@ -151,6 +157,7 @@ export default function BillingPage() {
                 ))}
               </tbody>
             </table>
+            {!loading && hasUsage && <Pagination offset={start} limit={PAGE_SIZE} total={rows.length} onChange={setOffset} testId="usage-pagination" itemLabel="schools" />}
           </div>
           {!loading && platformEmails > 0 && <p className="mt-2 text-xs text-gray-500" data-testid="usage-platform-line">Platform (not tied to a school): {platformEmails.toLocaleString('en-IN')} emails</p>}
         </>
@@ -174,8 +181,12 @@ function BillsTab({ data, loading, error, month, onReload }: { data: BillsRespon
   const [status, setStatus] = useState<'all' | BillStatus>('all')
   const [paying, setPaying] = useState<number | null>(null)
   const [openId, setOpenId] = useState<number | null>(null)
+  const [offset, setOffset] = useState(0)
+  const [offsetMonth, setOffsetMonth] = useState(month)
+  if (offsetMonth !== month) { setOffsetMonth(month); setOffset(0) } // new month, back to page 1
   const all = data?.bills ?? []
   const bills = all.filter(b => status === 'all' || b.status === status)
+  const start = pageStart(offset, bills.length)
   const overdue = all.filter(b => b.status === 'overdue').length
   const billed = sumRupees(all.map(b => b.total))
   const collected = sumRupees(all.map(b => b.paid))
@@ -200,7 +211,7 @@ function BillsTab({ data, loading, error, month, onReload }: { data: BillsRespon
 
     <div className="flex flex-wrap gap-2 mt-4">
       {STATUS_FILTERS.map(f => (
-        <button key={f.key} data-testid={`bills-filter-${f.key}`} onClick={() => setStatus(f.key)} aria-pressed={status === f.key}
+        <button key={f.key} data-testid={`bills-filter-${f.key}`} onClick={() => { setStatus(f.key); setOffset(0) }} aria-pressed={status === f.key}
           className={`px-3 py-1 rounded-full text-xs border ${status === f.key ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-300 text-gray-700 hover:bg-gray-50'}`}>{f.label}</button>
       ))}
     </div>
@@ -221,7 +232,7 @@ function BillsTab({ data, loading, error, month, onReload }: { data: BillsRespon
           ))}
           {data && all.length === 0 && <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-500" data-testid="bills-empty">No bills for {monthLabel(month)}.</td></tr>}
           {data && all.length > 0 && bills.length === 0 && <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-500" data-testid="bills-no-match">No bills with this status.</td></tr>}
-          {data && bills.map(b => {
+          {data && bills.slice(start, start + PAGE_SIZE).map(b => {
             const left = sumRupees([b.total, -b.paid])
             return [
               <tr key={b.id} data-testid={`bills-row-${b.id}`}>
@@ -245,6 +256,7 @@ function BillsTab({ data, loading, error, month, onReload }: { data: BillsRespon
           })}
         </tbody>
       </table>
+      {data && <Pagination offset={start} limit={PAGE_SIZE} total={bills.length} onChange={setOffset} testId="bills-pagination" itemLabel="bills" />}
     </div>
     {data && <p className="mt-3 text-xs text-gray-500 tabular-nums" data-testid="bills-totals">Billed {inr(billed)} · Collected {inr(collected)} · Outstanding {inr(sumRupees([billed, -collected]))}</p>}
 
