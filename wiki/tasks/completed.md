@@ -6,6 +6,10 @@ All finished features and bug fixes. Most recent first.
 
 <!-- Add new entries at the top -->
 
+### [2026-09-30] — Public privacy policy page (#269)
+**Type:** Feature · **Portal:** Public site
+Static `/privacy` page, public in `proxy.ts`, footer link on the landing page, e2e in `home.spec.ts`. Used as the Google Play privacy policy URL for WLYL Parent.
+
 ## Format
 
 ```

@@ -18,6 +18,7 @@ const PUBLIC_PREFIXES = [
   '/forgot-password',
   '/reset-password',
   '/change-password',
+  '/privacy',
   '/profile-setup',
   '/teacher/login',
   '/teacher/forgot-password',

@@ -37,3 +37,12 @@ test.describe('Home Page — Portal Selection', () => {
     await expect(page).toHaveURL(/\/parent\/login/)
   })
 })
+
+test.describe('Privacy policy (#269)', () => {
+  test('is public and linked from the landing page', async ({ page }) => {
+    await page.goto('/')
+    await page.getByTestId('privacy-link').click()
+    await expect(page).toHaveURL(/\/privacy$/)
+    await expect(page.getByRole('heading', { level: 1 })).toContainText('Privacy Policy')
+  })
+})
