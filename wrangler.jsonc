@@ -2,8 +2,10 @@
 	"$schema": "node_modules/wrangler/config-schema.json",
 	"main": "custom-worker.js",
 	"name": "wlyl",
-	// DB is in Mumbai (Supabase ap-south-1); run the Worker next to it instead of next to the visitor.
-	"placement": { "mode": "smart" },
+	// Supabase (and its pooler) is in AWS ap-south-1, Mumbai. Pin the Worker next to it: every
+	// request makes several sequential DB round trips, so DB distance dominates, not visitor distance.
+	// Smart placement never moved a low-traffic Worker (it ran in Marseille).
+	"placement": { "region": "aws:ap-south-1" },
 	"compatibility_date": "2026-09-18",
 	"compatibility_flags": [
 		"nodejs_compat",
