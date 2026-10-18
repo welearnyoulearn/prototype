@@ -20,7 +20,7 @@ import PortalSidebar from '@/components/portal/PortalSidebar'
 import { Skeleton } from '@/components/ui/skeleton'
 
 // Always-loaded (small, needed immediately)
-import { BookOpen, Bell, Building2, CalendarDays, ChevronDown, ClipboardCheck, Download, GraduationCap, LayoutDashboard, Library, GripVertical, LayoutGrid, ListChecks, Megaphone, MessageSquareText, NotebookPen, Receipt, RefreshCcw, School, Search, SlidersHorizontal, Users, Wallet, Wrench, X } from 'lucide-react'
+import { BookOpen, Bell, Building2, CalendarDays, ChevronDown, ClipboardCheck, Download, GraduationCap, LayoutDashboard, Library, GripVertical, LayoutGrid, LineChart, ListChecks, Megaphone, MessageSquareText, NotebookPen, Receipt, RefreshCcw, School, Search, SlidersHorizontal, Users, Wallet, Wrench, X } from 'lucide-react'
 import Overview from './components/Overview'
 import StaffProfile from './components/StaffProfile'
 
@@ -55,6 +55,7 @@ const SchoolSettings        = dynamic(() => import('./components/SchoolSettings'
 const FeeManagement         = dynamic(() => import('./components/FeeManagement'),          { loading: () => <ModuleSkeleton /> })
 const ExpenseManagement     = dynamic(() => import('./components/ExpenseManagement'),      { loading: () => <ModuleSkeleton /> })
 const YearRollover          = dynamic(() => import('./components/YearRollover'),           { loading: () => <ModuleSkeleton /> })
+const SchoolTraffic         = dynamic(() => import('./components/SchoolTraffic'),          { loading: () => <ModuleSkeleton /> })
 
 type School = {
   id: number
@@ -88,7 +89,7 @@ const NAV_SECTIONS: { label: string; shortLabel?: string; keys: string[]; icon: 
   { label: 'SCHEDULING',    keys: ['attendance', 'academic-calendar', 'exam-schedule'], icon: <CalendarDays className="w-3.5 h-3.5" aria-hidden="true" /> },
   { label: 'ACADEMICS',     keys: ['curriculum', 'syllabus-tracking', 'library'], icon: <BookOpen className="w-3.5 h-3.5" aria-hidden="true" /> },
   { label: 'COMMUNICATION', keys: ['announcements', 'feedback-management'], icon: <Megaphone className="w-3.5 h-3.5" aria-hidden="true" /> },
-  { label: 'TOOLS',         keys: ['settings', 'export', 'year-rollover'], icon: <Wrench className="w-3.5 h-3.5" aria-hidden="true" /> },
+  { label: 'TOOLS',         keys: ['settings', 'export', 'traffic', 'year-rollover'], icon: <Wrench className="w-3.5 h-3.5" aria-hidden="true" /> },
 ]
 
 type NavOrder = { sections: string[]; items: Record<string, string[]> }
@@ -372,6 +373,12 @@ const NAV_ITEMS: NavItem[] = [
     tier: ['basic', 'standard', 'premium'],
     icon: (<RefreshCcw className="w-4 h-4" aria-hidden="true" />),
   },
+  {
+    // Not a plan feature: always on for school admin + principal (see canSeeTraffic).
+    key: 'traffic',
+    label: 'Traffic',
+    icon: (<LineChart className="w-4 h-4" aria-hidden="true" />),
+  },
 ]
 
 
@@ -471,8 +478,10 @@ function SchoolAdmin() {
 
   const requestedFeatureKey = PORTAL_NAV_KEY_ALIASES[requestedNav] ?? requestedNav
   const requestedFeature = ALL_FEATURES.find(feature => feature.key === requestedFeatureKey)
+  const canSeeTraffic = myRole === 'school_admin' || myRole === 'principal'
   const requestedAllowed = requestedNav === 'profile'
     ? myRole === 'principal' || myRole === 'vice_principal'
+    : requestedNav === 'traffic' ? canSeeTraffic
     : enabledFeatures.has(requestedFeatureKey) && (!requestedFeature || requestedFeature.portals.includes('school-admin'))
   const fallbackNav = NAV_ITEMS.find(item => {
     const key = PORTAL_NAV_KEY_ALIASES[item.key] ?? item.key
@@ -601,12 +610,13 @@ function SchoolAdmin() {
   // entry (legacy keys not yet migrated into the catalog) default to visible
   // so nothing existing silently disappears.
   const isSchoolAdminScoped = (key: string) => {
+    if (key === 'traffic') return canSeeTraffic
     const featureKey = PORTAL_NAV_KEY_ALIASES[key] ?? key
     const feature = ALL_FEATURES.find(f => f.key === featureKey)
     return !feature || feature.portals.includes('school-admin')
   }
 
-  const navEnabled = (key: string) => enabledFeatures.has(PORTAL_NAV_KEY_ALIASES[key] ?? key)
+  const navEnabled = (key: string) => key === 'traffic' || enabledFeatures.has(PORTAL_NAV_KEY_ALIASES[key] ?? key)
 
   const enabledNavItems = NAV_ITEMS.filter(item =>
     tier !== 'none' &&
@@ -1116,6 +1126,7 @@ function SchoolAdmin() {
                 {visited.has('profile')          && <div hidden={activeNav !== 'profile'}><StaffProfile /></div>}
                 {visited.has('fee-management')   && <div hidden={activeNav !== 'fee-management'}><FeeManagement schoolId={selectedSchool.id} schoolName={selectedSchool.name} schoolLogoUrl={selectedSchool.logo_url ?? null} schoolLogoAlign={selectedSchool.logo_align ?? 'center'} schoolHeaderBlocks={selectedSchool.receipt_header_blocks ?? []} onGoToYearRollover={() => navigateTo('year-rollover')} /></div>}
                 {visited.has('expenses')         && <div hidden={activeNav !== 'expenses'}><ExpenseManagement schoolId={selectedSchool.id} /></div>}
+                {visited.has('traffic')          && <div hidden={activeNav !== 'traffic'}><SchoolTraffic /></div>}
                 {visited.has('year-rollover')    && <div hidden={activeNav !== 'year-rollover'}><YearRollover schoolId={selectedSchool.id} onGoToFeeYearEnd={() => navigateTo('fee-management')} /></div>}
               </FeaturesProvider>
             )}

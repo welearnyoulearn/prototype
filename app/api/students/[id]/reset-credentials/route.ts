@@ -43,7 +43,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   // Send new credentials via email if student has one
   if (student.email) {
     sendStudentWelcomeEmail({
-      to: student.email, name: student.name, schoolName: student.school_name,
+      schoolId: student.school_id, to: student.email, name: student.name, schoolName: student.school_name,
       rollNumber: student.roll_number, tempPassword,
       loginUrl: `${appUrl}/student/login`,
     }).catch(console.error)
@@ -60,7 +60,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   )
   for (const parent of parentRes.rows) {
     sendChildCredentialsToParentEmail({
-      to: parent.email, parentName: parent.name || parent.email,
+      schoolId: student.school_id, to: parent.email, parentName: parent.name || parent.email,
       studentName: student.name, schoolName: student.school_name,
       rollNumber: student.roll_number, tempPassword,
       loginUrl: `${appUrl}/student/login`,

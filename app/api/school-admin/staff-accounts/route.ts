@@ -170,6 +170,7 @@ export async function POST(req: NextRequest) {
       name: full_name.trim(),
       roleLabel: ROLE_LABELS[role] || role,
       schoolName,
+      schoolId,
       inviteUrl: `${appUrl}/reset-password?token=${token}`,
       hours: INVITE_LINK_HOURS,
     }).catch(console.error)

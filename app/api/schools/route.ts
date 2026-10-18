@@ -132,7 +132,7 @@ export async function POST(req: NextRequest) {
     const resetUrl = `${process.env.APP_URL || 'https://welearnyoulearn.com'}/reset-password?token=${token}`
     let setupEmailSent = false
     try {
-      await sendPasswordResetEmail({ to: email.trim(), name: school.name, resetUrl })
+      await sendPasswordResetEmail({ to: email.trim(), name: school.name, resetUrl, schoolId: school.id })
       setupEmailSent = true
     } catch (err) {
       console.error('[email/onboarding] Failed:', err instanceof Error ? err.message : err)

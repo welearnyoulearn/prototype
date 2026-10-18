@@ -161,7 +161,7 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
     const schoolRes = await pool.query('SELECT name FROM schools WHERE id = $1', [student.school_id])
     const schoolName = schoolRes.rows[0]?.name || 'Your School'
 
-    if (student.email) sendStudentRemovedEmail({ to: student.email, name: student.name, schoolName }).catch(console.error)
+    if (student.email) sendStudentRemovedEmail({ to: student.email, name: student.name, schoolName, schoolId: student.school_id }).catch(console.error)
     if (student.phone) {
       sendWhatsappMessage({
         schoolId: student.school_id, to: student.phone, templateName: 'student_removed', recipientName: student.name,
@@ -177,7 +177,7 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
       const parentDisplayName = parent.name || parent.email || parent.phone || 'there'
       if (parent.email) {
         sendParentStudentRemovedEmail({
-          to: parent.email, parentName: parentDisplayName, studentName: student.name, schoolName,
+          schoolId: student.school_id, to: parent.email, parentName: parentDisplayName, studentName: student.name, schoolName,
         }).catch(console.error)
       }
       if (parent.phone) {
