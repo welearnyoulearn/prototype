@@ -14,6 +14,7 @@
 import { z } from 'zod'
 import { SignJWT, importPKCS8 } from 'jose'
 import pool from '@/lib/db'
+import { pushLinkFor, type PushRole } from '@/lib/pushLinks'
 
 const serviceAccountSchema = z.object({
   project_id: z.string().min(1),
@@ -146,13 +147,14 @@ type PendingRow = {
   title: string | null
   message: string | null
   school_id: number | null
+  data: unknown
   recipient_teacher_id: number | null
   recipient_student_id: number | null
   recipient_parent_id: number | null
   recipient_school_id: number | null
 }
 
-function recipientOf(r: PendingRow): { role: string; id: number } | null {
+function recipientOf(r: PendingRow): { role: PushRole; id: number } | null {
   if (r.recipient_teacher_id) return { role: 'teacher', id: r.recipient_teacher_id }
   if (r.recipient_student_id) return { role: 'student', id: r.recipient_student_id }
   if (r.recipient_parent_id) return { role: 'parent', id: r.recipient_parent_id }
@@ -181,7 +183,7 @@ export async function dispatchPendingPushes(limit = 100): Promise<number> {
           SELECT id FROM notifications WHERE push_sent_at IS NULL
           ORDER BY id LIMIT $1 FOR UPDATE SKIP LOCKED
         )
-        RETURNING id, type, title, message, school_id,
+        RETURNING id, type, title, message, school_id, data,
                   recipient_teacher_id, recipient_student_id, recipient_parent_id, recipient_school_id`,
       [limit]
     )
@@ -202,16 +204,22 @@ export async function dispatchPendingPushes(limit = 100): Promise<number> {
       tokensByRecipient.set(key, [...(tokensByRecipient.get(key) ?? []), d.token])
     }
 
-    const jobs = targets.flatMap(t =>
-      (tokensByRecipient.get(`${t.role}:${t.id}`) ?? []).map(token => ({
+    const jobs = targets.flatMap(t => {
+      // Deep link for the installed parent app; other portals have none.
+      const link = pushLinkFor(t.role, t.row.type, t.row.data)
+      return (tokensByRecipient.get(`${t.role}:${t.id}`) ?? []).map(token => ({
         token,
         message: {
           title: t.row.title ?? 'New notification',
           body: (t.row.message ?? '').slice(0, BODY_MAX),
-          data: { notification_id: String(t.row.id), type: t.row.type },
+          data: {
+            notification_id: String(t.row.id),
+            type: t.row.type,
+            ...(link ? { url: link } : {}),
+          },
         } satisfies PushMessage,
       }))
-    )
+    })
 
     let sent = 0
     const dead: string[] = []
