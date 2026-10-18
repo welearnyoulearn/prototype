@@ -15,12 +15,13 @@ import { useSectionNav } from '@/lib/useSectionNav'
 import { getUsageSessionId, clearUsageSessionId } from '@/lib/usageSession'
 import { PORTAL_NAV_KEY_ALIASES } from '@/lib/features'
 import NotificationBell from '../components/NotificationBell'
-import { useNavNotificationCounts, NavBadge } from '../components/navNotifications'
+import { useNavNotifications, NavBadge } from '../components/navNotifications'
 import TestCalendar from '../components/TestCalendar'
 import AttendanceCalendar from '../components/AttendanceCalendar'
 import SchoolCalendarView from '../components/SchoolCalendarView'
 import PortalSidebar from '@/components/portal/PortalSidebar'
-import { CalendarDays, Phone } from 'lucide-react'
+import FeatureLauncher, { type LauncherSection } from '@/components/portal/FeatureLauncher'
+import { CalendarDays, Home, GraduationCap, LayoutGrid, Phone, School, UserRound } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 
 // Used by printParentReceipt below — fee category names (admin-set),
@@ -244,7 +245,8 @@ function ParentDashboard() {
   }
 
   const [sidebarOpen, setSidebarOpen] = useState(false)
-  const navCounts = useNavNotificationCounts('parent')
+  const { counts: navCounts, latest: navLatest } = useNavNotifications('parent')
+  const [launcherOpen, setLauncherOpen] = useState(false)
 
   const [lang, setLang] = useState<Lang>('en')
   useEffect(() => {
@@ -582,6 +584,36 @@ function ParentDashboard() {
   const latestPct = latestResult?.total_obtained !== null && latestResult?.total_max
     ? Math.round((latestResult.total_obtained! / latestResult.total_max!) * 100) : null
 
+  // "All features" window: the same visible items as the sidebar, grouped by purpose. Fees and Results
+  // carry the same overdue / to-sign counts the sidebar badges show (not the raw notification counts).
+  const visibleNav = NAV.filter(item => isNavItemVisible(item.key))
+  const launcherItem = (key: string) => {
+    const item = visibleNav.find(i => i.key === key)
+    return item ? [{
+      key,
+      label: T.nav[key as keyof typeof T.nav],
+      icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={item.icon} /></svg>,
+    }] : []
+  }
+  const launcherSections: LauncherSection[] = ([
+    { id: 'home', label: T.navGroups.home, icon: <Home className="w-3.5 h-3.5" aria-hidden="true" />, keys: ['overview'] },
+    { id: 'learning', label: T.navGroups.learning, icon: <GraduationCap className="w-3.5 h-3.5" aria-hidden="true" />, keys: ['attendance', 'results', 'exams', 'syllabus', 'library'] },
+    { id: 'school', label: T.navGroups.school, icon: <School className="w-3.5 h-3.5" aria-hidden="true" />, keys: ['calendar', 'fees'] },
+    { id: 'account', label: T.navGroups.account, icon: <UserRound className="w-3.5 h-3.5" aria-hidden="true" />, keys: ['profile'] },
+  ] as const)
+    .map(section => ({ id: section.id, label: section.label, icon: section.icon, items: section.keys.flatMap(launcherItem) }))
+    .filter(section => section.items.length > 0)
+  const launcherCounts: Record<string, number> = {
+    ...navCounts,
+    fees: feeSummary?.overdue_count ?? 0,
+    results: summary?.unacknowledged_count ?? 0,
+  }
+  const launcherHints: Record<string, string> = {
+    ...((feeSummary?.overdue_count ?? 0) > 0 ? { fees: T.feeOverdue(feeSummary!.overdue_count) } : {}),
+    ...((summary?.unacknowledged_count ?? 0) > 0 ? { results: T.resultsToSign(summary!.unacknowledged_count) } : {}),
+  }
+  const totalUnread = visibleNav.reduce((n, i) => n + (launcherCounts[i.key] ?? 0), 0)
+
   return (
     <div className="portal-root" data-portal="parent">
       <a href="#parent-content" className="portal-skip-link">Skip to content</a>
@@ -650,6 +682,31 @@ function ParentDashboard() {
             <p className="mt-1 text-xs text-muted-foreground">{parentInfo?.school_name}</p>
           </div>
           <nav className="flex-1 overflow-y-auto p-3" aria-label={lang === 'te' ? 'నావిగేషన్' : 'Parent workspace'}>
+          {/* All-features window: every icon + name, grouped, one click to open */}
+          <div className="pb-3">
+            <button
+              type="button"
+              onClick={() => setLauncherOpen(true)}
+              data-testid="nav-launcher"
+              aria-haspopup="dialog"
+              className="flex h-10 w-full items-center gap-2.5 rounded-lg border border-[#c5d8c8] bg-[#dce9dc] px-3 text-[14px] font-semibold text-[#173e2f] transition-colors hover:bg-[#cfe1d0] focus-visible:outline-2 focus-visible:outline-[#235b46]"
+            >
+              <LayoutGrid className="h-5 w-5 flex-shrink-0" aria-hidden="true" />
+              <span className="flex-1 text-left">{T.allFeatures}</span>
+              <NavBadge navKey="launcher" count={totalUnread} className="!ml-0" />
+            </button>
+            <FeatureLauncher
+              open={launcherOpen}
+              onOpenChange={setLauncherOpen}
+              sections={launcherSections}
+              activeNav={activeNav}
+              counts={launcherCounts}
+              latest={navLatest}
+              hints={launcherHints}
+              text={{ title: T.allFeatures, findPlaceholder: T.findFeature, close: T.closeAllFeatures, whatsNew: T.whatsNew, unread: T.unreadCount, more: T.moreCount, noMatch: T.noFeatureMatch }}
+              onSelect={navigateTo}
+            />
+          </div>
           {NAV.filter(item => isNavItemVisible(item.key)).map(item => (
             <button key={item.key} onClick={() => navigateTo(item.key)} aria-current={activeNav === item.key ? 'page' : undefined}
               className="portal-nav-item">

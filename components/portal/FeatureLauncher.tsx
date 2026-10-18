@@ -6,17 +6,41 @@ import { Bell, Search, X } from 'lucide-react'
 import type { NavNote } from '@/app/components/navNotifications'
 
 export type LauncherItem = { key: string; label: string; icon: ReactNode }
-export type LauncherSection = { label: string; icon: ReactNode; items: LauncherItem[] }
+/** `id` keeps test ids stable when `label` is translated. */
+export type LauncherSection = { id?: string; label: string; icon: ReactNode; items: LauncherItem[] }
+
+/** Window copy — defaults to English; portals with a language switch pass their own. */
+export type LauncherText = {
+  title: string
+  findPlaceholder: string
+  close: string
+  whatsNew: string
+  unread: (n: number) => string
+  more: (n: number) => string
+  noMatch: (query: string) => string
+}
+const DEFAULT_TEXT: LauncherText = {
+  title: 'All features',
+  findPlaceholder: 'Find a feature…',
+  close: 'Close all features',
+  whatsNew: "What's new",
+  unread: n => `${n} unread`,
+  more: n => `+${n} more`,
+  noMatch: q => `No features match “${q}”.`,
+}
 
 // "All features" window: every feature the portal offers, as icon + name tiles grouped by section,
 // so anyone can jump anywhere in one click without expanding the sidebar sections.
-export default function FeatureLauncher({ open, onOpenChange, sections, activeNav, counts, latest, onSelect }: {
+export default function FeatureLauncher({ open, onOpenChange, sections, activeNav, counts, latest, hints = {}, text = DEFAULT_TEXT, onSelect }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   sections: LauncherSection[]
   activeNav: string
   counts: Record<string, number>
   latest: Record<string, NavNote[]>
+  /** Subtitle for a feature with updates that has no notification text (e.g. "2 overdue"). */
+  hints?: Record<string, string>
+  text?: LauncherText
   onSelect: (key: string) => void
 }) {
   const [query, setQuery] = useState('')
@@ -42,20 +66,20 @@ export default function FeatureLauncher({ open, onOpenChange, sections, activeNa
           className="fixed left-1/2 top-1/2 z-[101] flex max-h-[85vh] w-[min(760px,calc(100vw-24px))] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-2xl border border-[#dce2db] bg-[#fbfcfa] shadow-2xl"
         >
           <div className="flex items-center gap-3 border-b border-[#dce2db] px-4 py-3">
-            <Dialog.Title className="text-base font-semibold text-[#202a25]">All features</Dialog.Title>
+            <Dialog.Title className="text-base font-semibold text-[#202a25]">{text.title}</Dialog.Title>
             <div className="relative ml-auto w-full max-w-xs">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#7a867e]" aria-hidden="true" />
               <input
                 type="search"
                 value={query}
                 onChange={e => setQuery(e.target.value)}
-                placeholder="Find a feature…"
-                aria-label="Find a feature"
+                placeholder={text.findPlaceholder}
+                aria-label={text.findPlaceholder}
                 data-testid="launcher-search"
                 className="h-9 w-full rounded-lg border border-[#dce2db] bg-white pl-9 pr-3 text-[13px] text-[#3b4a40] placeholder:text-[#7a867e] focus-visible:outline-2 focus-visible:outline-[#235b46]"
               />
             </div>
-            <Dialog.Close className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg text-[#47574c] hover:bg-[#e3ece4] focus-visible:outline-2 focus-visible:outline-[#235b46]" aria-label="Close all features" data-testid="launcher-close">
+            <Dialog.Close className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg text-[#47574c] hover:bg-[#e3ece4] focus-visible:outline-2 focus-visible:outline-[#235b46]" aria-label={text.close} data-testid="launcher-close">
               <X className="h-5 w-5" aria-hidden="true" />
             </Dialog.Close>
           </div>
@@ -64,8 +88,8 @@ export default function FeatureLauncher({ open, onOpenChange, sections, activeNa
               <section aria-label="Updates" data-testid="launcher-updates" className="rounded-xl border border-red-200 bg-red-50/60 p-3">
                 <div className="mb-2 flex items-center gap-2">
                   <span className="flex h-6 w-6 items-center justify-center rounded-md bg-red-500 text-white"><Bell className="h-3.5 w-3.5" aria-hidden="true" /></span>
-                  <h3 className="text-[11px] font-bold uppercase tracking-[.08em] text-red-800">What&apos;s new</h3>
-                  <span className="text-xs font-semibold text-red-700">{totalUpdates} unread</span>
+                  <h3 className="text-[11px] font-bold uppercase tracking-[.08em] text-red-800">{text.whatsNew}</h3>
+                  <span className="text-xs font-semibold text-red-700">{text.unread(totalUpdates)}</span>
                 </div>
                 <ul className="space-y-1.5">
                   {updates.map(item => {
@@ -83,7 +107,7 @@ export default function FeatureLauncher({ open, onOpenChange, sections, activeNa
                           <span className="min-w-0 flex-1">
                             <span className="block truncate text-[13px] font-semibold text-[#202a25]">{item.label}</span>
                             <span className="block truncate text-xs text-[#55635a]">
-                              {notes[0]?.title}{more > 0 ? ` · +${more} more` : notes.length > 1 ? ` · +${notes.length - 1} more` : ''}
+                              {notes[0]?.title ?? hints[item.key]}{more > 0 ? ` · ${text.more(more)}` : notes.length > 1 ? ` · ${text.more(notes.length - 1)}` : ''}
                             </span>
                           </span>
                           <span className="flex flex-shrink-0 items-center gap-1 rounded-full bg-red-500 px-2 py-0.5 text-[11px] font-bold text-white">
@@ -96,9 +120,9 @@ export default function FeatureLauncher({ open, onOpenChange, sections, activeNa
                 </ul>
               </section>
             )}
-            {filtered.length === 0 && <p className="py-8 text-center text-sm text-[#55635a]" data-testid="launcher-empty">No features match “{query.trim()}”.</p>}
+            {filtered.length === 0 && <p className="py-8 text-center text-sm text-[#55635a]" data-testid="launcher-empty">{text.noMatch(query.trim())}</p>}
             {filtered.map(section => (
-              <section key={section.label} aria-label={section.label} data-testid={`launcher-section-${section.label.toLowerCase()}`}>
+              <section key={section.id ?? section.label} aria-label={section.label} data-testid={`launcher-section-${(section.id ?? section.label).toLowerCase()}`}>
                 <div className="mb-2 flex items-center gap-2">
                   <span className="flex h-6 w-6 items-center justify-center rounded-md bg-[#dce9dc] text-[#235b46] ring-1 ring-[#c5d8c8]">{section.icon}</span>
                   <h3 className="text-[11px] font-bold uppercase tracking-[.08em] text-[#3b4a40]">{section.label}</h3>
@@ -113,7 +137,7 @@ export default function FeatureLauncher({ open, onOpenChange, sections, activeNa
                         type="button"
                         onClick={() => go(item.key)}
                         data-testid={`launcher-${item.key}`}
-                        title={(latest[item.key] ?? []).map(n => n.title).join(' • ') || undefined}
+                        title={(latest[item.key] ?? []).map(n => n.title).join(' • ') || hints[item.key] || undefined}
                         aria-current={isActive ? 'page' : undefined}
                         className={`relative flex flex-col items-center gap-2 rounded-xl border p-3 text-center transition-colors hover:border-[#235b46]/40 hover:bg-[#edf2eb] focus-visible:outline-2 focus-visible:outline-[#235b46] ${isActive ? 'border-[#235b46] bg-[#dce9dc]' : 'border-[#dce2db] bg-white'}`}
                       >
