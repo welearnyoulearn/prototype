@@ -26,9 +26,25 @@ export function navBadgeKey(type: string, portal: NotificationPortal): string | 
 
 const POLL_MS = 30_000
 
+export type NavNote = { id: number; title: string; message: string | null; createdAt: string }
+export type NavNotifications = {
+  /** Unread count per sidebar nav key, e.g. { 'exam-schedule': 3 }. */
+  counts: Record<string, number>
+  /** Newest few unread notifications per nav key, for "what's new" previews. */
+  latest: Record<string, NavNote[]>
+}
+
+const LATEST_PER_KEY = 3
+const NO_NOTIFICATIONS: NavNotifications = { counts: {}, latest: {} }
+
 /** Unread notification count per sidebar nav key, e.g. { 'exam-schedule': 3 }. */
 export function useNavNotificationCounts(portal: NotificationPortal, enabled = true): Record<string, number> {
-  const [counts, setCounts] = useState<Record<string, number>>({})
+  return useNavNotifications(portal, enabled).counts
+}
+
+/** Counts plus the newest unread notifications per sidebar nav key (one poll serves both). */
+export function useNavNotifications(portal: NotificationPortal, enabled = true): NavNotifications {
+  const [data, setData] = useState<NavNotifications>(NO_NOTIFICATIONS)
 
   const load = useCallback(async () => {
     try {
@@ -36,12 +52,18 @@ export function useNavNotificationCounts(portal: NotificationPortal, enabled = t
       if (!res.ok) return
       const rows: unknown = await res.json()
       if (!Array.isArray(rows)) return
-      const next: Record<string, number> = {}
-      for (const row of rows as { type?: string }[]) {
+      const counts: Record<string, number> = {}
+      const latest: Record<string, NavNote[]> = {}
+      const sorted = [...(rows as { id: number; type?: string; title?: string | null; message?: string | null; created_at?: string }[])]
+        .sort((a, b) => new Date(b.created_at ?? 0).getTime() - new Date(a.created_at ?? 0).getTime())
+      for (const row of sorted) {
         const key = row.type ? navBadgeKey(row.type, portal) : undefined
-        if (key) next[key] = (next[key] ?? 0) + 1
+        if (!key) continue
+        counts[key] = (counts[key] ?? 0) + 1
+        const list = (latest[key] ??= [])
+        if (list.length < LATEST_PER_KEY) list.push({ id: row.id, title: row.title || row.type || 'Update', message: row.message ?? null, createdAt: row.created_at ?? '' })
       }
-      setCounts(next)
+      setData({ counts, latest })
     } catch { /* badges are a convenience; never surface a failure */ }
   }, [portal])
 
@@ -58,7 +80,7 @@ export function useNavNotificationCounts(portal: NotificationPortal, enabled = t
     }
   }, [enabled, load])
 
-  return counts
+  return data
 }
 
 /** Small count pill shown at the right edge of a sidebar item. Renders nothing for 0. */
