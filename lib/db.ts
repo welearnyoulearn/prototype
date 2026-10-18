@@ -135,7 +135,7 @@ const BOOTSTRAP_MARKER_KEY   = 'initial_schema_bootstrap'
 // silently never runs anywhere, and you will chase a "column does not exist" 500
 // that reproduces on production but never locally against a fresh DB.
 // Adding a migration statement and bumping this number is ONE change, not two.
-const SCHEMA_VERSION = 53
+const SCHEMA_VERSION = 54
 
 // Records the schema level this build finished applying, on the same row as the
 // bootstrap marker (no extra row, no extra round-trip to read it back).
@@ -395,7 +395,13 @@ export async function initDB() {
     );
   `)
 
-  // Run each migration individually so one failure doesn't block others
+  // Run each migration individually so one failure doesn't block others.
+  // ⚠️ FRESH-DATABASE ONLY: this array runs only when a database is first
+  // bootstrapped — an existing database never reaches this code again. Never add
+  // to it; anything appended here after a DB was bootstrapped silently never
+  // reaches that DB (#397: production was missing ~50 indexes and the textbook
+  // tables this way). New schema goes in a new block at the bottom of
+  // runIncrementalMigrations() together with a SCHEMA_VERSION bump.
   const migrations = [
     `ALTER TABLE teachers ADD COLUMN IF NOT EXISTS employee_id VARCHAR(50)`,
     `ALTER TABLE teachers ADD COLUMN IF NOT EXISTS department VARCHAR(100)`,
@@ -451,9 +457,10 @@ export async function initDB() {
       UNIQUE(student_id, date, class_id, session)  -- per-session uniqueness
     )`,
     `ALTER TABLE students ADD COLUMN IF NOT EXISTS parent_email VARCHAR(255)`,
-    // If table already existed with old constraint, add session column + new unique index
+    // If table already existed with old constraint, add the session column. Per-session
+    // uniqueness is the table's UNIQUE constraint above (the old duplicate
+    // attendance_session_unique index is dropped in the #397 block).
     `ALTER TABLE attendance ADD COLUMN IF NOT EXISTS session VARCHAR(20) DEFAULT 'morning'`,
-    `CREATE UNIQUE INDEX IF NOT EXISTS attendance_session_unique ON attendance(student_id, date, class_id, session)`,
     // Track when attendance was last marked/updated for "already marked by" feature
     `ALTER TABLE attendance ADD COLUMN IF NOT EXISTS marked_at TIMESTAMPTZ DEFAULT NOW()`,
     // Widen roll_number column to fit generated IDs like wlyl-stu-{slug}-{num}
@@ -779,7 +786,6 @@ export async function initDB() {
       nudged_by INTEGER REFERENCES teachers(id) ON DELETE SET NULL,
       nudged_at TIMESTAMPTZ DEFAULT NOW()
     )`,
-    `CREATE INDEX IF NOT EXISTS idx_exam_records_class ON exam_records(class_id, school_id)`,
     `CREATE INDEX IF NOT EXISTS idx_exam_records_group ON exam_records(exam_group_id)`,
     `CREATE INDEX IF NOT EXISTS idx_exam_marks_student ON exam_marks(student_id, exam_id)`,
     `CREATE INDEX IF NOT EXISTS idx_parent_mark_ack_nudges_exam_student ON parent_mark_ack_nudges(exam_id, student_id)`,
@@ -1003,9 +1009,7 @@ export async function initDB() {
       status VARCHAR(20) NOT NULL DEFAULT 'pending', -- pending|paid|partial|overdue|waived
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`,
-    `CREATE INDEX IF NOT EXISTS idx_fee_ledger_student ON student_fee_ledger(student_id)`,
     `CREATE INDEX IF NOT EXISTS idx_fee_ledger_school ON student_fee_ledger(school_id, status)`,
-    `CREATE INDEX IF NOT EXISTS idx_fee_ledger_year ON student_fee_ledger(school_id, academic_year)`,
     `ALTER TABLE student_fee_ledger ADD COLUMN IF NOT EXISTS waiver_amount NUMERIC(10,2) NOT NULL DEFAULT 0`,
 
     `CREATE TABLE IF NOT EXISTS fee_payments (
@@ -1257,7 +1261,6 @@ export async function initDB() {
       updated_at TIMESTAMPTZ DEFAULT NOW(),
       UNIQUE(school_id, feature_key)
     )`,
-    `CREATE INDEX IF NOT EXISTS idx_school_feature_overrides_school ON school_feature_overrides(school_id)`,
 
     // ── Cashfree configuration (per school) ───────────────────────────────────────
     // Schools connect their own Cashfree account — money flows school → bank directly.
@@ -1432,7 +1435,6 @@ export async function initDB() {
       created_at TIMESTAMPTZ DEFAULT NOW(),
       updated_at TIMESTAMPTZ DEFAULT NOW()
     )`,
-    `CREATE INDEX IF NOT EXISTS idx_saas_invoices_school ON saas_invoices(school_id, status)`,
     `CREATE INDEX IF NOT EXISTS idx_saas_invoices_status ON saas_invoices(status, due_date)`,
 
     // ── SaaS invoice line items ───────────────────────────────────────────────────
@@ -1573,7 +1575,6 @@ const SYLLABUS_SCHEMA: string[] = [
       created_at TIMESTAMPTZ DEFAULT NOW(),
       UNIQUE(school_id, grade, subject_name, academic_year)
     )`,
-    `CREATE INDEX IF NOT EXISTS idx_school_subjects_school ON school_subjects(school_id)`,
     // Copied from master_subjects.category at subscribe time — kept as its
     // own column (not a live join) since master_subjects rows can change or
     // be deleted after a school has already subscribed.
@@ -1644,7 +1645,6 @@ const SYLLABUS_SCHEMA: string[] = [
       created_at TIMESTAMPTZ DEFAULT NOW(),
       UNIQUE(class_id, school_topic_id)
     )`,
-    `CREATE INDEX IF NOT EXISTS idx_school_topic_progress_class ON school_topic_progress(class_id)`,
 
     // Progress-tracking fields the syllabus GET/PATCH routes select — must
     // exist alongside the table itself (the CREATE above predates them).
@@ -1825,10 +1825,16 @@ const SYLLABUS_SCHEMA: string[] = [
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       PRIMARY KEY (school_id, academic_year, kind)
     )`,
-    // Why a year was closed with students still on Leave Open.
-    `ALTER TABLE fee_year_close ADD COLUMN IF NOT EXISTS close_reason TEXT`,
+    // close_reason (why a year was closed with students still on Leave Open) now lives in
+    // fee_year_close's CREATE TABLE — this ALTER ran before that table existed on a fresh DB.
 ]
 
+// HOW TO ADD A MIGRATION: append a NEW block at the BOTTOM of this function and
+// bump SCHEMA_VERSION in the same change. Never add to an older block or to the
+// fresh-DB-only `migrations` array in initDB(): an up-to-date database skips this
+// whole function until SCHEMA_VERSION goes up, so a statement slipped into old
+// code without a bump never runs on production (the #397 schema drift).
+// Every statement must be idempotent (IF NOT EXISTS / IF EXISTS).
 async function runIncrementalMigrations() {
   // Syllabus system (master_* + school_*) — idempotent, safe on fresh and existing DBs
   for (const stmt of SYLLABUS_SCHEMA) await pool.query(stmt)
@@ -2001,6 +2007,7 @@ async function runIncrementalMigrations() {
       reopened_by    TEXT,
       reopened_at    TIMESTAMPTZ,
       reopen_reason  TEXT,
+      close_reason   TEXT,
       UNIQUE(school_id, academic_year)
     )
   `)
@@ -2353,9 +2360,6 @@ async function runIncrementalMigrations() {
       UNIQUE(school_id, feature_key)
     )
   `).catch(() => {})
-  await pool.query(`
-    CREATE INDEX IF NOT EXISTS idx_school_feature_overrides_school ON school_feature_overrides(school_id)
-  `).catch(() => {})
 
   // ── Student/parent portal feature keys ────────────────────────────────────────
   // Tier default: Basic = off, Standard/Premium = on. These two keys are no
@@ -2661,7 +2665,6 @@ async function runIncrementalMigrations() {
       UNIQUE(school_id, day, actor_role)
     )
   `).catch(() => {})
-  await pool.query(`CREATE INDEX IF NOT EXISTS idx_usage_rollup_school_day ON usage_daily_rollup(school_id, day DESC)`).catch(() => {})
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_usage_rollup_day ON usage_daily_rollup(day DESC)`).catch(() => {})
 
   // ── Feature-level usage — which module/tab each portal actually opens ──
@@ -2702,7 +2705,6 @@ async function runIncrementalMigrations() {
       UNIQUE(school_id, day, portal, nav_key, actor_role)
     )
   `).catch(() => {})
-  await pool.query(`CREATE INDEX IF NOT EXISTS idx_feature_rollup_school_day ON feature_usage_daily_rollup(school_id, day DESC)`).catch(() => {})
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_feature_rollup_key_day ON feature_usage_daily_rollup(nav_key, day DESC)`).catch(() => {})
 
   // ── Teacher uniqueness — was app-level-only (SELECT-then-INSERT), so two
@@ -2848,7 +2850,6 @@ async function runIncrementalMigrations() {
       UNIQUE(class_id, school_chapter_id)
     )
   `).catch(() => {})
-  await pool.query(`CREATE INDEX IF NOT EXISTS idx_class_chapter_visibility_class ON class_chapter_visibility(class_id)`).catch(() => {})
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS class_topic_visibility (
@@ -2861,7 +2862,6 @@ async function runIncrementalMigrations() {
       UNIQUE(class_id, school_topic_id)
     )
   `).catch(() => {})
-  await pool.query(`CREATE INDEX IF NOT EXISTS idx_class_topic_visibility_class ON class_topic_visibility(class_id)`).catch(() => {})
 
   // Tracks whether a teacher has completed setup at least once for a
   // (class, subject) pair — GET /api/syllabus/setup reads this to tell the
@@ -3326,8 +3326,6 @@ async function runIncrementalMigrations() {
       UNIQUE(exam_id, student_id)
     )
   `).catch(() => {})
-  await pool.query(`CREATE INDEX IF NOT EXISTS idx_exam_applicable_students_exam ON exam_applicable_students(exam_id)`).catch(() => {})
-  await pool.query(`CREATE INDEX IF NOT EXISTS idx_exam_applicable_students_student ON exam_applicable_students(student_id)`).catch(() => {})
 
   // Dedup log for the 7-day / 1-day / exam-day reminder cron — without this,
   // a cron re-run on the same day (a manual trigger, a retry after a
@@ -3809,7 +3807,6 @@ async function runIncrementalMigrations() {
     END $$
   `)
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_exam_applicable_students_student_exam ON exam_applicable_students(student_id, exam_id)`)
-  await pool.query(`CREATE INDEX IF NOT EXISTS idx_exam_marks_exam_student ON exam_marks(exam_id, student_id)`)
   // A school or staff account must remain deletable after marks have been
   // entered. The original FK used the implicit NO ACTION policy, leaving
   // exam_marks as an unexpected blocker even though entered_by is nullable.
@@ -4070,4 +4067,183 @@ async function runIncrementalMigrations() {
       failed JSONB NOT NULL DEFAULT '[]'
     );
   `)
+
+  // ── #397: schema-drift repair + index pass (SCHEMA_VERSION 54) ──────────────
+  // Production had skipped objects declared in the fresh-DB-only `migrations`
+  // array (see the warning there), so this block re-declares the ones still
+  // needed, adds indexes for the hot/unindexed paths found in the #397 audit,
+  // and drops exact/prefix duplicates that only cost writes.
+  //
+  // CONCURRENTLY so live tables are never write-locked. It cannot run inside a
+  // transaction block, so each statement is its own single-statement
+  // pool.query (never batched into one multi-statement string). A failed
+  // concurrent build leaves an INVALID index behind that IF NOT EXISTS would
+  // then treat as present forever, so a failure drops it again; the next
+  // SCHEMA_VERSION bump (or a manual run) retries.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS textbook_library (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      grade VARCHAR(10) NOT NULL,
+      subject VARCHAR(100) NOT NULL,
+      book_title VARCHAR(255),
+      file_name VARCHAR(255) NOT NULL,
+      file_path VARCHAR(500),
+      total_chunks INTEGER DEFAULT 0,
+      total_chars INTEGER DEFAULT 0,
+      uploaded_by_name VARCHAR(100),
+      uploaded_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(school_id, grade, subject, file_name)
+    )
+  `).catch(err => console.error('[migration #397] textbook_library:', err.message))
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS textbook_chunks (
+      id SERIAL PRIMARY KEY,
+      textbook_id INTEGER NOT NULL REFERENCES textbook_library(id) ON DELETE CASCADE,
+      school_id INTEGER NOT NULL,
+      grade VARCHAR(10) NOT NULL,
+      subject VARCHAR(100) NOT NULL,
+      chunk_index INTEGER NOT NULL,
+      content TEXT NOT NULL,
+      page_hint INTEGER
+    )
+  `).catch(err => console.error('[migration #397] textbook_chunks:', err.message))
+
+  // Variable-fee assignments are unique per (category, student, academic year).
+  // Production still carried the original (student_id, fee_category_id) key,
+  // which blocked assigning the same fee to a student in a second year. The
+  // to_regclass check also accepts a pre-existing plain unique index of that name.
+  await pool.query(`
+    ALTER TABLE student_fee_category_assignments
+      DROP CONSTRAINT IF EXISTS student_fee_category_assignments_student_id_fee_category_id_key
+  `).catch(err => console.error('[migration #397] sfca old key:', err.message))
+  await pool.query(`
+    DO $$ BEGIN
+      IF to_regclass('sfca_cat_student_year_unique') IS NULL THEN
+        ALTER TABLE student_fee_category_assignments
+          ADD CONSTRAINT sfca_cat_student_year_unique UNIQUE (fee_category_id, student_id, academic_year);
+      END IF;
+    END $$
+  `).catch(err => console.error('[migration #397] sfca_cat_student_year_unique:', err.message))
+
+  const indexes = [
+    // Drift repair — declared in `migrations` but absent on production.
+    `idx_textbook_library_school ON textbook_library(school_id, grade, subject)`,
+    `idx_textbook_chunks_book ON textbook_chunks(textbook_id, chunk_index)`,
+    `idx_textbook_chunks_school ON textbook_chunks(school_id, grade, subject)`,
+    `idx_textbook_chunks_fts ON textbook_chunks USING GIN (to_tsvector('english', content))`,
+    `idx_fee_payments_student ON fee_payments(student_id)`,
+    `idx_fee_payments_school ON fee_payments(school_id, paid_date DESC)`,
+    `idx_ai_chat_sessions_student ON ai_chat_sessions(student_id, created_at DESC)`,
+    `idx_audit_log_actor ON platform_audit_log(actor_id)`,
+    `idx_audit_log_entity ON platform_audit_log(entity_type, entity_id)`,
+    `idx_billing_cycles_school ON billing_cycles(school_id, status)`,
+    `idx_class_timetable_modes_school ON class_timetable_modes(school_id)`,
+    `idx_class_timetable_teacher_slot ON class_timetable(school_id, teacher_id, day_of_week, period_number) WHERE teacher_id IS NOT NULL AND is_break = FALSE`,
+    `idx_classes_deleted ON classes(deleted_at) WHERE deleted_at IS NOT NULL`,
+    `idx_display_tokens_school ON display_tokens(school_id)`,
+    `idx_doubt_messages_doubt ON doubt_messages(doubt_id, created_at)`,
+    `idx_doubts_status ON doubts(status, school_id)`,
+    `idx_doubts_student ON doubts(student_id)`,
+    `idx_exam_marks_student ON exam_marks(student_id, exam_id)`,
+    `idx_portal_activity_student ON student_portal_activity(student_id, created_at DESC)`,
+    `idx_portal_sessions_student ON student_portal_sessions(student_id, started_at DESC)`,
+    `idx_saas_invoices_status ON saas_invoices(status, due_date)`,
+    `idx_saas_payments_school ON saas_payments(school_id)`,
+    `idx_school_subject_templates_school ON school_subject_templates(school_id)`,
+    `idx_student_class_history_year ON student_class_history(academic_year_id, school_id)`,
+    `idx_student_points_student ON student_points(student_id, school_id)`,
+    `idx_task_reminders_task ON task_reminders(task_id)`,
+    `idx_task_subs_student ON task_submissions(student_id)`,
+    `idx_tasks_class ON tasks(class_id)`,
+    `idx_tasks_status ON tasks(status, due_date)`,
+    `idx_tasks_teacher ON tasks(teacher_id)`,
+    `idx_teacher_ai_sessions_teacher ON teacher_ai_sessions(teacher_id, created_at DESC)`,
+    `idx_teacher_unavail_school ON teacher_unavailability(school_id, teacher_id)`,
+    `idx_timetable_versions_school ON timetable_versions(school_id)`,
+    `idx_usage_ledger_cycle ON usage_ledger(billing_cycle_id)`,
+    `idx_weekly_tests_class ON weekly_tests(class_id, week_start)`,
+    // Fees
+    `idx_fee_ledger_school_year_status ON student_fee_ledger(school_id, academic_year, status)`,
+    `idx_fee_ledger_category ON student_fee_ledger(fee_category_id)`,
+    `idx_fee_ledger_structure ON student_fee_ledger(fee_structure_id) WHERE fee_structure_id IS NOT NULL`,
+    `idx_fee_payments_school_student ON fee_payments(school_id, student_id)`,
+    `idx_fee_payments_school_created ON fee_payments(school_id, created_at DESC, id DESC)`,
+    `idx_fee_waivers_ledger ON fee_waivers(ledger_id)`,
+    `idx_fee_ledger_edits_ledger ON student_fee_ledger_edits(ledger_id, changed_at)`,
+    `idx_fee_ledger_edits_school ON student_fee_ledger_edits(school_id, changed_at DESC)`,
+    // People / auth
+    `idx_student_parents_parent ON student_parents(parent_id)`,
+    `idx_parents_phone_login ON parents(phone) WHERE password_hash IS NOT NULL`,
+    `idx_parents_school ON parents(school_id)`,
+    `idx_users_school_role ON users(school_id, role)`,
+    `idx_user_sessions_expires ON user_sessions(expires_at)`,
+    `idx_portal_sessions_expires ON portal_sessions(expires_at)`,
+    // Academics
+    `idx_exam_records_class_created ON exam_records(class_id, created_at DESC)`,
+    `idx_exam_records_school_created ON exam_records(school_id, created_at DESC)`,
+    `idx_exam_records_open_date ON exam_records(exam_date) WHERE status IN ('scheduled', 'collecting')`,
+    `idx_notifications_teacher_unread ON notifications(recipient_teacher_id, created_at DESC) WHERE NOT is_read`,
+    `idx_notifications_student_unread ON notifications(recipient_student_id, created_at DESC) WHERE NOT is_read`,
+    `idx_notifications_parent_unread ON notifications(recipient_parent_id, created_at DESC) WHERE NOT is_read`,
+    `idx_notifications_school_unread ON notifications(recipient_school_id, created_at DESC) WHERE NOT is_read`,
+    `idx_notifications_sender_teacher ON notifications(sender_teacher_id)`,
+    `idx_exam_marks_school ON exam_marks(school_id)`,
+    `idx_parent_mark_acks_student ON parent_mark_acks(student_id)`,
+    `idx_class_subjects_teacher ON class_subjects(teacher_id)`,
+    // Unindexed curriculum foreign keys
+    `idx_school_topic_progress_topic ON school_topic_progress(school_topic_id)`,
+    `idx_class_topic_visibility_topic ON class_topic_visibility(school_topic_id)`,
+    `idx_class_chapter_visibility_chapter ON class_chapter_visibility(school_chapter_id)`,
+    `idx_class_subject_setup_status_subject ON class_subject_setup_status(school_subject_id)`,
+    `idx_syllabus_coverage_snapshots_subject ON syllabus_coverage_snapshots(school_subject_id)`,
+    `idx_school_subjects_master ON school_subjects(master_subject_id)`,
+    `idx_school_chapters_master ON school_chapters(master_chapter_id)`,
+    `idx_school_topics_master ON school_topics(master_topic_id)`,
+    `idx_school_tasks_master ON school_tasks(master_task_id)`,
+    `idx_school_resources_master ON school_resources(master_resource_id)`,
+    // Platform / usage. Open sessions are indexed on started_at, not
+    // last_seen_at: heartbeats rewrite last_seen_at every few seconds and an
+    // index on it would disable HOT updates (see the usage_sessions note above).
+    `idx_usage_sessions_started ON usage_sessions(started_at)`,
+    `idx_usage_sessions_open ON usage_sessions(started_at) WHERE ended_at IS NULL`,
+    `idx_expense_audit_school ON expense_audit_log(school_id, created_at DESC)`,
+    `idx_saas_invoices_school_date ON saas_invoices(school_id, invoice_date DESC)`,
+  ]
+  for (const def of indexes) {
+    const name = def.split(' ')[0]
+    await pool.query(`CREATE INDEX CONCURRENTLY IF NOT EXISTS ${def}`).catch(async err => {
+      console.error(`[migration #397] ${name} not built:`, err.message)
+      await pool.query(`DROP INDEX CONCURRENTLY IF EXISTS ${name}`).catch(() => {})
+    })
+  }
+
+  // [duplicate, the index that still covers it]. Dropped only when the covering
+  // index exists and the duplicate does not back a constraint.
+  const duplicates: [string, string][] = [
+    ['idx_students_school_grade', 'idx_students_school_grade_section'],
+    ['attendance_session_unique', 'attendance_student_id_date_class_id_session_key'],
+    ['idx_school_feature_overrides_school', 'school_feature_overrides_school_id_feature_key_key'],
+    ['idx_exam_applicable_students_exam', 'exam_applicable_students_exam_id_student_id_key'],
+    ['idx_exam_applicable_students_student', 'idx_exam_applicable_students_student_exam'],
+    ['idx_exam_marks_exam_student', 'exam_marks_exam_id_student_id_subject_name_key'],
+    ['idx_class_topic_visibility_class', 'class_topic_visibility_class_id_school_topic_id_key'],
+    ['idx_class_chapter_visibility_class', 'class_chapter_visibility_class_id_school_chapter_id_key'],
+    ['idx_school_topic_progress_class', 'school_topic_progress_class_id_school_topic_id_key'],
+    ['idx_usage_rollup_school_day', 'usage_daily_rollup_school_id_day_actor_role_key'],
+    ['idx_feature_rollup_school_day', 'feature_usage_daily_rollup_school_id_day_portal_nav_key_act_key'],
+    ['idx_custom_subject_chapters_subject', 'custom_subject_chapters_custom_subject_id_chapter_key'],
+    ['idx_school_subjects_school', 'school_subjects_school_id_grade_subject_name_academic_year_key'],
+  ]
+  for (const [dup, keep] of duplicates) {
+    try {
+      const { rows } = await pool.query<{ ok: boolean }>(`
+        SELECT to_regclass($2) IS NOT NULL
+           AND NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conindid = to_regclass($1)) AS ok
+      `, [dup, keep])
+      if (rows[0]?.ok) await pool.query(`DROP INDEX CONCURRENTLY IF EXISTS ${dup}`)
+    } catch (err) {
+      console.error(`[migration #397] ${dup} not dropped:`, (err as Error).message)
+    }
+  }
 }

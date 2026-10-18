@@ -12,6 +12,13 @@ Non-obvious technical decisions and their reasoning for the WLYL School prototyp
 -->
 
 
+## 2026-10-18 — Schema changes go in a new bottom block of runIncrementalMigrations with a SCHEMA_VERSION bump (#397)
+
+**Context:** Production (schema_version 53) was missing about 50 indexes and the `textbook_library` / `textbook_chunks` tables that `lib/db.ts` declares. They had been added to the `migrations` array inside `initDB()`, which only runs when a database is first bootstrapped. Production was bootstrapped before they were added, and on every later start `initDB()` returns early once `schema_version >= SCHEMA_VERSION`, so they never ran there. Fresh local databases had them, so nothing failed locally.
+**Decision:** Every schema change is a new block at the bottom of `runIncrementalMigrations()`, together with a `SCHEMA_VERSION` bump in the same change. Never add to the fresh-DB `migrations` array or to an older block. Statements stay idempotent. Indexes on live tables use `CREATE INDEX CONCURRENTLY` / `DROP INDEX CONCURRENTLY`, one statement per `pool.query`, because they cannot run in a transaction. Version 54 re-creates the missing objects, adds the #397 audit indexes and drops exact/prefix duplicate indexes. A duplicate is dropped only when its covering index exists and the duplicate does not back a constraint.
+**Alternatives considered:** a per-statement migrations ledger table, or running all statements on every cold start. Both were rejected: the ledger is a redesign, and running everything costs ~115 round-trips per cold start.
+**Consequences:** a failed concurrent build is dropped again rather than left INVALID, where `IF NOT EXISTS` would hide it. It is retried only at the next version bump or by a manual run. Before deploying a version that adds indexes, apply the statements by hand outside peak hours so the first cold start after the deploy only meets no-ops.
+
 ## 2026-10-18 — Host on Cloudflare Workers via OpenNext, keep Supabase Postgres (#381)
 
 **Context:** The app runs on Vercel serverless; each lambda holds its own Supavisor connection (31 of 60 Postgres connections sat idle on 2026-10-18). Cloudflare already hosts our R2 backups and the same OpenNext setup runs varchas.store.

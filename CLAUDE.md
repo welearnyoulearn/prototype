@@ -93,7 +93,7 @@ Platform Admin is served on `admin.welearnyoulearn.com` subdomain only — block
 ### Database
 - `lib/db.ts` — single `pg.Pool`, auto-runs migrations via `initDB()` / `ensureDB()` on cold start
 - All migrations are idempotent (`IF NOT EXISTS`, `IF NOT EXISTS` indexes, `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`)
-- Add new migrations at the **bottom** of the `migrations[]` array in `lib/db.ts`
+- Add new migrations as a **new block at the bottom of `runIncrementalMigrations()`** in `lib/db.ts` and bump `SCHEMA_VERSION` — never add to the `migrations[]` array or an older block (those only run on a fresh DB or below their version; that is how ~50 declared indexes went missing in production)
 - Supabase PgBouncer in session mode — pool `max: 1` on Vercel, `max: 10` locally
 
 ### Feature Flags (two-layer)
