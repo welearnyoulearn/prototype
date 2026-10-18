@@ -63,7 +63,9 @@ function createPool(perRequest: boolean, hyperdriveUrl?: string) {
   // mid-handshake), so on Workers pg talks plain TCP to the local Hyperdrive
   // binding, which holds the TLS pool to Supabase. Hyperdrive ignores startup
   // `options`, so the Asia/Kolkata timezone must come from the DB role default.
-  if (hyperdriveUrl) return new Pool({ connectionString: hyperdriveUrl, max: 3 })
+  // connectionTimeoutMillis: a request that outgrows its 3 connections fails
+  // loudly (naming its route in the logs) instead of hanging the page forever.
+  if (hyperdriveUrl) return new Pool({ connectionString: hyperdriveUrl, max: 3, connectionTimeoutMillis: 10_000 })
   return new Pool({ ...poolConfig, max: perRequest ? 3 : poolConfig.max })
 }
 
