@@ -7,7 +7,7 @@ process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID = 'demo'
 process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID = '123'
 process.env.NEXT_PUBLIC_FIREBASE_APP_ID = '1:123:web:abc'
 process.env.NEXT_PUBLIC_FIREBASE_VAPID_KEY = 'test-vapid'
-const { getPushState, unregisterPushDevice } = await import('./pushClient')
+const { getPushState, isPushPromptSnoozed, snoozePushPrompt, unregisterPushDevice } = await import('./pushClient')
 
 function memoryStorage(initial: Record<string, string> = {}) {
   const map = new Map(Object.entries(initial))
@@ -85,4 +85,19 @@ test('logout cleanup does nothing, and does not fail, when push was never enable
     globalThis.fetch = realFetch
     browser.restore()
   }
+})
+
+test('"not now" hides the post-login card for the snooze period, then it comes back', () => {
+  const browser = fakeBrowser('default')
+  try {
+    assert.equal(isPushPromptSnoozed(), false)
+    snoozePushPrompt(7)
+    assert.equal(isPushPromptSnoozed(), true)
+    // An expired snooze no longer hides the card.
+    browser.local.setItem('wlyl_push_prompt_until', String(Date.now() - 1000))
+    assert.equal(isPushPromptSnoozed(), false)
+    // Garbage in storage must not hide it forever either.
+    browser.local.setItem('wlyl_push_prompt_until', 'not-a-number')
+    assert.equal(isPushPromptSnoozed(), false)
+  } finally { browser.restore() }
 })

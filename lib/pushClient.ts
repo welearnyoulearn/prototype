@@ -11,6 +11,7 @@
 
 const TOKEN_KEY = 'wlyl_push_token'
 const SYNCED_KEY = 'wlyl_push_synced'
+const SNOOZE_KEY = 'wlyl_push_prompt_until'
 // A scope of its own: /sw-attendance.js already owns "/", and a scope holds one worker.
 const SW_SCOPE = '/firebase-cloud-messaging-push-scope'
 
@@ -24,7 +25,9 @@ const vapidKey = process.env.NEXT_PUBLIC_FIREBASE_VAPID_KEY
 
 export type PushState = 'unconfigured' | 'unsupported' | 'blocked' | 'off' | 'on'
 
-export type EnablePushResult = { ok: true } | { ok: false; reason: 'unavailable' | 'blocked' | 'dismissed' | 'failed' }
+// push_service: the browser itself could not reach its push service (embedded browsers such as Electron,
+// Brave with Google push turned off, or a network that blocks Google's push servers).
+export type EnablePushResult = { ok: true } | { ok: false; reason: 'unavailable' | 'blocked' | 'dismissed' | 'push_service' | 'failed' }
 
 function configured(): boolean {
   return Boolean(firebaseConfig.apiKey && firebaseConfig.projectId && firebaseConfig.messagingSenderId && firebaseConfig.appId && vapidKey)
@@ -80,6 +83,16 @@ async function registerWithServer(token: string): Promise<boolean> {
   return res.ok
 }
 
+/** True while the "turn on notifications?" card should stay hidden because the person said not now. */
+export function isPushPromptSnoozed(): boolean {
+  const until = Number(readStored(SNOOZE_KEY) ?? 0)
+  return Number.isFinite(until) && until > Date.now()
+}
+
+export function snoozePushPrompt(days: number): void {
+  writeStored(SNOOZE_KEY, String(Date.now() + days * 24 * 60 * 60 * 1000))
+}
+
 /** Asks for permission (must be called from a click), then registers this browser for push. */
 export async function enablePush(): Promise<EnablePushResult> {
   try {
@@ -99,6 +112,10 @@ export async function enablePush(): Promise<EnablePushResult> {
     try { window.sessionStorage.setItem(SYNCED_KEY, '1') } catch { /* ignore */ }
     return { ok: true }
   } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      console.warn('[push] this browser cannot reach its push service', error)
+      return { ok: false, reason: 'push_service' }
+    }
     console.error('[push] enable failed', error)
     return { ok: false, reason: 'failed' }
   }

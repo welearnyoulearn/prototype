@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
 import { Bell, CalendarDays, Check, ChevronLeft, ChevronRight, ClipboardList, Clock, Megaphone, RefreshCw, UserRound, XCircle, type LucideIcon } from 'lucide-react'
 import { buildGroups, groupOf, NOTIFICATION_GROUP_LABELS, type NotificationGroupId } from './notificationGroups'
-import { enablePush, getPushState, syncPushRegistration, type PushState } from '@/lib/pushClient'
+import { enablePush, getPushState, isPushPromptSnoozed, snoozePushPrompt, syncPushRegistration, type PushState } from '@/lib/pushClient'
 
 type Notification = {
   id: number
@@ -133,6 +133,9 @@ export default function NotificationBell({ teacherId, schoolId, studentId, paren
   const [pushState, setPushState] = useState<PushState>('unconfigured')
   const [pushBusy, setPushBusy] = useState(false)
   const [pushError, setPushError] = useState<string | null>(null)
+  // The one-time "turn on notifications?" card shown after sign-in (a click is needed before the browser
+  // will show its own permission dialog, so we ask in-app first).
+  const [promptOpen, setPromptOpen] = useState(false)
 
   // These query params are not actually consulted server-side — GET
   // /api/notifications derives the recipient purely from the session cookie
@@ -177,8 +180,10 @@ export default function NotificationBell({ teacherId, schoolId, studentId, paren
   useEffect(() => {
     if (group) return
     const timer = setTimeout(() => {
-      setPushState(getPushState())
+      const state = getPushState()
+      setPushState(state)
       void syncPushRegistration()
+      if (state === 'off' && !isPushPromptSnoozed()) setPromptOpen(true)
     }, 0)
     return () => clearTimeout(timer)
   }, [group])
@@ -189,8 +194,19 @@ export default function NotificationBell({ teacherId, schoolId, studentId, paren
     const result = await enablePush()
     setPushBusy(false)
     setPushState(getPushState())
-    if (!result.ok && result.reason === 'failed') setPushError('Could not turn on notifications. Please try again.')
-    if (!result.ok && result.reason === 'blocked') setPushError('Notifications are blocked for this site in your browser settings.')
+    if (result.ok) { setPromptOpen(false); return }
+    if (result.reason === 'failed') setPushError('Could not turn on notifications. Please try again.')
+    if (result.reason === 'blocked') { setPushError('Notifications are blocked for this site in your browser settings.'); snoozePushPrompt(30) }
+    if (result.reason === 'dismissed') { snoozePushPrompt(7); setPromptOpen(false) }
+    if (result.reason === 'push_service') {
+      setPushError("This browser can't connect to its push service, so alerts can't be turned on here. Open the app in Chrome or Edge to get them.")
+      snoozePushPrompt(30)
+    }
+  }
+
+  function notNow() {
+    snoozePushPrompt(7)
+    setPromptOpen(false)
   }
 
 
@@ -273,6 +289,7 @@ export default function NotificationBell({ teacherId, schoolId, studentId, paren
   }
 
   return (
+    <>
     <Popover open={open} onOpenChange={handleOpenChange}>
       <PopoverTrigger asChild>
       <button
@@ -389,5 +406,28 @@ export default function NotificationBell({ teacherId, schoolId, studentId, paren
         </PopoverContent>
       )}
     </Popover>
+    {!group && promptOpen && pushState === 'off' && (
+      <div
+        role="dialog"
+        aria-label="Turn on notifications"
+        data-testid="push-prompt"
+        className="fixed bottom-4 left-4 right-4 sm:left-auto sm:right-4 sm:w-80 z-50 rounded-xl border border-gray-200 bg-white p-4 shadow-lg"
+      >
+        <p className="text-sm font-semibold text-gray-900">Turn on notifications?</p>
+        <p className="mt-1 text-xs text-gray-600">Get alerts about exams, results and messages on this device, even when the app is closed.</p>
+        {pushError && <p role="alert" data-testid="push-prompt-error" className="mt-2 text-xs text-red-600">{pushError}</p>}
+        <div className="mt-3 flex justify-end gap-2">
+          <button onClick={notNow} data-testid="push-prompt-later" className="min-h-10 rounded-md px-3 text-xs font-medium text-gray-600 hover:bg-gray-100">
+            {pushError ? 'Close' : 'Not now'}
+          </button>
+          {!pushError && (
+            <button onClick={turnOnPush} disabled={pushBusy} data-testid="push-prompt-allow" className="min-h-10 rounded-md bg-primary px-3 text-xs font-semibold text-white disabled:opacity-60">
+              {pushBusy ? 'Turning on…' : 'Allow'}
+            </button>
+          )}
+        </div>
+      </div>
+    )}
+    </>
   )
 }
