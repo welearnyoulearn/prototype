@@ -420,7 +420,7 @@ test.describe.serial('Student Onboarding — Full Lifecycle (UI)', () => {
     await uiLogin(page, adminEmail, uiPass)
 
     await page.getByRole('button', { name: /Student Management/i }).click()
-    await expect(page.getByText('Student List')).toBeVisible({ timeout: 10000 })
+    await page.getByRole('button', { name: 'Student List', exact: true }).click()   // Onboard Students is the default sub-tab
 
     // 10-A: roll 1 = Mehta Arjun, roll 2 = Patel Priya — Arjun should be above Priya
     const arjun = page.getByText(/Mehta Arjun|Arjun Mehta/).first()
