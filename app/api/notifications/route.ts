@@ -128,7 +128,7 @@ export async function POST(req: NextRequest) {
        toSchool ? schoolId : null, teacher?.teacherId ?? null, b.type, b.title ?? null, b.message ?? null,
        b.data ? JSON.stringify(b.data) : null]
     )
-    if (b.recipient_parent_id) pushToParentsAfter([b.recipient_parent_id], { title: b.title ?? 'New notification', body: b.message ?? '' })
+    if (b.recipient_parent_id) pushToParentsAfter([b.recipient_parent_id], { title: b.title ?? 'New notification', body: b.message ?? '', kind: 'messages' })
     return NextResponse.json(result.rows[0], { status: 201 })
   } catch (error) {
     console.error(error)

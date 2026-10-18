@@ -119,6 +119,7 @@ export async function POST(
             title: `${lockedExam.exam_name} results released`,
             body: `${student.name}'s results for ${lockedExam.exam_name} are available. Please review and acknowledge.`,
             data: { url: '/exams' },
+            kind: 'results',
           }])
         }
       }

@@ -123,7 +123,7 @@ async function run(req: NextRequest) {
            VALUES ($1, $2, 'birthday', '🎉 Happy Birthday!', $3)`,
           [p.school_id, p.id, `Wishing you a wonderful birthday, ${p.name || 'there'}!`]
         )
-        pushToParentsAfter([p.id], { title: '🎉 Happy Birthday!', body: `Wishing you a wonderful birthday, ${p.name || 'there'}!` })
+        pushToParentsAfter([p.id], { title: '🎉 Happy Birthday!', body: `Wishing you a wonderful birthday, ${p.name || 'there'}!`, kind: 'birthday' })
       }
     }
 

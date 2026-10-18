@@ -6,7 +6,19 @@ import pool from './db'
 // source of truth; push is only a nudge, so nothing here may fail the request that
 // created the notification. Tokens Expo reports as DeviceNotRegistered are deleted.
 
-export type ParentPush = { title: string; body: string; data?: Record<string, string> }
+// Ids + sound files must match the app's src/lib/push.ts channel list. Android binds the
+// sound to the channel (channelId); iOS plays `sound`.
+const PUSH_SOUNDS = {
+  exams: 'exams_chime.wav',
+  results: 'results_bells.wav',
+  fees: 'fees_coin.wav',
+  absent: 'absent_alert.wav',
+  messages: 'message_ding.wav',
+  birthday: 'birthday_jingle.wav',
+} as const
+export type PushKind = keyof typeof PUSH_SOUNDS
+
+export type ParentPush = { title: string; body: string; data?: Record<string, string>; kind?: PushKind }
 
 const EXPO_SEND_URL = 'https://exp.host/--/api/v2/push/send'
 const BATCH_SIZE = 100 // Expo's per-request limit
@@ -30,6 +42,7 @@ export async function sendExpo(tokens: string[], msg: ParentPush, fetchImpl: typ
 
   // The app opens data.url on tap and falls back to its notifications screen.
   const data = msg.data ?? { url: '/notifications' }
+  const kind = msg.kind ?? 'messages'
   const dead: string[] = []
   for (let i = 0; i < tokens.length; i += BATCH_SIZE) {
     const batch = tokens.slice(i, i + BATCH_SIZE)
@@ -38,7 +51,7 @@ export async function sendExpo(tokens: string[], msg: ParentPush, fetchImpl: typ
         method: 'POST',
         headers,
         body: JSON.stringify(batch.map(to => ({
-          to, title: msg.title, body: msg.body, data, sound: 'default', channelId: 'default', priority: 'high',
+          to, title: msg.title, body: msg.body, data, sound: PUSH_SOUNDS[kind], channelId: kind, priority: 'high',
         }))),
         signal: AbortSignal.timeout(10_000),
       })

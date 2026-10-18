@@ -420,7 +420,7 @@ export async function POST(req: NextRequest) {
             notified++
           }
           parentPushes.push([parentLinks.map(l => l.parent_id), {
-            title: `${exam_name} scheduled`, body: `${exam_name} is scheduled — ${scheduleLabel}${roomLabel}.`, data: { url: '/exams' },
+            title: `${exam_name} scheduled`, body: `${exam_name} is scheduled — ${scheduleLabel}${roomLabel}.`, data: { url: '/exams' }, kind: 'exams',
           }])
         }
 

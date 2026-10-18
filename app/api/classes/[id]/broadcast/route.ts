@@ -84,7 +84,7 @@ export async function POST(
           notifiedParentIds.push(link.parent_id)
         } catch { /* non-critical */ }
       }
-      pushToParentsAfter(notifiedParentIds, { title: title.trim(), body: message.trim() })
+      pushToParentsAfter(notifiedParentIds, { title: title.trim(), body: message.trim(), kind: 'messages' })
     }
 
     return NextResponse.json({ success: true, students_notified: studentsNotified, parents_notified: parentsNotified })

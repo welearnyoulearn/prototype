@@ -95,6 +95,7 @@ export async function POST(
       title: `Please acknowledge — ${exam.exam_name}`,
       body: `${student.name}'s result for ${exam.exam_name} is waiting for your acknowledgement.`,
       data: { url: '/exams' },
+      kind: 'results',
     })
 
     return NextResponse.json({ success: true, notified })

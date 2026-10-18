@@ -143,7 +143,7 @@ async function notifyExamChange(
         )
         notifiedParentIds.push(link.parent_id)
       }
-      pushToParentsAfter(notifiedParentIds, { title, body: message, data: { url: '/exams' } })
+      pushToParentsAfter(notifiedParentIds, { title, body: message, data: { url: '/exams' }, kind: 'exams' })
     } catch { /* non-critical */ }
   }
   // Dedup: a teacher who is both the class teacher and the assigned

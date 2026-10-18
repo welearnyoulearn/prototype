@@ -83,7 +83,7 @@ export async function POST(
           )
           notifiedParentIds.push(link.parent_id)
         }
-        pushToParentsAfter(notifiedParentIds, { title, body: message, data: { url: '/exams' } })
+        pushToParentsAfter(notifiedParentIds, { title, body: message, data: { url: '/exams' }, kind: 'exams' })
       } catch { /* non-critical */ }
     }
     // Dedup: a teacher who is both class teacher and assigned invigilator

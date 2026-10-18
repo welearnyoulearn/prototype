@@ -24,10 +24,18 @@ test('sends in batches of 100 with the Android channel, sound and default tap ur
   assert.deepEqual(sizes, [100, 100, 50])
   assert.equal(calls[0].url, 'https://exp.host/--/api/v2/push/send')
   const first = (JSON.parse(String(calls[0].init.body)) as Record<string, unknown>[])[0]
-  assert.equal(first.channelId, 'default')
-  assert.equal(first.sound, 'default')
+  assert.equal(first.channelId, 'messages')
+  assert.equal(first.sound, 'message_ding.wav')
   assert.deepEqual(first.data, { url: '/notifications' })
   assert.equal((calls[0].init.headers as Record<string, string>)['Accept-Encoding'], 'gzip, deflate')
+})
+
+test('uses the channel and sound of the push kind', async () => {
+  const calls: Call[] = []
+  await sendExpo(['ExponentPushToken[a]'], { title: 'x', body: 'y', kind: 'exams' }, fakeFetch(calls, () => ({ status: 'ok', id: 'x' })))
+  const msg = (JSON.parse(String(calls[0].init.body)) as Record<string, unknown>[])[0]
+  assert.equal(msg.channelId, 'exams')
+  assert.equal(msg.sound, 'exams_chime.wav')
 })
 
 test('returns only DeviceNotRegistered tokens as dead', async () => {
