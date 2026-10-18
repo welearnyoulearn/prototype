@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
+import Pagination from '@/app/components/Pagination'
 
 type Trend = { day: string; login_count: number; unique_actors: number; total_duration_seconds: number }
 type RoleBreakdown = { actor_role: string; login_count: number; unique_actors: number; total_duration_seconds: number }
@@ -71,6 +72,10 @@ const SEGMENT_CHIP: Record<Segment, string> = {
 }
 const SEGMENT_LABEL: Record<Segment, string> = { active: 'Active', cooling: 'Cooling', at_risk: 'At Risk' }
 
+const PAGE_SIZE = 50
+// Keeps a page offset inside the list when it shrinks (refetch, filter).
+const pageStart = (offset: number, total: number) => Math.min(offset, Math.max(0, Math.floor((total - 1) / PAGE_SIZE) * PAGE_SIZE))
+
 function fmt(n: number) { return n.toLocaleString('en-IN') }
 function fmtDuration(seconds: number) {
   const hrs = seconds / 3600
@@ -138,6 +143,9 @@ export default function UsageAnalyticsPage() {
   const [health, setHealth] = useState<{ risk_counts: Record<RiskLevel, number>; schools: SchoolHealthRow[] } | null>(null)
   const [healthLoading, setHealthLoading] = useState(true)
   const [riskFilter, setRiskFilter] = useState<RiskLevel | null>(null)
+  const [byOffset, setByOffset] = useState(0)
+  const [healthOffset, setHealthOffset] = useState(0)
+  const [actorsOffset, setActorsOffset] = useState(0)
 
   const [growth, setGrowth] = useState<Growth | null>(null)
   const [growthLoading, setGrowthLoading] = useState(true)
@@ -189,13 +197,18 @@ export default function UsageAnalyticsPage() {
     if (!selectedSchool) { setDetail(null); return }
     setDetailLoading(true)
     setSegmentFilter(null)
+    setActorsOffset(0)
     fetch(`/api/platform/usage-analytics/${selectedSchool.id}?days=${days}`)
       .then(r => r.ok ? r.json() : null)
       .then(d => setDetail(d))
       .finally(() => setDetailLoading(false))
   }, [selectedSchool, days])
 
+  const filteredSchools = health?.schools.filter(s => !riskFilter || s.risk_level === riskFilter) ?? []
+  const healthStart = pageStart(healthOffset, filteredSchools.length)
+  const byStart = pageStart(byOffset, overview?.by_school.length ?? 0)
   const filteredActors = detail?.actors.filter(a => !segmentFilter || a.segment === segmentFilter) ?? []
+  const actorsStart = pageStart(actorsOffset, filteredActors.length)
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -220,7 +233,7 @@ export default function UsageAnalyticsPage() {
           <div className="flex items-center gap-2">
             <div className="flex gap-1 bg-white border border-gray-200 rounded-lg p-1">
               {[7, 30, 90].map(d => (
-                <button key={d} onClick={() => setDays(d)}
+                <button key={d} onClick={() => { setDays(d); setByOffset(0); setHealthOffset(0) }}
                   className={`text-xs font-medium px-3 py-1.5 rounded-md transition-colors ${days === d ? 'bg-gray-900 text-white' : 'text-gray-500 hover:bg-gray-50'}`}>
                   {d}d
                 </button>
@@ -353,7 +366,7 @@ export default function UsageAnalyticsPage() {
               <div className="grid grid-cols-3 gap-3">
                 {(['at_risk', 'watch', 'healthy'] as RiskLevel[]).map(level => (
                   <button key={level}
-                    onClick={() => setRiskFilter(f => f === level ? null : level)}
+                    onClick={() => { setRiskFilter(f => f === level ? null : level); setHealthOffset(0) }}
                     className={`bg-white rounded-md border px-4 py-3 text-left transition-all ${riskFilter === level ? 'border-gray-900 ring-1 ring-gray-900' : 'border-gray-200 hover:border-gray-300'}`}>
                     <span className={`inline-block text-xs font-semibold px-2 py-0.5 rounded-full mb-2 ${RISK_CHIP[level]}`}>{RISK_LABEL[level]}</span>
                     <p className="text-xl font-bold text-gray-900">{fmt(health.risk_counts[level] || 0)}</p>
@@ -370,7 +383,7 @@ export default function UsageAnalyticsPage() {
                     Schools {riskFilter ? `— ${RISK_LABEL[riskFilter]}` : ''}
                   </p>
                   {riskFilter && (
-                    <button onClick={() => setRiskFilter(null)} className="text-xs text-muted-foreground hover:text-gray-600">Clear filter</button>
+                    <button onClick={() => { setRiskFilter(null); setHealthOffset(0) }} className="text-xs text-muted-foreground hover:text-gray-600">Clear filter</button>
                   )}
                 </div>
                 <div className="overflow-x-auto">
@@ -386,7 +399,7 @@ export default function UsageAnalyticsPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100">
-                      {health.schools.filter(s => !riskFilter || s.risk_level === riskFilter).map(s => (
+                      {filteredSchools.slice(healthStart, healthStart + PAGE_SIZE).map(s => (
                         <tr key={s.school_id} className="hover:bg-gray-50">
                           <td className="px-5 py-3 font-medium text-gray-800">{s.school_name}</td>
                           <td className="px-5 py-3 text-xs text-muted-foreground capitalize">{s.tier}</td>
@@ -403,6 +416,7 @@ export default function UsageAnalyticsPage() {
                     </tbody>
                   </table>
                 </div>
+                <Pagination offset={healthStart} limit={PAGE_SIZE} total={filteredSchools.length} onChange={setHealthOffset} testId="school-health-pagination" itemLabel="schools" />
               </div>
             </>
           )
@@ -604,7 +618,7 @@ export default function UsageAnalyticsPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100">
-                      {overview.by_school.map(s => (
+                      {overview.by_school.slice(byStart, byStart + PAGE_SIZE).map(s => (
                         <tr key={s.school_id} className="hover:bg-gray-50 cursor-pointer" onClick={() => setSelectedSchool({ id: s.school_id, name: s.school_name })}>
                           <td className="px-5 py-3 font-medium text-gray-800">{s.school_name}</td>
                           <td className="px-5 py-3 text-right font-mono text-xs text-gray-600">{fmt(s.login_count)}</td>
@@ -617,6 +631,7 @@ export default function UsageAnalyticsPage() {
                   </table>
                 </div>
               )}
+              <Pagination offset={byStart} limit={PAGE_SIZE} total={overview.by_school.length} onChange={setByOffset} testId="traffic-by-school-pagination" itemLabel="schools" />
             </div>
           </>
         )}
@@ -645,7 +660,7 @@ export default function UsageAnalyticsPage() {
                   <div className="grid grid-cols-3 gap-3">
                     {(['active', 'cooling', 'at_risk'] as Segment[]).map(seg => (
                       <button key={seg}
-                        onClick={() => setSegmentFilter(f => f === seg ? null : seg)}
+                        onClick={() => { setSegmentFilter(f => f === seg ? null : seg); setActorsOffset(0) }}
                         className={`bg-white rounded-md border px-4 py-3 text-left transition-all ${segmentFilter === seg ? 'border-gray-900 ring-1 ring-gray-900' : 'border-gray-200 hover:border-gray-300'}`}>
                         <span className={`inline-block text-xs font-semibold px-2 py-0.5 rounded-full mb-2 ${SEGMENT_CHIP[seg]}`}>{SEGMENT_LABEL[seg]}</span>
                         <p className="text-xl font-bold text-gray-900">{fmt(detail.segment_counts[seg] || 0)}</p>
@@ -683,13 +698,13 @@ export default function UsageAnalyticsPage() {
                         Users {segmentFilter ? `— ${SEGMENT_LABEL[segmentFilter]}` : ''}
                       </p>
                       {segmentFilter && (
-                        <button onClick={() => setSegmentFilter(null)} className="text-xs text-muted-foreground hover:text-gray-600">Clear filter</button>
+                        <button onClick={() => { setSegmentFilter(null); setActorsOffset(0) }} className="text-xs text-muted-foreground hover:text-gray-600">Clear filter</button>
                       )}
                     </div>
                     <div className="divide-y divide-gray-100 max-h-[420px] overflow-y-auto">
                       {filteredActors.length === 0 ? (
                         <div className="py-8 text-center text-muted-foreground text-sm">No users match this filter.</div>
-                      ) : filteredActors.map(a => (
+                      ) : filteredActors.slice(actorsStart, actorsStart + PAGE_SIZE).map(a => (
                         <div key={`${a.actor_role}-${a.actor_id}`} className="px-5 py-2.5 flex items-center justify-between text-sm">
                           <div>
                             <p className="font-medium text-gray-800">{a.actor_name || `#${a.actor_id}`}</p>
@@ -702,6 +717,7 @@ export default function UsageAnalyticsPage() {
                         </div>
                       ))}
                     </div>
+                    <Pagination offset={actorsStart} limit={PAGE_SIZE} total={filteredActors.length} onChange={setActorsOffset} testId="school-detail-users-pagination" itemLabel="users" />
                   </div>
                 </>
               )}
