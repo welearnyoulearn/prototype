@@ -1,9 +1,10 @@
 // WLYL Offline Attendance Service Worker
-const CACHE_NAME = 'wlyl-v1'
-const QUEUE_KEY  = 'attendance_queue'
+// Registered with scope '/school-admin' (see app/school-admin/hooks/useOfflineAttendance.ts).
+// Queued submissions are re-sent only on the 'sync' event, a { type: 'SYNC' } message from the
+// page (when it comes back online or the user hits Retry), or on activation — never per fetch.
 
 self.addEventListener('install',  () => self.skipWaiting())
-self.addEventListener('activate', e => e.waitUntil(self.clients.claim()))
+self.addEventListener('activate', e => e.waitUntil(self.clients.claim().then(() => syncQueue()).catch(() => {})))
 
 // Intercept attendance POST requests when offline
 self.addEventListener('fetch', e => {
@@ -16,19 +17,16 @@ self.addEventListener('fetch', e => {
 async function handleAttendancePost(request) {
   try {
     // Try online first
-    const response = await fetch(request.clone())
-    return response
+    return await fetch(request.clone())
   } catch {
     // Offline — queue it
     const body = await request.clone().json()
-    const queue = await getQueue()
     const entry = { id: Date.now(), body, status: 'pending', queued_at: new Date().toISOString() }
-    queue.push(entry)
-    await saveQueue(queue)
+    const count = await addEntry(entry)
 
     // Notify all clients
     const clients = await self.clients.matchAll()
-    clients.forEach(c => c.postMessage({ type: 'QUEUED', id: entry.id, count: queue.length }))
+    clients.forEach(c => c.postMessage({ type: 'QUEUED', id: entry.id, count }))
 
     return new Response(JSON.stringify({ offline: true, queued: true, id: entry.id }), {
       status: 202,
@@ -44,18 +42,26 @@ self.addEventListener('sync', e => {
   }
 })
 
-// Also try sync on fetch (for browsers without Background Sync)
-self.addEventListener('fetch', e => {
-  if (e.request.method === 'GET') {
+// The page asks for a sync when it comes back online (browsers without Background Sync) or on Retry.
+self.addEventListener('message', e => {
+  if (e.data && e.data.type === 'SYNC') {
     e.waitUntil(syncQueue().catch(() => {}))
   }
 })
 
-async function syncQueue() {
+// One sync at a time: overlapping triggers share the in-flight run, so no entry is POSTed twice.
+let syncing = null
+function syncQueue() {
+  if (!syncing) syncing = runSync().finally(() => { syncing = null })
+  return syncing
+}
+
+async function runSync() {
   const queue = await getQueue()
   if (queue.length === 0) return
 
   const results = []
+  const processed = []
   for (const entry of queue) {
     // 'terminal' = the server understood and REFUSED it (already marked by someone else, holiday,
     // outside the allowed dates…). Retrying can never succeed, so it is kept for the user to see
@@ -82,31 +88,63 @@ async function syncQueue() {
       entry.status = 'failed'
       results.push({ id: entry.id, status: 'failed' })
     }
+    processed.push(entry)
   }
 
-  // Remove synced entries, keep failed for retry
-  const remaining = queue.filter(e => e.status !== 'synced')
-  await saveQueue(remaining)
+  // Remove synced entries, keep failed for retry. Only the entries sent in this run are written
+  // (not clear + rewrite), so one queued or dismissed while the sync was running is left alone.
+  const remaining = await updateEntries(processed)
 
   const clients = await self.clients.matchAll()
-  clients.forEach(c => c.postMessage({ type: 'SYNC_COMPLETE', results, remaining: remaining.length }))
+  clients.forEach(c => c.postMessage({ type: 'SYNC_COMPLETE', results, remaining }))
 }
 
 async function getQueue() {
   try {
-    const db   = await openDB()
-    const tx   = db.transaction('queue', 'readonly')
-    const all  = await tx.objectStore('queue').getAll()
+    const db = await openDB()
+    const all = await reqP(db.transaction('queue', 'readonly').objectStore('queue').getAll())
     return all || []
   } catch { return [] }
 }
 
-async function saveQueue(queue) {
+// Adds one entry; resolves to the queue length once the write has committed.
+async function addEntry(entry) {
   const db = await openDB()
   const tx = db.transaction('queue', 'readwrite')
   const store = tx.objectStore('queue')
-  await store.clear()
-  for (const item of queue) await store.put(item)
+  store.put(entry)
+  const count = reqP(store.count())
+  await txDone(tx)
+  return count
+}
+
+// Deletes synced entries, saves the rest; resolves to the queue length after commit.
+async function updateEntries(entries) {
+  const db = await openDB()
+  const tx = db.transaction('queue', 'readwrite')
+  const store = tx.objectStore('queue')
+  for (const entry of entries) {
+    if (entry.status === 'synced') store.delete(entry.id)
+    else store.put(entry)
+  }
+  const count = reqP(store.count())
+  await txDone(tx)
+  return count
+}
+
+function reqP(request) {
+  return new Promise((resolve, reject) => {
+    request.onsuccess = () => resolve(request.result)
+    request.onerror   = () => reject(request.error)
+  })
+}
+
+function txDone(tx) {
+  return new Promise((resolve, reject) => {
+    tx.oncomplete = () => resolve()
+    tx.onerror    = () => reject(tx.error)
+    tx.onabort    = () => reject(tx.error)
+  })
 }
 
 function openDB() {

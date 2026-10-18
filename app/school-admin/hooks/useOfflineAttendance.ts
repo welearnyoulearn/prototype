@@ -20,11 +20,17 @@ export function useOfflineAttendance() {
   const [swReady, setSwReady]     = useState(false)
   const [syncResults, setSyncResults] = useState<SyncResult[]>([])
 
-  // Register service worker
+  // Register service worker. Scope is narrowed to the school-admin portal (allowed without a
+  // Service-Worker-Allowed header: '/school-admin' sits under the script's own path, '/').
+  // An older build registered it with scope '/', which intercepted requests site-wide — remove it.
   useEffect(() => {
     if (!('serviceWorker' in navigator)) return
-    navigator.serviceWorker.register('/sw-attendance.js')
-      .then(() => setSwReady(true))
+    navigator.serviceWorker.getRegistration('/')
+      .then(old => { if (old?.scope === `${location.origin}/`) return old.unregister() })
+      .catch(() => {})
+    navigator.serviceWorker.register('/sw-attendance.js', { scope: '/school-admin' })
+      // Flush anything queued in an earlier visit (a fresh install syncs on activation instead).
+      .then(reg => { setSwReady(true); if (navigator.onLine) reg.active?.postMessage({ type: 'SYNC' }) })
       .catch(e => console.warn('SW registration failed:', e))
   }, [])
 
@@ -68,28 +74,26 @@ export function useOfflineAttendance() {
 
   useEffect(() => { loadQueue() }, [loadQueue])
 
+  // The SW is the only sender of queued entries (it guards against overlapping runs), so the page
+  // just asks it to sync; SYNC_COMPLETE then reloads the queue.
   async function triggerSync() {
     if (!('serviceWorker' in navigator)) return
     try {
       const reg = await navigator.serviceWorker.ready
       if ('sync' in reg) {
         await (reg as ServiceWorkerRegistration & { sync: { register(tag: string): Promise<void> } }).sync.register('attendance-sync')
+      } else {
+        reg.active?.postMessage({ type: 'SYNC' })
       }
-    } catch { /* Background Sync not supported, SW will sync on next fetch */ }
+    } catch { /* SW unavailable — it syncs on its next activation */ }
   }
 
   async function retryFailed() {
-    const failed = queue.filter(q => q.status === 'failed' && !q.terminal)
-    for (const entry of failed) {
-      try {
-        await fetch('/api/attendance', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(entry.body),
-        })
-      } catch { /* still offline */ }
-    }
-    await loadQueue()
+    if (!('serviceWorker' in navigator)) return
+    try {
+      const reg = await navigator.serviceWorker.ready
+      reg.active?.postMessage({ type: 'SYNC' })
+    } catch { /* SW unavailable */ }
   }
 
   // Clears submissions the server refused, once the user has read why.
