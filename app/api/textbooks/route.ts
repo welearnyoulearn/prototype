@@ -1,11 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
-import path from 'path'
-import fs from 'fs/promises'
+import { extractText } from 'unpdf'
 import { gradeOrderSql } from '@/lib/grades'
 import { requireSchoolAdmin, getTeacherSession } from '@/lib/auth'
 
-const UPLOAD_DIR = path.join(process.cwd(), 'textbook_uploads')
 const CHUNK_SIZE = 1500   // chars per chunk
 const OVERLAP    = 150    // chars of overlap between chunks
 
@@ -19,7 +17,6 @@ function chunkText(text: string): string[] {
   return chunks.filter(c => c.trim().length > 50)
 }
 
-// `grade` becomes a directory name on disk, so it must never carry a path separator or `..`.
 const SAFE_GRADE = /^[A-Za-z0-9][A-Za-z0-9 _-]{0,19}$/
 
 // The school always comes from the session. A school_id param/field from older clients is
@@ -90,32 +87,22 @@ export async function POST(req: NextRequest) {
       if (file.size > 50 * 1024 * 1024)
         return NextResponse.json({ error: 'File too large (max 50 MB)' }, { status: 400 })
 
-      // Extract text using pdf-parse
+      // Extract text using unpdf (edge/Workers-compatible)
       const buffer = Buffer.from(await file.arrayBuffer())
-      // Dynamic import avoids edge-runtime issues with pdf-parse
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const pdfParse = require('pdf-parse') as (buf: Buffer) => Promise<{ text: string; numpages: number }>
-      const pdfData  = await pdfParse(buffer)
-      const rawText  = pdfData.text ?? ''
+      const { text: rawText, totalPages } = await extractText(new Uint8Array(buffer), { mergePages: true })
 
       if (rawText.trim().length < 100)
         return NextResponse.json({ error: 'Could not extract readable text from this PDF. Try a text-based PDF (not scanned image).' }, { status: 422 })
-
-      // Save file to disk
-      await fs.mkdir(path.join(UPLOAD_DIR, school_id, grade), { recursive: true })
-      const safeName = `${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`
-      const filePath = path.join(UPLOAD_DIR, school_id, grade, safeName)
-      await fs.writeFile(filePath, buffer)
 
       // Insert library record
       const { rows: [lib] } = await pool.query(
         `INSERT INTO textbook_library
            (school_id, grade, subject, book_title, file_name, file_path, uploaded_by_name)
-         VALUES ($1,$2,$3,$4,$5,$6,$7)
+         VALUES ($1,$2,$3,$4,$5,NULL,$6)
          ON CONFLICT (school_id, grade, subject, file_name)
-         DO UPDATE SET book_title=$4, file_path=$6, uploaded_by_name=$7, uploaded_at=NOW()
+         DO UPDATE SET book_title=$4, file_path=NULL, uploaded_by_name=$6, uploaded_at=NOW()
          RETURNING id`,
-        [school_id, grade, subject, book_title ?? file.name, file.name, filePath, uploader],
+        [school_id, grade, subject, book_title ?? file.name, file.name, uploader],
       )
       const textbook_id = lib.id
 
@@ -143,7 +130,7 @@ export async function POST(req: NextRequest) {
         id: textbook_id,
         chunks: chunks.length,
         chars: rawText.length,
-        pages: pdfData.numpages,
+        pages: totalPages,
       })
     } catch (err) {
       console.error('textbooks POST error:', err)
