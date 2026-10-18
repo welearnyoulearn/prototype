@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
 import { Bell, CalendarDays, Check, ChevronLeft, ChevronRight, ClipboardList, Clock, Megaphone, RefreshCw, UserRound, XCircle, type LucideIcon } from 'lucide-react'
 import { buildGroups, groupOf, NOTIFICATION_GROUP_LABELS, type NotificationGroupId } from './notificationGroups'
+import { enablePush, getPushState, syncPushRegistration, type PushState } from '@/lib/pushClient'
 
 type Notification = {
   id: number
@@ -127,6 +128,11 @@ export default function NotificationBell({ teacherId, schoolId, studentId, paren
   const [open, setOpen] = useState(false)
   // Which feature group is expanded (null = the grouped overview).
   const [activeGroup, setActiveGroup] = useState<NotificationGroupId | null>(null)
+  // Push on this device. Only the main bell (not a feature-scoped one) offers it, so a page with
+  // several bells shows one prompt.
+  const [pushState, setPushState] = useState<PushState>('unconfigured')
+  const [pushBusy, setPushBusy] = useState(false)
+  const [pushError, setPushError] = useState<string | null>(null)
 
   // These query params are not actually consulted server-side — GET
   // /api/notifications derives the recipient purely from the session cookie
@@ -156,6 +162,36 @@ export default function NotificationBell({ teacherId, schoolId, studentId, paren
     const timer = setInterval(fetchNotifications, 30000)
     return () => { clearTimeout(initial); clearInterval(timer) }
   }, [fetchNotifications])
+
+  // A push that arrives while this tab is open is handed over by the service worker: refresh now
+  // instead of waiting for the next 30s poll.
+  useEffect(() => {
+    if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return
+    const onMessage = (event: MessageEvent) => {
+      if ((event.data as { type?: string } | null)?.type === 'wlyl-push') void fetchNotifications()
+    }
+    navigator.serviceWorker.addEventListener('message', onMessage)
+    return () => navigator.serviceWorker.removeEventListener('message', onMessage)
+  }, [fetchNotifications])
+
+  useEffect(() => {
+    if (group) return
+    const timer = setTimeout(() => {
+      setPushState(getPushState())
+      void syncPushRegistration()
+    }, 0)
+    return () => clearTimeout(timer)
+  }, [group])
+
+  async function turnOnPush() {
+    setPushBusy(true)
+    setPushError(null)
+    const result = await enablePush()
+    setPushBusy(false)
+    setPushState(getPushState())
+    if (!result.ok && result.reason === 'failed') setPushError('Could not turn on notifications. Please try again.')
+    if (!result.ok && result.reason === 'blocked') setPushError('Notifications are blocked for this site in your browser settings.')
+  }
 
 
   async function markAllRead() {
@@ -275,6 +311,23 @@ export default function NotificationBell({ teacherId, schoolId, studentId, paren
               </button>
             )}
           </div>
+
+          {!group && pushState === 'off' && (
+            <div className="px-4 py-2.5 border-b border-gray-100 bg-blue-50/50 flex items-center justify-between gap-3">
+              <p className="text-xs text-gray-600">Get alerts on this device, even when the app is closed.</p>
+              <button
+                onClick={turnOnPush}
+                disabled={pushBusy}
+                data-testid="push-enable-btn"
+                className="min-h-10 shrink-0 text-xs text-primary hover:underline font-medium disabled:opacity-60"
+              >
+                {pushBusy ? 'Turning on…' : 'Turn on'}
+              </button>
+            </div>
+          )}
+          {!group && pushError && (
+            <p role="alert" data-testid="push-error" className="px-4 py-2 border-b border-gray-100 text-xs text-red-600">{pushError}</p>
+          )}
 
           <div className="max-h-80 overflow-y-auto">
             {showGroups ? (

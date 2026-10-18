@@ -21,6 +21,7 @@ import SchoolCalendarView from '../components/SchoolCalendarView'
 import PortalSidebar from '@/components/portal/PortalSidebar'
 import { CalendarDays, Phone } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
+import { unregisterPushDevice } from '@/lib/pushClient'
 
 // Used by printParentReceipt below — fee category names (admin-set),
 // transaction references (parent-typed, directly attacker-controlled) and
@@ -382,6 +383,7 @@ function ParentDashboard() {
 
   async function handleLogout() {
     const usageSessionId = getUsageSessionId()
+    await unregisterPushDevice()
     await fetch('/api/parent/auth/logout', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

@@ -12,7 +12,7 @@ Move an entry to [completed.md](completed.md) when it ships. Add new entries at 
 - [x] device_tokens table, push_sent_at outbox column, register/unregister endpoints
 - [x] FCM sender and dispatcher; wired into `POST /api/notifications`
 - [x] Call `dispatchPendingPushes()` / `drainPendingPushes()` from every notification-creating route and cron
-- [ ] Web: `firebase-messaging-sw.js`, permission prompt in NotificationBell, register/unregister on login/logout
+- [x] Web: `firebase-messaging-sw.js`, "Turn on" prompt in NotificationBell, token registered on enable/visit and removed on logout (all four portals). Needs a real Firebase project to test end to end.
 - [ ] Firebase project, `FIREBASE_SERVICE_ACCOUNT` in Vercel, parent app integration (separate repo)
 
 ### Product documentation dossiers (this branch)

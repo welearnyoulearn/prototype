@@ -17,6 +17,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 // Always-loaded (landing tab, and small enough not to be worth its own chunk)
 import SmartSnapshot from './components/SmartSnapshot'
 import TeacherSyllabus from './components/TeacherSyllabus'
+import { unregisterPushDevice } from '@/lib/pushClient'
 
 // Lazy-loaded — only downloaded when first opened
 function ModuleSkeleton() {
@@ -156,6 +157,7 @@ function TeacherPortal() {
 
   const handleLogout = useCallback(async () => {
     const usageSessionId = getUsageSessionId()
+    await unregisterPushDevice()
     await fetch('/api/teacher/auth/logout', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

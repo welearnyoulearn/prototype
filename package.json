@@ -33,6 +33,7 @@
     "cloudinary": "^2.9.0",
     "clsx": "^2.1.1",
     "exceljs": "^4.4.0",
+    "firebase": "^12.19.0",
     "framer-motion": "^13.2.0",
     "html2canvas": "^1.4.1",
     "jose": "^6.2.3",

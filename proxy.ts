@@ -44,6 +44,7 @@ const PUBLIC_PREFIXES = [
   '/api/',
   '/_next/',
   '/favicon',
+  '/firebase-messaging-sw.js',
 ]
 
 function isPublic(pathname: string): boolean {
