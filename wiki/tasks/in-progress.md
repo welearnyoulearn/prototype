@@ -12,8 +12,10 @@ Move an entry to [completed.md](completed.md) when it ships. Add new entries at 
 - [x] OpenNext scaffolding, per-request `pg` pool, `scheduled()` handler for all 9 crons
 - [x] Post-response emails / WhatsApp / log writes moved into `after()`
 - [x] Textbook upload: `pdf-parse` → `unpdf`, no filesystem writes
-- [ ] Hyperdrive config + wrangler secrets (needs Cloudflare dashboard / `wrangler login`)
-- [ ] First workers.dev deploy, Playwright suite against it, connection count check
+- [x] Hyperdrive config (caching off) + 16 Worker secrets; `postgres` role default timezone set to Asia/Kolkata (Hyperdrive drops startup options)
+- [x] First workers.dev deploy: https://wlyl.welearnyoulearn.workers.dev — pages, health (db connected) and login verified
+- [ ] Full Playwright suite against the preview (needs E2E platform-admin creds; writes test data)
+- [ ] Workers Paid before cutover: 9 crons > Free limit of 5; login uses ~500 ms CPU vs Free's 10 ms
 - [ ] Backup cron within Workers CPU/memory limits; restore without in-memory gunzip
 - [ ] `next/image` on Workers; review in-isolate caches
 
