@@ -58,7 +58,12 @@ const poolConfig = (process.env.PGHOST)
 // startup options also avoids racing a connect-event query with the first
 // application query on that client.
 
-function createPool(perRequest: boolean) {
+function createPool(perRequest: boolean, hyperdriveUrl?: string) {
+  // Workers cannot TLS-handshake with Supabase directly (connections drop
+  // mid-handshake), so on Workers pg talks plain TCP to the local Hyperdrive
+  // binding, which holds the TLS pool to Supabase. Hyperdrive ignores startup
+  // `options`, so the Asia/Kolkata timezone must come from the DB role default.
+  if (hyperdriveUrl) return new Pool({ connectionString: hyperdriveUrl, max: 3 })
   return new Pool({ ...poolConfig, max: perRequest ? 3 : poolConfig.max })
 }
 
@@ -75,15 +80,18 @@ const perRequestPool = new WeakMap<object, Pool>()
 
 function current(): Pool {
   let requestKey: object | undefined
+  let hyperdriveUrl: string | undefined
   try {
-    requestKey = getCloudflareContext().ctx as object
+    const { ctx, env } = getCloudflareContext()
+    requestKey = ctx as object
+    hyperdriveUrl = (env as { HYPERDRIVE?: { connectionString: string } }).HYPERDRIVE?.connectionString
   } catch {
     // Not on Workers (plain Node: next dev, scripts, tests).
   }
   if (!requestKey) return (globalForPool.pool ??= createPool(false))
 
   let requestPool = perRequestPool.get(requestKey)
-  if (!requestPool) perRequestPool.set(requestKey, (requestPool = createPool(true)))
+  if (!requestPool) perRequestPool.set(requestKey, (requestPool = createPool(true, hyperdriveUrl)))
   return requestPool
 }
 

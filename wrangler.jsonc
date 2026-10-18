@@ -11,6 +11,8 @@
 	],
 	// Phase 1: workers.dev URL only, no custom domain/zone routes yet.
 	"workers_dev": true,
+	// Supabase via Hyperdrive, query caching disabled (cached reads would go stale after writes).
+	"hyperdrive": [{ "binding": "HYPERDRIVE", "id": "9a23f4ac1a884291ae1667aa63bbad10" }],
 	"assets": {
 		"directory": ".open-next/assets",
 		"binding": "ASSETS"
