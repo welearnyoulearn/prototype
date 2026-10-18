@@ -12,6 +12,13 @@ Non-obvious technical decisions and their reasoning for the WLYL School prototyp
 -->
 
 
+## 2026-10-18 — Host on Cloudflare Workers via OpenNext, keep Supabase Postgres (#381)
+
+**Context:** The app runs on Vercel serverless; each lambda holds its own Supavisor connection (31 of 60 Postgres connections sat idle on 2026-10-18). Cloudflare already hosts our R2 backups and the same OpenNext setup runs varchas.store.
+**Decision:** Run the Next.js app on Cloudflare Workers with `@opennextjs/cloudflare`, keeping Supabase as the database (via Hyperdrive). Workers Paid plan is required: bcrypt cost 12 is ~300 ms CPU per login, over the Free plan's 10 ms. The nine `vercel.json` crons map to a `scheduled()` handler in `custom-worker.js`. Post-response work must go through `after()` / `waitUntil` — un-awaited promises are killed when the response returns.
+**Alternatives considered:** vinext (Cloudflare's newer recommendation for Next 16) — still beta; revisit once OpenNext is live. Moving the database to D1 — rejected: every query is raw Postgres via `pg`.
+**Consequences:** `lib/db.ts` keys a `pg` Pool per request on Workers. In-isolate caches (`lib/responseCache.ts`, Watchline flags) are per-isolate, not global. No local filesystem: the textbook upload no longer keeps the original PDF (only its extracted text was ever used). Bundle was 5.7 MB gzipped against the 10 MB limit. DNS (Hostinger) and production cutover are a separate step.
+
 ## 2026-09-28 — Plan features are enforced centrally in proxy.ts (#253)
 
 **Context:** Plan features only hid navigation tabs. Of roughly 95 feature API routes, only the fee and portal-access ones called `schoolHasFeature`, so a school on a lower plan could use any feature by calling its API directly. Adding a check to every handler would be easy to forget on the next new route.
