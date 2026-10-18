@@ -110,9 +110,12 @@ export default function CommandBar({ schoolId, onNavigate }: Props) {
     const lower = q.toLowerCase()
     const navMatches = NAV_SEARCH.filter(n => n.label.toLowerCase().includes(lower) || n.sub?.toLowerCase().includes(lower))
 
-    // API search for students and teachers in parallel
+    // API search for students and teachers in parallel. /api/students filters server-side on `q`
+    // and, with `limit`, answers { data } instead of a bare array.
+    // /api/teachers has no search param: `search` is ignored and the whole staff list comes back,
+    // so the first 3 shown are not filtered by the query (needs server-side search to fix).
     const [stuRes, tchRes] = await Promise.all([
-      fetch(`/api/students?school_id=${schoolId}&search=${encodeURIComponent(q)}`).then(r => r.ok ? r.json() : []).catch(() => []),
+      fetch(`/api/students?school_id=${schoolId}&q=${encodeURIComponent(q)}&limit=5`).then(r => r.ok ? r.json() : null).then(d => d?.data ?? []).catch(() => []),
       fetch(`/api/teachers?school_id=${schoolId}&search=${encodeURIComponent(q)}`).then(r => r.ok ? r.json() : []).catch(() => []),
     ])
 
