@@ -32,6 +32,14 @@ async function handleGET(req: NextRequest) {
     const p = req.nextUrl.searchParams
     const school_id    = p.get('school_id')
     const academic_year = p.get('academic_year')
+    // scope=summary → headline figures + per-fee-head collection (what the Overview cards and the Fee
+    // Plan need); scope=details → the heavier breakdowns, fetched only when the user asks for them;
+    // no scope → everything, as before.
+    const scope = p.get('scope')
+    const wantSummary = scope !== 'details'
+    const wantDetails = scope !== 'summary'
+    const q = (want: boolean, sql: string, params: unknown[]) =>
+      want ? pool.query(sql, params) : Promise.resolve({ rows: [] as never[] })
 
     if (!school_id || !academic_year) {
       return NextResponse.json({ error: 'school_id and academic_year required' }, { status: 400 })
@@ -43,11 +51,11 @@ async function handleGET(req: NextRequest) {
       // pending while it hasn't. One statement that only touches rows that actually need to change,
       // and at most once every few minutes per school+year — the status only ever changes with the
       // calendar date, so doing this on every Overview/Ledger load was wasted round trips and writes.
-      await syncOverdueStatus(school_id, academic_year)
+      if (wantSummary) await syncOverdueStatus(school_id, academic_year)
 
       // Per-student rollup first, then aggregate — so paid/partial/zero-payer counts
       // are per STUDENT not per ledger entry, and zero-payer = no cash paid at all this year
-      const qSummary = pool.query(
+      const qSummary = q(wantSummary, 
         `WITH per_student AS (
            SELECT
              l.student_id,
@@ -94,7 +102,7 @@ async function handleGET(req: NextRequest) {
       // 'carry_forward' waiver_type used internally to zero out an old year's balance
       // during year-end/rollover, so "Total Waived" reflects actual concessions granted,
       // not administrative bookkeeping from closing out unpaid dues.
-      const qDisc = pool.query(
+      const qDisc = q(wantSummary, 
         `SELECT COALESCE(SUM(w.waiver_amount), 0) AS total
          FROM fee_waivers w
          JOIN student_fee_ledger l ON l.id = w.ledger_id
@@ -107,7 +115,7 @@ async function handleGET(req: NextRequest) {
       // Dues carried in from earlier years (bills created by year-end carry-forward / passout) are
       // billed in THIS year too, but were already counted as billed in the year they came from.
       // Report them separately so "current-year fees" and "previous-year dues" are never blurred.
-      const qCarried = pool.query(
+      const qCarried = q(wantSummary, 
         `SELECT COALESCE(SUM(l.amount_due), 0) AS due,
                 COALESCE(SUM(l.amount_paid), 0) AS collected,
                 COALESCE(SUM(GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0)), 0) AS outstanding,
@@ -119,7 +127,7 @@ async function handleGET(req: NextRequest) {
 
       // Dues from EARLIER years that are still unpaid (e.g. students "left open" at year-end) are not
       // part of this year's figures. Count them so the screen can say "this isn't included".
-      const qPriorOpen = pool.query(
+      const qPriorOpen = q(wantSummary, 
         `SELECT COALESCE(SUM(GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0)), 0) AS outstanding,
                 COUNT(DISTINCT l.student_id) AS students,
                 MIN(l.academic_year) AS from_year
@@ -130,7 +138,7 @@ async function handleGET(req: NextRequest) {
       ).catch(() => ({ rows: [{ outstanding: 0, students: 0, from_year: null }] }))
       // The same dues split by the year they sit in, so each earlier year is named — "and earlier"
       // is ambiguous once dues from more than one year are left open.
-      const qPriorByYear = pool.query(
+      const qPriorByYear = q(wantSummary, 
         `SELECT l.academic_year AS year,
                 COALESCE(SUM(GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0)), 0) AS outstanding,
                 COUNT(DISTINCT l.student_id) AS students
@@ -142,7 +150,7 @@ async function handleGET(req: NextRequest) {
       ).catch(() => ({ rows: [] as Array<{ year: string; outstanding: string; students: string }> }))
 
       // Dues sitting in the passout bucket (graduated/left students) — a third place money can be owed.
-      const qPassout = pool.query(
+      const qPassout = q(wantSummary, 
         `SELECT COALESCE(SUM(GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0)), 0) AS outstanding,
                 COUNT(DISTINCT l.student_id) AS students
          FROM student_fee_ledger l
@@ -153,7 +161,7 @@ async function handleGET(req: NextRequest) {
 
       // Collection by category — discretionary_waived computed from fee_waivers
       // (separate query to avoid multiplying total_due/collected when joining waivers)
-      const qByCategory = pool.query(
+      const qByCategory = q(wantSummary, 
         `SELECT fc.name AS category_name, fc.frequency,
                 COALESCE(SUM(l.amount_due), 0)                                                             AS total_due,
                 COALESCE(SUM(l.amount_paid), 0)                                                            AS total_collected,
@@ -169,7 +177,7 @@ async function handleGET(req: NextRequest) {
         [school_id, academic_year]
       )
       // Discretionary waivers per category (excludes carry_forward bookkeeping)
-      const qDiscByCat = pool.query(
+      const qDiscByCat = q(wantSummary, 
         `SELECT fc.id AS fee_category_id, COALESCE(SUM(w.waiver_amount), 0) AS total
          FROM fee_waivers w
          JOIN student_fee_ledger l ON l.id = w.ledger_id
@@ -183,7 +191,7 @@ async function handleGET(req: NextRequest) {
 
       // Include all completed collections against this year's bills, even when
       // paid outside the year, so the trend reconciles with the headline total.
-      const qTrend = pool.query(
+      const qTrend = q(wantDetails, 
         `SELECT TO_CHAR(fp.paid_date, 'Mon YYYY') AS month,
                 DATE_TRUNC('month', fp.paid_date) AS month_start,
                 COALESCE(SUM(fp.amount), 0) AS collected
@@ -200,7 +208,7 @@ async function handleGET(req: NextRequest) {
       // Top defaulters — outstanding balance > 0 regardless of status, so partially-paid
       // students aren't silently excluded (they still owe money). Matches the Defaulters
       // CSV export's definition.
-      const qDefaulters = pool.query(
+      const qDefaulters = q(wantDetails, 
         `SELECT s.id AS student_id, s.name AS student_name, ${CLASS_GRADE} AS grade, ${CLASS_SECTION} AS section, s.roll_number, ${CLASS_ROLL} AS school_roll_number,
                 SUM(GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0)) AS outstanding,
                 COALESCE(SUM(GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0)) FILTER (WHERE l.source_academic_year IS NOT NULL), 0) AS carried_outstanding,
@@ -218,7 +226,7 @@ async function handleGET(req: NextRequest) {
       )
 
       // Count receipts, rather than the individual bill allocations they contain.
-      const qMode = pool.query(
+      const qMode = q(wantDetails, 
         `SELECT fp.payment_mode, COUNT(DISTINCT fp.receipt_number) AS count, SUM(fp.amount) AS total
          FROM fee_payments fp
          JOIN student_fee_ledger l ON l.id = fp.ledger_id
@@ -229,7 +237,7 @@ async function handleGET(req: NextRequest) {
       )
 
       // Class-wise (grade + section) collection breakdown for Overview analysis
-      const qClass = pool.query(
+      const qClass = q(wantDetails, 
         `WITH per_student AS (
            SELECT ${CLASS_GRADE} AS grade, COALESCE(${CLASS_SECTION}, '') AS section, l.student_id,
                   SUM(l.amount_due)  AS s_due,
@@ -265,26 +273,28 @@ async function handleGET(req: NextRequest) {
       ] = await Promise.all([
         qSummary, qDisc, qCarried, qPriorOpen, qPriorByYear, qPassout, qByCategory, qDiscByCat, qTrend, qDefaulters, qMode, qClass,
       ])
-      summary.discretionary_waived = discRows[0]?.total ?? summary.total_waived
-      summary.carried_in_due = carriedIn.due
-      summary.carried_in_collected = carriedIn.collected
-      summary.carried_in_outstanding = carriedIn.outstanding
-      summary.carried_in_students = carriedIn.students
-      summary.prior_unresolved_outstanding = priorOpen.outstanding
-      summary.prior_unresolved_students = priorOpen.students
-      summary.prior_unresolved_from = priorOpen.from_year
-      summary.prior_unresolved_by_year = priorByYear
-      summary.passout_outstanding = passoutOpen.outstanding
-      summary.passout_students = passoutOpen.students
-      summary.owed_all_years = Number(summary.total_outstanding) + Number(priorOpen.outstanding) + Number(passoutOpen.outstanding)
-      const discCatMap = new Map(discByCat.map((r: { fee_category_id: number; total: string }) => [r.fee_category_id, r.total]))
-      for (const c of by_category) c.discretionary_waived = discCatMap.get(c.fee_category_id) ?? '0'
+      if (summary) {
+        summary.discretionary_waived = discRows[0]?.total ?? summary.total_waived
+        summary.carried_in_due = carriedIn.due
+        summary.carried_in_collected = carriedIn.collected
+        summary.carried_in_outstanding = carriedIn.outstanding
+        summary.carried_in_students = carriedIn.students
+        summary.prior_unresolved_outstanding = priorOpen.outstanding
+        summary.prior_unresolved_students = priorOpen.students
+        summary.prior_unresolved_from = priorOpen.from_year
+        summary.prior_unresolved_by_year = priorByYear
+        summary.passout_outstanding = passoutOpen.outstanding
+        summary.passout_students = passoutOpen.students
+        summary.owed_all_years = Number(summary.total_outstanding) + Number(priorOpen.outstanding) + Number(passoutOpen.outstanding)
+        const discCatMap = new Map(discByCat.map((r: { fee_category_id: number; total: string }) => [r.fee_category_id, r.total]))
+        for (const c of by_category) c.discretionary_waived = discCatMap.get(c.fee_category_id) ?? '0'
+      }
 
       // Students who are active but have NO ledger rows for this year. Split into those Generate can
       // bill (their grade has a fee structure, or they have a variable-fee assignment) and those it
       // can't (no fee amount set for their grade) — the latter would otherwise show as "unbilled"
       // forever, because generating creates nothing for them.
-      const { rows: unbilledRows } = await pool.query(
+      const { rows: unbilledRows } = await q(wantSummary, 
         `SELECT s.grade,
                 (EXISTS (SELECT 1 FROM fee_structures fs
                          JOIN fee_categories fc ON fc.id = fs.fee_category_id AND fc.is_active = TRUE
@@ -307,6 +317,7 @@ async function handleGET(req: NextRequest) {
         grades: [...new Set(noPlanRows.map(r => String(r.grade ?? '—')))],
       }
 
+      if (scope === 'details') return NextResponse.json({ monthly_trend, top_defaulters, by_payment_mode, by_class })
       return NextResponse.json({
         summary,
         by_category,

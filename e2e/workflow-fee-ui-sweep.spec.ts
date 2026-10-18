@@ -113,3 +113,16 @@ test('FEEUI-ledger student name opens details', async ({ page }) => {
   await page.locator('[data-testid^="btn-ledger-details-"]').first().click({ timeout: 30000 })
   await expect(page.getByTestId('passbook-student-details')).toBeVisible({ timeout: 30000 })
 })
+
+test('FEEUI-overview details load on demand', async ({ page }) => {
+  await page.setViewportSize({ width: 1366, height: 800 })
+  const detailCalls: string[] = []
+  page.on('request', r => { if (r.url().includes('/api/fees/stats') && r.url().includes('scope=details')) detailCalls.push(r.url()) })
+  await open(page)
+  await expect(page.getByTestId('overview-details-cta')).toBeVisible({ timeout: 30000 })
+  expect(detailCalls).toHaveLength(0)
+  await page.getByTestId('btn-overview-load-details').click()
+  await expect(page.getByTestId('overview-details-cta')).toHaveCount(0, { timeout: 30000 })
+  expect(detailCalls.length).toBeGreaterThan(0)
+  await expect(page.getByText('Fee Head Collection Health')).toBeVisible()
+})
