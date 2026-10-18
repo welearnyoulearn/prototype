@@ -162,7 +162,7 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
     const schoolName = schoolRes.rows[0]?.name || 'Your School'
 
     const notifications: Promise<unknown>[] = []
-    if (student.email) notifications.push(sendStudentRemovedEmail({ to: student.email, name: student.name, schoolName }).catch(console.error))
+    if (student.email) notifications.push(sendStudentRemovedEmail({ schoolId: student.school_id, to: student.email, name: student.name, schoolName }).catch(console.error))
     if (student.phone) {
       notifications.push(sendWhatsappMessage({
         schoolId: student.school_id, to: student.phone, templateName: 'student_removed', recipientName: student.name,
@@ -178,7 +178,7 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
       const parentDisplayName = parent.name || parent.email || parent.phone || 'there'
       if (parent.email) {
         notifications.push(sendParentStudentRemovedEmail({
-          to: parent.email, parentName: parentDisplayName, studentName: student.name, schoolName,
+          schoolId: student.school_id, to: parent.email, parentName: parentDisplayName, studentName: student.name, schoolName,
         }).catch(console.error))
       }
       if (parent.phone) {

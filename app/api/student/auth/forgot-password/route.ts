@@ -36,7 +36,7 @@ export async function POST(req: NextRequest) {
 
     const resetUrl = `${process.env.APP_URL || 'http://localhost:3000'}/student/reset-password?token=${token}`
     if (student.email) {
-      after(() => sendPasswordResetEmail({ to: student.email, name: student.name, resetUrl, role: 'student' }).catch(console.error))
+      after(() => sendPasswordResetEmail({ schoolId: student.school_id, to: student.email, name: student.name, resetUrl, role: 'student' }).catch(console.error))
     }
     if (student.phone) {
       after(() => sendWhatsappMessage({

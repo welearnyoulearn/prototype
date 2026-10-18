@@ -35,7 +35,7 @@ export async function POST(req: NextRequest) {
       const url = resetUrl(token)
       const name = parent.name || identifier
       if (parent.email) {
-        after(() => sendPasswordResetEmail({ to: parent.email, name, resetUrl: url, role: 'parent' }).catch(console.error))
+        after(() => sendPasswordResetEmail({ schoolId: parent.school_id, to: parent.email, name, resetUrl: url, role: 'parent' }).catch(console.error))
       }
       if (parent.phone) {
         after(() => sendWhatsappMessage({

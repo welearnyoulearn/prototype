@@ -1,8 +1,9 @@
 import { createHash } from 'crypto'
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
 import { DeleteObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3'
 import pool from '@/lib/db'
 import { r2Config } from '@/lib/r2'
+import { recordUsage } from '@/lib/usage'
 import { getClientIp } from '@/lib/request-ip'
 import { resolveFeedbackCode } from '@/lib/feedback-public-access'
 import { feedbackSubmitSchema } from '@/lib/validation/feedback'
@@ -90,6 +91,7 @@ export async function POST(req: NextRequest) {
     // exist — prevents a client passing another school's key or a
     // never-uploaded one.
     let voiceKey: string | null = null
+    let voiceBytes = 0
     if (body.voice_key) {
       if (!body.voice_key.startsWith(`feedback/${schoolId}/`)) {
         return NextResponse.json({ error: 'Invalid voice_key' }, { status: 400 })
@@ -108,6 +110,7 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: `Voice note is too long — please keep it under ${VOICE_LIMIT_LABEL}` }, { status: 400 })
       }
       voiceKey = body.voice_key
+      voiceBytes = head.ContentLength ?? 0
     }
 
     // Resolve each rated category against this school's live category rows
@@ -167,6 +170,14 @@ export async function POST(req: NextRequest) {
     }
 
     await client.query('COMMIT')
+    // after(): recordUsage needs its own pool connection, and `client` is held until finally.
+    if (voiceKey) {
+      const key = voiceKey
+      after(() => recordUsage({
+        schoolId, meterKey: 'storage.upload', quantity: Math.round(voiceBytes / 1_048_576 * 1e4) / 1e4,
+        source: 'upload.feedback_voice', idempotencyKey: `upload:${key}`,
+      }))
+    }
 
     return NextResponse.json({ id: submission.id, created_at: submission.created_at }, { status: 201 })
   } catch (err: unknown) {

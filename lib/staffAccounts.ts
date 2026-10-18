@@ -126,7 +126,7 @@ export async function notifySeatOverage(
       <p>Go to <strong>Settings → Staff Accounts</strong> to choose which accounts to deactivate. Deactivated accounts are kept and can be reactivated later when there is room.</p>
     </div>`
     await Promise.all(rows.map(r =>
-      sendMail(r.email, `Your ${tierLabel(info.tier)} plan allows ${info.limit} staff accounts`, html)
+      sendMail(r.email, `Your ${tierLabel(info.tier)} plan allows ${info.limit} staff accounts`, html, { schoolId, source: 'email.seat_overage' })
     ))
   } catch (e) {
     console.error('[staffAccounts] seat overage email failed', e)
