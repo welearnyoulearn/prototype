@@ -219,13 +219,13 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 
     const loginUrl = `${process.env.APP_URL || 'http://localhost:3000'}/teacher/login`
     if (becomingActive && tempPassword) {
-      sendStaffReactivatedEmail({ to: teacher.email, name: teacher.name, schoolName, tempPassword, loginUrl }).catch(console.error)
+      sendStaffReactivatedEmail({ schoolId: teacher.school_id, to: teacher.email, name: teacher.name, schoolName, tempPassword, loginUrl }).catch(console.error)
       sendWhatsappMessage({ schoolId: teacher.school_id, to: teacher.phone, templateName: 'staff_reactivated', recipientName: teacher.name,
         templateParams: { staff_name: teacher.name, school_name: schoolName, login: teacher.email, temp_password: tempPassword, login_url: loginUrl } }).catch(console.error)
     } else {
       if (emailChanged) {
-        sendStaffContactChangedEmail({ to: teacher.email, name: teacher.name, schoolName, field: 'email', newValue: teacher.email }).catch(console.error)
-        if (existing.email && existing.email !== teacher.email) sendStaffContactChangedEmail({ to: existing.email, name: teacher.name, schoolName, field: 'email', newValue: teacher.email }).catch(console.error)
+        sendStaffContactChangedEmail({ schoolId: teacher.school_id, to: teacher.email, name: teacher.name, schoolName, field: 'email', newValue: teacher.email }).catch(console.error)
+        if (existing.email && existing.email !== teacher.email) sendStaffContactChangedEmail({ schoolId: teacher.school_id, to: existing.email, name: teacher.name, schoolName, field: 'email', newValue: teacher.email }).catch(console.error)
       }
       if (phoneChanged) {
         for (const phone of new Set([teacher.phone, existing.phone].filter(Boolean))) {
@@ -335,7 +335,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
       const schoolNameRes = await pool.query('SELECT name FROM schools WHERE id = $1', [schoolId])
       const schoolName = schoolNameRes.rows[0]?.name || 'Your School'
       if (removedTeacher.email) {
-        sendStaffRemovedEmail({ to: removedTeacher.email, name: removedTeacher.name, schoolName }).catch(console.error)
+        sendStaffRemovedEmail({ schoolId, to: removedTeacher.email, name: removedTeacher.name, schoolName }).catch(console.error)
       }
       if (removedTeacher.phone) {
         sendWhatsappMessage({
