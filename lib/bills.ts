@@ -149,10 +149,13 @@ ${bill.paid > 0 ? row('Received', inr(bill.paid)) + row('Left to pay', inr(left)
   return sent
 }
 
-async function sendAndStamp(billId: number): Promise<void> {
+// True when at least one recipient got the bill (sent_at is stamped).
+async function sendAndStamp(billId: number): Promise<boolean> {
   const bill = await getBill(billId)
-  if (paise(bill.total) === 0) return // ₹0 bills are never emailed
-  if (await emailBill(bill)) await pool.query(`UPDATE saas_invoices SET sent_at = NOW() WHERE id = $1`, [billId])
+  if (paise(bill.total) === 0) return false // ₹0 bills are never emailed
+  if (!(await emailBill(bill))) return false
+  await pool.query(`UPDATE saas_invoices SET sent_at = NOW() WHERE id = $1`, [billId])
+  return true
 }
 
 // ── Creating bills ──────────────────────────────────────────────────────────
@@ -311,6 +314,26 @@ export async function createPlanBill(input: { schoolId: number; termId: number; 
   })
   await sendAndStamp(id).catch(err => console.error('[bills] send failed', id, err))
   return id
+}
+
+// Bills from the last week whose first email failed (sent_at still NULL) get one more try per
+// daily run. The cron calls this before creating new bills, so a bill is attempted once per run.
+export async function resendUnsentBills(): Promise<number> {
+  const { rows } = await pool.query<{ id: number }>(
+    `SELECT id FROM saas_invoices
+     WHERE kind IN ('usage', 'plan') AND sent_at IS NULL AND total_amount > 0 AND paid_amount < total_amount
+       AND generated_at > NOW() - INTERVAL '7 days'
+     ORDER BY id`,
+  )
+  let sent = 0
+  for (const { id } of rows) {
+    try {
+      if (await sendAndStamp(id)) sent++
+    } catch (err) {
+      console.error('[bills] resend failed', id, err)
+    }
+  }
+  return sent
 }
 
 // ── Reminders, payments, adjustments ────────────────────────────────────────
