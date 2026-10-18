@@ -15,6 +15,7 @@ import { useSectionNav } from '@/lib/useSectionNav'
 import { getUsageSessionId, clearUsageSessionId } from '@/lib/usageSession'
 import { PORTAL_NAV_KEY_ALIASES } from '@/lib/features'
 import NotificationBell from '../components/NotificationBell'
+import { useNavNotificationCounts, NavBadge } from '../components/navNotifications'
 import TestCalendar from '../components/TestCalendar'
 import AttendanceCalendar from '../components/AttendanceCalendar'
 import SchoolCalendarView from '../components/SchoolCalendarView'
@@ -243,6 +244,7 @@ function ParentDashboard() {
   }
 
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const navCounts = useNavNotificationCounts('parent')
 
   const [lang, setLang] = useState<Lang>('en')
   useEffect(() => {
@@ -655,6 +657,7 @@ function ParentDashboard() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={item.icon} />
               </svg>
               {T.nav[item.key as keyof typeof T.nav]}
+              {item.key !== 'fees' && item.key !== 'results' && <NavBadge count={navCounts[item.key]} navKey={item.key} />}
               {item.key === 'fees' && (feeSummary?.overdue_count ?? 0) > 0 && (
                 <span className="ml-auto bg-red-500 text-white text-xs font-bold w-4 h-4 rounded-full flex items-center justify-center">
                   {feeSummary!.overdue_count}

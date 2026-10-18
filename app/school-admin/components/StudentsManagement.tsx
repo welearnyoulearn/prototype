@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import dynamic from 'next/dynamic'
-import { Users } from 'lucide-react'
+import { Users, Eye, Pencil, ChevronRight } from 'lucide-react'
 import { isValidName, NAME_INVALID_MESSAGE } from '@/lib/nameValidation'
 import { EMAIL_RE, INDIAN_MOBILE_RE, parsePositiveInteger } from '@/lib/studentValidation'
 import { EmptyState } from '@/components/ui/empty-state'
@@ -620,6 +620,14 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
           </select>
         </div>
 
+        {filtered.length > 0 && (
+          <p className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-gray-500" data-testid="students-row-hint">
+            <span className="inline-flex items-center gap-1"><Eye className="h-3.5 w-3.5 text-violet-600" aria-hidden="true" /><b className="font-semibold text-violet-700">Profile</b> opens the full student profile</span>
+            <span className="inline-flex items-center gap-1"><Pencil className="h-3.5 w-3.5 text-green-700" aria-hidden="true" /><b className="font-semibold text-green-700">Edit</b> changes this student&apos;s details</span>
+            <span className="inline-flex items-center gap-1"><ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />Click anywhere on a row for a quick view</span>
+          </p>
+        )}
+
         {filtered.length === 0 ? (
           <EmptyState
             icon={Users}
@@ -644,6 +652,7 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
                       <th className="text-left px-5 py-2.5 font-medium text-gray-500 text-xs">Parent</th>
                       <th className="text-left px-5 py-2.5 font-medium text-gray-500 text-xs">Contact</th>
                       <th className="text-left px-5 py-2.5 font-medium text-gray-500 text-xs">Status</th>
+                      <th className="text-right px-5 py-2.5 font-medium text-gray-500 text-xs">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
@@ -654,13 +663,15 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
                       return a.name.localeCompare(b.name)
                     }).map(s => (
                       <tr key={s.id} onClick={() => { setSelected(s); setEditing(false); setEditForm({}); }}
-                        className={`cursor-pointer transition-colors ${selected?.id === s.id ? 'bg-green-50' : 'hover:bg-gray-50'}`}>
+                        data-testid={`student-row-${s.id}`}
+                        title="Click for quick view"
+                        className={`group cursor-pointer transition-colors ${selected?.id === s.id ? 'bg-green-50 shadow-[inset_3px_0_0_#16a34a]' : 'hover:bg-gray-50'}`}>
                         <td className="px-3 py-3 text-center font-semibold text-sm text-amber-700 bg-amber-50/40">
                           {s.school_roll_number ?? <span className="text-gray-300 font-normal text-xs">—</span>}
                         </td>
                         <td className="px-5 py-3 font-medium text-gray-900">
                           <button type="button" data-testid={`student-name-${s.id}`} aria-label={`Open full profile of ${s.name}`}
-                            onClick={e => { e.stopPropagation(); setProfileId(s.id) }} className="text-left text-violet-700 hover:underline">{s.name}</button>
+                            title="Open full profile" onClick={e => { e.stopPropagation(); setProfileId(s.id) }} className="text-left text-violet-700 hover:underline">{s.name}</button>
                         </td>
                         <td className="px-5 py-3 text-gray-600 text-xs">{s.parent_name || '—'}</td>
                         <td className="px-5 py-3 text-gray-500 text-xs">{s.parent_phone || s.phone || '—'}</td>
@@ -668,6 +679,20 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
                           <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${s.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
                             {s.status}
                           </span>
+                        </td>
+                        <td className="px-5 py-3">
+                          <div className="flex items-center justify-end gap-2 whitespace-nowrap">
+                            <button type="button" data-testid={`student-profile-btn-${s.id}`} aria-label={`Open full profile of ${s.name}`}
+                              onClick={e => { e.stopPropagation(); setProfileId(s.id) }}
+                              className="inline-flex items-center gap-1 rounded-lg border border-violet-200 px-2.5 py-1 text-xs font-medium text-violet-700 hover:bg-violet-50">
+                              <Eye className="h-3.5 w-3.5" aria-hidden="true" />Profile
+                            </button>
+                            <button type="button" data-testid={`student-edit-btn-${s.id}`} aria-label={`Edit ${s.name}`}
+                              onClick={e => { e.stopPropagation(); setSelected(s); setEditForm({}); setEditing(true) }}
+                              className="inline-flex items-center gap-1 rounded-lg border border-green-200 px-2.5 py-1 text-xs font-medium text-green-700 hover:bg-green-50">
+                              <Pencil className="h-3.5 w-3.5" aria-hidden="true" />Edit
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -732,7 +757,7 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
         <div className="w-full xl:w-72 flex-shrink-0">
           <div className="bg-white rounded-md border border-gray-200 xl:sticky xl:top-6 flex flex-col max-h-[calc(100vh-6rem)] overflow-hidden">
             <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
-              <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Student</span>
+              <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{editing ? 'Editing student' : 'Quick view'}</span>
               <button onClick={() => setSelected(null)} className="text-muted-foreground hover:text-gray-600 text-lg leading-none">×</button>
             </div>
 

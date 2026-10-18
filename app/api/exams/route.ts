@@ -63,7 +63,7 @@ export async function GET(req: NextRequest) {
         JOIN classes c ON c.id = e.class_id
         JOIN exam_subjects es ON es.exam_id = e.id AND es.teacher_id = $3
         LEFT JOIN exam_subjects all_es ON all_es.exam_id = e.id
-        WHERE e.class_id = $1 AND e.school_id = $2 AND e.status != 'released'
+        WHERE e.class_id = $1 AND e.school_id = $2 AND e.status NOT IN ('released', 'cancelled')
         GROUP BY e.id, c.grade, c.section, es.id, es.subject_name, es.max_marks, es.status
         ORDER BY e.exam_date ASC NULLS LAST, e.created_at DESC
       `, [parseInt(class_id), parseInt(school_id!), parseInt(teacher_id)])

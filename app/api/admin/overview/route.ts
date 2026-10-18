@@ -26,9 +26,9 @@ export async function GET(req: NextRequest) {
     // ── 1. Core counts (always) ───────────────────────────────────────────────
     const coreQ = pool.query(`
       SELECT
-        (SELECT COUNT(*) FROM teachers WHERE school_id=$1 AND status='active')::int AS teachers,
+        (SELECT COUNT(*) FROM teachers WHERE school_id=$1 AND status='active' AND removed_at IS NULL)::int AS teachers,
         (SELECT COUNT(*) FROM students WHERE school_id=$1 AND status='active')::int AS students,
-        (SELECT COUNT(*) FROM classes  WHERE school_id=$1)::int                     AS classes
+        (SELECT COUNT(*) FROM classes  WHERE school_id=$1 AND deleted_at IS NULL)::int AS classes
     `, [school_id])
 
     // ── 4. Attendance today ───────────────────────────────────────────────────
@@ -57,6 +57,7 @@ export async function GET(req: NextRequest) {
           FROM exam_records e
           JOIN classes c ON c.id = e.class_id
           WHERE e.school_id = $1
+            AND e.status != 'cancelled'
             AND e.exam_date >= $2::date
             AND e.exam_date < $2::date + interval '7 days'
           ORDER BY e.exam_date, e.exam_name
