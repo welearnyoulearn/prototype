@@ -22,6 +22,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
+import { checkCronAuth } from '@/lib/backup'
 import { getOrCreateClassCircle } from '@/lib/classCircle'
 import { getISTDateParts } from '@/lib/birthday'
 
@@ -34,12 +35,12 @@ export async function POST(req: NextRequest) {
 }
 
 async function run(req: NextRequest) {
-  const cronSecret = process.env.CRON_SECRET
-  if (cronSecret) {
-    const auth = req.headers.get('authorization') ?? ''
-    if (auth.replace('Bearer ', '') !== cronSecret) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
+  const unauthorized = checkCronAuth(req)
+  if (unauthorized) {
+    return NextResponse.json(
+      { error: unauthorized === 503 ? 'Cron authentication is not configured' : 'Unauthorized' },
+      { status: unauthorized },
+    )
   }
 
   const { month, day, dateStr } = getISTDateParts()

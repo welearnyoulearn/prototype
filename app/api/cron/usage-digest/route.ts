@@ -11,6 +11,7 @@
 // benefit.
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
+import { checkCronAuth } from '@/lib/backup'
 import { sendMail } from '@/lib/email'
 import { ALL_FEATURES } from '@/lib/features'
 
@@ -174,12 +175,12 @@ async function run() {
 }
 
 export async function GET(req: NextRequest) {
-  const cronSecret = process.env.CRON_SECRET
-  if (cronSecret) {
-    const auth = req.headers.get('authorization') ?? ''
-    if (auth.replace('Bearer ', '') !== cronSecret) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
+  const unauthorized = checkCronAuth(req)
+  if (unauthorized) {
+    return NextResponse.json(
+      { error: unauthorized === 503 ? 'Cron authentication is not configured' : 'Unauthorized' },
+      { status: unauthorized },
+    )
   }
   try {
     const digest = await run()

@@ -285,8 +285,10 @@ export async function proxy(req: NextRequest, event?: NextFetchEvent) {
   }
 
   // ── admin.welearnyoulearn.com — Platform Admin only ──────────────────────
-  if (isAdminSubdomain) {
-    if (pathname.startsWith('/_next/') || pathname.startsWith('/api/') || pathname.startsWith('/favicon')) {
+  // /api/* falls through to the main-domain plan-lock and feature checks below, so a
+  // school cookie cannot use the admin host to bypass them (platform_admin passes both).
+  if (isAdminSubdomain && !pathname.startsWith('/api/')) {
+    if (pathname.startsWith('/_next/') || pathname.startsWith('/favicon')) {
       return NextResponse.next()
     }
     if (pathname === '/') {
