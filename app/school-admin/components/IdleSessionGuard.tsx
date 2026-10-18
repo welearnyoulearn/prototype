@@ -8,9 +8,13 @@ const CHECK_INTERVAL_MS = 60_000
 // Enforces the school-staff idle timeout on the client. The server is the authority
 // (an idle session is rejected by getSession()); this component keeps the timer alive
 // while the person is genuinely working and sends them to the login page as soon as the
-// session has ended, instead of leaving a dead dashboard on screen.
-export default function IdleSessionGuard() {
+// session has ended, instead of leaving a dead dashboard on screen. Used by the
+// teacher/student/parent portals too (their background polls are passive, so real
+// activity has to be reported here or a long read/type session would time out).
+export default function IdleSessionGuard({ loginHref = '/login?role=school' }: { loginHref?: string }) {
   useEffect(() => {
+    // Portal layouts also wrap their own login/password pages — no session there.
+    if (/\/(login|forgot-password|reset-password)(\/|$)/.test(window.location.pathname)) return
     let lastActivity = 0
     let lastHeartbeat = 0
     let redirecting = false
@@ -28,7 +32,7 @@ export default function IdleSessionGuard() {
         if (res.status === 401) {
           redirecting = true
           clearUsageSessionId()
-          window.location.href = '/login?role=school&reason=timeout'
+          window.location.href = `${loginHref}${loginHref.includes('?') ? '&' : '?'}reason=timeout`
         }
       } catch { /* offline — try again next tick */ }
     }
@@ -42,7 +46,7 @@ export default function IdleSessionGuard() {
       document.removeEventListener('visibilitychange', onVisible)
       events.forEach(e => window.removeEventListener(e, onActivity))
     }
-  }, [])
+  }, [loginHref])
 
   return null
 }

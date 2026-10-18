@@ -6,20 +6,20 @@ import { getSession, getPlatformSession, getTeacherSession, getStudentSession, g
 // session is active. The usage session id is a sequential integer, so it is only accepted
 // from a signed-in caller and only updates a row that caller owns — otherwise anyone could
 // keep other people's sessions "alive" and skew the usage figures.
-// The staff session is read passively: this ping runs every minute and must not count as
+// Every session is read passively: this ping runs every minute and must not count as
 // activity, or an abandoned tab would never hit the idle timeout.
 export async function POST(req: NextRequest) {
   try {
     const actors: { role: string; id: number }[] = []
-    const teacher = await getTeacherSession()
+    const teacher = await getTeacherSession({ passive: true })
     if (teacher) actors.push({ role: 'teacher', id: teacher.teacherId })
-    const student = await getStudentSession()
+    const student = await getStudentSession({ passive: true })
     if (student) actors.push({ role: 'student', id: student.studentId })
-    const parent = await getParentSession()
+    const parent = await getParentSession({ passive: true })
     if (parent) actors.push({ role: 'parent', id: parent.parentId })
     const staff = await getSession({ passive: true })
     if (staff) actors.push({ role: staff.role, id: staff.userId })
-    const platform = await getPlatformSession()
+    const platform = await getPlatformSession({ passive: true })
     if (platform?.role === 'platform_admin') actors.push({ role: 'platform_admin', id: platform.userId })
     if (actors.length === 0) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 

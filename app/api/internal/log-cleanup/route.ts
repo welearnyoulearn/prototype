@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse, after } from 'next/server'
 import pool from '@/lib/db'
+import { checkCronAuth } from '@/lib/backup'
 import { sendMail } from '@/lib/email'
 import { buildHealth } from '@/lib/watchline'
 import { closeStaleSessions } from '@/lib/usageTracking'
@@ -73,12 +74,17 @@ async function runCleanup() {
     pool.query(`DELETE FROM error_events WHERE severity IN ('info','warn') AND created_at < NOW() - INTERVAL '30 days'`),
   ])
   const r4 = await pool.query(`DELETE FROM error_events WHERE severity IN ('error','critical') AND created_at < NOW() - INTERVAL '90 days'`)
+  // Dead sessions (revoked or expired over 30 days ago) are never read again — keep the tables small.
+  const r5 = await pool.query(`DELETE FROM user_sessions WHERE revoked_at < NOW() - INTERVAL '30 days' OR expires_at < NOW() - INTERVAL '30 days'`)
+  const r6 = await pool.query(`DELETE FROM portal_sessions WHERE revoked_at < NOW() - INTERVAL '30 days' OR expires_at < NOW() - INTERVAL '30 days'`)
 
   const deleted = {
     request_logs_success:       r1.rowCount,
     request_logs_slow_or_error: r2.rowCount,
     error_events_info_warn:     r3.rowCount,
     error_events_error_critical: r4.rowCount,
+    user_sessions:              r5.rowCount,
+    portal_sessions:            r6.rowCount,
   }
 
   // Check remaining row counts — email only on critical (to avoid daily spam at warn level).
@@ -129,11 +135,15 @@ async function runCleanup() {
   return deleted
 }
 
-// GET — called by Vercel Cron (sends Authorization: Bearer <CRON_SECRET>)
+// GET — called by the daily cron (sends Authorization: Bearer <CRON_SECRET>).
+// POST — same, for manual triggering.
 export async function GET(req: NextRequest) {
-  const auth = req.headers.get('authorization')
-  if (!process.env.CRON_SECRET || auth !== `Bearer ${process.env.CRON_SECRET}`) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const unauthorized = checkCronAuth(req)
+  if (unauthorized) {
+    return NextResponse.json(
+      { error: unauthorized === 503 ? 'Cron authentication is not configured' : 'Unauthorized' },
+      { status: unauthorized },
+    )
   }
   try {
     const deleted = await runCleanup()
@@ -146,19 +156,6 @@ export async function GET(req: NextRequest) {
   }
 }
 
-// POST — for manual triggering (e.g. from a script or test)
 export async function POST(req: NextRequest) {
-  const secret = req.headers.get('x-cron-secret')
-  if (!secret || secret !== process.env.CRON_SECRET) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-  }
-  try {
-    const deleted = await runCleanup()
-    const usage = await runUsageRollup().catch(e => { console.error('[log-cleanup] usage rollup failed:', e); return null })
-    const featureUsage = await runFeatureUsageRollup().catch(e => { console.error('[log-cleanup] feature usage rollup failed:', e); return null })
-    return NextResponse.json({ deleted, usage, featureUsage, ran_at: new Date().toISOString() })
-  } catch (err) {
-    console.error('[log-cleanup]', err)
-    return NextResponse.json({ error: 'Cleanup failed' }, { status: 500 })
-  }
+  return GET(req)
 }

@@ -10,10 +10,10 @@ export async function GET(req: NextRequest) {
     // teacher_id/student_id/recipient_school_id was trusted, so any logged-in user
     // could read anybody else's notifications just by changing the id in the URL.
     // Precedence matches getAnySession(): teacher, then student, then parent, then school staff.
-    const teacher = await getTeacherSession()
-    const student = teacher ? null : await getStudentSession()
-    const parent  = teacher || student ? null : await getParentSession()
     // passive: NotificationBell polls every 30s — that must not count as user activity.
+    const teacher = await getTeacherSession({ passive: true })
+    const student = teacher ? null : await getStudentSession({ passive: true })
+    const parent  = teacher || student ? null : await getParentSession({ passive: true })
     const admin   = teacher || student || parent ? null : await getSession({ passive: true })
 
     let recipientColumn: string

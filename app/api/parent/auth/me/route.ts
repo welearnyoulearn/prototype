@@ -4,7 +4,9 @@ import { getParentSession, schoolHasFeature, clearParentAuthCookie } from '@/lib
 
 export async function GET() {
   try {
-    const session = await getParentSession()
+    // passive: app/parent/page.tsx polls this every 60s (access-revocation check) — that
+    // must not count as activity, or an abandoned tab would never hit the idle timeout.
+    const session = await getParentSession({ passive: true })
     if (!session) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 })
 
     // Checked on every load (and periodically while the tab stays open, see

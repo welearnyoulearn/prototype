@@ -316,7 +316,7 @@ export async function touchSession(): Promise<JWTPayload | null> {
   return validateStaffSession(true)
 }
 
-export async function getPlatformSession(): Promise<JWTPayload | null> {
+export async function getPlatformSession(opts: { passive?: boolean } = {}): Promise<JWTPayload | null> {
   const cookieStore = await cookies()
   const token = cookieStore.get(COOKIE_PLATFORM)?.value
   if (!token) return null
@@ -332,7 +332,9 @@ export async function getPlatformSession(): Promise<JWTPayload | null> {
     [payload.sid, payload.userId, SESSION_IDLE_MINUTES],
   )
   if (!rows.length) return null
-  await pool.query(`UPDATE user_sessions SET last_seen_at = NOW() WHERE id = $1 AND last_seen_at < NOW() - INTERVAL '30 seconds'`, [payload.sid])
+  if (!opts.passive) {
+    await pool.query(`UPDATE user_sessions SET last_seen_at = NOW() WHERE id = $1 AND last_seen_at < NOW() - INTERVAL '30 seconds'`, [payload.sid])
+  }
   return { ...payload, displayName: rows[0].full_name?.trim() || rows[0].email || undefined }
 }
 
@@ -385,6 +387,7 @@ async function validatePortalSession<T extends { sid?: string; schoolId: number 
   payload: T | null,
   actorType: PortalActorType,
   actorId: number,
+  touch: boolean,
 ): Promise<T | null> {
   if (!payload?.sid) return null
   const { rows } = await pool.query(
@@ -395,7 +398,9 @@ async function validatePortalSession<T extends { sid?: string; schoolId: number 
     [payload.sid, actorType, actorId, payload.schoolId, SESSION_IDLE_MINUTES],
   )
   if (!rows.length) return null
-  await pool.query(`UPDATE portal_sessions SET last_seen_at = NOW() WHERE id = $1 AND last_seen_at < NOW() - INTERVAL '30 seconds'`, [payload.sid])
+  if (touch) {
+    await pool.query(`UPDATE portal_sessions SET last_seen_at = NOW() WHERE id = $1 AND last_seen_at < NOW() - INTERVAL '30 seconds'`, [payload.sid])
+  }
   return payload
 }
 
@@ -406,18 +411,21 @@ export async function getPortalSessionIdFromCookie(actorType: PortalActorType): 
   return verifyParentToken(cookieStore.get(COOKIE_PARENT)?.value || '')?.sid ?? null
 }
 
+// Portal getters take the same { passive: true } as getSession(): background pollers
+// must not push the idle timer forward, or an abandoned tab never expires.
+
 // ─── Teacher JWT ──────────────────────────────────────────────────────────────
 export function signTeacherToken(payload: TeacherJWTPayload): string              { return sign(payload) }
 export function verifyTeacherToken(token: string): TeacherJWTPayload | null       { return verify<TeacherJWTPayload>(token) }
 export async function setTeacherAuthCookie(payload: TeacherJWTPayload)            { await setCookie(COOKIE_TEACHER, sign(payload, `${SESSION_MAX_HOURS}h`), false) }
 export async function clearTeacherAuthCookie()                                    { await clearCookie(COOKIE_TEACHER) }
 
-export async function getTeacherSession(opts: { allowFirstLogin?: boolean } = {}): Promise<TeacherJWTPayload | null> {
+export async function getTeacherSession(opts: { passive?: boolean; allowFirstLogin?: boolean } = {}): Promise<TeacherJWTPayload | null> {
   const cookieStore = await cookies()
   const token = cookieStore.get(COOKIE_TEACHER)?.value
   if (!token) return null
   const payload = verifyTeacherToken(token)
-  const validated = await validatePortalSession(payload, 'teacher', payload?.teacherId ?? 0)
+  const validated = await validatePortalSession(payload, 'teacher', payload?.teacherId ?? 0, !opts.passive)
   if (!validated) return null
   const { rows } = await pool.query(
     `SELECT 1 FROM teachers
@@ -440,12 +448,12 @@ export function verifyStudentToken(token: string): StudentJWTPayload | null     
 export async function setStudentAuthCookie(payload: StudentJWTPayload)            { await setCookie(COOKIE_STUDENT, sign(payload, `${SESSION_MAX_HOURS}h`), false) }
 export async function clearStudentAuthCookie()                                    { await clearCookie(COOKIE_STUDENT) }
 
-export async function getStudentSession(opts: { allowFirstLogin?: boolean } = {}): Promise<StudentJWTPayload | null> {
+export async function getStudentSession(opts: { passive?: boolean; allowFirstLogin?: boolean } = {}): Promise<StudentJWTPayload | null> {
   const cookieStore = await cookies()
   const token = cookieStore.get(COOKIE_STUDENT)?.value
   if (!token) return null
   const payload = verifyStudentToken(token)
-  const validated = await validatePortalSession(payload, 'student', payload?.studentId ?? 0)
+  const validated = await validatePortalSession(payload, 'student', payload?.studentId ?? 0, !opts.passive)
   if (!validated) return null
   const { rows } = await pool.query(
     `SELECT 1 FROM students WHERE id = $1 AND school_id = $2 AND status = 'active'`,
@@ -467,12 +475,12 @@ export function verifyParentToken(token: string): ParentJWTPayload | null       
 export async function setParentAuthCookie(payload: ParentJWTPayload)              { await setCookie(COOKIE_PARENT, sign(payload, `${SESSION_MAX_HOURS}h`), false) }
 export async function clearParentAuthCookie()                                     { await clearCookie(COOKIE_PARENT) }
 
-export async function getParentSession(opts: { allowFirstLogin?: boolean } = {}): Promise<ParentJWTPayload | null> {
+export async function getParentSession(opts: { passive?: boolean; allowFirstLogin?: boolean } = {}): Promise<ParentJWTPayload | null> {
   const cookieStore = await cookies()
   const token = cookieStore.get(COOKIE_PARENT)?.value
   if (!token) return null
   const payload = verifyParentToken(token)
-  const validated = await validatePortalSession(payload, 'parent', payload?.parentId ?? 0)
+  const validated = await validatePortalSession(payload, 'parent', payload?.parentId ?? 0, !opts.passive)
   if (!validated) return null
   const { rows } = await pool.query(
     `SELECT 1 FROM parents WHERE id = $1 AND school_id = $2`,
