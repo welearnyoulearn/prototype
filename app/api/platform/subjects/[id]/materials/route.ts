@@ -1,6 +1,9 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
+import { HeadObjectCommand } from '@aws-sdk/client-s3'
 import pool from '@/lib/db'
 import { requirePlatformAdmin } from '@/lib/auth'
+import { r2Config } from '@/lib/r2'
+import { recordUsage } from '@/lib/usage'
 
 // GET /api/platform/subjects/[id]/materials
 export async function GET(
@@ -43,6 +46,18 @@ export async function POST(
        RETURNING *`,
       [subjectId, material_type, title.trim(), file_url.trim()]
     )
+    // Platform storage (no school): size comes from R2, since the browser PUT the file directly.
+    const key = new URL(file_url.trim(), 'http://x').searchParams.get('key')
+    if (key) after(async () => {
+      try {
+        const r2 = r2Config()
+        const head = await r2.client.send(new HeadObjectCommand({ Bucket: r2.bucket, Key: key }))
+        await recordUsage({
+          schoolId: null, meterKey: 'storage.upload', quantity: Math.round((head.ContentLength ?? 0) / 1_048_576 * 1e4) / 1e4,
+          source: 'upload.materials', idempotencyKey: `upload:${key}`,
+        })
+      } catch (err) { console.error('[usage] storage.upload not recorded', err) }
+    })
     return NextResponse.json({ material: rows[0] })
   } catch (err) {
     console.error('Platform subject materials POST error:', err)

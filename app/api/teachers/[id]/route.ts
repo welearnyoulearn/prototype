@@ -221,14 +221,14 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     const notifications: Promise<unknown>[] = []
     if (becomingActive && tempPassword) {
       notifications.push(
-        sendStaffReactivatedEmail({ to: teacher.email, name: teacher.name, schoolName, tempPassword, loginUrl }).catch(console.error),
+        sendStaffReactivatedEmail({ schoolId: teacher.school_id, to: teacher.email, name: teacher.name, schoolName, tempPassword, loginUrl }).catch(console.error),
         sendWhatsappMessage({ schoolId: teacher.school_id, to: teacher.phone, templateName: 'staff_reactivated', recipientName: teacher.name,
           templateParams: { staff_name: teacher.name, school_name: schoolName, login: teacher.email, temp_password: tempPassword, login_url: loginUrl } }).catch(console.error),
       )
     } else {
       if (emailChanged) {
-        notifications.push(sendStaffContactChangedEmail({ to: teacher.email, name: teacher.name, schoolName, field: 'email', newValue: teacher.email }).catch(console.error))
-        if (existing.email && existing.email !== teacher.email) notifications.push(sendStaffContactChangedEmail({ to: existing.email, name: teacher.name, schoolName, field: 'email', newValue: teacher.email }).catch(console.error))
+        notifications.push(sendStaffContactChangedEmail({ schoolId: teacher.school_id, to: teacher.email, name: teacher.name, schoolName, field: 'email', newValue: teacher.email }).catch(console.error))
+        if (existing.email && existing.email !== teacher.email) notifications.push(sendStaffContactChangedEmail({ schoolId: teacher.school_id, to: existing.email, name: teacher.name, schoolName, field: 'email', newValue: teacher.email }).catch(console.error))
       }
       if (phoneChanged) {
         for (const phone of new Set([teacher.phone, existing.phone].filter(Boolean))) {
@@ -340,7 +340,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
       const schoolName = schoolNameRes.rows[0]?.name || 'Your School'
       const notifications: Promise<unknown>[] = []
       if (removedTeacher.email) {
-        notifications.push(sendStaffRemovedEmail({ to: removedTeacher.email, name: removedTeacher.name, schoolName }).catch(console.error))
+        notifications.push(sendStaffRemovedEmail({ schoolId, to: removedTeacher.email, name: removedTeacher.name, schoolName }).catch(console.error))
       }
       if (removedTeacher.phone) {
         notifications.push(sendWhatsappMessage({

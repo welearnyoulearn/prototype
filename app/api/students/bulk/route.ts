@@ -266,7 +266,7 @@ export async function POST(req: NextRequest) {
         const student = insertedStudents[i]
         if (studentPortalEnabled && s.email?.trim()) {
           notifications.push(sendStudentWelcomeEmail({
-            to: s.email.trim(), name: s.name.trim(), schoolName,
+            schoolId: school_id, to: s.email.trim(), name: s.name.trim(), schoolName,
             rollNumber: student.roll_number, tempPassword: studentTempPasswords[i],
             loginUrl: `${appUrl}/student/login`,
           }).catch(console.error))
@@ -289,7 +289,7 @@ export async function POST(req: NextRequest) {
             const displayName = s.parent_name?.trim() || pe || pp || 'there'
             if (pe) {
               notifications.push(sendParentWelcomeEmail({
-                to: pe, parentName: displayName,
+                schoolId: school_id, to: pe, parentName: displayName,
                 studentName: s.name.trim(), schoolName,
                 tempPassword: parentTempPasswords[i], loginUrl: `${appUrl}/parent/login`,
               }).catch(console.error))
@@ -313,7 +313,7 @@ export async function POST(req: NextRequest) {
           const parentDisplayName = parentContact.name || s.parent_name?.trim() || parentContact.email || parentContact.phone || 'there'
           if (parentContact.email) {
             notifications.push(sendChildCredentialsToParentEmail({
-              to: parentContact.email,
+              schoolId: school_id, to: parentContact.email,
               parentName: parentDisplayName,
               studentName: s.name.trim(),
               schoolName,

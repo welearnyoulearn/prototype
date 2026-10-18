@@ -257,6 +257,7 @@ test.describe.serial('Student 360 profile — school admin', () => {
     const context = await browserAs(browser, owner)
     const page = await context.newPage()
     await page.goto('/school-admin?tab=students')
+    await page.getByRole('button', { name: 'Student List', exact: true }).click()   // Onboard Students is the default sub-tab
     await page.getByTestId(`student-name-${ids.Bala}`).click()
     await expect(page.getByTestId('profile-name')).toHaveText('Bala Krishna', { timeout: 60000 })
     await page.getByTestId('student-profile-close').click()

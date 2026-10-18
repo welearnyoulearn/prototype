@@ -18,6 +18,7 @@ export default {
       "20 1 * * *": "/api/cron/fee-year-end-reminders",
       "30 18 * * *": "/api/cron/birthday-sweep",
       "30 4 * * *": "/api/cron/plan-expiry",
+      "30 0 * * *": "/api/cron/billing",
     };
     const path = map[event.cron];
     if (!path) throw new Error(`Unknown cron: ${event.cron}`);

@@ -17,6 +17,7 @@ School admin.
 
 ## How it works
 
+- Student Management opens on the **Onboard Students** tab (first), with **Student List** next to it. The list mounts and loads only when its tab is first opened, so opening Student Management to onboard makes no list API calls.
 - Add one student or bulk-upload a CSV/Excel template; duplicates are detected before saving and can be cleaned up.
 - Each student gets a system id and a class roll number (unique within grade + section); the parent phone must be a valid 10-digit Indian mobile.
 - Parent accounts are created and linked automatically; student and parent login credentials are issued and can be reset.
@@ -65,3 +66,4 @@ API routes these screens call (all exist):
 |------|--------|-------|
 | 2026-09-21 | Doc created from the code; status checked with `scripts/product-docs.mjs` | #162 |
 | 2026-10-06 | Student List paginated (50/page) with server-side search, filters and summary counts | #352 |
+| 2026-10-18 | Onboard Students is the first/default tab; Student List loads on demand | #389 |

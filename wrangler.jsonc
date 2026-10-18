@@ -31,6 +31,7 @@
 			"20 1 * * *",   // fee-year-end-reminders
 			"30 18 * * *",  // birthday-sweep
 			"30 4 * * *",   // plan-expiry
+			"30 0 * * *",   // billing
 		]
 	},
 	"services": [
