@@ -1,0 +1,211 @@
+// Push delivery for notifications, over Firebase Cloud Messaging (HTTP v1).
+//
+// The notifications table stays the source of truth (history, read state, the bell). This file only
+// wakes devices up. It talks to FCM directly with fetch + jose instead of firebase-admin: that SDK is
+// heavy for a serverless cold start, and all we need is "mint an OAuth token, POST one message".
+//
+// Delivery is an outbox. Anything that INSERTs into notifications leaves push_sent_at NULL;
+// dispatchPendingPushes() claims those rows, looks up the recipients' device_tokens and sends. Callers
+// run it after their response (next/server after()), so a push problem can never fail a request.
+//
+// Env: FIREBASE_SERVICE_ACCOUNT — the service-account JSON (raw, or base64 of it). Unset = push is
+// off and every function here is a no-op, so the feature is safe to deploy before Firebase exists.
+
+import { z } from 'zod'
+import { SignJWT, importPKCS8 } from 'jose'
+import pool from '@/lib/db'
+
+const serviceAccountSchema = z.object({
+  project_id: z.string().min(1),
+  client_email: z.string().min(1),
+  private_key: z.string().min(1),
+})
+type ServiceAccount = z.infer<typeof serviceAccountSchema>
+
+const TOKEN_URI = 'https://oauth2.googleapis.com/token'
+const FCM_SCOPE = 'https://www.googleapis.com/auth/firebase.messaging'
+// Pushes older than this are dropped instead of delivered — a "class starts in 10 minutes" alert
+// arriving a day late is worse than none.
+const MAX_PUSH_AGE_HOURS = 24
+const SEND_CONCURRENCY = 10
+const BODY_MAX = 200
+
+// Parsed once per distinct env value (the key import and JSON parse are not free on every send).
+let cachedAccount: { raw: string; account: ServiceAccount | null } | null = null
+function serviceAccount(): ServiceAccount | null {
+  const raw = process.env.FIREBASE_SERVICE_ACCOUNT?.trim() ?? ''
+  if (cachedAccount?.raw === raw) return cachedAccount.account
+  let account: ServiceAccount | null = null
+  if (raw) {
+    try {
+      const json = raw.startsWith('{') ? raw : Buffer.from(raw, 'base64').toString('utf8')
+      const parsed = serviceAccountSchema.safeParse(JSON.parse(json))
+      if (parsed.success) account = parsed.data
+      else console.error('[push] FIREBASE_SERVICE_ACCOUNT is missing project_id / client_email / private_key')
+    } catch {
+      console.error('[push] FIREBASE_SERVICE_ACCOUNT is not valid JSON')
+    }
+  }
+  cachedAccount = { raw, account }
+  cachedAccessToken = null
+  return account
+}
+
+export function isPushConfigured(): boolean {
+  return serviceAccount() !== null
+}
+
+let cachedAccessToken: { value: string; expiresAt: number } | null = null
+async function accessToken(account: ServiceAccount): Promise<string> {
+  const now = Date.now()
+  if (cachedAccessToken && cachedAccessToken.expiresAt - 60_000 > now) return cachedAccessToken.value
+
+  const key = await importPKCS8(account.private_key, 'RS256')
+  const assertion = await new SignJWT({ scope: FCM_SCOPE })
+    .setProtectedHeader({ alg: 'RS256', typ: 'JWT' })
+    .setIssuer(account.client_email)
+    .setSubject(account.client_email)
+    .setAudience(TOKEN_URI)
+    .setIssuedAt()
+    .setExpirationTime('1h')
+    .sign(key)
+
+  const res = await fetch(TOKEN_URI, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer', assertion }),
+  })
+  if (!res.ok) throw new Error(`Google OAuth token request failed (${res.status})`)
+  const body = await res.json() as { access_token?: string; expires_in?: number }
+  if (!body.access_token) throw new Error('Google OAuth token response had no access_token')
+  cachedAccessToken = { value: body.access_token, expiresAt: now + (body.expires_in ?? 3600) * 1000 }
+  return body.access_token
+}
+
+export type PushMessage = {
+  title: string
+  body: string
+  /** FCM data values must be strings. */
+  data?: Record<string, string>
+}
+
+export type PushResult = 'sent' | 'unregistered' | 'failed'
+
+/** Sends one message to one device token. Never throws. */
+export async function sendPushToToken(token: string, message: PushMessage): Promise<PushResult> {
+  const account = serviceAccount()
+  if (!account) return 'failed'
+  try {
+    const res = await fetch(`https://fcm.googleapis.com/v1/projects/${account.project_id}/messages:send`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${await accessToken(account)}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message: {
+          token,
+          notification: { title: message.title, body: message.body },
+          data: message.data ?? {},
+        },
+      }),
+    })
+    if (res.ok) return 'sent'
+    const err = await res.json().catch(() => null) as { error?: { details?: { errorCode?: string }[] } } | null
+    const dead = res.status === 404 || err?.error?.details?.some(d => d.errorCode === 'UNREGISTERED')
+    if (dead) return 'unregistered'
+    console.error('[push] FCM send failed', res.status)
+    return 'failed'
+  } catch (e) {
+    console.error('[push] FCM send error', e)
+    return 'failed'
+  }
+}
+
+type PendingRow = {
+  id: number
+  type: string
+  title: string | null
+  message: string | null
+  school_id: number | null
+  recipient_teacher_id: number | null
+  recipient_student_id: number | null
+  recipient_parent_id: number | null
+  recipient_school_id: number | null
+}
+
+function recipientOf(r: PendingRow): { role: string; id: number } | null {
+  if (r.recipient_teacher_id) return { role: 'teacher', id: r.recipient_teacher_id }
+  if (r.recipient_student_id) return { role: 'student', id: r.recipient_student_id }
+  if (r.recipient_parent_id) return { role: 'parent', id: r.recipient_parent_id }
+  if (r.recipient_school_id) return { role: 'school', id: r.recipient_school_id }
+  return null
+}
+
+/**
+ * Pushes every notification that has not been pushed yet. Safe to call from several places at once
+ * and as often as you like: rows are claimed with FOR UPDATE SKIP LOCKED and stamped before sending,
+ * so each notification is attempted at most once. Returns how many device sends succeeded.
+ */
+export async function dispatchPendingPushes(limit = 100): Promise<number> {
+  if (!isPushConfigured()) return 0
+  try {
+    // Too old to be useful now — mark them done without sending.
+    await pool.query(
+      `UPDATE notifications SET push_sent_at = NOW()
+        WHERE push_sent_at IS NULL AND created_at < NOW() - make_interval(hours => $1)`,
+      [MAX_PUSH_AGE_HOURS]
+    )
+
+    const { rows } = await pool.query<PendingRow>(
+      `UPDATE notifications SET push_sent_at = NOW()
+        WHERE id IN (
+          SELECT id FROM notifications WHERE push_sent_at IS NULL
+          ORDER BY id LIMIT $1 FOR UPDATE SKIP LOCKED
+        )
+        RETURNING id, type, title, message, school_id,
+                  recipient_teacher_id, recipient_student_id, recipient_parent_id, recipient_school_id`,
+      [limit]
+    )
+    if (rows.length === 0) return 0
+
+    const targets = rows.flatMap(r => { const t = recipientOf(r); return t ? [{ row: r, ...t }] : [] })
+    if (targets.length === 0) return 0
+
+    const { rows: devices } = await pool.query<{ recipient_role: string; recipient_id: number; token: string }>(
+      `SELECT d.recipient_role, d.recipient_id, d.token
+         FROM device_tokens d
+         JOIN unnest($1::text[], $2::int[]) AS r(role, id) ON d.recipient_role = r.role AND d.recipient_id = r.id`,
+      [targets.map(t => t.role), targets.map(t => t.id)]
+    )
+    const tokensByRecipient = new Map<string, string[]>()
+    for (const d of devices) {
+      const key = `${d.recipient_role}:${d.recipient_id}`
+      tokensByRecipient.set(key, [...(tokensByRecipient.get(key) ?? []), d.token])
+    }
+
+    const jobs = targets.flatMap(t =>
+      (tokensByRecipient.get(`${t.role}:${t.id}`) ?? []).map(token => ({
+        token,
+        message: {
+          title: t.row.title ?? 'New notification',
+          body: (t.row.message ?? '').slice(0, BODY_MAX),
+          data: { notification_id: String(t.row.id), type: t.row.type },
+        } satisfies PushMessage,
+      }))
+    )
+
+    let sent = 0
+    const dead: string[] = []
+    for (let i = 0; i < jobs.length; i += SEND_CONCURRENCY) {
+      const batch = jobs.slice(i, i + SEND_CONCURRENCY)
+      const results = await Promise.all(batch.map(j => sendPushToToken(j.token, j.message)))
+      results.forEach((result, n) => {
+        if (result === 'sent') sent++
+        else if (result === 'unregistered') dead.push(batch[n].token)
+      })
+    }
+    if (dead.length > 0) await pool.query(`DELETE FROM device_tokens WHERE token = ANY($1::text[])`, [dead])
+    return sent
+  } catch (e) {
+    console.error('[push] dispatchPendingPushes failed', e)
+    return 0
+  }
+}

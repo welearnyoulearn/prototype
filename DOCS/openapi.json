@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "WLYL School Management API",
-    "version": "2026-09-28",
+    "version": "2026-10-18",
     "description": "Every API route in the WLYL platform, generated from the route handlers on the `dev` branch.\n\n## How to read this\n\n- **Sections and subcategories.** The sidebar groups routes by area, such as Fees & finance, then by topic, such as Waivers.\n- **Who can call.** The coloured badges on each route show which signed-in users it accepts. A red **Public** badge means the route has no sign-in check in code.\n- **Checks.** Extra rules inside the route, such as \"parent must own this student\", are listed under Checks.\n- **Feature flag.** Routes that are switched off unless the school's plan includes a feature say which one.\n\n## Signing in\n\nEach portal has its own session cookie: `wlyl-platform`, `wlyl-auth` (school admin), `wlyl-teacher`, `wlyl-student` and `wlyl-parent`. Sign in to the app in this browser, then use **Test Request** on any route. Scheduled jobs take `Authorization: Bearer $CRON_SECRET`."
   },
   "servers": [
@@ -35464,6 +35464,195 @@
         ]
       }
     },
+    "/api/devices": {
+      "post": {
+        "tags": [
+          "Notifications"
+        ],
+        "summary": "Register a device for push notifications",
+        "description": "Stores (or re-points) an FCM registration token so the caller's devices receive push notifications. Called by the web app and the parent app after login.\n\n**Who can call:** Teacher, Student, Parent, School admin.\n\n**Checks:** Precedence teacher > student > parent > school staff (same as /api/notifications). The owner comes from the session, never the body. A token already registered to someone else is moved to the caller.",
+        "operationId": "postDevices",
+        "security": [
+          {
+            "teacher": []
+          },
+          {
+            "student": []
+          },
+          {
+            "parent": []
+          },
+          {
+            "schoolAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Done",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid token or platform"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "500": {
+            "description": "Failed to register device"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Teacher",
+            "color": "#0f766e"
+          },
+          {
+            "name": "Student",
+            "color": "#b45309"
+          },
+          {
+            "name": "Parent",
+            "color": "#be185d"
+          },
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
+          }
+        ],
+        "x-source-file": "app/api/devices/route.ts",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "token": {
+                    "type": "string",
+                    "description": "FCM registration token for this browser or app install."
+                  },
+                  "platform": {
+                    "type": "string",
+                    "enum": [
+                      "web",
+                      "android",
+                      "ios"
+                    ]
+                  }
+                },
+                "required": [
+                  "token",
+                  "platform"
+                ]
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Notifications"
+        ],
+        "summary": "Unregister a device from push notifications",
+        "description": "Removes the caller's FCM registration token, e.g. on logout.\n\n**Who can call:** Teacher, Student, Parent, School admin.\n\n**Checks:** Only a token owned by the caller is removed; anything else is a no-op.",
+        "operationId": "deleteDevices",
+        "security": [
+          {
+            "teacher": []
+          },
+          {
+            "student": []
+          },
+          {
+            "parent": []
+          },
+          {
+            "schoolAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Done",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid token"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "500": {
+            "description": "Failed to remove device"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Teacher",
+            "color": "#0f766e"
+          },
+          {
+            "name": "Student",
+            "color": "#b45309"
+          },
+          {
+            "name": "Parent",
+            "color": "#be185d"
+          },
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
+          }
+        ],
+        "x-source-file": "app/api/devices/route.ts",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "token": {
+                    "type": "string",
+                    "description": "FCM registration token for this browser or app install."
+                  }
+                },
+                "required": [
+                  "token"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/notifications": {
       "get": {
         "tags": [
@@ -39961,6 +40150,106 @@
           }
         ],
         "x-source-file": "app/api/cron/exam-status-sweep/route.ts"
+      }
+    },
+    "/api/cron/push-dispatch": {
+      "get": {
+        "tags": [
+          "Scheduled jobs"
+        ],
+        "summary": "Dispatch pending push notifications",
+        "description": "Sends push notifications for any notification not yet pushed (push_sent_at IS NULL, newer than 24h). A no-op when FIREBASE_SERVICE_ACCOUNT is not set. Not scheduled in vercel.json; call it from an external scheduler if a safety net is wanted.\n\n**Who can call:** Cron.\n\n**Checks:** Authorization: Bearer $CRON_SECRET (503 if CRON_SECRET is unset).",
+        "operationId": "getCronPushDispatch",
+        "security": [
+          {
+            "cron": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Dispatch result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "configured": {
+                      "type": "boolean"
+                    },
+                    "sent": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Bad bearer token"
+          },
+          "503": {
+            "description": "CRON_SECRET not configured"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Cron",
+            "color": "#475569"
+          }
+        ],
+        "x-source-file": "app/api/cron/push-dispatch/route.ts"
+      },
+      "post": {
+        "tags": [
+          "Scheduled jobs"
+        ],
+        "summary": "Trigger push dispatch manually",
+        "description": "Sends push notifications for any notification not yet pushed (push_sent_at IS NULL, newer than 24h). A no-op when FIREBASE_SERVICE_ACCOUNT is not set. Not scheduled in vercel.json; call it from an external scheduler if a safety net is wanted.\n\n**Who can call:** Cron.\n\n**Checks:** Authorization: Bearer $CRON_SECRET (503 if CRON_SECRET is unset).",
+        "operationId": "postCronPushDispatch",
+        "security": [
+          {
+            "cron": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Dispatch result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "configured": {
+                      "type": "boolean"
+                    },
+                    "sent": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Bad bearer token"
+          },
+          "503": {
+            "description": "CRON_SECRET not configured"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Cron",
+            "color": "#475569"
+          }
+        ],
+        "x-source-file": "app/api/cron/push-dispatch/route.ts"
       }
     },
     "/api/cron/syllabus-coverage-snapshot": {

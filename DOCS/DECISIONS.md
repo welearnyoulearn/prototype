@@ -12,6 +12,13 @@ Non-obvious technical decisions and their reasoning for the WLYL School prototyp
 -->
 
 
+## 2026-10-18 — Push notifications go through an outbox and FCM HTTP v1, not firebase-admin
+
+**Context:** Notifications are rows in `notifications`, written by raw `INSERT`s in about 19 route files, and the web bell polls every 30 seconds. We want pushes to the web app and the separate parent app through Firebase Cloud Messaging.
+**Decision:** Keep `notifications` as the source of truth and treat push as a delivery step. `notifications.push_sent_at` is NULL until a notification has been pushed; `dispatchPendingPushes()` (lib/push.ts) claims unsent rows with `FOR UPDATE SKIP LOCKED`, stamps them, looks up `device_tokens` for the recipient and sends. Any route can call it from `after()`, and `/api/cron/push-dispatch` covers the rest, so existing insert sites do not all have to change at once. FCM is called over its HTTP v1 REST API with a service-account JWT signed by `jose`, which is already a dependency. Rows older than 24 hours are stamped without sending, and existing rows are stamped when the column is added, so rollout never replays old notifications.
+**Alternatives considered:** `firebase-admin` (large for a serverless cold start, and one more dependency to patch); sending push inside every `INSERT` site (easy to miss one, and a push failure could break the request); a Postgres trigger (cannot call FCM).
+**Consequences:** Delivery is at-most-once: a notification is stamped before it is sent, so a crash mid-send loses it rather than duplicating it. Vercel Hobby cron is daily, so `/api/cron/push-dispatch` is not in `vercel.json`; notifications created by routes that do not call the dispatcher yet are not pushed until something does.
+
 ## 2026-09-28 — Plan features are enforced centrally in proxy.ts (#253)
 
 **Context:** Plan features only hid navigation tabs. Of roughly 95 feature API routes, only the fee and portal-access ones called `schoolHasFeature`, so a school on a lower plan could use any feature by calling its API directly. Adding a check to every handler would be easy to forget on the next new route.
