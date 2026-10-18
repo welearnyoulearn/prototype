@@ -7,10 +7,15 @@ export default {
 
   async scheduled(event, env, ctx) {
     const map = {
-      "30 1 * * 0": "/api/cron/weekly-test",
       "30 3 * * 1": "/api/cron/usage-digest",
       "0 2 * * *": "/api/internal/log-cleanup",
       "30 2 * * *": "/api/cron/backup",
+      "0 2 * * 1": "/api/cron/syllabus-coverage-snapshot",
+      "0 0 * * *": "/api/cron/exam-status-sweep",
+      "0 1 * * *": "/api/cron/exam-reminders",
+      "20 1 * * *": "/api/cron/fee-year-end-reminders",
+      "30 18 * * *": "/api/cron/birthday-sweep",
+      "30 4 * * *": "/api/cron/plan-expiry",
     };
     const path = map[event.cron];
     if (!path) throw new Error(`Unknown cron: ${event.cron}`);

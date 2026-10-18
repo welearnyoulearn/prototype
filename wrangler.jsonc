@@ -15,12 +15,18 @@
 		"directory": ".open-next/assets",
 		"binding": "ASSETS"
 	},
+	// Keep in sync with vercel.json crons (and the map in custom-worker.js).
 	"triggers": {
 		"crons": [
-			"30 1 * * 0", // weekly-test
-			"30 3 * * 1", // usage-digest
-			"0 2 * * *",  // log-cleanup
-			"30 2 * * *"  // backup
+			"30 3 * * 1",   // usage-digest
+			"0 2 * * *",    // log-cleanup
+			"30 2 * * *",   // backup
+			"0 2 * * 1",    // syllabus-coverage-snapshot
+			"0 0 * * *",    // exam-status-sweep
+			"0 1 * * *",    // exam-reminders
+			"20 1 * * *",   // fee-year-end-reminders
+			"30 18 * * *",  // birthday-sweep
+			"30 4 * * *",   // plan-expiry
 		]
 	},
 	"services": [
