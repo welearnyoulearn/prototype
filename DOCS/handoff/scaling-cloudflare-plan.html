@@ -1,0 +1,449 @@
+<title>WLYL Scaling &amp; Cloudflare Plan</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@500;600;700&family=Source+Sans+3:ital,wght@0,400;0,600;0,700;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a plan document in the same family as the WLYL Platform Handoff — one reading column, contents rail on wide screens,
+   a day-by-day timeline, a two-track test diagram, and open questions answered in the page. */
+:root {
+  --bg: #f4f5f1; --paper: #ffffff; --ink: #1c2420; --muted: #616d66; --line: #dbe0d9; --soft: #eef1ec;
+  --brand: #235b46; --brand-soft: #e2ede7; --amber: #9a5806; --amber-soft: #fbf0dc; --red: #a33131; --red-soft: #fbeceb;
+  --cf: #c25a12; --cf-soft: #fcecdf; --note: #5546c9; --note-soft: #eeebfc; --code-bg: #f1f3ef;
+  --f-display: "Inter Tight", "Segoe UI", system-ui, sans-serif;
+  --f-body: "Source Sans 3", "Segoe UI", system-ui, sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #121614; --paper: #1a201d; --ink: #e5eae6; --muted: #9ba8a0; --line: #2c3530; --soft: #212824;
+  --brand: #7cc3a3; --brand-soft: #1d2f27; --amber: #eeb260; --amber-soft: #2d2415; --red: #f08a80; --red-soft: #321a18;
+  --cf: #f4a466; --cf-soft: #33231a; --note: #ab9ff5; --note-soft: #24203d; --code-bg: #1f2622; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #121614; --paper: #1a201d; --ink: #e5eae6; --muted: #9ba8a0; --line: #2c3530; --soft: #212824;
+  --brand: #7cc3a3; --brand-soft: #1d2f27; --amber: #eeb260; --amber-soft: #2d2415; --red: #f08a80; --red-soft: #321a18;
+  --cf: #f4a466; --cf-soft: #33231a; --note: #ab9ff5; --note-soft: #24203d; --code-bg: #1f2622; color-scheme: dark }
+
+body { background: var(--bg); color: var(--ink); font: 16px/1.62 var(--f-body); padding-inline: 16px; }
+.wrap { max-width: 1100px; margin: 0 auto; padding-block: 40px 96px; display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 48px; }
+nav.toc { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 24px); align-self: start; display: grid; gap: 4px; font-size: 14px; }
+nav.toc a { color: var(--muted); text-decoration: none; padding: 3px 0 3px 10px; border-left: 2px solid var(--line); }
+nav.toc a:hover { color: var(--brand); border-left-color: var(--brand); }
+article { display: grid; gap: 52px; min-width: 0; }
+section { display: grid; gap: 14px; min-width: 0; scroll-margin-top: 20px; }
+h1, h2, h3 { font-family: var(--f-display); line-height: 1.15; margin: 0; text-wrap: balance; }
+h1 { font-size: clamp(30px, 5vw, 42px); letter-spacing: -0.015em; }
+h2 { font-size: 24px; letter-spacing: -0.01em; } h3 { font-size: 17.5px; }
+p { margin: 0; max-width: 72ch; }
+ul, ol { margin: 0; padding-left: 1.25em; display: grid; gap: 5px; max-width: 74ch; }
+a { color: var(--brand); }
+code { font-family: var(--f-mono); font-size: .84em; background: var(--code-bg); border: 1px solid var(--line); padding: 0 5px; border-radius: 4px; }
+pre.code { margin: 0; font: 12.8px/1.6 var(--f-mono); background: var(--code-bg); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; overflow-x: auto; }
+.eyebrow { font: 500 11.5px/1 var(--f-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.lede { font-size: 18px; color: var(--muted); max-width: 66ch; }
+.meta { display: flex; flex-wrap: wrap; gap: 6px 20px; font: 13px var(--f-mono); color: var(--muted); }
+.callout { border-left: 3px solid var(--brand); background: var(--brand-soft); padding: 12px 16px; border-radius: 0 8px 8px 0; display: grid; gap: 6px; max-width: 82ch; }
+.callout.warn { border-left-color: var(--amber); background: var(--amber-soft); }
+.callout.red { border-left-color: var(--red); background: var(--red-soft); }
+.tag { display: inline-block; font: 500 11px/1 var(--f-mono); letter-spacing: .05em; text-transform: uppercase; padding: 4px 7px; border-radius: 4px; white-space: nowrap; }
+.t-a { color: var(--brand); background: var(--brand-soft); } .t-b { color: var(--cf); background: var(--cf-soft); } .t-c { color: var(--note); background: var(--note-soft); }
+
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; }
+.card { background: var(--paper); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; display: grid; gap: 4px; align-content: start; }
+.card b { font-family: var(--f-display); font-size: 15.5px; }
+.card span { color: var(--muted); font-size: 14.5px; }
+.card.a { border-top: 3px solid var(--brand); } .card.b { border-top: 3px solid var(--cf); } .card.c { border-top: 3px solid var(--note); }
+
+.tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); }
+table { border-collapse: collapse; width: 100%; font-size: 14.5px; }
+th { text-align: left; font: 600 12px var(--f-body); letter-spacing: .04em; text-transform: uppercase; color: var(--muted); background: var(--soft); padding: 9px 12px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+td { padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; font-variant-numeric: tabular-nums; }
+tr:last-child td { border-bottom: 0; }
+.wide table { min-width: 780px; }
+.diagram { background: var(--paper); border: 1px solid var(--line); border-radius: 8px; padding: 16px; overflow-x: auto; }
+
+.days { display: grid; gap: 10px; }
+.day { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 16px; background: var(--paper); border: 1px solid var(--line); border-radius: 8px; padding: 14px 18px; }
+.day .when b { display: block; font: 700 16px var(--f-display); } .day .when span { font: 12px var(--f-mono); color: var(--muted); }
+.day ul { font-size: 14.5px; }
+.day .exit { margin-top: 8px; font-size: 13.5px; color: var(--muted); border-top: 1px dashed var(--line); padding-top: 6px; }
+
+.qs { display: grid; gap: 12px; }
+.q { background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; display: grid; gap: 10px; }
+.q.answered { border-color: color-mix(in srgb, var(--brand) 45%, var(--line)); }
+.q .qt { display: flex; gap: 10px; align-items: baseline; }
+.q .qn { font: 600 12px var(--f-mono); color: var(--brand); flex: none; }
+.q .qt b { font-family: var(--f-display); font-size: 16px; line-height: 1.3; }
+.q .why { color: var(--muted); font-size: 14.5px; }
+.q fieldset { border: 0; margin: 0; padding: 0; min-width: 0; display: grid; gap: 10px; }
+.opts { display: grid; gap: 6px; }
+.opt { display: grid; grid-template-columns: 20px 1fr; gap: 8px; align-items: start; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; cursor: pointer; font-size: 14.5px; }
+.opt:hover { background: var(--soft); }
+.opt input { margin: 3px 0 0; accent-color: var(--brand); }
+.opt .rec { font: 500 10.5px var(--f-mono); color: var(--brand); text-transform: uppercase; letter-spacing: .05em; margin-left: 6px; }
+.opt.chosen { border-color: var(--brand); background: var(--brand-soft); }
+.q textarea { width: 100%; min-height: 54px; resize: vertical; font: 14.5px/1.5 var(--f-body); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; box-sizing: border-box; }
+.q .who { font: 12px var(--f-mono); color: var(--muted); min-height: 1em; }
+#qstatus { font: 13px var(--f-mono); color: var(--muted); }
+:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+@media (max-width: 900px) { .wrap { grid-template-columns: 1fr; gap: 28px; } nav.toc { position: static; grid-template-columns: 1fr 1fr; } }
+@media (max-width: 560px) { nav.toc { grid-template-columns: 1fr; } .day { grid-template-columns: 1fr; gap: 6px; } }
+</style>
+
+<div class="wrap">
+  <nav class="toc" aria-label="Contents">
+    <a href="#goal">1. Goal</a>
+    <a href="#rules">2. Testing rules</a>
+    <a href="#approach">3. Approach</a>
+    <a href="#profile">4. School profile</a>
+    <a href="#scenarios">5. Test scenarios</a>
+    <a href="#measure">6. What we measure</a>
+    <a href="#cost">7. Cost per school</a>
+    <a href="#cloudflare">8. Cloudflare move</a>
+    <a href="#timeline">9. Day by day</a>
+    <a href="#gonogo">10. Go / no-go</a>
+    <a href="#risks">11. Risks</a>
+    <a href="#questions">12. Questions</a>
+  </nav>
+
+  <article>
+    <header style="display:grid;gap:14px">
+      <div class="eyebrow">Plan · draft for review</div>
+      <h1>Scaling test, cost per school &amp; the move to Cloudflare</h1>
+      <p class="lede">One piece of work with three results: how many schools the platform can carry before it slows down, what each school costs us per month, and whether we move hosting from Vercel to Cloudflare. We get all three by running the same tests on the same synthetic schools.</p>
+      <div class="meta"><span>8 Oct 2026</span><span>~8 working days</span><span>Base: <code>origin/dev</code></span><span>Status: waiting on Q1–Q4</span></div>
+    </header>
+
+    <section id="goal">
+      <div class="eyebrow">01 · Goal</div>
+      <h2>What we'll know at the end</h2>
+      <div class="cards">
+        <div class="card a"><b>The ceiling</b><span>How many schools at peak (9 AM attendance, results day) before pages pass 1.5 s or errors pass 1%, and what breaks first.</span></div>
+        <div class="card a"><b>Cost per school</b><span>₹ per school per month and per active user, at 10, 50, 200 and 500 schools, on Vercel Pro and on Cloudflare.</span></div>
+        <div class="card b"><b>Cloudflare: go or no-go</b><span>Does the app work fully on Cloudflare Workers, is it as fast, and is it cheaper? Decided against a written checklist.</span></div>
+        <div class="card c"><b>Fixes for the top bottlenecks</b><span>The 1–2 worst problems the test finds get fixed in this window, so the ceiling moves before we sell.</span></div>
+      </div>
+    </section>
+
+    <section id="rules">
+      <div class="eyebrow">02 · Ground rules</div>
+      <h2>Testing rules we have to follow</h2>
+      <div class="callout red"><b>We can't load-test on Vercel.</b><span>Vercel only allows load testing on Enterprise plans; on other plans the testing IPs get blocked and it can breach fair use. So Vercel's numbers come from production's own usage dashboard (real traffic), not from a load test.</span></div>
+      <ul>
+        <li><b>Never production.</b> No load against <code>welearnyoulearn.com</code> or the production database. Tests use a separate <b>staging database</b> with synthetic schools only, no copies of real student data.</li>
+        <li><b>Cloudflare:</b> we may test infrastructure we own. We test the preview Worker on our own account and open a support ticket with the test window first, so DDoS protection doesn't block the test.</li>
+        <li><b>The local dev database</b> (<code>.env</code>) is not used for load either; it stays for development.</li>
+        <li>Reading production's traffic numbers (logins, sessions per school) is read-only and done by whoever holds production access (Q4).</li>
+      </ul>
+    </section>
+
+    <section id="approach">
+      <div class="eyebrow">03 · Approach</div>
+      <h2>Two test targets, one set of scripts</h2>
+      <div class="diagram">
+<pre class="mermaid">
+flowchart LR
+  P["Production (Vercel)<br/>read-only usage numbers"] --> M["Traffic profile<br/>per school per day"]
+  M --> K["k6 test scripts<br/>(same for both targets)"]
+  S["Staging database<br/>(separate Supabase project,<br/>50 synthetic schools)"]
+  K --> A["Target A: production build<br/>of the app (next start)"]
+  K --> B["Target B: Cloudflare<br/>preview Worker"]
+  A --> S
+  B --> S
+  A --> R["Ceiling + bottlenecks"]
+  B --> R
+  B --> C["Exact Cloudflare cost<br/>(requests, CPU ms)"]
+  P --> V["Vercel cost<br/>(real usage × Pro prices)"]
+  C --> X["Cost per school<br/>at 10 / 50 / 200 / 500"]
+  V --> X
+</pre>
+      </div>
+      <div class="cards">
+        <div class="card a"><b>Target A · the app itself</b><span>A production build (<code>next build &amp;&amp; next start</code>) on a test machine against the staging database. Finds limits in our code and database (slow queries, connections) without breaking any host's rules.</span></div>
+        <div class="card b"><b>Target B · Cloudflare preview</b><span>The same build running on a Cloudflare Worker (workers.dev address) against the same staging database. Shows serverless behaviour and gives exact cost from Cloudflare's own request and CPU counts.</span></div>
+        <div class="card c"><b>Vercel · real numbers</b><span>Last 30 days of production usage (requests, function time, data transfer) from the Vercel dashboard, priced at Vercel Pro rates. No load test needed.</span></div>
+      </div>
+      <p>Tool: <b>k6</b> (already installed on the dev Mac). Scripts live in the repo under <code>load/</code> so anyone can rerun them after a change.</p>
+    </section>
+
+    <section id="profile">
+      <div class="eyebrow">04 · Realistic load</div>
+      <h2>What one school looks like</h2>
+      <p>We size each synthetic school from production's real traffic, not guesses. The platform already records logins, time spent and features opened per school and role (<code>usage_daily_rollup</code>, <code>feature_usage_events</code>). These read-only queries give the profile:</p>
+<pre class="code">-- Per school, per role, per weekday (last 30 days): active people, logins, minutes
+SELECT school_id, actor_role, EXTRACT(ISODOW FROM day) AS weekday,
+       ROUND(AVG(unique_actors)) AS people, ROUND(AVG(login_count)) AS logins,
+       ROUND(AVG(total_duration_seconds) / 60) AS minutes
+FROM usage_daily_rollup WHERE day &gt;= CURRENT_DATE - 30
+GROUP BY 1, 2, 3 ORDER BY 1, 2, 3;
+
+-- Busiest hours (IST) across all schools
+SELECT EXTRACT(HOUR FROM started_at AT TIME ZONE 'Asia/Kolkata') AS hour, COUNT(*) AS sessions
+FROM usage_sessions WHERE started_at &gt;= NOW() - INTERVAL '30 days' GROUP BY 1 ORDER BY 1;
+
+-- What people open most, per portal (drives the mix of pages in the scripts)
+SELECT portal, nav_key, COUNT(*) FROM feature_usage_events
+WHERE created_at &gt;= NOW() - INTERVAL '30 days' GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 40;</pre>
+      <p>Until those numbers arrive, the scripts start from this assumed school, then get corrected:</p>
+      <div class="tablewrap wide">
+        <table>
+          <thead><tr><th>School size</th><th>Students</th><th>Teachers</th><th>Parents active / day</th><th>Peak moment</th></tr></thead>
+          <tbody>
+            <tr><td>Small</td><td>300</td><td>15</td><td>~90</td><td>15 teachers mark attendance between 9:00 and 9:30</td></tr>
+            <tr><td>Medium (default)</td><td>800</td><td>40</td><td>~250</td><td>40 teachers at 9 AM; 250 parents 7–9 PM</td></tr>
+            <tr><td>Large</td><td>2,000</td><td>90</td><td>~600</td><td>Results day: 60% of parents within 2 hours</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="callout"><span><b>Synthetic data:</b> a seed script creates 50 schools in staging (mix of sizes), with a year of attendance, fees, exams and marks, using the same API calls the e2e tests already use (<code>e2e/fixtures/seed-test-data.ts</code>). No real names or phone numbers.</span></p>
+    </section>
+
+    <section id="scenarios">
+      <div class="eyebrow">05 · Scenarios</div>
+      <h2>Five tests, each at four sizes</h2>
+      <div class="tablewrap wide">
+        <table>
+          <thead><tr><th>Scenario</th><th>Who does what</th><th>Why it matters</th></tr></thead>
+          <tbody>
+            <tr><td><b>1 · Morning attendance</b></td><td>Every teacher logs in and marks attendance for their class within 30 min (<code>/api/attendance</code>).</td><td>The sharpest daily peak; many writes at once.</td></tr>
+            <tr><td><b>2 · Parents' evening</b></td><td>Parents log in, open child summary, attendance and fees (<code>/api/parent/*</code>), 7–9 PM.</td><td>The largest number of people; mostly reads.</td></tr>
+            <tr><td><b>3 · Fee day</b></td><td>Admins collect payments and open the ledger and reports (<code>/api/fees/*</code>) while parents check dues.</td><td>Heavy queries and money writes together.</td></tr>
+            <tr><td><b>4 · Results day</b></td><td>60% of parents open marks within 2 hours of publishing.</td><td>A burst well above normal; tests cold starts and caching.</td></tr>
+            <tr><td><b>5 · Heavy jobs</b></td><td>500-student import, a full Excel export, the nightly backup, during scenario 2.</td><td>Long-running work that can hit time and memory limits, especially on Workers (128 MB, CPU time).</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <ul>
+        <li><b>Sizes:</b> 1× (today's live school count), 5×, 20×, 50× schools, each ramped over 10 minutes and held for 20.</li>
+        <li><b>Stop a run early</b> when p95 response time passes 2 s, errors pass 1%, or database CPU stays over 90%.</li>
+        <li>Each run starts from a freshly seeded database so results compare fairly.</li>
+      </ul>
+    </section>
+
+    <section id="measure">
+      <div class="eyebrow">06 · Evidence</div>
+      <h2>What we measure, and where from</h2>
+      <div class="tablewrap wide">
+        <table>
+          <thead><tr><th>Measure</th><th>Source</th><th>Used for</th></tr></thead>
+          <tbody>
+            <tr><td>Response time (p50/p95/p99), error rate, requests per second</td><td>k6 results</td><td>Ceiling; Cloudflare speed vs. baseline</td></tr>
+            <tr><td>Database CPU, connections in use, slowest queries</td><td>Supabase dashboard; <code>pg_stat_statements</code></td><td>What breaks first; which queries to fix</td></tr>
+            <tr><td>Requests and CPU milliseconds per school</td><td>Cloudflare Workers analytics (Target B)</td><td>Exact Cloudflare cost per school</td></tr>
+            <tr><td>Cold starts and slow first requests</td><td>k6 timings + Worker logs</td><td>Impact of migrations at startup</td></tr>
+            <tr><td>Production requests, function time, data transfer (30 days)</td><td>Vercel usage dashboard (read-only)</td><td>Vercel cost per school today</td></tr>
+            <tr><td>WhatsApp, email, AI, storage per school</td><td>Usage tracking (Phase 1 of the billing work) or provider dashboards until then</td><td>Service costs in the cost model</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <h3>What we expect to find (to confirm or rule out)</h3>
+      <ul>
+        <li><b>Database connections run out first.</b> Each Vercel function holds one connection through Supabase's session pooler; a busy morning may use them all before CPU is a problem.</li>
+        <li><b>Cold starts are slow</b> because every new instance runs ~115 migration statements (<code>instrumentation.ts</code>).</li>
+        <li><b>A few heavy screens</b> (fee ledger, reports, exports) dominate database time.</li>
+      </ul>
+    </section>
+
+    <section id="cost">
+      <div class="eyebrow">07 · Money</div>
+      <h2>Cost per school</h2>
+<pre class="code">cost per school per month =
+    fixed costs ÷ number of schools                     (hosting plan base, database plan, domain, monitoring)
+  + hosting usage per school                            (requests × price + CPU/function time × price + data transfer)
+  + database share                                      (database size step needed for that many schools ÷ schools)
+  + storage per school                                  (R2 GB stored and operations)
+  + paid services per school                            (WhatsApp, email, AI — from usage tracking)
+cost per active user = cost per school ÷ active users per school</pre>
+      <p>Prices used, checked 8 Oct 2026 (confirm before budgeting):</p>
+      <div class="tablewrap wide">
+        <table>
+          <thead><tr><th>Item</th><th>Price</th><th>Note</th></tr></thead>
+          <tbody>
+            <tr><td>Cloudflare Workers Paid</td><td>$5 / month; 10M requests and 30M CPU-ms included; then $0.30 per million requests and $0.02 per million CPU-ms</td><td>Hyperdrive (database pooling) included</td></tr>
+            <tr><td>Vercel Pro</td><td>$20 per developer seat / month, includes $20 usage credit; then pay as you go</td><td>1 TB data transfer and 10M edge requests included</td></tr>
+            <tr><td>Supabase Pro</td><td>$25 / month, includes $10 compute credit (covers Micro)</td><td>Micro $10 (1 GB, 200 pooled connections) · Small $15 (2 GB, 400) · Medium $60 (4 GB, 600)</td></tr>
+            <tr><td>WhatsApp, email, AI, storage</td><td>Provider rates</td><td>From the usage-tracking work; placeholders until then</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <h3>The table we'll fill in (Day 7)</h3>
+      <div class="tablewrap wide">
+        <table>
+          <thead><tr><th>Schools</th><th>Database size needed</th><th>Vercel Pro: ₹ / school / month</th><th>Cloudflare: ₹ / school / month</th><th>₹ / active user</th><th>Lowest safe plan price</th></tr></thead>
+          <tbody>
+            <tr><td>10</td><td>from test</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+            <tr><td>50</td><td>from test</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+            <tr><td>200</td><td>from test</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+            <tr><td>500</td><td>from test</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>"Lowest safe plan price" = cost per school × a margin we choose (Q6). It feeds the plan prices on the Plans &amp; Pricing screen and answers Q14 on the handoff page.</p>
+    </section>
+
+    <section id="cloudflare">
+      <div class="eyebrow">08 · Hosting</div>
+      <h2>Moving to Cloudflare</h2>
+      <div class="callout warn"><b>Known risk for our exact setup.</b><span>Next.js 16.3 apps whose <code>proxy.ts</code> loads <code>instrumentation.ts</code> fail on Cloudflare's runtime. Step 1 below removes that dependency, and it's worth doing on any host.</span></div>
+      <ol>
+        <li><b>Migrations out of startup:</b> run <code>scripts/run-migrations.ts</code> as a deploy step; <code>instrumentation.ts</code> stops touching the database. Faster cold starts everywhere.</li>
+        <li><b>Adapter:</b> add <code>@opennextjs/cloudflare</code> and <code>wrangler.jsonc</code> with <code>nodejs_compat</code>; build and deploy <code>dev</code> to a preview Worker.</li>
+        <li><b>Database:</b> connect through Hyperdrive to Supabase (pooled, close to the Worker); remove the Vercel-only pool sizing in <code>lib/db.ts</code>.</li>
+        <li><b>Scheduled jobs:</b> the 9 jobs in <code>vercel.json</code> become Cloudflare Cron Triggers calling the same <code>/api/cron/*</code> routes with <code>CRON_SECRET</code>. Long ones (backup) must fit the cron CPU limit or be split.</li>
+        <li><b>Limits:</b> bundle size (10 MB), memory (128 MB) and CPU time (raise to 5 min where needed) for exports, imports and backup.</li>
+        <li><b>Settings and branches:</b> secrets per environment; <code>prod</code> → production, <code>qa</code>/<code>dev</code> → previews.</li>
+        <li><b>Full Playwright suite</b> against the preview Worker, then the load tests (Target B).</li>
+        <li><b>Cutover</b> (after go): move DNS for <code>welearnyoulearn.com</code> and <code>admin.</code> to Cloudflare in a late-night window, watch for an hour, keep Vercel running 2 weeks for instant rollback.</li>
+      </ol>
+      <p><b>If the trial fails:</b> move production to Vercel Pro straight away (we can't charge schools on the free plan), and retry Cloudflare once the adapter issue is fixed.</p>
+    </section>
+
+    <section id="timeline">
+      <div class="eyebrow">09 · Schedule</div>
+      <h2>Day by day</h2>
+      <div class="days">
+        <div class="day"><div class="when"><b>Day 1</b><span>Setup</span></div><div><ul><li>Create the staging Supabase project; enable <code>pg_stat_statements</code>.</li><li>Seed script: 50 synthetic schools with a year of data.</li><li>Run the traffic-profile queries on production (read-only, Q4); export Vercel's 30-day usage.</li><li>Open the Cloudflare support ticket with the test window.</li></ul><p class="exit">Done when: staging is seeded and the school profile is set from real numbers.</p></div></div>
+        <div class="day"><div class="when"><b>Day 2</b><span>Scripts + fix 1</span></div><div><ul><li>k6 scripts for the 5 scenarios in <code>load/</code>.</li><li>PR: migrations out of startup (needed for Cloudflare, helps Vercel too).</li></ul><p class="exit">Done when: a 1× run of all scenarios completes against Target A.</p></div></div>
+        <div class="day"><div class="when"><b>Day 3</b><span>Target A runs</span></div><div><ul><li>Run 1×, 5×, 20×, 50× on the production build.</li><li>List what breaks first, with the slowest queries.</li></ul><p class="exit">Done when: the ceiling and top 3 bottlenecks are written down.</p></div></div>
+        <div class="day"><div class="when"><b>Day 4</b><span>Fixes</span></div><div><ul><li>Fix the top 1–2 bottlenecks (likely pooler mode/size and a few heavy queries or indexes).</li><li>Rerun the scenario that failed first.</li></ul><p class="exit">Done when: the ceiling has measurably moved.</p></div></div>
+        <div class="day"><div class="when"><b>Day 5–6</b><span>Cloudflare port</span></div><div><ul><li>OpenNext adapter, Wrangler config, Hyperdrive, Cron Triggers, secrets.</li><li>Deploy to a preview Worker; full Playwright suite on it.</li></ul><p class="exit">Done when: all Playwright tests pass on the preview Worker.</p></div></div>
+        <div class="day"><div class="when"><b>Day 7</b><span>Target B + cost</span></div><div><ul><li>Same k6 runs on the Cloudflare preview; read requests and CPU-ms from Workers analytics.</li><li>Fill the cost table for both hosts at 10/50/200/500 schools.</li></ul><p class="exit">Done when: the cost table is complete and reviewed.</p></div></div>
+        <div class="day"><div class="when"><b>Day 8</b><span>Decide</span></div><div><ul><li>Go / no-go review against the checklist.</li><li>Go: plan the cutover window. No-go: move production to Vercel Pro.</li><li>Delete the staging project or pause it.</li></ul><p class="exit">Done when: the hosting decision is made and written in <code>docs/DECISIONS.md</code>.</p></div></div>
+      </div>
+    </section>
+
+    <section id="gonogo">
+      <div class="eyebrow">10 · Decision</div>
+      <h2>Cloudflare go / no-go checklist</h2>
+      <ul>
+        <li>All Playwright tests pass on the preview Worker.</li>
+        <li>Login, <code>proxy.ts</code> redirects and plan locks work in all 5 portals.</li>
+        <li>All 9 scheduled jobs run from Cron Triggers.</li>
+        <li>500-student import, a full Excel export, fee year-end and the backup each finish within limits.</li>
+        <li>p95 response time on Cloudflare is no worse than Target A at the same load.</li>
+        <li>Cost per school on Cloudflare is lower than on Vercel Pro at 50 schools and above.</li>
+      </ul>
+    </section>
+
+    <section id="risks">
+      <div class="eyebrow">11 · Risks</div>
+      <h2>What could go wrong</h2>
+      <div class="tablewrap wide">
+        <table>
+          <thead><tr><th>Risk</th><th>What we do</th></tr></thead>
+          <tbody>
+            <tr><td>Cloudflare adapter can't run our Next.js 16.3 setup</td><td>Step 1 removes the known trigger; if anything else blocks, no-go → Vercel Pro.</td></tr>
+            <tr><td>Test traffic gets blocked as an attack</td><td>Support ticket first; test the workers.dev address; adjust our own rules during the window.</td></tr>
+            <tr><td>Test machine's network skews timings</td><td>Run k6 from a small cloud machine in Mumbai (ap-south-1), close to the database, for the final numbers.</td></tr>
+            <tr><td>Synthetic schools don't behave like real ones</td><td>Profile comes from production's real usage tables (Section 4), not guesses.</td></tr>
+            <tr><td>Staging and observability costs during tests</td><td>Staging on the smallest size that matches production; deleted or paused on Day 8.</td></tr>
+            <tr><td>Accidentally pointing load at production</td><td>Scripts refuse any host that isn't the staging build or the preview Worker.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="questions">
+      <div style="display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;justify-content:space-between">
+        <div style="display:grid;gap:8px"><div class="eyebrow">12 · Needs your answer</div><h2>Open questions</h2></div>
+        <span id="qstatus">Loading answers…</span>
+      </div>
+      <p>Q1–Q4 are needed to start Day 1. Answers save for everyone who opens this page.</p>
+      <div class="qs" id="qs"></div>
+      <p style="font-size:13px;color:var(--muted)">Sources: <a href="https://vercel.com/kb/guide/what-s-vercel-s-policy-regarding-load-testing-deployments">Vercel load testing policy</a> · <a href="https://vercel.com/kb/guide/how-to-effectively-load-test-your-vercel-application">Vercel load testing guide</a> · <a href="https://developers.cloudflare.com/ddos-protection/reference/simulate-ddos-attack">Cloudflare: testing your own properties</a> · <a href="https://developers.cloudflare.com/workers/platform/pricing/">Workers pricing</a> · <a href="https://developers.cloudflare.com/workers/platform/limits">Workers limits</a> · <a href="https://supabase.com/pricing">Supabase pricing</a> · <a href="https://supabase.com/docs/guides/troubleshooting/how-to-change-max-database-connections-_BQ8P5">Supabase connection limits</a> · <a href="https://vercel.com/docs/plans/pro">Vercel Pro</a> · <a href="https://github.com/cloudflare/workers-sdk/issues/13755">workers-sdk #13755</a>.</p>
+    </section>
+  </article>
+</div>
+
+<script>
+const QUESTIONS = [
+  { id: 'q1', t: 'Who owns the Cloudflare account, and can the developer get access?', why: 'R2 already lives in a Cloudflare account. We need Workers, Hyperdrive and (later) DNS on the same account. Name the owner in the note.',
+    o: [['note', 'Details in the note', true]] },
+  { id: 'q2', t: 'Can we create a separate staging Supabase project for the tests?', why: 'About $10–15 a month while it exists; deleted or paused after Day 8. The dev database is full of e2e data and must stay usable for development.',
+    o: [['yes', 'Yes, create it and delete it after', true], ['use_dev', 'No, use the existing dev database', false]] },
+  { id: 'q3', t: 'What size is the production database today?', why: 'Staging should match it so the ceiling we find is the real one. Check Supabase → Project settings → Compute.',
+    o: [['micro', 'Micro', false], ['small', 'Small', false], ['larger', 'Medium or larger', false], ['unknown', 'Not sure, check for me', true]] },
+  { id: 'q4', t: 'Who runs the read-only traffic queries on production and exports Vercel\'s 30-day usage?', why: 'Production access isn\'t on the developer\'s machine (on purpose). Vercel runs under two accounts (vasmikrishnas-projects, sunny3005s-projects).',
+    o: [['founder', 'I will run them and share the results', true], ['give_access', 'Give the developer temporary read-only access', false]] },
+  { id: 'q5', t: 'How many schools should the cost table plan for?', why: 'Sets the sizes in the cost table and how far the load test pushes.',
+    o: [['default', '10, 50, 200, 500 (default)', true], ['custom', 'Different sizes (note)', false]] },
+  { id: 'q6', t: 'What margin should plan prices keep over our cost per school?', why: 'Turns cost per school into a lowest safe plan price.',
+    o: [['3x', 'Price at least 3× our cost', true], ['2x', 'At least 2×', false], ['custom', 'Other (note)', false]] },
+  { id: 'q7', t: 'If the Cloudflare trial fails, move to Vercel Pro right away?', why: 'We can\'t charge schools while on Vercel\'s free plan.',
+    o: [['yes', 'Yes, Vercel Pro immediately', true], ['wait', 'No, stay on free and retry Cloudflare first', false]] },
+  { id: 'q8', t: 'When can the hosting cutover happen if Cloudflare passes?', why: 'DNS switch with rollback ready; schools told in advance.',
+    o: [['weekend', 'A weekend night, 15-minute window', true], ['weekday', 'A weekday night after 10 PM', false]] },
+];
+
+let db = null, user = null, myId = null, canWrite = false, answers = {};
+const qEls = {};
+function build() {
+  const root = document.getElementById('qs');
+  QUESTIONS.forEach((q, i) => {
+    const box = document.createElement('div'); box.className = 'q';
+    const fs = document.createElement('fieldset');
+    fs.innerHTML = `<legend class="qt"><span class="qn">Q${i + 1}</span><b></b></legend>`;
+    fs.querySelector('b').textContent = q.t;
+    const why = document.createElement('p'); why.className = 'why'; why.textContent = q.why;
+    const opts = document.createElement('div'); opts.className = 'opts';
+    const labels = {};
+    for (const [val, label, rec] of q.o) {
+      const l = document.createElement('label'); l.className = 'opt';
+      const inp = document.createElement('input'); inp.type = 'radio'; inp.name = q.id; inp.value = val; inp.id = `${q.id}-${val}`; inp.disabled = true;
+      inp.addEventListener('change', () => save(q.id, { choice: val }));
+      const span = document.createElement('span'); span.textContent = label;
+      if (rec) { const r = document.createElement('span'); r.className = 'rec'; r.textContent = 'Recommended'; span.appendChild(r); }
+      l.append(inp, span); opts.appendChild(l); labels[val] = l;
+    }
+    const ta = document.createElement('textarea'); ta.id = `${q.id}-note`; ta.placeholder = 'Add a note or your own answer'; ta.disabled = true;
+    ta.setAttribute('aria-label', `Note for question ${i + 1}`);
+    let timer = null;
+    ta.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(() => save(q.id, { note: ta.value.slice(0, 4000) }), 800); });
+    const who = document.createElement('div'); who.className = 'who';
+    fs.append(why, opts); box.append(fs, ta, who); root.appendChild(box);
+    qEls[q.id] = { box, labels, ta, who };
+  });
+}
+const fmt = iso => { const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' }); };
+async function render() {
+  const ids = [...new Set(Object.values(answers).map(a => a.by).filter(Boolean))];
+  let profiles = {};
+  if (user && ids.length) { try { profiles = (await user.profiles(ids)) || {}; } catch { profiles = {}; } }
+  let n = 0;
+  for (const q of QUESTIONS) {
+    const a = answers[q.id] || {}; const { box, labels, ta, who } = qEls[q.id];
+    const valid = q.o.some(([v]) => v === a.choice);
+    for (const [v, l] of Object.entries(labels)) { const inp = l.querySelector('input'); inp.checked = valid && v === a.choice; inp.disabled = !canWrite; l.classList.toggle('chosen', inp.checked); }
+    if (document.activeElement !== ta) ta.value = typeof a.note === 'string' ? a.note : '';
+    ta.disabled = !canWrite;
+    const answered = valid || (typeof a.note === 'string' && a.note.trim() !== '');
+    box.classList.toggle('answered', answered); if (answered) n++;
+    const name = a.by && profiles[a.by] ? profiles[a.by].name : '';
+    who.textContent = a.at ? `Answered ${fmt(a.at)}${name ? ' by ' + name : ''}` : '';
+  }
+  document.getElementById('qstatus').textContent = `${n} of ${QUESTIONS.length} answered` + (canWrite ? '' : db ? ' · view only' : '');
+}
+async function save(id, patch) {
+  if (!db || !canWrite) return;
+  const prev = answers[id];
+  const next = { choice: prev?.choice ?? null, note: prev?.note ?? '', ...patch, by: myId, at: new Date().toISOString() };
+  answers = { ...answers, [id]: next }; render();
+  try { await db.collection('answers').doc(id).set(next); }
+  catch (e) {
+    answers = { ...answers, [id]: prev };
+    if (e && e.code === 'invalid_argument') canWrite = false;
+    document.getElementById('qstatus').textContent = canWrite ? 'That answer didn’t save. Check your connection and try again.' : 'You have view-only access.';
+    render();
+  }
+}
+build(); render();
+(async () => {
+  try { [db, user] = await Promise.all([window.claude?.use('db') ?? null, window.claude?.use('user') ?? null]); } catch { db = null; }
+  if (!db) { document.getElementById('qstatus').textContent = 'Sign in to answer'; return; }
+  myId = user ? await user.id() : null;
+  canWrite = (user ? await user.can('data.write') : null) !== false;
+  render();
+  db.collection('answers').onSnapshot(snap => {
+    const next = {};
+    for (const d of snap.docs) { const v = d.data() || {}; next[d.id] = { choice: typeof v.choice === 'string' ? v.choice : null, note: typeof v.note === 'string' ? v.note : '', by: typeof v.by === 'string' ? v.by : null, at: typeof v.at === 'string' ? v.at : null }; }
+    answers = next; render();
+  }, () => { document.getElementById('qstatus').textContent = 'Live updates stopped. Reload to reconnect.'; });
+})();
+</script>

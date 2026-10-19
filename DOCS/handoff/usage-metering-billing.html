@@ -1,0 +1,925 @@
+<title>WLYL Platform Handoff</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@500;600;700&family=Source+Sans+3:ital,wght@0,400;0,600;0,700;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a handoff document — one reading column with a contents rail on wide screens; WLYL portal green as the accent;
+   mock screens drawn in framed panels; open questions at the end with in-page answers saved for the team. */
+:root {
+  --bg: #f4f5f1; --paper: #ffffff; --ink: #1c2420; --muted: #616d66; --line: #dbe0d9; --soft: #eef1ec;
+  --brand: #235b46; --brand-soft: #e2ede7; --amber: #9a5806; --amber-soft: #fbf0dc; --red: #a33131; --red-soft: #fbeceb;
+  --note: #5546c9; --note-soft: #eeebfc; --code-bg: #f1f3ef;
+  --f-display: "Inter Tight", "Segoe UI", system-ui, sans-serif;
+  --f-body: "Source Sans 3", "Segoe UI", system-ui, sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #121614; --paper: #1a201d; --ink: #e5eae6; --muted: #9ba8a0; --line: #2c3530; --soft: #212824;
+  --brand: #7cc3a3; --brand-soft: #1d2f27; --amber: #eeb260; --amber-soft: #2d2415; --red: #f08a80; --red-soft: #321a18;
+  --note: #ab9ff5; --note-soft: #24203d; --code-bg: #1f2622; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #121614; --paper: #1a201d; --ink: #e5eae6; --muted: #9ba8a0; --line: #2c3530; --soft: #212824;
+  --brand: #7cc3a3; --brand-soft: #1d2f27; --amber: #eeb260; --amber-soft: #2d2415; --red: #f08a80; --red-soft: #321a18;
+  --note: #ab9ff5; --note-soft: #24203d; --code-bg: #1f2622; color-scheme: dark }
+
+body { background: var(--bg); color: var(--ink); font: 16px/1.62 var(--f-body); padding-inline: 16px; }
+.wrap { max-width: 1120px; margin: 0 auto; padding-block: 40px 96px; display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 48px; }
+nav.toc { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 24px); align-self: start; display: grid; gap: 4px; font-size: 14px; }
+nav.toc .eyebrow { margin-bottom: 8px; }
+nav.toc a { color: var(--muted); text-decoration: none; padding: 3px 0 3px 10px; border-left: 2px solid var(--line); }
+nav.toc a:hover { color: var(--brand); border-left-color: var(--brand); }
+article { display: grid; gap: 56px; min-width: 0; }
+section { display: grid; gap: 16px; min-width: 0; scroll-margin-top: 20px; }
+h1, h2, h3 { font-family: var(--f-display); line-height: 1.15; margin: 0; text-wrap: balance; }
+h1 { font-size: clamp(30px, 5vw, 44px); letter-spacing: -0.015em; }
+h2 { font-size: 25px; letter-spacing: -0.01em; }
+h3 { font-size: 18px; }
+p { margin: 0; max-width: 72ch; }
+ul, ol { margin: 0; padding-left: 1.25em; display: grid; gap: 5px; max-width: 72ch; }
+a { color: var(--brand); }
+code { font-family: var(--f-mono); font-size: 0.84em; background: var(--code-bg); border: 1px solid var(--line); padding: 0 5px; border-radius: 4px; }
+pre.code { margin: 0; font: 13px/1.6 var(--f-mono); background: var(--code-bg); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; overflow-x: auto; }
+.eyebrow { font: 500 11.5px/1 var(--f-mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.secno { color: var(--brand); }
+.lede { font-size: 18px; color: var(--muted); max-width: 66ch; }
+.meta { display: flex; flex-wrap: wrap; gap: 6px 20px; font: 13px var(--f-mono); color: var(--muted); }
+.callout { border-left: 3px solid var(--brand); background: var(--brand-soft); padding: 12px 16px; border-radius: 0 8px 8px 0; display: grid; gap: 6px; max-width: 80ch; }
+.callout.warn { border-left-color: var(--amber); background: var(--amber-soft); }
+.tag { display: inline-block; font: 500 11px/1 var(--f-mono); letter-spacing: .05em; text-transform: uppercase; padding: 4px 7px; border-radius: 4px; white-space: nowrap; }
+.t-bill { color: var(--brand); background: var(--brand-soft); }
+.t-track { color: var(--muted); background: var(--soft); border: 1px solid var(--line); }
+.t-later { color: var(--note); background: var(--note-soft); }
+.t-live { color: var(--brand); background: var(--brand-soft); }
+.t-idle { color: var(--amber); background: var(--amber-soft); }
+.t-none { color: var(--red); background: var(--red-soft); }
+.sample { display: inline-block; font: 500 10.5px/1 var(--f-mono); letter-spacing: .06em; text-transform: uppercase; color: var(--note); border: 1px dashed var(--note); border-radius: 4px; padding: 4px 6px; }
+
+.tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); }
+table { border-collapse: collapse; width: 100%; font-size: 14.5px; }
+th { text-align: left; font: 600 12px var(--f-body); letter-spacing: .04em; text-transform: uppercase; color: var(--muted); background: var(--soft); padding: 9px 12px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+td { padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; font-variant-numeric: tabular-nums; }
+tr:last-child td { border-bottom: 0; }
+td code { white-space: nowrap; }
+.wide table { min-width: 820px; }
+
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; }
+.card { background: var(--paper); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; display: grid; gap: 4px; align-content: start; }
+.card b { font-family: var(--f-display); font-size: 15.5px; }
+.card span { color: var(--muted); font-size: 14.5px; }
+
+.diagram { background: var(--paper); border: 1px solid var(--line); border-radius: 8px; padding: 16px; overflow-x: auto; }
+.diagram pre.mermaid { margin: 0; background: transparent; }
+
+/* mock frames */
+.frame { background: var(--paper); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; min-width: 0; }
+.chrome { display: flex; gap: 10px; align-items: center; padding: 8px 12px; background: var(--soft); border-bottom: 1px solid var(--line); }
+.chrome i { width: 9px; height: 9px; border-radius: 50%; background: var(--line); display: block; }
+.chrome .url { flex: 1; min-width: 0; font: 12px var(--f-mono); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mock { padding: 18px 20px 22px; display: grid; gap: 14px; }
+.mock .mt { font: 700 19px var(--f-display); }
+.mock .ms { color: var(--muted); font-size: 14px; }
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.kpi { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; display: grid; gap: 2px; }
+.kpi small { color: var(--muted); font-size: 12.5px; }
+.kpi b { font: 700 20px var(--f-display); font-variant-numeric: tabular-nums; }
+.kpi em { font-style: normal; font-size: 12.5px; color: var(--brand); }
+.pill { display: inline-block; font: 600 12px/1 var(--f-body); padding: 5px 9px; border-radius: 999px; white-space: nowrap; }
+.p-on { background: var(--brand-soft); color: var(--brand); } .p-off { background: var(--soft); color: var(--muted); border: 1px solid var(--line); }
+.p-warn { background: var(--amber-soft); color: var(--amber); }
+.cellstack { display: grid; gap: 1px; font-size: 13.5px; } .cellstack small { color: var(--muted); font-size: 12px; }
+.btn { display: inline-block; font: 600 12.5px var(--f-body); border: 1px solid var(--line); border-radius: 7px; padding: 5px 10px; background: var(--paper); color: var(--ink); white-space: nowrap; }
+.btn.primary { background: var(--brand); border-color: var(--brand); color: var(--paper); }
+.bar { height: 6px; background: var(--soft); border-radius: 3px; overflow: hidden; min-width: 90px; } .bar i { display: block; height: 100%; background: var(--brand); }
+.bar.w i { background: var(--amber); } .bar.o i { background: var(--red); }
+
+/* phases */
+.phases { display: grid; gap: 14px; }
+.phase { background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 18px 20px; display: grid; gap: 10px; }
+.phase header { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: baseline; justify-content: space-between; }
+.phase h3 small { font: 500 12px var(--f-mono); color: var(--muted); margin-left: 8px; }
+.phase .done { font-size: 14px; color: var(--muted); border-top: 1px dashed var(--line); padding-top: 8px; }
+
+/* questions */
+.qhead { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; }
+#qstatus { font: 13px var(--f-mono); color: var(--muted); }
+.qs { display: grid; gap: 12px; counter-reset: q; }
+.q { background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; display: grid; gap: 10px; }
+.q.answered { border-color: color-mix(in srgb, var(--brand) 45%, var(--line)); }
+.q .qt { display: flex; gap: 10px; align-items: baseline; }
+.q .qn { font: 600 12px var(--f-mono); color: var(--brand); flex: none; }
+.q .qt b { font-family: var(--f-display); font-size: 16.5px; line-height: 1.3; }
+.q .why { color: var(--muted); font-size: 14.5px; }
+.opts { display: grid; gap: 6px; }
+.opt { display: grid; grid-template-columns: 20px 1fr; gap: 8px; align-items: start; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; cursor: pointer; font-size: 14.5px; }
+.opt:hover { background: var(--soft); }
+.opt input { margin: 3px 0 0; accent-color: var(--brand); }
+.opt .rec { font: 500 10.5px var(--f-mono); color: var(--brand); text-transform: uppercase; letter-spacing: .05em; margin-left: 6px; }
+.opt.chosen { border-color: var(--brand); background: var(--brand-soft); }
+.q textarea { width: 100%; min-height: 56px; resize: vertical; font: 14.5px/1.5 var(--f-body); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; box-sizing: border-box; }
+.q .who { font: 12px var(--f-mono); color: var(--muted); min-height: 1em; }
+.q fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
+.q legend { padding: 0; }
+:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+
+@media (max-width: 900px) { .wrap { grid-template-columns: 1fr; gap: 28px; } nav.toc { position: static; grid-template-columns: 1fr 1fr; } nav.toc .eyebrow { grid-column: 1 / -1; } }
+@media (max-width: 520px) { nav.toc { grid-template-columns: 1fr; } }
+</style>
+
+<div class="wrap">
+  <nav class="toc" aria-label="Contents">
+    <div class="eyebrow">Contents</div>
+    <a href="#summary">1. Summary</a>
+    <a href="#today">2. What exists today</a>
+    <a href="#plans">3. Plans &amp; prices</a>
+    <a href="#concepts">4. How usage works</a>
+    <a href="#services">5. What we track</a>
+    <a href="#data">6. Data model</a>
+    <a href="#recording">7. Recording usage</a>
+    <a href="#pricing">8. Usage prices &amp; charges</a>
+    <a href="#traffic">9. Traffic</a>
+    <a href="#screens">10. Screens</a>
+    <a href="#apis">11. APIs</a>
+    <a href="#limits">12. Limits &amp; alerts</a>
+    <a href="#safety">13. Security &amp; accuracy</a>
+    <a href="#hosting">14. Hosting</a>
+    <a href="#plan">15. Build plan</a>
+    <a href="#tests">16. Testing &amp; acceptance</a>
+    <a href="#questions">17. Open questions</a>
+  </nav>
+
+  <article>
+    <header style="display:grid;gap:14px">
+      <div class="eyebrow">Feature handoff · draft for review</div>
+      <h1>Plans, usage, traffic &amp; hosting</h1>
+      <p class="lede">Four connected pieces for taking WLYL to paying schools. <b>Plans</b> get real prices the platform admin controls. <b>Usage</b> records every paid service each school uses (WhatsApp, email, AI, storage, and later services) and bills the extra. <b>Traffic</b> shows visitors, sessions and time spent, kept separate from usage. <b>Hosting</b> covers the move off Vercel's free plan.</p>
+      <div class="meta"><span>Date: 8 Oct 2026</span><span>Base: <code>origin/dev</code> @ a75dc5a</span><span>Issues: #358 (to be widened), #359</span><span>Status: waiting on open questions</span></div>
+      <div class="callout warn"><b>This replaces the WhatsApp-only credits plan.</b><span>WhatsApp becomes one service among several. The earlier decisions still hold: bill monthly after use, and keep sending up to a limit. They now apply per service, and the platform admin sets them.</span></div>
+    </header>
+
+    <!-- 1 -->
+    <section id="summary">
+      <div class="eyebrow"><span class="secno">01</span> · Summary</div>
+      <h2>What we are building</h2>
+      <div class="cards">
+        <div class="card"><b>Plans with real prices</b><span>Each plan gets a monthly and yearly price, set by the platform admin together with its features, staff limit and included usage. A single school can get a discount.</span></div>
+        <div class="card"><b>Traffic, separate from usage</b><span>Visitors, sessions and time spent, for the portals and the public website. Shown on its own Traffic page and never mixed into bills.</span></div>
+        <div class="card"><b>Hosting that allows commercial use</b><span>Vercel's free plan doesn't allow commercial use. The plan: a short Cloudflare trial, with Vercel Pro as the fallback.</span></div>
+        <div class="card"><b>Track everything, per school</b><span>One shared function records each use of a paid service against the school, with the amount and when it happened.</span></div>
+        <div class="card"><b>Prices set by the platform admin</b><span>For each service and plan: how much is included each month, the price per extra unit, and a monthly limit. No code change is needed to change a price.</span></div>
+        <div class="card"><b>Charge later, by switch</b><span>Every service is tracked from day one. Charging is switched on per service, once prices are agreed.</span></div>
+        <div class="card"><b>Add a service in one step</b><span>A new service (SMS, push, a new AI model) is a new row in the service list plus one tracking call in code. No database change.</span></div>
+        <div class="card"><b>Visible to both sides</b><span>Schools see this month's usage and estimated charges. The platform admin sees every school, sets prices, closes months into bills, and compares what we charge with what the service costs us.</span></div>
+      </div>
+      <h3>Not in this feature</h3>
+      <ul>
+        <li>Online payment of bills (Cashfree). Bills are marked paid by hand for now.</li>
+        <li>Prepaid credit packs or wallets.</li>
+        <li>The plan fee itself, which stays with yearly renewals unless question Q8 says otherwise.</li>
+        <li>New services that don't exist yet, such as SMS. The design makes them easy to add later.</li>
+      </ul>
+    </section>
+
+    <!-- 2 -->
+    <section id="today">
+      <div class="eyebrow"><span class="secno">02</span> · Starting point</div>
+      <h2>What exists today</h2>
+      <p>Checked in code on <code>origin/dev</code>. Paid services already go through a few shared helpers, which is where tracking will plug in.</p>
+      <div class="tablewrap wide">
+        <table>
+          <thead><tr><th>Service</th><th>Where in code</th><th>State today</th><th>Notes</th></tr></thead>
+          <tbody>
+            <tr><td>Plans</td><td><code>plan_pricing</code>, <code>plan_features</code>, Platform admin → Feature Plans, School → plan &amp; term dates</td><td><span class="tag t-idle">No prices</span></td><td>4 plans (none, basic, standard, premium) with features and staff limits (2 / 5 / unlimited). <code>plan_pricing.monthly_price</code> holds ₹499 / ₹999 / ₹1,999 from setup, but no screen shows or uses it. Plan terms, renewals and expiry locks are live.</td></tr>
+            <tr><td>Traffic</td><td><code>usage_sessions</code>, <code>usage_daily_rollup</code>, <code>feature_usage_events</code>, Platform admin → Usage analytics</td><td><span class="tag t-live">Live</span></td><td>Logins, unique users, time in product, feature adoption, school health and growth for the 4 portals. Public website visitors are not counted. The page is called "Usage analytics", which clashes with billable usage.</td></tr>
+            <tr><td>Hosting</td><td>Vercel (free Hobby plan, two accounts), <code>vercel.json</code> with 9 crons, Supabase (ap-south-1), R2, Resend, Cloudinary</td><td><span class="tag t-none">Must change</span></td><td>Hobby doesn't allow commercial use, so we can't charge schools while on it. See the Hosting section.</td></tr>
+            <tr><td>WhatsApp</td><td><code>lib/whatsapp.ts</code> → <code>sendWhatsappMessage()</code></td><td><span class="tag t-idle">Log only</span></td><td>Called from 13 places (logins, password resets, account changes). Never reaches Meta. Real sending is issue #359.</td></tr>
+            <tr><td>Email</td><td><code>lib/email.ts</code> → <code>sendMail()</code> (Resend)</td><td><span class="tag t-live">Live</span></td><td>Every email goes through one function, but it isn't told which school the email is for.</td></tr>
+            <tr><td>AI</td><td><code>lib/gemini.ts</code> → <code>callAI()</code> (Groq, llama-3.3-70b)</td><td><span class="tag t-idle">Built, not used</span></td><td>6 AI functions (announcement draft, insights, syllabus PDF extraction…) with no callers on dev today. Tracking goes in <code>callAI()</code> so every future AI feature is counted.</td></tr>
+            <tr><td>File storage</td><td><code>lib/r2.ts</code>, Cloudinary (<code>app/api/upload/sign</code>, expense attachments)</td><td><span class="tag t-live">Live</span></td><td>Voice feedback, study materials, expense attachments, logos. Files upload straight from the browser, so the size is only known when the upload is confirmed.</td></tr>
+            <tr><td>Transliteration</td><td><code>app/api/transliterate</code> (Google Input Tools)</td><td><span class="tag t-live">Live</span> (uncommitted)</td><td>Free today. Track only.</td></tr>
+            <tr><td>API requests</td><td><code>proxy.ts</code> → <code>request_logs</code></td><td><span class="tag t-idle">Partial</span></td><td>Logged only for schools with monitoring on. Counting every request as its own row would double database writes.</td></tr>
+            <tr><td>Active users</td><td><code>usage_sessions</code>, <code>usage_daily_rollup</code></td><td><span class="tag t-live">Live</span></td><td>Logins and time spent per school and role. Already enough to count monthly active users.</td></tr>
+            <tr><td>Push notifications</td><td><code>app/api/parent/push/*</code> (branch #133)</td><td><span class="tag t-none">Not merged</span></td><td>Parent app push via Expo. Track when it's merged.</td></tr>
+            <tr><td>Exports / reports</td><td><code>app/api/export/*</code>, <code>data-export</code></td><td><span class="tag t-live">Live</span></td><td>Heavy on the server. Track only, as a cost signal.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <h3>Billing tables already in the database (unused)</h3>
+      <ul>
+        <li><code>plan_pricing</code>: price per plan plus WhatsApp-only fields (<code>included_whatsapp_messages</code>, <code>whatsapp_overage_rate</code>). The new per-service price list replaces those WhatsApp fields.</li>
+        <li><code>usage_ledger</code>: one row per use (school, type, amount, reference). It's empty and requires a billing month. We extend it into the general usage record instead of adding a new table.</li>
+        <li><code>billing_cycles</code>, <code>saas_invoices</code>: a month and its bill. We keep both, and add bill lines so one bill can list several services.</li>
+        <li><code>whatsapp_usage_summary</code>: replaced by the general daily totals. Drop it later.</li>
+      </ul>
+    </section>
+
+    <section id="plans">
+      <div class="eyebrow"><span class="secno">03</span> · Plans</div>
+      <h2>Plans &amp; prices</h2>
+      <p>Today a plan decides which features a school gets and how many staff accounts it can have, but nothing sets what the school pays. This makes a plan one complete package that the platform admin edits in one place:</p>
+      <div class="cards">
+        <div class="card"><b>Price</b><span>Monthly and yearly price in ₹, GST shown separately. The yearly price can be discounted.</span></div>
+        <div class="card"><b>Features</b><span>The existing per-plan feature switches, unchanged.</span></div>
+        <div class="card"><b>Staff accounts</b><span>The existing staff limit, unchanged.</span></div>
+        <div class="card"><b>Included usage</b><span>How many WhatsApp messages, AI tokens and so on are included each month, from the usage prices in this document.</span></div>
+        <div class="card"><b>Visibility</b><span>Shown on the website or not, display order, and retired. A retired plan keeps its current schools but can't be given to new ones.</span></div>
+      </div>
+      <h3>How a school's price works</h3>
+      <ul>
+        <li>When the platform admin gives a school a plan or renews it, the screen shows the plan's list price, the billing period (monthly or yearly), and an optional discount or custom price with a reason.</li>
+        <li>The agreed price is saved on that school's plan term. Later changes to the plan's price don't affect the school until its next renewal (Q16).</li>
+        <li>Starting or renewing a term creates a plan bill: once for a yearly term, or one line on each monthly bill for a monthly term (Q8).</li>
+        <li>Upgrades mid-term are charged for the remaining days, worked out from the agreed price (Q18). Downgrades take effect at renewal.</li>
+        <li>Every price, discount and plan change is written to <code>platform_audit_log</code>, as plan changes are today.</li>
+      </ul>
+      <h3>Data changes</h3>
+<pre class="code">ALTER TABLE plan_pricing ADD COLUMN IF NOT EXISTS yearly_price NUMERIC(10,2),
+  ADD COLUMN IF NOT EXISTS description TEXT, ADD COLUMN IF NOT EXISTS is_public BOOLEAN DEFAULT FALSE,
+  ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE, ADD COLUMN IF NOT EXISTS sort_order INTEGER;
+
+-- One row per plan term a school has had (schools.plan_start_date / plan_end_date stay as the current-term mirror)
+school_plan_terms (id, school_id, tier, start_date, end_date, billing_period VARCHAR(10),  -- monthly | yearly
+                   list_price NUMERIC(10,2), agreed_price NUMERIC(10,2), discount_reason TEXT,
+                   created_by TEXT, created_at TIMESTAMPTZ)
+
+-- Bill lines get a type, so one bill can carry plan fee + usage + adjustments
+ALTER TABLE saas_invoice_lines ADD COLUMN line_type VARCHAR(12) NOT NULL DEFAULT 'usage';  -- plan_fee | usage | adjustment</pre>
+    </section>
+
+    <!-- 3 -->
+    <section id="concepts">
+      <div class="eyebrow"><span class="secno">04</span> · End to end</div>
+      <h2>How usage works</h2>
+      <div class="cards">
+        <div class="card"><b>Service</b><span>Something we count, with a unit. "WhatsApp message (per message)", "AI (per 1,000 tokens)", "Storage (per GB per month)".</span></div>
+        <div class="card"><b>Usage record</b><span>One use by one school: which service, how much, when, and what triggered it.</span></div>
+        <div class="card"><b>Price</b><span>Per service and plan: included per month, price per extra unit, monthly limit, and what happens at the limit. A single school can have its own price.</span></div>
+        <div class="card"><b>Billing month</b><span>Prices are locked when the month starts. On the 1st, a scheduled job closes the month before and creates every school's bill automatically. Nobody has to click anything.</span></div>
+        <div class="card"><b>Bill</b><span>One line per charged service, with the total. Marked paid by hand for now.</span></div>
+      </div>
+      <div class="diagram">
+<pre class="mermaid">
+flowchart LR
+  A["School action<br/>(send WhatsApp, email,<br/>AI request, upload)"] --> B{"Within limit?<br/>checkAllowance()"}
+  B -- "no (block)" --> X["Not sent<br/>0 usage, school told"]
+  B -- yes --> C["Call provider<br/>(Meta, Resend, Groq, R2)"]
+  C -- "failed" --> Y["0 usage recorded"]
+  C -- "accepted" --> D["recordUsage()<br/>usage record + daily total"]
+  D --> E["80% / 100% alerts"]
+  D --> F["School: Usage page<br/>(this month + estimate)"]
+  D --> G["Platform admin: Usage dashboard"]
+  P["Platform admin:<br/>Pricing page"] --> H
+  G --> H["1st of month, 6:00 AM (automatic):<br/>prices × usage = bill lines, emailed"]
+  H --> I["Bill: Due → Paid"]
+</pre>
+      </div>
+    </section>
+
+    <!-- 4 -->
+    <section id="services">
+      <div class="eyebrow"><span class="secno">05</span> · Service list (starting set)</div>
+      <h2>What we track</h2>
+      <p>The platform admin can add, rename, switch off, or mark services as charged. "Charged?" is the suggested starting point (see Q1–Q3).</p>
+      <div class="tablewrap wide">
+        <table>
+          <thead><tr><th>Service key</th><th>Shown as</th><th>Unit</th><th>Recorded in</th><th>Charged?</th></tr></thead>
+          <tbody>
+            <tr><td><code>whatsapp.message</code></td><td>WhatsApp messages</td><td>1 message</td><td><code>sendWhatsappMessage()</code> after Meta accepts</td><td><span class="tag t-bill">Charge</span></td></tr>
+            <tr><td><code>ai.tokens</code></td><td>AI usage</td><td>1,000 tokens (input + output)</td><td><code>callAI()</code>, from the provider's usage count</td><td><span class="tag t-bill">Charge</span></td></tr>
+            <tr><td><code>ai.request</code></td><td>AI requests</td><td>1 request</td><td><code>callAI()</code></td><td><span class="tag t-track">Track</span></td></tr>
+            <tr><td><code>email.sent</code></td><td>Emails</td><td>1 email</td><td><code>sendMail()</code> after Resend accepts</td><td><span class="tag t-track">Track</span></td></tr>
+            <tr><td><code>storage.upload</code></td><td>Files uploaded</td><td>1 MB uploaded</td><td>Upload-confirm routes (R2 + Cloudinary)</td><td><span class="tag t-track">Track</span></td></tr>
+            <tr><td><code>storage.gb_month</code></td><td>Storage used</td><td>1 GB stored for a month</td><td>Nightly job: total stored per school</td><td><span class="tag t-later">Later</span></td></tr>
+            <tr><td><code>api.request</code></td><td>Platform activity</td><td>1,000 requests</td><td><code>proxy.ts</code> daily counter per school (no row per request)</td><td><span class="tag t-track">Track</span></td></tr>
+            <tr><td><code>users.active</code></td><td>Active users</td><td>1 user active in the month</td><td>Worked out from <code>usage_sessions</code></td><td><span class="tag t-track">Track</span></td></tr>
+            <tr><td><code>push.sent</code></td><td>App notifications</td><td>1 notification</td><td>Parent push send (after #133 merges)</td><td><span class="tag t-later">Later</span></td></tr>
+            <tr><td><code>export.generated</code></td><td>Reports exported</td><td>1 export</td><td>Export routes</td><td><span class="tag t-track">Track</span></td></tr>
+            <tr><td><code>sms.message</code></td><td>SMS</td><td>1 message</td><td>When an SMS provider is added</td><td><span class="tag t-later">Later</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 5 -->
+    <section id="data">
+      <div class="eyebrow"><span class="secno">06</span> · For developers</div>
+      <h2>Data model</h2>
+      <p>New migrations go at the end of <code>initDB()</code> in <code>lib/db.ts</code>, idempotent like the rest. Existing tables are reused wherever possible.</p>
+<pre class="code">-- Service list (platform admin edits it)
+usage_meters (
+  key            VARCHAR(60) PRIMARY KEY,     -- 'whatsapp.message'
+  name           TEXT NOT NULL,               -- 'WhatsApp messages'
+  unit_label     TEXT NOT NULL,               -- 'message', '1,000 tokens', 'GB-month'
+  unit_size      NUMERIC NOT NULL DEFAULT 1,  -- raw quantity per billed unit (1000 for tokens)
+  category       VARCHAR(30) NOT NULL,        -- messaging | ai | storage | platform
+  our_cost_per_unit NUMERIC(12,4),            -- what the provider charges us (for margin; platform-only)
+  is_active      BOOLEAN NOT NULL DEFAULT TRUE,
+  is_billable    BOOLEAN NOT NULL DEFAULT FALSE,
+  updated_at     TIMESTAMPTZ DEFAULT NOW()
+)
+
+-- Usage record: extend the existing, empty usage_ledger
+ALTER TABLE usage_ledger ALTER COLUMN billing_cycle_id DROP NOT NULL;
+ALTER TABLE usage_ledger ADD COLUMN IF NOT EXISTS occurred_at TIMESTAMPTZ DEFAULT NOW(),
+  ADD COLUMN IF NOT EXISTS source VARCHAR(60),          -- 'fees.reminder', 'onboarding.parent_credentials'
+  ADD COLUMN IF NOT EXISTS actor_role VARCHAR(20), ADD COLUMN IF NOT EXISTS actor_id INTEGER,
+  ADD COLUMN IF NOT EXISTS idempotency_key TEXT, ADD COLUMN IF NOT EXISTS meta JSONB DEFAULT '{}';
+-- event_type holds the service key (FK to usage_meters.key); school_id NULL = platform's own usage
+CREATE UNIQUE INDEX uq_usage_ledger_idem ON usage_ledger(idempotency_key) WHERE idempotency_key IS NOT NULL;
+
+-- Daily totals: what dashboards and bills read (never scan raw rows)
+usage_daily (school_id INTEGER, day DATE, meter_key VARCHAR(60), quantity NUMERIC(16,4),
+             PRIMARY KEY (school_id, day, meter_key))   -- school_id 0 = platform
+
+-- Prices per service × plan (replaces plan_pricing's WhatsApp-only columns)
+usage_prices (
+  meter_key, tier,                      -- tier: basic | standard | premium
+  included_per_month NUMERIC NOT NULL DEFAULT 0,
+  unit_price NUMERIC(12,4) NOT NULL DEFAULT 0,   -- ₹ per billed unit
+  monthly_cap NUMERIC,                           -- NULL = no limit
+  at_cap VARCHAR(10) NOT NULL DEFAULT 'block',   -- block | allow | notify
+  PRIMARY KEY (meter_key, tier), updated_by TEXT, updated_at TIMESTAMPTZ
+)
+
+-- One school's own price for one service (same fields, any can be NULL = use the plan's)
+school_usage_overrides (school_id, meter_key, included_per_month, unit_price, monthly_cap, at_cap,
+                        note TEXT, PRIMARY KEY (school_id, meter_key))
+
+-- Billing month: existing billing_cycles + the prices locked for that month
+ALTER TABLE billing_cycles ADD COLUMN IF NOT EXISTS price_snapshot JSONB;   -- {meter_key: {included, unit_price, unit_size, cap, at_cap}}
+-- Bill lines: one per charged service
+saas_invoice_lines (invoice_id, meter_key, used, included, billable_units, unit_price, amount NUMERIC(12,2))
+-- Alerts sent once per school × service × month
+usage_alerts_sent (school_id, meter_key, cycle_start DATE, threshold SMALLINT, sent_at, PRIMARY KEY (...4 cols))</pre>
+    </section>
+
+    <!-- 6 -->
+    <section id="recording">
+      <div class="eyebrow"><span class="secno">07</span> · For developers</div>
+      <h2>Recording usage</h2>
+      <p>New file <code>lib/usage.ts</code>. These are the only two functions the rest of the app calls. Each paid service plugs in at the shared helper it already goes through, never at individual screens.</p>
+<pre class="code">// Before a costly action. Reads this month's total from usage_daily and the school's price (override → plan).
+checkAllowance(schoolId, meterKey, quantity = 1)
+  → { allowed: boolean, reason?: 'limit_reached' | 'not_in_plan', used, included, cap }
+
+// After the provider accepted it. Never throws; a failure is logged to error_events.
+recordUsage({ schoolId, meterKey, quantity, source, actor?, ref?: { type, id }, idempotencyKey?, meta? })
+  → INSERT usage_ledger … ON CONFLICT (idempotency_key) DO NOTHING
+  → UPSERT usage_daily  quantity = quantity + $n   (only if the insert happened)
+  → threshold check → alert email once (usage_alerts_sent)</pre>
+      <h3>Where each call goes</h3>
+      <ul>
+        <li><b>WhatsApp:</b> <code>sendWhatsappMessage()</code>, check before sending, record when Meta returns a message id. Idempotency key <code>wa:&lt;provider id&gt;</code>.</li>
+        <li><b>Email:</b> <code>sendMail(to, subject, html, { schoolId, source })</code>. The new options argument is optional, so the 25 existing callers keep working, and emails without a school count as the platform's own use.</li>
+        <li><b>AI:</b> <code>callAI()</code> records <code>ai.request</code> = 1 and <code>ai.tokens</code> from the response's <code>usage.total_tokens</code>. It's checked before calling, so a school at its limit gets a clear message instead of an AI answer.</li>
+        <li><b>Storage:</b> the upload-confirm routes record the file size in MB. A nightly job adds up stored size per school for <code>storage.gb_month</code>.</li>
+        <li><b>API requests:</b> <code>proxy.ts</code> runs where it can't reach the database, so it keeps a count in memory and sends one total per school every minute through the existing internal ingest route, instead of one row per request.</li>
+        <li><b>Active users:</b> no new tracking. A nightly job counts each school's distinct users this month from <code>usage_sessions</code>.</li>
+      </ul>
+    </section>
+
+    <!-- 7 -->
+    <section id="pricing">
+      <div class="eyebrow"><span class="secno">08</span> · Money</div>
+      <h2>Usage prices &amp; charges</h2>
+      <p>For each school, charged service and month:</p>
+<pre class="code">price      = school override ?? plan price      (locked into the month when it starts)
+used       = sum of usage_daily for the month
+extra      = max(0, used − included)
+units      = extra ÷ unit_size                  (e.g. 450,000 extra tokens ÷ 1,000 = 450)
+line total = round(units × unit_price, 2)        (see Q5 for rounding up to whole units)
+bill total = sum of line totals  (+ GST, see Q9)</pre>
+      <div class="callout"><b>Worked example</b> <span class="sample">example prices</span><span>A Standard school in October: 1,240 WhatsApp messages (1,000 included, ₹0.20 each after) → 240 × ₹0.20 = <b>₹48.00</b>. AI: 1.45M tokens (1M included, ₹0.05 per 1,000 after) → 450 × ₹0.05 = <b>₹22.50</b>. Emails: 3,400, tracked only, so no line. <b>Bill: ₹70.50</b> before GST.</span></div>
+      <ul>
+        <li>Prices are locked when a month starts, so an edit only affects the next month and no school's month is re-priced mid-way (Q6).</li>
+        <li>A service's "charged" switch only affects months that start after it's turned on. Earlier usage stays recorded, but nobody is charged for it retroactively.</li>
+        <li>Every price change is recorded in <code>platform_audit_log</code> with who changed it and the old and new values.</li>
+      </ul>
+    </section>
+
+    <section id="traffic">
+      <div class="eyebrow"><span class="secno">09</span> · Traffic</div>
+      <h2>Traffic, kept apart from usage</h2>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th></th><th>Usage</th><th>Traffic</th></tr></thead>
+          <tbody>
+            <tr><td><b>Means</b></td><td>Paid services a school uses up</td><td>People visiting and how long they stay</td></tr>
+            <tr><td><b>Examples</b></td><td>WhatsApp messages, AI tokens, emails, storage</td><td>Visitors, sessions, logins, time spent, pages and features opened, devices, peak hours</td></tr>
+            <tr><td><b>Costs us money</b></td><td>Yes, per unit</td><td>Only indirectly (hosting)</td></tr>
+            <tr><td><b>On bills</b></td><td>Yes, when a service is charged</td><td>Never. It may shape plan limits, e.g. active users</td></tr>
+            <tr><td><b>Platform admin page</b></td><td>Usage (new) + Pricing + Billing</td><td>Traffic (today's "Usage analytics", renamed)</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <h3>What already exists</h3>
+      <p>Platform admin → Usage analytics tracks the four portals: active now, logins, unique users and time in product per school and role, plus feature adoption, school health, growth and retention, and a weekly digest email. It's built on <code>usage_sessions</code> (heartbeats), <code>usage_daily_rollup</code> and <code>feature_usage_events</code>. That covers most of traffic already.</p>
+      <h3>What to add</h3>
+      <ul>
+        <li><b>Rename</b> the page to <b>Traffic</b>, so "Usage" always means paid services.</li>
+        <li><b>Public website visitors</b> (landing page, public feedback forms, privacy page) aren't counted today. Count page views without cookies and without storing IP addresses: Cloudflare Web Analytics (free) once hosting moves, or a small first-party counter into a <code>traffic_daily</code> table (visits, unique visitors via a daily-rotating hash, referrer, country, device) (Q20).</li>
+        <li><b>Peak hours</b> per school and portal from existing session data, which the scaling test needs too.</li>
+        <li><b>Parent mobile app</b> sends the same session start and heartbeat once it ships.</li>
+        <li><b>School admin view</b> of its own traffic: logins and time spent by role, and which features staff use (Q19).</li>
+      </ul>
+      <h3>Mock · Platform admin → Traffic <span class="sample">example data</span></h3>
+      <div class="frame">
+        <div class="chrome"><i></i><i></i><i></i><span class="url">admin.welearnyoulearn.com/platform-admin/traffic</span></div>
+        <div class="mock">
+          <div style="display:flex;flex-wrap:wrap;gap:10px;justify-content:space-between;align-items:center"><div><div class="mt">Traffic</div><div class="ms">Visitors and time spent · last 14 days</div></div><span class="btn">Last 14 days ▾</span></div>
+          <div class="kpis">
+            <div class="kpi"><small>Portal sessions</small><b>13,780</b><em>+12% vs previous</em></div>
+            <div class="kpi"><small>Unique users</small><b>4,870</b><em>38 schools</em></div>
+            <div class="kpi"><small>Avg time per session</small><b>7m 40s</b><em>teachers longest</em></div>
+            <div class="kpi"><small>Website visitors</small><b>2,310</b><em>landing + feedback forms</em></div>
+            <div class="kpi"><small>Peak hour</small><b>9–10 AM</b><em>attendance time</em></div>
+          </div>
+          <div class="diagram" style="padding:12px"><svg viewBox="0 0 600 168" width="100%" role="img" aria-label="Example chart: daily portal sessions over two weeks, lower on weekends" style="max-width:100%;display:block">
+              <g font-family="IBM Plex Mono, monospace">
+              <line x1="40" y1="140" x2="592" y2="140" stroke="var(--line)"/><line x1="40" y1="80" x2="592" y2="80" stroke="var(--line)" stroke-dasharray="3 4"/><line x1="40" y1="20" x2="592" y2="20" stroke="var(--line)" stroke-dasharray="3 4"/>
+              <text x="34" y="143" text-anchor="end" font-size="10" fill="var(--muted)">0</text><text x="34" y="83" text-anchor="end" font-size="10" fill="var(--muted)">700</text><text x="34" y="23" text-anchor="end" font-size="10" fill="var(--muted)">1,400</text>
+              <rect x="44" y="69.7" width="26" height="70.3" rx="3" fill="var(--brand)" opacity="1"><title>24: 820 sessions</title></rect><text x="57" y="156" text-anchor="middle" font-size="10" fill="var(--muted)">24</text><rect x="83" y="53.4" width="26" height="86.6" rx="3" fill="var(--brand)" opacity="1"><title>25: 1,010 sessions</title></rect><text x="96" y="156" text-anchor="middle" font-size="10" fill="var(--muted)">25</text><rect x="122" y="38.9" width="26" height="101.1" rx="3" fill="var(--brand)" opacity="1"><title>26: 1,180 sessions</title></rect><text x="135" y="156" text-anchor="middle" font-size="10" fill="var(--muted)">26</text><rect x="161" y="33.7" width="26" height="106.3" rx="3" fill="var(--brand)" opacity="1"><title>27: 1,240 sessions</title></rect><text x="174" y="156" text-anchor="middle" font-size="10" fill="var(--muted)">27</text><rect x="200" y="45.7" width="26" height="94.3" rx="3" fill="var(--brand)" opacity="1"><title>28: 1,100 sessions</title></rect><text x="213" y="156" text-anchor="middle" font-size="10" fill="var(--muted)">28</text><rect x="239" y="104.0" width="26" height="36.0" rx="3" fill="var(--brand)" opacity="0.55"><title>29: 420 sessions</title></rect><text x="252" y="156" text-anchor="middle" font-size="10" fill="var(--muted)">29</text><rect x="278" y="113.4" width="26" height="26.6" rx="3" fill="var(--brand)" opacity="0.55"><title>30: 310 sessions</title></rect><text x="291" y="156" text-anchor="middle" font-size="10" fill="var(--muted)">30</text><rect x="317" y="62.9" width="26" height="77.1" rx="3" fill="var(--brand)" opacity="1"><title>1: 900 sessions</title></rect><text x="330" y="156" text-anchor="middle" font-size="10" fill="var(--muted)">1</text><rect x="356" y="41.4" width="26" height="98.6" rx="3" fill="var(--brand)" opacity="1"><title>2: 1,150 sessions</title></rect><text x="369" y="156" text-anchor="middle" font-size="10" fill="var(--muted)">2</text><rect x="395" y="26.9" width="26" height="113.1" rx="3" fill="var(--brand)" opacity="1"><title>3: 1,320 sessions</title></rect><text x="408" y="156" text-anchor="middle" font-size="10" fill="var(--muted)">3</text><rect x="434" y="29.4" width="26" height="110.6" rx="3" fill="var(--brand)" opacity="1"><title>4: 1,290 sessions</title></rect><text x="447" y="156" text-anchor="middle" font-size="10" fill="var(--muted)">4</text><rect x="473" y="36.3" width="26" height="103.7" rx="3" fill="var(--brand)" opacity="1"><title>5: 1,210 sessions</title></rect><text x="486" y="156" text-anchor="middle" font-size="10" fill="var(--muted)">5</text><rect x="512" y="98.9" width="26" height="41.1" rx="3" fill="var(--brand)" opacity="0.55"><title>6: 480 sessions</title></rect><text x="525" y="156" text-anchor="middle" font-size="10" fill="var(--muted)">6</text><rect x="551" y="110.0" width="26" height="30.0" rx="3" fill="var(--brand)" opacity="0.55"><title>7: 350 sessions</title></rect><text x="564" y="156" text-anchor="middle" font-size="10" fill="var(--muted)">7</text>
+              </g></svg></div>
+          <div class="tablewrap wide">
+            <table>
+              <thead><tr><th>School</th><th>Sessions</th><th>Unique users</th><th>Time spent</th><th>Busiest portal</th><th>Peak hour</th></tr></thead>
+              <tbody>
+                <tr><td>Green Valley Public School</td><td>3,920</td><td>1,410</td><td>512 h</td><td>Parent</td><td>8–9 PM</td></tr>
+                <tr><td>Sri Vidya High School</td><td>2,140</td><td>612</td><td>301 h</td><td>Teacher</td><td>9–10 AM</td></tr>
+                <tr><td>Bright Minds School</td><td>640</td><td>188</td><td>74 h</td><td>School admin</td><td>11 AM–12 PM</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 8 -->
+    <section id="screens">
+      <div class="eyebrow"><span class="secno">10</span> · Screens</div>
+      <h2>Screens</h2>
+      <p>Mockups use example numbers. The WhatsApp-only mockups shared earlier still apply to the bill and limit screens; this section adds the screens that cover all services.</p>
+
+      <h3>Platform admin → Plans (replaces "Feature Plans")</h3>
+      <p>One card per plan with its price, staff accounts, included usage and features. Editing a plan opens tabs for Price, Features (today's switches), Staff accounts and Included usage (the Pricing grid filtered to that plan). The page notes that price changes apply to new terms and renewals.</p>
+      <div class="frame">
+        <div class="chrome"><i></i><i></i><i></i><span class="url">admin.welearnyoulearn.com/platform-admin/plans</span></div>
+        <div class="mock">
+          <div style="display:flex;flex-wrap:wrap;gap:10px;justify-content:space-between;align-items:center"><div><div class="mt">Plans</div><div class="ms">Price changes apply to new plans and renewals. Schools keep their agreed price until renewal.</div></div><span class="sample">example prices</span></div>
+          <div class="cards">
+            <div class="card"><b>Basic</b><span><b style="font-size:20px;color:var(--ink)">₹499</b> / month · ₹4,990 / year</span><span>2 staff accounts · 18 features</span><span>WhatsApp and AI not included</span><span>12 schools · <span class="pill p-on">On website</span></span><span><span class="btn">Edit plan</span></span></div>
+            <div class="card"><b>Standard</b><span><b style="font-size:20px;color:var(--ink)">₹999</b> / month · ₹9,990 / year</span><span>5 staff accounts · 31 features</span><span>1,000 WhatsApp · 1M AI tokens a month</span><span>21 schools · <span class="pill p-on">On website</span></span><span><span class="btn">Edit plan</span></span></div>
+            <div class="card"><b>Premium</b><span><b style="font-size:20px;color:var(--ink)">₹1,999</b> / month · ₹19,990 / year</span><span>Unlimited staff · all features</span><span>5,000 WhatsApp · 5M AI tokens a month</span><span>5 schools · <span class="pill p-on">On website</span></span><span><span class="btn">Edit plan</span></span></div>
+          </div>
+        </div>
+      </div>
+
+      <h3>Platform admin → School → Plan (assign or renew with a price)</h3>
+      <p>The existing plan screen for a school gains billing period, list price, agreed price and reason. Before saving, it says what bill will be created.</p>
+      <div class="frame">
+        <div class="chrome"><i></i><i></i><i></i><span class="url">admin.welearnyoulearn.com/platform-admin/schools/14 · Plan</span></div>
+        <div class="mock">
+          <div class="tablewrap">
+            <table>
+              <tbody>
+                <tr><td style="width:34%"><b>Plan</b></td><td>Standard ▾</td></tr>
+                <tr><td><b>Billing</b></td><td><span class="pill p-on">Yearly</span> <span class="pill p-off">Monthly</span></td></tr>
+                <tr><td><b>Term</b></td><td>1 Nov 2026 – 31 Oct 2027</td></tr>
+                <tr><td><b>List price</b></td><td>₹9,990 / year</td></tr>
+                <tr><td><b>Agreed price</b></td><td><span class="btn">₹8,500</span> <span class="muted small">15% off</span></td></tr>
+                <tr><td><b>Reason</b></td><td>Founding school offer, 1st year</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="callout"><span>Saving creates a plan bill for <b>₹8,500 + GST</b> dated 1 Nov 2026 and emails the school admin. Usage beyond Standard's included amounts is billed monthly.</span></div>
+          <div><span class="btn primary">Save plan</span> <span class="btn">Cancel</span></div>
+        </div>
+      </div>
+
+      <h3>School admin → Settings → Plan &amp; Features</h3>
+      <p>Shows the plan, the price the school pays, the renewal date and what's included (with usage bars from the Usage page), plus a "Compare plans" table that uses the platform admin's prices. "Request upgrade" uses the existing renewal-request flow.</p>
+
+      <h3>Platform admin → Pricing (new)</h3>
+      <p>The service list and the price for each plan in one place. Editing a cell opens included amount, price per unit, monthly limit, and what happens at the limit. A banner says changes apply from next month.</p>
+      <div class="frame">
+        <div class="chrome"><i></i><i></i><i></i><span class="url">admin.welearnyoulearn.com/platform-admin/pricing</span></div>
+        <div class="mock">
+          <div style="display:flex;flex-wrap:wrap;gap:10px;justify-content:space-between;align-items:center"><div><div class="mt">Pricing</div><div class="ms">What each plan includes per month and what extra use costs. Changes apply from 1 Nov.</div></div><span class="btn primary">Add service</span></div>
+          <div class="tablewrap wide">
+            <table>
+              <thead><tr><th>Service</th><th>Unit</th><th>Our cost</th><th>Charged</th><th>Basic</th><th>Standard</th><th>Premium</th></tr></thead>
+              <tbody>
+                <tr><td><b>WhatsApp messages</b></td><td>message</td><td>₹0.13</td><td><span class="pill p-on">On</span></td><td><span class="cellstack">Not included</span></td><td><span class="cellstack">1,000 included<small>₹0.20 after · limit 2,000 · block</small></span></td><td><span class="cellstack">5,000 included<small>₹0.20 after · limit 10,000 · block</small></span></td></tr>
+                <tr><td><b>AI usage</b></td><td>1,000 tokens</td><td>₹0.02</td><td><span class="pill p-on">On</span></td><td><span class="cellstack">Not included</span></td><td><span class="cellstack">1M tokens included<small>₹0.05 after · limit 5M · block</small></span></td><td><span class="cellstack">5M tokens included<small>₹0.04 after · limit 25M · block</small></span></td></tr>
+                <tr><td><b>Emails</b></td><td>email</td><td>₹0.08</td><td><span class="pill p-off">Track only</span></td><td colspan="3"><span class="cellstack muted">Counted for every school, not charged</span></td></tr>
+                <tr><td><b>Files uploaded</b></td><td>MB</td><td>₹0.001</td><td><span class="pill p-off">Track only</span></td><td colspan="3"><span class="cellstack muted">Counted for every school, not charged</span></td></tr>
+                <tr><td><b>Platform activity</b></td><td>1,000 requests</td><td>—</td><td><span class="pill p-off">Track only</span></td><td colspan="3"><span class="cellstack muted">Counted for every school, not charged</span></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <h3>Platform admin → Usage (new dashboard)</h3>
+      <p>All schools for a month, with totals per service across the platform and what we earn compared with what the services cost us. Click a school to see its daily usage per service and set its own prices.</p>
+      <div class="frame">
+        <div class="chrome"><i></i><i></i><i></i><span class="url">admin.welearnyoulearn.com/platform-admin/usage?month=2026-10</span></div>
+        <div class="mock">
+          <div style="display:flex;flex-wrap:wrap;gap:10px;justify-content:space-between;align-items:center"><div><div class="mt">Usage</div><div class="ms">October 2026 · 38 schools · month in progress</div></div><span class="btn">October 2026 ▾</span></div>
+          <div class="kpis">
+            <div class="kpi"><small>WhatsApp messages</small><b>9,050</b><em>₹312 extra · cost ₹1,177</em></div>
+            <div class="kpi"><small>AI tokens</small><b>14.2M</b><em>₹96 extra · cost ₹284</em></div>
+            <div class="kpi"><small>Emails</small><b>3,412</b><em>tracked · cost ₹273</em></div>
+            <div class="kpi"><small>Files uploaded</small><b>6.1 GB</b><em>tracked</em></div>
+            <div class="kpi"><small>Active users</small><b>4,870</b><em>tracked</em></div>
+          </div>
+          <div class="tablewrap wide">
+            <table>
+              <thead><tr><th>School</th><th>Plan</th><th>WhatsApp</th><th>AI tokens</th><th>Emails</th><th>Uploads</th><th>Active users</th><th>Est. extra</th></tr></thead>
+              <tbody>
+                <tr><td>Green Valley Public School</td><td>Premium</td><td><div class="cellstack">5,410 / 5,000<div class="bar o"><i style="width:100%"></i></div></div></td><td><div class="cellstack">3.1M / 5M<div class="bar"><i style="width:62%"></i></div></div></td><td>1,204</td><td>2.3 GB</td><td>1,410</td><td><b>₹82.00</b></td></tr>
+                <tr><td>Sri Vidya High School</td><td>Standard</td><td><div class="cellstack">870 / 1,000<div class="bar w"><i style="width:87%"></i></div></div></td><td><div class="cellstack">1.45M / 1M<div class="bar o"><i style="width:100%"></i></div></div></td><td>655</td><td>0.9 GB</td><td>612</td><td><b>₹22.50</b></td></tr>
+                <tr><td>Bright Minds School</td><td>Basic</td><td class="muted">not in plan</td><td class="muted">not in plan</td><td>212</td><td>0.2 GB</td><td>188</td><td>₹0.00</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <h3>Platform admin → Billing</h3>
+      <p>As in the earlier mockup, with two changes: a bill lists one line per charged service, and plan bills (from a term starting or renewing) appear here too, with type "Plan fee".</p>
+
+      <h3>School admin → Settings → Usage &amp; Billing (replaces the WhatsApp-only card)</h3>
+      <p>One row per service in the school's plan: used against included, a bar, and the estimated extra charge. Track-only services are shown as counts with no price. Below that: past months' bills with status.</p>
+      <div class="frame">
+        <div class="chrome"><i></i><i></i><i></i><span class="url">welearnyoulearn.com/school-admin · Settings → Usage &amp; Billing</span></div>
+        <div class="mock">
+          <div><div class="mt">This month's usage</div><div class="ms">1 – 31 Oct · Standard plan · about <b>₹70.50</b> extra so far</div></div>
+          <div class="tablewrap">
+            <table>
+              <thead><tr><th>Service</th><th>Used</th><th></th><th>Extra so far</th></tr></thead>
+              <tbody>
+                <tr><td>WhatsApp messages</td><td>1,240 of 1,000 included</td><td><div class="bar o"><i style="width:100%"></i></div></td><td>₹48.00</td></tr>
+                <tr><td>AI usage</td><td>1.45M of 1M tokens included</td><td><div class="bar o"><i style="width:100%"></i></div></td><td>₹22.50</td></tr>
+                <tr><td>Emails sent</td><td>655</td><td class="muted small">included</td><td>—</td></tr>
+                <tr><td>Files uploaded</td><td>0.9 GB</td><td class="muted small">included</td><td>—</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="ms">Past bills: September ₹24.00 <span class="pill p-warn">Due</span> · August ₹0.00 <span class="pill p-off">No charge</span></div>
+        </div>
+      </div>
+      <p>The 80% and 100% alert emails from the earlier mockup still apply, now one per charged service.</p>
+    </section>
+
+    <!-- 9 -->
+    <section id="apis">
+      <div class="eyebrow"><span class="secno">11</span> · For developers</div>
+      <h2>APIs</h2>
+      <div class="tablewrap wide">
+        <table>
+          <thead><tr><th>Method &amp; path</th><th>Who</th><th>Does</th></tr></thead>
+          <tbody>
+            <tr><td><code>GET /api/billing/usage</code></td><td>School staff (own school from session)</td><td>This month per service: used, included, cap, extra, estimate. Never writes.</td></tr>
+            <tr><td><code>GET /api/billing/invoices</code></td><td>School admin / principal</td><td>The school's bills with lines.</td></tr>
+            <tr><td><code>GET /api/platform/usage?month=</code></td><td>Platform admin</td><td>All schools × services for the month, totals, cost vs. earned.</td></tr>
+            <tr><td><code>GET /api/platform/usage/[schoolId]?from=&amp;to=</code></td><td>Platform admin</td><td>Daily usage per service for one school.</td></tr>
+            <tr><td><code>GET/POST/PATCH /api/platform/usage-meters</code></td><td>Platform admin</td><td>Service list: add, rename, switch off, mark charged, set our cost.</td></tr>
+            <tr><td><code>GET/PUT /api/platform/pricing</code></td><td>Platform admin</td><td>Price grid per service × plan (Zod-validated; audit-logged).</td></tr>
+            <tr><td><code>GET/PUT/DELETE /api/platform/schools/[id]/usage-overrides</code></td><td>Platform admin</td><td>One school's own prices per service.</td></tr>
+            <tr><td><code>GET /api/platform/billing?month=</code></td><td>Platform admin</td><td>Months and bills per school (as in the earlier design, now with lines).</td></tr>
+            <tr><td><code>POST /api/platform/billing/[cycleId]</code></td><td>Platform admin</td><td><code>record_payment</code>, <code>add_adjustment</code>, <code>resend</code>. Bills are never created by hand.</td></tr>
+            <tr><td><code>GET/PUT /api/platform/plans</code></td><td>Platform admin</td><td>Plan price (monthly/yearly), description, website visibility, order, retired. Features and staff limits keep their existing endpoints.</td></tr>
+            <tr><td><code>PUT /api/schools/[id]/subscription</code> (extended)</td><td>Platform admin</td><td>Adds billing period, agreed price and discount reason; writes <code>school_plan_terms</code> and the plan bill.</td></tr>
+            <tr><td><code>GET /api/plans/public</code></td><td>Anyone</td><td>Plans marked "on website", for the landing page.</td></tr>
+            <tr><td><code>GET /api/platform/traffic?from=&amp;to=</code></td><td>Platform admin</td><td>Today's usage-analytics endpoints, renamed, plus peak hours and website visitors.</td></tr>
+            <tr><td><code>POST /api/traffic/hit</code></td><td>Public, rate-limited</td><td>Only if we count website visitors ourselves instead of using Cloudflare Web Analytics (Q20). Stores no IP address.</td></tr>
+            <tr><td><code>POST /api/internal/usage-ingest</code></td><td>Internal (shared secret, like log-ingest)</td><td>Per-minute request counts from <code>proxy.ts</code>.</td></tr>
+            <tr><td><code>GET /api/cron/usage-nightly</code></td><td>Vercel Cron (<code>CRON_SECRET</code>)</td><td>Storage snapshot and active users nightly; on the 1st at 6:00 AM IST, create last month's bills and email them; every 7 days, remind schools about overdue bills.</td></tr>
+            <tr><td><code>GET/POST /api/whatsapp/webhook</code></td><td>Meta (signed)</td><td>Delivery status for WhatsApp (#359).</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 10 -->
+    <section id="limits">
+      <div class="eyebrow"><span class="secno">12</span> · Behaviour</div>
+      <h2>Limits &amp; alerts</h2>
+      <ul>
+        <li>Each charged service has a monthly limit per plan, which the platform admin can change for a single school. At the limit the service does what the price says: <b>block</b> (stop and tell the user why), <b>allow</b> (keep going and charge), or <b>notify</b> (keep going and alert the platform admin).</li>
+        <li>School admins get one email per service at 80% and at 100% of what's included each month. The platform admin gets a daily digest of schools that are over their limit or using far more than usual.</li>
+        <li>Messages a school can't do without (password resets, login details) can be exempt from blocking so parents are never locked out (Q7).</li>
+        <li>Known gap: the limit is checked just before each use, so many uses at the same moment can go a few units past the limit. That's acceptable at school scale; we'll lock per school and service if it ever matters.</li>
+      </ul>
+    </section>
+
+    <!-- 11 -->
+    <section id="safety">
+      <div class="eyebrow"><span class="secno">13</span> · Non-negotiables</div>
+      <h2>Security &amp; accuracy</h2>
+      <ul>
+        <li><b>School data stays separate:</b> school endpoints take the school only from the session, never from the request. Every platform endpoint requires <code>requirePlatformAdmin()</code>.</li>
+        <li><b>No double counting:</b> every record has an idempotency key (the provider's message id, file key, or request id), so retries don't count twice.</li>
+        <li><b>Usage counts never break the action:</b> if recording fails, the WhatsApp message or email still goes out and the failure is logged in Watchline. A daily check compares usage counts with the provider logs we already keep (for example <code>whatsapp_messages</code>) and flags any gap.</li>
+        <li><b>Money is auditable:</b> prices, overrides, each automatic bill run and every payment recorded are all written to <code>platform_audit_log</code>. A closed bill never changes; corrections become a new adjustment line (Q12).</li>
+        <li><b>No personal data in usage records:</b> they hold ids and counts only, never message text, email addresses or file names.</li>
+        <li><b>Validation:</b> all inputs go through Zod. Prices and limits have to be zero or more, with sensible upper bounds.</li>
+      </ul>
+    </section>
+
+    <section id="hosting">
+      <div class="eyebrow"><span class="secno">14</span> · Deployment</div>
+      <h2>Hosting: moving off Vercel's free plan</h2>
+      <div class="callout warn"><b>We can't charge schools on the free plan.</b><span>Vercel's Hobby plan is for non-commercial use only. Any site that takes payment or is built for financial gain needs Pro or Enterprise. We must move before the first school pays.</span></div>
+      <h3>Today</h3>
+      <ul>
+        <li>Next.js 16.3.6 (App Router, <code>proxy.ts</code>, <code>instrumentation.ts</code>) on Vercel Hobby, under two accounts. Production deploys from the <code>prod</code> branch; <code>qa</code> and <code>dev</code> are previews.</li>
+        <li>9 scheduled jobs in <code>vercel.json</code> (backup, plan expiry, exam reminders, birthday sweep, usage digest…).</li>
+        <li>Supabase Postgres (ap-south-1) through the session pooler, with 1 connection per function on Vercel. Cloudflare R2 already holds backups and files. Resend for email, Cloudinary for some images.</li>
+        <li><code>instrumentation.ts</code> runs all database migrations (~115 statements) on every cold start.</li>
+      </ul>
+      <h3>Options</h3>
+      <div class="tablewrap wide">
+        <table>
+          <thead><tr><th></th><th>Cloudflare Workers (OpenNext)</th><th>Vercel Pro</th><th>Container host (Railway, Fly, a VPS)</th></tr></thead>
+          <tbody>
+            <tr><td><b>Base cost</b></td><td>$5/month Workers Paid; 10M requests and 30M CPU-ms included, then $0.30 per million requests and $0.02 per million CPU-ms. Hyperdrive (database pooling) included.</td><td>$20 per developer seat per month, including $20 usage credit; then pay as you go.</td><td>From about $5–20/month per server; we run and patch it.</td></tr>
+            <tr><td><b>Code changes</b></td><td>Medium: adapter, config, cron triggers, migrations out of startup, database via Hyperdrive.</td><td>None.</td><td>Small: Dockerfile, process manager, cron.</td></tr>
+            <tr><td><b>Fit with what we use</b></td><td>R2 is already Cloudflare. DNS and a free cookieless visitor counter come with it.</td><td>Everything works as today.</td><td>Full Node.js, no edge limits.</td></tr>
+            <tr><td><b>Main risk</b></td><td>Next 16 support is new. A known issue breaks Next 16.3 apps whose <code>proxy.ts</code> loads <code>instrumentation.ts</code>, which is exactly our setup.</td><td>Cost grows with team seats and usage.</td><td>We handle uptime, scaling and security patches.</td></tr>
+            <tr><td><b>Time to move</b></td><td>~1 week including a trial</td><td>Same day</td><td>~3–5 days</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p><b>Recommendation:</b> run a 2-day Cloudflare trial against the dev database. If it passes the checklist below, move to Cloudflare. If not, move production to Vercel Pro straight away so we're allowed to charge, and retry Cloudflare once OpenNext fixes the issue (Q21).</p>
+      <h3>Cloudflare move, step by step</h3>
+      <ol>
+        <li><b>Trial (2 days):</b> add <code>@opennextjs/cloudflare</code> and <code>wrangler.jsonc</code> (<code>nodejs_compat</code>), deploy <code>dev</code> to a preview Worker on the dev database, then run the full Playwright suite against it.</li>
+        <li><b>Move migrations out of startup:</b> run <code>scripts/run-migrations.ts</code> (already exists) as a deploy step and make <code>instrumentation.ts</code> a no-op. This avoids the known OpenNext issue and stops every cold start from running ~115 statements. Worth doing even if we stay on Vercel.</li>
+        <li><b>Database:</b> connect <code>pg</code> through Hyperdrive to Supabase (pooled, close to the Worker). Remove the Vercel-only pool sizing in <code>lib/db.ts</code>. Check that long transactions (fee year-end, bulk imports) still finish.</li>
+        <li><b>Scheduled jobs:</b> move the 9 jobs in <code>vercel.json</code> to Cloudflare Cron Triggers. They call the same <code>/api/cron/*</code> routes with <code>CRON_SECRET</code>, at the same times (UTC).</li>
+        <li><b>Limits check:</b> Worker bundle size (exceljs and PDF code are heavy), CPU time for backup, exports and bulk imports (raise the CPU limit or split the work), and the in-memory caches in <code>proxy.ts</code>, which become per-instance.</li>
+        <li><b>Settings and branches:</b> secrets via <code>wrangler secret</code> per environment. GitHub builds: <code>prod</code> → production, <code>qa</code> and <code>dev</code> → preview URLs. Images: keep <code>next/image</code> unoptimized or use Cloudflare Images.</li>
+        <li><b>Domains:</b> move <code>welearnyoulearn.com</code> and <code>admin.welearnyoulearn.com</code> DNS to Cloudflare with a low TTL. The platform-admin subdomain rule in <code>proxy.ts</code> stays.</li>
+        <li><b>Cutover:</b> a late-night window with schools told in advance. Switch DNS, watch Watchline errors and logs for an hour, and keep Vercel running for 2 weeks for instant rollback (switch DNS back).</li>
+      </ol>
+      <h3>Trial pass checklist</h3>
+      <ul>
+        <li>All Playwright tests pass against the preview Worker.</li>
+        <li>Login, <code>proxy.ts</code> redirects and the plan lock work in all 5 portals.</li>
+        <li>Every cron route runs from a Cron Trigger.</li>
+        <li>Fee year-end, a 500-row student import and an Excel export each finish within limits.</li>
+        <li>p95 page response is no worse than on Vercel in the scaling test.</li>
+        <li>Monthly cost estimate from the scaling test is below the Vercel Pro estimate.</li>
+      </ul>
+      <p class="small" style="color:var(--muted)">Sources: <a href="https://vercel.com/docs/limits/fair-use-guidelines">Vercel fair use guidelines</a> · <a href="https://vercel.com/docs/plans/pro">Vercel Pro plan</a> · <a href="https://developers.cloudflare.com/workers/platform/pricing/">Cloudflare Workers pricing</a> · <a href="https://developers.cloudflare.com/workers/framework-guides/web-apps/opennext/">Next.js on Workers (OpenNext)</a> · <a href="https://github.com/cloudflare/workers-sdk/issues/13755">workers-sdk #13755: Next.js 16 proxy and OpenNext</a> · <a href="https://github.com/opennextjs/opennextjs-cloudflare/pull/1309">OpenNext PR #1309: proxy.ts support</a>. Prices checked 8 Oct 2026.</p>
+    </section>
+
+    <!-- 12 -->
+    <section id="plan">
+      <div class="eyebrow"><span class="secno">15</span> · Handoff</div>
+      <h2>Build plan</h2>
+      <p>Tracking comes first so we gather real data; charging is switched on once prices are agreed. Each phase is its own PR from <code>dev</code>, linked to an issue.</p>
+      <div class="phases">
+        <div class="phase">
+          <header><h3>Phase 1 · Track everything <small>~3–4 days</small></h3><span class="tag t-bill">First</span></header>
+          <ul>
+            <li>Migrations: <code>usage_meters</code> (seeded with the service list), <code>usage_ledger</code> changes, <code>usage_daily</code>.</li>
+            <li><code>lib/usage.ts</code> with <code>recordUsage()</code>, plus a self-check script for the totals logic.</li>
+            <li>Tracking calls in <code>sendMail()</code> (new optional school argument), <code>callAI()</code>, upload-confirm routes, and <code>sendWhatsappMessage()</code>, together with real sending from #359.</li>
+            <li>Request counts from <code>proxy.ts</code> → <code>/api/internal/usage-ingest</code>. Nightly job for storage and active users.</li>
+            <li>Platform admin → Usage dashboard (read-only).</li>
+          </ul>
+          <div class="done">Done when the dashboard shows real per-school numbers for every service on preview, and the daily check reports no gaps.</div>
+        </div>
+        <div class="phase">
+          <header><h3>Phase 2 · Prices &amp; limits <small>~2–3 days</small></h3></header>
+          <ul>
+            <li><code>usage_prices</code> and <code>school_usage_overrides</code>; WhatsApp values moved over from <code>plan_pricing</code>.</li>
+            <li>Platform admin → Pricing page; per-school price overrides on the school detail page.</li>
+            <li><code>checkAllowance()</code> wired into WhatsApp and AI; 80%/100% emails; platform admin digest.</li>
+            <li><b>Plans:</b> price fields on <code>plan_pricing</code>, the Plans page (replacing Feature Plans), and agreed price and billing period when assigning or renewing a school's plan (<code>school_plan_terms</code>).</li>
+            <li>School admin → Usage &amp; Billing page (this month and estimates).</li>
+          </ul>
+          <div class="done">Done when a price edit on the Pricing page changes the next month's estimate, and a school at its limit is blocked with a clear message.</div>
+        </div>
+        <div class="phase">
+          <header><h3>Phase 3 · Bills <small>~2 days</small></h3></header>
+          <ul>
+            <li>Billing months with locked prices, <code>saas_invoice_lines</code>, and the automatic bill run on the 1st (cron, safe to re-run: never creates a second bill for the same school and month), record payment, overdue reminders every 7 days.</li>
+            <li>Platform admin → Billing page; past bills on the school's Usage page.</li>
+            <li>Plan bills when a term starts or renews; mid-term upgrades charged for the remaining days.</li>
+            <li>GST and invoice details once Q9 is answered.</li>
+          </ul>
+          <div class="done">Done when the 1 Oct run produces September bills whose lines match the usage dashboard to the paisa, and re-running it creates nothing new.</div>
+        </div>
+        <div class="phase">
+          <header><h3>Traffic <small>~1–2 days, any time</small></h3></header>
+          <ul>
+            <li>Rename Usage analytics → Traffic; add peak hours.</li>
+            <li>Website visitors (Cloudflare Web Analytics, or <code>traffic_daily</code> + <code>/api/traffic/hit</code>).</li>
+            <li>School admin traffic view if Q19 says yes.</li>
+          </ul>
+          <div class="done">Done when the Traffic page shows website visitors and peak hours, and nothing on it mentions billing.</div>
+        </div>
+        <div class="phase">
+          <header><h3>Hosting <small>runs alongside, ~1 week</small></h3><span class="tag t-bill">Before first payment</span></header>
+          <ul>
+            <li>Day 1: move migrations to a deploy step (helps on any host).</li>
+            <li>Days 1–2: Cloudflare trial and checklist → go or no-go (Q21).</li>
+            <li>Go: Hyperdrive, Cron Triggers, secrets, branch builds, DNS, then cutover with Vercel kept for rollback. No-go: upgrade production to Vercel Pro.</li>
+          </ul>
+          <div class="done">Done when production runs on a plan that allows commercial use, with all scheduled jobs running and rollback tested.</div>
+        </div>
+        <div class="phase">
+          <header><h3>Later</h3><span class="tag t-later">After launch</span></header>
+          <ul><li>Online payment via Cashfree · prepaid credits · storage charging per GB-month · push and SMS · a PDF bill for download · usage-based alerts on unusual spikes.</li></ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- 13 -->
+    <section id="tests">
+      <div class="eyebrow"><span class="secno">16</span> · Proof</div>
+      <h2>Testing &amp; acceptance</h2>
+      <ul>
+        <li><b>Self-check script</b> (<code>scripts/check-usage.ts</code>): billing maths, rounding, months of different lengths, limits, and the override-over-plan order.</li>
+        <li><b>Playwright API guards:</b> every new endpoint refuses users who aren't logged in and users from another school; the webhook rejects a bad signature.</li>
+        <li><b>Playwright flows:</b> platform admin edits a price → the school's estimate changes next month; a WhatsApp send at the limit is blocked; the automatic bill run creates a bill with matching lines and running it twice creates no duplicates.</li>
+        <li><b>Accuracy check:</b> a seeded test school gets 1,000 sends from parallel requests → exactly 1,000 recorded, none counted twice.</li>
+        <li><b>Load:</b> recording usage adds no more than 15 ms at the 95th percentile to a WhatsApp or email send (measured in the scaling test).</li>
+      </ul>
+    </section>
+
+    <!-- 14 -->
+    <section id="questions">
+      <div class="qhead">
+        <div style="display:grid;gap:8px"><div class="eyebrow"><span class="secno">17</span> · Needs your answer</div><h2>Open questions</h2></div>
+        <span id="qstatus">Loading answers…</span>
+      </div>
+      <p>Screen-by-screen details and edge cases are in the companion <b>WLYL Billing UI Spec</b>; Q24–Q30 came from those edge cases. Choose an option, or add a note, and it's saved for everyone who opens this page. Recommended options are marked. Phase 1 needs only Q1–Q4, and hosting needs Q21–Q23 this week. Everything else can be answered while it's being built.</p>
+      <div class="qs" id="qs"></div>
+    </section>
+  </article>
+</div>
+
+<script>
+const QUESTIONS = [
+  { id: 'q1', t: 'Which services should be charged first? The rest are tracked only.', why: 'Everything is tracked from day one. This decides which services get prices and appear on bills.',
+    o: [['wa_ai', 'WhatsApp and AI', true], ['wa_ai_email', 'WhatsApp, AI and emails', false], ['all', 'Everything in the service list', false], ['none', 'Nothing yet: only track for now', false]] },
+  { id: 'q2', t: 'How should AI be counted for charging?', why: 'Our AI cost depends on tokens (text length), not the number of requests.',
+    o: [['tokens', 'Per 1,000 tokens (matches our cost)', true], ['requests', 'Per request (simpler for schools to understand)', false], ['credits', 'As "AI credits", e.g. 1 credit = 1,000 tokens', false]] },
+  { id: 'q3', t: 'One price per service, or one shared "credit" for everything?', why: 'Separate prices are clearer on a bill. A shared credit is easier to sell as a bundle and suits prepaid packs later.',
+    o: [['per_service', 'Each service has its own unit and price', true], ['credits', 'One credit currency; each service costs N credits', false]] },
+  { id: 'q4', t: 'Start tracking now for every school, before prices are decided?', why: 'Real data from schools gives us the numbers to set prices with.',
+    o: [['yes', 'Yes, track silently for all schools now', true], ['pilot', 'Only for pilot schools', false]] },
+  { id: 'q5', t: 'How should extra usage be rounded on bills?', why: 'Example: 450,500 extra tokens at ₹0.05 per 1,000.',
+    o: [['exact', 'Exact, rounded to the paisa (₹22.53)', true], ['up', 'Round up to whole units (451 units = ₹22.55)', false]] },
+  { id: 'q6', t: 'When does a price change take effect?', why: 'Changing prices mid-month makes the school\'s estimate jump.',
+    o: [['next_month', 'From the next month', true], ['immediately', 'Immediately, for the rest of this month', false]] },
+  { id: 'q7', t: 'What happens at a monthly limit?', why: 'Blocking protects against surprise bills, but blocking password resets could lock parents out.',
+    o: [['block_exempt', 'Block, but never block login and password messages', true], ['block_all', 'Block everything at the limit', false], ['allow', 'Never block; charge and alert us', false]] },
+  { id: 'q8', t: 'How should plan fees be billed?', why: 'Plans are sold as terms with renewals today. Usage is billed monthly either way.',
+    o: [['term', 'One plan bill when a term starts or renews; usage on monthly bills', true], ['monthly', 'Plan fee as a line on every monthly bill', false], ['school_choice', 'School chooses monthly or yearly when the plan is assigned', false]] },
+  { id: 'q9', t: 'GST on bills: what are our invoice details?', why: 'Indian B2B invoices need GSTIN, legal name, address, SAC code and an invoice number series. Please add them in the note.',
+    o: [['gst18', 'Add 18% GST; details in the note', true], ['no_gst', 'No GST yet (not registered)', false]] },
+  { id: 'q10', t: 'Who at the school can see usage and bills?', why: 'Bills show money; usage helps staff understand limits.',
+    o: [['admin_principal', 'School admin and principal', true], ['all_staff', 'All school staff', false], ['admin_only', 'School admin only', false]] },
+  { id: 'q11', t: 'How long do we keep the detailed usage records?', why: 'Daily totals are kept forever either way. Detailed records grow fastest.',
+    o: [['13m', '13 months, then only daily totals', true], ['forever', 'Keep everything', false], ['6m', '6 months', false]] },
+  { id: 'q12', t: 'If a closed bill turns out to be wrong, how do we fix it?', why: 'Closed bills should never change silently.',
+    o: [['adjust', 'Add a credit/adjustment line on the next month\'s bill', true], ['reopen', 'Cancel the bill and generate it again', false]] },
+  { id: 'q13', t: 'Who keeps "our cost per unit" up to date for the margin view?', why: 'Provider prices change (Meta, Groq, Resend). Without these, the dashboard can\'t show margin.',
+    o: [['platform_admin', 'Platform admin edits it on the Pricing page', true], ['skip', 'Skip margin for now', false]] },
+  { id: 'q14', t: 'Starting prices per plan', why: 'The examples in this document (₹0.20 per WhatsApp message, ₹0.05 per 1,000 AI tokens, Standard 1,000 messages / 1M tokens included) are placeholders. Please give real numbers in the note, or answer after the scaling test.',
+    o: [['after_test', 'Decide after the scaling test gives our cost per school', true], ['use_examples', 'Use the example numbers to start', false]] },
+  { id: 'q15', t: 'Which billing periods do plans offer?', why: 'Yearly suits school budgets; monthly lowers the barrier for small schools.',
+    o: [['both', 'Monthly and yearly, with a yearly discount', true], ['yearly', 'Yearly only', false], ['monthly', 'Monthly only', false]] },
+  { id: 'q16', t: 'When a plan\'s price changes, what happens to schools already on it?', why: 'Changing a price mid-term surprises schools.',
+    o: [['until_renewal', 'They keep their agreed price until renewal', true], ['immediately', 'New price applies from the next bill', false]] },
+  { id: 'q17', t: 'Can the platform admin give a single school a discount or custom price?', why: 'Useful for founding schools and pilots. Every change is audit-logged with a reason.',
+    o: [['yes_reason', 'Yes, with a required reason', true], ['no', 'No, list prices only', false], ['approval', 'Yes, but a second admin must approve', false]] },
+  { id: 'q18', t: 'How are mid-term upgrades charged?', why: 'Example: Standard to Premium halfway through a yearly term.',
+    o: [['prorate', 'Charge the difference for the remaining days now', true], ['next_renewal', 'New price from the next renewal only', false]] },
+  { id: 'q19', t: 'Should school admins see their own school\'s traffic?', why: 'Logins and time spent by role, and which features staff use. Helps them get value from the product.',
+    o: [['yes', 'Yes, school admin and principal', true], ['no', 'No, platform admin only', false]] },
+  { id: 'q20', t: 'How should we count public website visitors?', why: 'Landing page, public feedback forms, privacy page. Neither option uses cookies or stores IP addresses.',
+    o: [['cf', 'Cloudflare Web Analytics (free, nothing to build)', true], ['own', 'Our own small counter in the database', false], ['skip', 'Don\'t count website visitors', false]] },
+  { id: 'q21', t: 'Hosting: how do we move off Vercel\'s free plan?', why: 'Vercel Hobby doesn\'t allow commercial use, so this has to be settled before the first school pays.',
+    o: [['trial', 'Run the 2-day Cloudflare trial; move if it passes, otherwise Vercel Pro', true], ['vercel_pro', 'Move to Vercel Pro now; look at Cloudflare later', false], ['cf_anyway', 'Move to Cloudflare whatever the trial finds', false], ['container', 'Use a container host instead', false]] },
+  { id: 'q22', t: 'Who owns the Cloudflare account and the welearnyoulearn.com domain?', why: 'We need access to the Cloudflare account (R2 already lives there) and to the domain registrar to move DNS. Please name the owner and account in the note.',
+    o: [['note', 'Details in the note', true]] },
+  { id: 'q23', t: 'When can we do the hosting cutover?', why: 'DNS switch with rollback ready. Schools are told in advance.',
+    o: [['weekend_night', 'A weekend night, 15-minute window', true], ['weekday_night', 'A weekday night after 10 PM', false]] },
+  { id: 'q24', t: 'A school that joins mid-month: full included usage, or reduced for the days left?', why: 'Example: a Standard school starting on 20 Oct.',
+    o: [['full', 'Full included amount (simpler; rare case)', true], ['prorated', 'Reduced for the days left', false]] },
+  { id: 'q25', t: 'A school that upgrades mid-month: which plan\'s included usage applies that month?', why: 'Example: Standard (1,000 messages) to Premium (5,000) on 15 Oct.',
+    o: [['higher', 'The higher of the two plans', true], ['split', 'Split by days on each plan', false], ['old', 'Old plan until next month', false]] },
+  { id: 'q26', t: 'Can a bill be paid in parts?', why: 'Schools sometimes pay in instalments.',
+    o: [['yes', 'Yes: record each payment; "Part paid" until covered', true], ['no', 'No: a bill is either due or paid', false]] },
+  { id: 'q27', t: 'Lowering a school\'s monthly limit below what it already used: block now or from next month?', why: 'Example: limit lowered to 1,000 when 1,240 are already used.',
+    o: [['now', 'Block now, after a warning that says so', true], ['next_month', 'From next month', false]] },
+  { id: 'q28', t: 'When is a bill overdue, and what happens then?', why: 'Decides the red "Overdue" status, reminder emails, and whether anything is locked.',
+    o: [['15_remind', '15 days after the bill date: overdue + reminder email; never auto-lock', true], ['30_remind', '30 days, same handling', false], ['15_lock', '15 days, then lock charged services until paid', false]] },
+  { id: 'q29', t: 'Can a service with recorded usage be deleted?', why: 'Deleting would break history and past bills.',
+    o: [['switch_off', 'No: switch it off instead (history kept)', true], ['delete', 'Yes, delete with its history', false]] },
+  { id: 'q30', t: 'Who can change prices and plans?', why: 'Prices affect every school\'s bill.',
+    o: [['any_admin', 'Any platform admin; every change audit-logged', true], ['owner_only', 'Only specific platform admins (name them in the note)', false]] },
+];
+
+let db = null, user = null, myId = null, canWrite = false, answers = {};
+const qEls = {};
+
+function buildQuestions() {
+  const root = document.getElementById('qs');
+  QUESTIONS.forEach((q, i) => {
+    const box = document.createElement('div');
+    box.className = 'q';
+    const fs = document.createElement('fieldset');
+    fs.innerHTML = `<legend class="qt"><span class="qn">Q${i + 1}</span><b></b></legend>`;
+    fs.querySelector('b').textContent = q.t;
+    const why = document.createElement('p'); why.className = 'why'; why.textContent = q.why;
+    const opts = document.createElement('div'); opts.className = 'opts';
+    const labels = {};
+    for (const [val, label, rec] of q.o) {
+      const l = document.createElement('label'); l.className = 'opt';
+      const inp = document.createElement('input');
+      inp.type = 'radio'; inp.name = q.id; inp.value = val; inp.id = `${q.id}-${val}`; inp.disabled = true;
+      inp.addEventListener('change', () => save(q.id, { choice: val }));
+      const span = document.createElement('span'); span.textContent = label;
+      if (rec) { const r = document.createElement('span'); r.className = 'rec'; r.textContent = 'Recommended'; span.appendChild(r); }
+      l.append(inp, span); opts.appendChild(l); labels[val] = l;
+    }
+    const ta = document.createElement('textarea');
+    ta.id = `${q.id}-note`; ta.placeholder = 'Add a note or your own answer'; ta.disabled = true;
+    ta.setAttribute('aria-label', `Note for question ${i + 1}`);
+    let timer = null;
+    ta.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(() => save(q.id, { note: ta.value.slice(0, 4000) }), 800); });
+    const who = document.createElement('div'); who.className = 'who';
+    fs.append(why, opts);
+    box.append(fs, ta, who);
+    root.appendChild(box);
+    qEls[q.id] = { box, labels, ta, who };
+  });
+}
+
+const fmt = iso => { const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' }); };
+
+async function render() {
+  const ids = [...new Set(Object.values(answers).map(a => a.by).filter(Boolean))];
+  let profiles = {};
+  if (user && ids.length) { try { profiles = (await user.profiles(ids)) || {}; } catch { profiles = {}; } }
+  let n = 0;
+  for (const q of QUESTIONS) {
+    const a = answers[q.id] || {};
+    const { box, labels, ta, who } = qEls[q.id];
+    const valid = q.o.some(([v]) => v === a.choice);
+    for (const [v, l] of Object.entries(labels)) {
+      const inp = l.querySelector('input');
+      inp.checked = valid && v === a.choice; inp.disabled = !canWrite;
+      l.classList.toggle('chosen', inp.checked);
+    }
+    if (document.activeElement !== ta) ta.value = typeof a.note === 'string' ? a.note : '';
+    ta.disabled = !canWrite;
+    const answered = valid || (typeof a.note === 'string' && a.note.trim() !== '');
+    box.classList.toggle('answered', answered);
+    if (answered) n++;
+    const name = a.by && profiles[a.by] ? profiles[a.by].name : '';
+    who.textContent = a.at ? `Answered ${fmt(a.at)}${name ? ' by ' + name : ''}` : '';
+  }
+  document.getElementById('qstatus').textContent = `${n} of ${QUESTIONS.length} answered` + (canWrite ? '' : db ? ' · view only' : '');
+}
+
+async function save(id, patch) {
+  if (!db || !canWrite) return;
+  const prev = answers[id];
+  const next = { choice: prev?.choice ?? null, note: prev?.note ?? '', ...patch, by: myId, at: new Date().toISOString() };
+  answers = { ...answers, [id]: next };
+  render();
+  try { await db.collection('answers').doc(id).set(next); }
+  catch (e) {
+    answers = { ...answers, [id]: prev };
+    if (e && e.code === 'invalid_argument') canWrite = false;
+    document.getElementById('qstatus').textContent = canWrite ? 'That answer didn’t save. Check your connection and try again.' : 'You have view-only access.';
+    render();
+  }
+}
+
+buildQuestions();
+render();
+
+(async () => {
+  try { [db, user] = await Promise.all([window.claude?.use('db') ?? null, window.claude?.use('user') ?? null]); } catch { db = null; }
+  if (!db) { document.getElementById('qstatus').textContent = 'Sign in to answer'; return; }
+  myId = user ? await user.id() : null;
+  canWrite = (user ? await user.can('data.write') : null) !== false;
+  render();
+  db.collection('answers').onSnapshot(snap => {
+    const next = {};
+    for (const d of snap.docs) {
+      const v = d.data() || {};
+      next[d.id] = { choice: typeof v.choice === 'string' ? v.choice : null, note: typeof v.note === 'string' ? v.note : '', by: typeof v.by === 'string' ? v.by : null, at: typeof v.at === 'string' ? v.at : null };
+    }
+    answers = next; render();
+  }, () => { document.getElementById('qstatus').textContent = 'Live updates stopped. Reload to reconnect.'; });
+})();
+</script>

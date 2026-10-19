@@ -1,0 +1,413 @@
+<title>WLYL Billing UI Spec</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: review document around full-fidelity screen mocks. The mocks reproduce the live WLYL portal (app/portal.css +
+   globals.css tokens: Plus Jakarta Sans 14px, 240px tinted sidebar, 64px top bar, editorial dividers instead of cards,
+   tinted uppercase table heads). Platform admin = wine accent, school admin = green, exactly as data-portal sets them.
+   The portal is light-only, so mock colours (--p-*) stay fixed; the document around them follows the viewer's theme. */
+:root {
+  --bg: #f3f4f1; --paper: #ffffff; --ink: #202a25; --muted: #5f6d63; --line: #dce3d9; --soft: #eef1ec; --brand: #235b46; --brand-soft: #e2ede7;
+  --amber: #9a5806; --amber-soft: #fbf0dc; --note: #5546c9; --note-soft: #eeebfc;
+  /* portal (fixed, light) */
+  --p-bg: #ffffff; --p-canvas: #f8f9f6; --p-fg: #202a25; --p-muted: #67736b; --p-border: #dce3d9; --p-primary: #235b46;
+  --p-red: #b42318; --p-red-soft: #fdecea; --p-red-line: #f5c2bd; --p-amber: #9a5806; --p-amber-soft: #fdf3e1; --p-amber-line: #f0d6a6;
+  --p-green: #1f6b4a; --p-green-soft: #e5f1ea; --p-grey-soft: #f0f3ed;
+  --f: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif; --mono: "JetBrains Mono", ui-monospace, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #131715; --paper: #1b211e; --ink: #e6ebe7; --muted: #9aa69f; --line: #2d3631; --soft: #222925; --brand: #7cc3a3; --brand-soft: #1d2f27; --amber: #eeb260; --amber-soft: #2d2415; --note: #ab9ff5; --note-soft: #24203d; color-scheme: dark } }
+:root[data-theme="dark"] { --bg: #131715; --paper: #1b211e; --ink: #e6ebe7; --muted: #9aa69f; --line: #2d3631; --soft: #222925; --brand: #7cc3a3; --brand-soft: #1d2f27; --amber: #eeb260; --amber-soft: #2d2415; --note: #ab9ff5; --note-soft: #24203d; color-scheme: dark }
+
+body { background: var(--bg); color: var(--ink); font: 15px/1.6 var(--f); padding-inline: 16px; }
+main { max-width: 1160px; margin: 0 auto; padding-block: 40px 96px; display: grid; gap: 56px; }
+h1, h2, h3 { margin: 0; line-height: 1.2; letter-spacing: -.025em; text-wrap: balance; }
+h1 { font-size: clamp(28px, 4.6vw, 40px); font-weight: 650; }
+h2 { font-size: 23px; font-weight: 650; } h3 { font-size: 17px; font-weight: 650; }
+p { margin: 0; max-width: 74ch; }
+ul { margin: 0; padding-left: 1.2em; display: grid; gap: 4px; }
+code { font-family: var(--mono); font-size: .82em; background: var(--soft); border: 1px solid var(--line); padding: 0 4px; border-radius: 4px; }
+.eyebrow { font: 600 11px/1 var(--f); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.lede { font-size: 17px; color: var(--muted); }
+section { display: grid; gap: 16px; min-width: 0; scroll-margin-top: 16px; }
+.qref { font: 500 11px var(--mono); color: var(--note); background: var(--note-soft); border-radius: 3px; padding: 1px 5px; white-space: nowrap; }
+
+/* principles + nav change */
+.principles { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 0; border-block: 1px solid var(--line); }
+.principles div { padding: 14px 16px 14px 0; display: grid; gap: 3px; }
+.principles b { font-size: 14.5px; }
+.principles span { color: var(--muted); font-size: 14px; }
+.navdiff { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 20px; }
+.navcol { display: grid; gap: 6px; align-content: start; }
+.navcol .h { font-size: 13px; font-weight: 600; color: var(--muted); }
+.navitem { display: flex; gap: 8px; align-items: center; font-size: 14px; padding: 6px 10px; border-radius: 6px; background: var(--paper); border: 1px solid var(--line); }
+.navitem .k { margin-left: auto; font: 500 10.5px var(--mono); text-transform: uppercase; letter-spacing: .05em; }
+.k.add { color: var(--brand); } .k.ren { color: var(--amber); } .k.same { color: var(--muted); }
+
+/* screen block */
+.screen { display: grid; gap: 14px; border-top: 1px solid var(--line); padding-top: 24px; scroll-margin-top: 16px; }
+.screen-head { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: baseline; }
+.screen-head .sid { font: 500 12px var(--mono); color: var(--muted); }
+.screen-head .where { font-size: 13.5px; color: var(--muted); }
+.notes { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px 28px; font-size: 14.5px; }
+.notes h4 { margin: 0 0 6px; font-size: 12px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+details { border: 1px solid var(--line); border-radius: 8px; background: var(--paper); }
+details summary { cursor: pointer; padding: 10px 14px; font-size: 14px; font-weight: 600; list-style: none; display: flex; gap: 8px; align-items: center; }
+details summary::-webkit-details-marker { display: none; }
+details summary::before { content: "+"; font-family: var(--mono); color: var(--muted); width: 12px; }
+details[open] summary::before { content: "−"; }
+details .in { padding: 0 16px 14px 34px; display: grid; gap: 10px; font-size: 14.5px; }
+details .ids { font: 12px/1.7 var(--mono); color: var(--muted); overflow-wrap: anywhere; }
+:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+
+/* ───────── portal mock (fixed light) ───────── */
+.mockwrap { overflow-x: auto; border-radius: 10px; border: 1px solid #cfd6cc; box-shadow: 0 10px 30px -18px rgb(23 34 27 / .35); }
+.pm { min-width: 920px; background: var(--p-canvas); color: var(--p-fg); font: 14px/1.5 var(--f); color-scheme: light; display: flex; flex-direction: column; }
+.pm[data-portal="platform-admin"] { --a: #773e48; --a-deep: #4f2830; --a-soft: #ead7da; --side: #f2e9ea; }
+.pm[data-portal="school-admin"] { --a: #245b46; --a-deep: #173e2f; --a-soft: #dce9dc; --side: #edf2eb; }
+.pm-top { position: relative; display: flex; align-items: center; justify-content: space-between; min-height: 56px; padding: 10px 20px; background: var(--p-bg); border-bottom: 1px solid var(--p-border); }
+.pm-top::after { content: ''; position: absolute; left: 0; right: 0; bottom: -1px; height: 1px; background: linear-gradient(90deg, var(--a), transparent 38%); opacity: .42; }
+.pm-top b { font-size: 14px; font-weight: 600; }
+.pm-top span { font-size: 12px; color: var(--p-muted); border-left: 1px solid var(--p-border); padding-left: 12px; margin-left: 12px; }
+.pm-top .out { color: var(--p-muted); font-size: 13.5px; border: 0; }
+.pm-body { display: flex; min-height: 420px; }
+.pm-side { width: 220px; flex: none; background: var(--side); border-right: 1px solid var(--p-border); display: flex; flex-direction: column; }
+.pm-id { padding: 18px 16px 16px; border-bottom: 1px solid var(--p-border); display: flex; gap: 10px; align-items: center; }
+.pm-id i { width: 34px; height: 34px; border-radius: 6px; background: var(--a); color: #fff; display: grid; place-items: center; font: 600 15px var(--f); font-style: normal; }
+.pm-id b { font-size: 13.5px; display: block; line-height: 1.25; } .pm-id small { font-size: 12px; color: var(--p-muted); }
+.pm-nav { padding: 4px 10px 14px; }
+.pm-nl { padding: 16px 10px 6px; color: #55635a; font-size: 10.5px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.pm-ni { position: relative; display: flex; align-items: center; gap: 9px; min-height: 36px; padding: 7px 10px; border-radius: 8px; color: #3b4a40; font-size: 13.5px; }
+.pm-ni::before { content: ''; width: 15px; height: 15px; border-radius: 4px; border: 1.6px solid currentColor; opacity: .55; flex: none; }
+.pm-ni.on { background: var(--a-soft); color: var(--a-deep); font-weight: 650; }
+.pm-ni.on::after { content: ''; position: absolute; left: 0; top: 9px; bottom: 9px; width: 3px; border-radius: 2px; background: var(--a); }
+.pm-ni .badge { margin-left: auto; background: #a33131; color: #fff; border-radius: 999px; font-size: 10px; font-weight: 600; padding: 2px 6px; line-height: 1.2; }
+.pm-ni .newtag { margin-left: auto; font: 600 9.5px var(--mono); color: var(--a); border: 1px dashed var(--a); border-radius: 3px; padding: 1px 4px; }
+.pm-main { flex: 1; min-width: 0; padding: 22px 26px 28px; display: grid; gap: 18px; align-content: start; position: relative; }
+.pm-h1 { font-size: 22px; font-weight: 650; letter-spacing: -.035em; line-height: 1.25; margin: 0; }
+.pm-sub { color: var(--p-muted); font-size: 13.5px; margin-top: 3px; }
+.pm-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.pm-row.sb { justify-content: space-between; align-items: flex-start; }
+.pm-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--p-border); }
+.pm-tab { padding: 9px 14px; font-size: 13.5px; color: var(--p-muted); border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.pm-tab.on { color: var(--a-deep); border-bottom-color: var(--a); font-weight: 650; }
+.btn { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 14px; border-radius: 6px; font: 600 13px var(--f); border: 1px solid var(--p-border); background: var(--p-bg); color: #465449; white-space: nowrap; }
+.btn.pri { background: var(--p-primary); border-color: var(--p-primary); color: #fff; }
+.btn.sm { min-height: 30px; padding: 0 10px; font-size: 12.5px; }
+.btn.link { border: 0; background: none; padding: 0; min-height: 0; color: var(--a); text-decoration: underline; text-underline-offset: 3px; }
+.btn.danger { color: var(--p-red); border-color: var(--p-red-line); }
+.sel { display: inline-flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 36px; min-width: 150px; padding: 0 10px; border: 1px solid var(--p-border); border-radius: 6px; background: var(--p-bg); font-size: 13.5px; }
+.sel::after { content: '▾'; color: var(--p-muted); font-size: 11px; }
+.inp { display: inline-flex; align-items: center; min-height: 36px; padding: 0 10px; border: 1px solid var(--p-border); border-radius: 6px; background: var(--p-bg); font-size: 13.5px; min-width: 90px; }
+.inp.focus { border-color: var(--a); box-shadow: 0 0 0 3px color-mix(in srgb, var(--a) 12%, transparent); }
+.lbl { font-size: 12.5px; color: var(--p-muted); font-weight: 500; margin-bottom: 4px; display: block; }
+
+.metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); border-block: 1px solid var(--p-border); background: var(--p-bg); }
+.metric { padding: 14px 18px; border-right: 1px solid var(--p-border); display: grid; gap: 2px; }
+.metric:last-child { border-right: 0; }
+.metric small { font-size: 12px; color: var(--p-muted); }
+.metric b { font-size: 20px; font-weight: 650; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.metric em { font-style: normal; font-size: 12px; color: var(--p-muted); }
+
+.tbl { background: var(--p-bg); border-block: 1px solid var(--p-border); }
+.tbl table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.tbl thead { background: color-mix(in srgb, var(--side) 62%, white); }
+.tbl th { text-align: left; color: color-mix(in srgb, var(--p-fg) 74%, transparent); font-size: 10.5px; font-weight: 700; letter-spacing: .035em; text-transform: uppercase; padding: 9px 12px; border-bottom: 1px solid var(--p-border); white-space: nowrap; }
+.tbl td { padding: 10px 12px; border-bottom: 1px solid var(--p-border); vertical-align: middle; font-size: 13.5px; }
+.tbl tr:last-child td { border-bottom: 0; }
+.tbl tr.hl td { background: color-mix(in srgb, var(--a-soft) 34%, transparent); }
+.tbl td .s { display: block; font-size: 12px; color: var(--p-muted); }
+.tbl td.num, .tbl th.num { text-align: right; }
+
+.chip { display: inline-flex; align-items: center; gap: 4px; border-radius: 999px; padding: 2px 9px; font-size: 12px; font-weight: 600; white-space: nowrap; border: 1px solid transparent; }
+.c-ok { background: var(--p-green-soft); color: var(--p-green); }
+.c-warn { background: var(--p-amber-soft); color: var(--p-amber); }
+.c-bad { background: var(--p-red-soft); color: var(--p-red); }
+.c-grey { background: var(--p-grey-soft); color: var(--p-muted); border-color: var(--p-border); }
+.c-acc { background: var(--a-soft); color: var(--a-deep); }
+
+.ubar { display: grid; gap: 4px; min-width: 120px; }
+.ubar .t { font-size: 13px; }
+.ubar .t small { color: var(--p-muted); font-size: 12px; }
+.ubar .b { height: 6px; background: #e7ebe5; border-radius: 3px; overflow: hidden; position: relative; }
+.ubar .b i { position: absolute; inset: 0 auto 0 0; background: var(--p-primary); border-radius: 3px; }
+.ubar .b.w i { background: #d58b1d; } .ubar .b.x i { background: #c2412f; }
+
+.alert { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; border-radius: 6px; padding: 10px 14px; font-size: 13.5px; border: 1px solid; }
+.alert.warn { background: var(--p-amber-soft); border-color: var(--p-amber-line); color: #6d3f04; }
+.alert.bad { background: var(--p-red-soft); border-color: var(--p-red-line); color: #8a1c12; }
+.alert.info { background: #eef4ee; border-color: #d7e5d9; color: #235b46; }
+.confirm td { background: #fbf7f8 !important; }
+.confirm .cbox { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+
+.panel { border-block: 1px solid var(--p-border); padding: 16px 0; display: grid; gap: 12px; }
+.panel h3 { font-size: 15px; }
+
+.drawer { position: absolute; top: 0; right: 0; bottom: 0; width: 380px; background: var(--p-bg); border-left: 1px solid var(--p-border); box-shadow: -18px 0 46px rgb(23 34 27 / .12); display: flex; flex-direction: column; }
+.drawer-h { display: flex; justify-content: space-between; align-items: center; min-height: 56px; padding: 8px 12px 8px 18px; background: var(--side); border-bottom: 1px solid color-mix(in srgb, var(--a) 16%, var(--p-border)); }
+.drawer-h b { font-size: 15px; }
+.drawer-b { padding: 16px 18px; display: grid; gap: 16px; overflow: auto; align-content: start; }
+.drawer-f { margin-top: auto; padding: 12px 18px; border-top: 1px solid var(--p-border); display: flex; gap: 8px; justify-content: flex-end; }
+.field { display: grid; gap: 4px; }
+.fgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.hint { font-size: 12px; color: var(--p-muted); }
+.dim { opacity: .45; pointer-events: none; }
+.seg { display: inline-flex; border: 1px solid var(--p-border); border-radius: 6px; overflow: hidden; }
+.seg span { padding: 6px 12px; font-size: 13px; border-right: 1px solid var(--p-border); background: var(--p-bg); }
+.seg span:last-child { border-right: 0; }
+.seg span.on { background: var(--a-soft); color: var(--a-deep); font-weight: 650; }
+.spark { display: flex; align-items: flex-end; gap: 3px; height: 70px; padding-top: 4px; border-bottom: 1px solid var(--p-border); }
+.spark i { flex: 1; background: var(--a); opacity: .8; border-radius: 2px 2px 0 0; }
+.kv { display: grid; grid-template-columns: auto 1fr; gap: 6px 16px; font-size: 13.5px; }
+.kv dt { color: var(--p-muted); } .kv dd { margin: 0; font-weight: 600; }
+.stab { display: flex; gap: 2px; border-bottom: 1px solid var(--p-border); }
+.stab span { padding: 8px 12px; font-size: 13px; color: var(--p-muted); }
+.stab span.on { color: #173e2f; border-bottom: 2px solid #245b46; font-weight: 650; margin-bottom: -1px; }
+</style>
+
+<main>
+  <header style="display:grid;gap:12px">
+    <div class="eyebrow">UI plan · fits the current WLYL portal</div>
+    <h1>Billing screens, in the portal you already have</h1>
+    <p class="lede">The same plans, usage, billing and traffic work, redrawn to look and behave like today's portal: same layout, fonts, colours, tables and drawers. Fewer, simpler screens: one new menu item, two renamed, and everything else lives inside pages people already use.</p>
+  </header>
+
+  <section>
+    <div class="eyebrow">How we keep it clean</div>
+    <div class="principles">
+      <div><b>Reuse, don't add</b><span>Existing shell, sidebar, tabs, drawer, tables, buttons (<code>components/ui</code>) and <code>portal.css</code>. No new visual style.</span></div>
+      <div><b>One place per job</b><span>Prices live with plans. Usage and bills live in Billing. Traffic stays where analytics is today.</span></div>
+      <div><b>Tables, not dashboards</b><span>One metrics strip at most, then a table. Details open in the side drawer the portal already uses.</span></div>
+      <div><b>Show the next step</b><span>Every warning says what happens and what to do. Money actions confirm in the row, restating the amount.</span></div>
+      <div><b>Hide what doesn't apply</b><span>Services not in a plan aren't shown as 0/0; track-only services have no prices; buttons appear only when usable.</span></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="eyebrow">Navigation changes</div>
+    <h2>One new menu item</h2>
+    <div class="navdiff">
+      <div class="navcol"><span class="h">Platform admin sidebar</span>
+        <div class="navitem">Schools<span class="k same">same</span></div>
+        <div class="navitem">Renewals<span class="k same">same</span></div>
+        <div class="navitem"><b>Billing</b><span class="k add">new · Workspace</span></div>
+        <div class="navitem"><b>Plans &amp; Pricing</b><span class="k ren">was Feature Plans</span></div>
+        <div class="navitem"><b>Traffic</b><span class="k ren">was Usage Analytics</span></div>
+        <div class="navitem">Watchline, Audit Log, content<span class="k same">same</span></div>
+      </div>
+      <div class="navcol"><span class="h">School admin → School Profile (settings) tabs</span>
+        <div class="navitem">School Profile · Academic Years<span class="k same">same</span></div>
+        <div class="navitem"><b>Plan &amp; Billing</b><span class="k ren">was Plan &amp; Features</span></div>
+        <div class="navitem">Staff Accounts · Security<span class="k same">same</span></div>
+        <div class="navitem">Sidebar: nothing new<span class="k same">same</span></div>
+      </div>
+      <div class="navcol"><span class="h">Everywhere else</span>
+        <div class="navitem">Banner at the top (existing PlanNotice)<span class="k ren">extended</span></div>
+        <div class="navitem">Result line after sends (onboarding, resets)<span class="k ren">extended</span></div>
+        <div class="navitem">School → Plan dialog (platform admin)<span class="k ren">extended</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="screens">
+    <div class="eyebrow">Screens</div>
+    <h2>Eight screens</h2>
+    <div id="screenList" style="display:grid;gap:48px"></div>
+  </section>
+
+  <section>
+    <div class="eyebrow">Shared rules (unchanged from the previous plan)</div>
+    <details open>
+      <summary>Money, numbers, months, states, permissions, accessibility</summary>
+      <div class="in">
+        <ul>
+          <li><b>Money:</b> ₹ with Indian grouping, 2 decimals on bills, none on plan prices; GST always its own line. One <code>&lt;Money/&gt;</code> component.</li>
+          <li><b>Big numbers:</b> full below 10,000; short form above ("1.45M tokens") with the exact number in a tooltip.</li>
+          <li><b>Months:</b> IST calendar months; "October 2026"; ranges "1 – 31 Oct".</li>
+          <li><b>Status:</b> a word on every chip; green fine, amber attention, red blocked/overdue, grey closed/neutral.</li>
+          <li><b>Loading:</b> skeletons shaped like the table; keep old data while refetching. <b>Errors:</b> inline with a retry, input kept.</li>
+          <li><b>Two admins:</b> saves send <code>updated_at</code>; a stale save says who changed it and keeps the input.</li>
+          <li><b>Permissions:</b> hide what a role can't do; billing is school admin + principal only <span class="qref">Q10</span>.</li>
+          <li><b>Accessibility:</b> labelled inputs, progress bars with text, keyboard reach, focus returns after the drawer closes.</li>
+          <li><b>Test IDs:</b> <code>{screen}-{element}[-{id}]</code> on every interactive element.</li>
+        </ul>
+      </div>
+    </details>
+  </section>
+</main>
+
+<script>
+const PA_NAV = [
+  ['Workspace', [['schools', 'Schools'], ['renewals', 'Renewals', '<span class="badge">2</span>'], ['billing', 'Billing', '<span class="newtag">NEW</span>']]],
+  ['Content', [['curriculum', 'Master Syllabus'], ['library', 'Digital Library']]],
+  ['Configuration', [['plans', 'Plans &amp; Pricing']]],
+  ['Monitoring', [['traffic', 'Traffic'], ['logs', 'Watchline'], ['audit', 'Audit Log']]],
+];
+const SA_NAV = [
+  ['Overview', [['overview', 'Overview']]],
+  ['People', [['staff', 'Staff Management'], ['students', 'Student Management']]],
+  ['Management', [['fees', 'Fee Management']]],
+  ['Communication', [['ann', 'Announcements']]],
+  ['Tools', [['export', 'Export Data'], ['settings', 'School Profile']]],
+];
+function shell(portal, active, content, url) {
+  const pa = portal === 'platform-admin';
+  const nav = (pa ? PA_NAV : SA_NAV).map(([label, items]) =>
+    `<div class="pm-nl">${label}</div>` + items.map(([k, n, extra]) => `<div class="pm-ni${k === active ? ' on' : ''}">${n}${extra || ''}</div>`).join('')).join('');
+  return `<div class="mockwrap" role="img" aria-label="Mock of ${url}"><div class="pm" data-portal="${portal}">
+    <div class="pm-top"><div><b>WeLearnYouLearn</b><span>${pa ? 'Platform workspace' : 'Sri Vidya High School'}</span></div><span class="out">Sign out</span></div>
+    <div class="pm-body"><aside class="pm-side"><div class="pm-id"><i>${pa ? 'W' : 'S'}</i><div><b>${pa ? 'Platform admin' : 'Lakshmi R.'}</b><small>${pa ? 'School operations' : 'School admin'}</small></div></div><div class="pm-nav">${nav}</div></aside>
+    <div class="pm-main">${content}</div></div></div></div>`;
+}
+const bar = (used, inc, cls, pct, extra = '') => `<div class="ubar"><span class="t">${used} <small>/ ${inc}${extra}</small></span><div class="b ${cls}"><i style="width:${pct}%"></i></div></div>`;
+
+const SCREENS = [
+{ id: 'P1', name: 'Plans & Pricing → Plans', where: 'Platform admin · replaces Feature Plans', portal: 'platform-admin', active: 'plans',
+  mock: `<div class="pm-row sb"><div><h1 class="pm-h1">Plans &amp; Pricing</h1><div class="pm-sub">What each plan costs and includes. Price changes apply to new plans and renewals.</div></div><span class="btn">New plan</span></div>
+  <div class="pm-tabs"><span class="pm-tab on">Plans</span><span class="pm-tab">Features</span><span class="pm-tab">Service prices</span></div>
+  <div class="tbl"><table><thead><tr><th>Plan</th><th class="num">Monthly</th><th class="num">Yearly</th><th>Staff</th><th>Included each month</th><th class="num">Schools</th><th>Website</th><th></th></tr></thead><tbody>
+   <tr><td><b>Basic</b><span class="s">Core school management</span></td><td class="num">₹499</td><td class="num">₹4,990</td><td>2</td><td>—</td><td class="num">12</td><td><span class="chip c-ok">Shown</span></td><td><span class="btn sm">Edit</span></td></tr>
+   <tr class="hl"><td><b>Standard</b><span class="s">Most schools</span></td><td class="num">₹999</td><td class="num">₹9,990</td><td>5</td><td>1,000 WhatsApp · 1M AI tokens</td><td class="num">21</td><td><span class="chip c-ok">Shown</span></td><td><span class="btn sm">Edit</span></td></tr>
+   <tr><td><b>Premium</b><span class="s">Large schools</span></td><td class="num">₹1,999</td><td class="num">₹19,990</td><td>Unlimited</td><td>5,000 WhatsApp · 5M AI tokens</td><td class="num">5</td><td><span class="chip c-grey">Hidden</span></td><td><span class="btn sm">Edit</span></td></tr>
+  </tbody></table></div>
+  <div class="drawer"><div class="drawer-h"><b>Edit Standard</b><span class="btn sm">✕</span></div>
+   <div class="drawer-b">
+    <div class="fgrid"><div class="field"><span class="lbl">Monthly price (₹)</span><span class="inp focus">1,099</span></div><div class="field"><span class="lbl">Yearly price (₹)</span><span class="inp">9,990</span></div></div>
+    <div class="alert warn">21 schools on Standard keep their current price until they renew.</div>
+    <div class="field"><span class="lbl">Staff accounts</span><span class="inp">5</span></div>
+    <div class="field"><span class="lbl">Included each month</span><span class="hint">WhatsApp 1,000 · AI 1M tokens · <span class="btn link">Edit in Service prices</span></span></div>
+    <div class="field"><span class="lbl">Description on website</span><span class="inp" style="min-height:52px">Most schools</span></div>
+    <div class="field"><span class="lbl">Show on website</span><span class="seg"><span class="on">Shown</span><span>Hidden</span></span></div>
+    <span class="btn link" style="color:#b42318">Retire this plan</span>
+   </div>
+   <div class="drawer-f"><span class="btn">Cancel</span><span class="btn pri">Save plan</span></div></div>`,
+  what: ['Plans as table rows, matching the Schools and Renewals tables', 'Edit opens the existing side-drawer pattern; no new page', 'Today\'s feature matrix moves unchanged into the Features tab', 'Included usage is edited in one place (Service prices) and only summarised here'],
+  states: ['Loading: 3 skeleton rows', 'Plan without a price: amber "No price set" in the price cells; assigning that plan is blocked until set', 'Retired plans: hidden behind "Show retired (n)"'],
+  edge: ['Yearly costs more than 12 × monthly → warning under the field', 'Monthly price ₹0 needs the "Free plan" switch (stops typos)', 'Lowering staff accounts below what schools use → lists the affected schools (existing seat-overage rules apply)', 'Retiring a plan that schools use → confirm names the count; they keep it until renewal', 'Unsaved changes when closing the drawer → "Discard changes?"', 'Two admins edit the same plan → stale-save message <span class="qref">Q30</span>'],
+  ids: 'plans-tab-{plans|features|prices}, plans-new, plans-edit-{tier}, plan-drawer-monthly, plan-drawer-yearly, plan-drawer-staff, plan-drawer-description, plan-drawer-website-{shown|hidden}, plan-drawer-retire, plan-drawer-save, plan-drawer-cancel, plan-drawer-close' },
+
+{ id: 'P2', name: 'Plans & Pricing → Service prices', where: 'Platform admin · new tab', portal: 'platform-admin', active: 'plans',
+  mock: `<div class="pm-row sb"><div><h1 class="pm-h1">Plans &amp; Pricing</h1><div class="pm-sub">What each plan costs and includes. Price changes apply to new plans and renewals.</div></div><span class="btn">Add service</span></div>
+  <div class="pm-tabs"><span class="pm-tab">Plans</span><span class="pm-tab">Features</span><span class="pm-tab on">Service prices</span></div>
+  <div class="alert info">Changes here apply from <b>1 November</b>. October keeps the prices it started with.</div>
+  <div class="tbl"><table><thead><tr><th>Service</th><th>Charged</th><th>Basic</th><th>Standard</th><th>Premium</th><th></th></tr></thead><tbody>
+   <tr><td><b>WhatsApp messages</b><span class="s">per message · our cost ₹0.13</span></td><td><span class="chip c-ok">Charged</span></td><td><span class="s">Not in plan</span></td><td>1,000 included<span class="s">then ₹0.20 · limit 2,000</span></td><td>5,000 included<span class="s">then ₹0.20 · limit 10,000</span></td><td><span class="btn sm">Edit</span></td></tr>
+   <tr class="hl"><td><b>AI usage</b><span class="s">per 1,000 tokens · our cost ₹0.02</span></td><td><span class="chip c-ok">Charged</span></td><td><span class="s">Not in plan</span></td><td>1M included<span class="s">then ₹0.05 · limit 5M · <b style="color:#9a5806">₹0.06 from 1 Nov</b></span></td><td>5M included<span class="s">then ₹0.04 · limit 25M</span></td><td><span class="btn sm">Edit</span></td></tr>
+   <tr><td><b>Emails</b><span class="s">per email</span></td><td><span class="chip c-grey">Counted only</span></td><td colspan="3"><span class="s">Counted for every school, not charged</span></td><td><span class="btn sm">Edit</span></td></tr>
+   <tr><td><b>Files uploaded</b><span class="s">per MB</span></td><td><span class="chip c-grey">Counted only</span></td><td colspan="3"><span class="s">Counted for every school, not charged</span></td><td><span class="btn sm">Edit</span></td></tr>
+  </tbody></table></div>
+  <span class="btn link" style="font-size:13px">Show switched-off services (1)</span>`,
+  what: ['One row per service; one cell per plan in plain words ("1,000 included, then ₹0.20")', 'Edit opens the same drawer as plans: name, unit, our cost, charged on/off, and the three plans\' numbers', 'Pending next-month changes show inline in amber', 'Track-only services take one line and no price fields'],
+  states: ['Loading: skeleton rows', 'Error on save: drawer keeps input, message under the field', 'New service that code doesn\'t record yet: "No usage recorded yet. Developers need to add tracking for ai.images." with the key to copy'],
+  edge: ['Limit lower than included → error', 'Charged switched on mid-month → starts next month; confirm says so', 'Our cost above price → red margin note in the cell', 'Changing the unit (e.g. per 1,000 → per 1M) after usage exists → blocked; create a new service <span class="qref">Q29</span>', 'Service with usage can\'t be deleted, only switched off <span class="qref">Q29</span>', 'A plan added later → its column shows "Not in plan" until filled'],
+  ids: 'prices-add-service, prices-edit-{meter}, price-drawer-charged, price-drawer-cost, price-drawer-{tier}-included, price-drawer-{tier}-price, price-drawer-{tier}-limit, price-drawer-{tier}-atlimit, price-drawer-save, prices-show-off' },
+
+{ id: 'P3', name: 'Billing → Usage', where: 'Platform admin · new Billing page, first tab', portal: 'platform-admin', active: 'billing',
+  mock: `<div class="pm-row sb"><div><h1 class="pm-h1">Billing</h1><div class="pm-sub">Usage per school and monthly bills.</div></div><div class="pm-row"><span class="sel">October 2026</span><span class="btn">Download CSV</span></div></div>
+  <div class="pm-tabs"><span class="pm-tab on">Usage</span><span class="pm-tab">Bills <span class="chip c-warn" style="margin-left:4px">3</span></span></div>
+  <div class="metrics"><div class="metric"><small>WhatsApp messages</small><b>9,050</b><em>₹312 extra so far</em></div><div class="metric"><small>AI tokens</small><b>14.2M</b><em>₹96 extra so far</em></div><div class="metric"><small>Emails</small><b>3,412</b><em>counted only</em></div><div class="metric"><small>Our service cost</small><b>₹1,734</b><em>vs ₹408 extra billed</em></div></div>
+  <div class="pm-row sb"><div class="pm-row"><span class="inp" style="min-width:220px;color:#67736b">Search school</span><span class="sel">All plans</span><span class="sel" style="min-width:130px">Over limit only</span></div><span class="hint">Month in progress · updated 3 min ago</span></div>
+  <div class="tbl"><table><thead><tr><th>School</th><th>Plan</th><th>WhatsApp</th><th>AI tokens</th><th class="num">Emails</th><th class="num">Extra so far</th></tr></thead><tbody>
+   <tr><td><b>Green Valley Public School</b><span class="s">GVPS-007</span></td><td>Premium</td><td>${bar('5,410', '5,000', 'x', 100)}</td><td>${bar('3.1M', '5M', '', 62)}</td><td class="num">1,204</td><td class="num"><b>₹82.00</b></td></tr>
+   <tr class="hl"><td><b>Sri Vidya High School</b><span class="s">SVHS-014</span></td><td>Standard</td><td>${bar('870', '1,000', 'w', 87)}</td><td>${bar('1.45M', '1M', 'x', 100)}</td><td class="num">655</td><td class="num"><b>₹22.50</b></td></tr>
+   <tr><td><b>Little Lotus School</b><span class="s">LLS-022</span></td><td>Standard</td><td>${bar('2,000', '1,000', 'x', 100, ' · <b style="color:#b42318">paused</b>')}</td><td>${bar('0.2M', '1M', '', 20)}</td><td class="num">318</td><td class="num"><b>₹200.00</b></td></tr>
+   <tr><td><b>Bright Minds School</b><span class="s">BMS-031</span></td><td>Basic</td><td><span class="s">Not in plan</span></td><td><span class="s">Not in plan</span></td><td class="num">212</td><td class="num">₹0.00</td></tr>
+  </tbody></table></div>`,
+  what: ['Same header, month select and table style as Renewals', 'One metrics strip (the Overview page pattern), then the table', 'Only charged services get bars; counted-only services are plain numbers', 'Click a row → P4 drawer'],
+  states: ['Loading: metrics + 5 skeleton rows', 'Month before tracking: "Tracking started 8 Oct 2026. Pick a later month."', 'No usage: "No usage recorded in October."', 'Error: inline "Couldn\'t load usage. Try again." above the table, last data kept'],
+  edge: ['School on a plan without the service → "Not in plan", never 0/0', 'Limit reached → "paused" in red next to the bar', 'Plan changed mid-month → plan cell "Standard → Premium" <span class="qref">Q25</span>', 'Deactivated school with usage → row kept, name greyed, "Deactivated"', 'Platform\'s own emails (no school) → separate "Platform" row at the bottom, not in totals', 'Our cost missing → metric shows "—" with "Add our cost" link <span class="qref">Q13</span>', '100+ schools → 50 per page (existing pagination component); totals still cover all'],
+  ids: 'billing-tab-{usage|bills}, billing-month, billing-csv, usage-search, usage-plan-filter, usage-over-only, usage-row-{schoolId}' },
+
+{ id: 'P4', name: 'Billing → school drawer', where: 'Platform admin · opens from a Usage or Bills row', portal: 'platform-admin', active: 'billing',
+  mock: `<div class="pm-row sb dim"><div><h1 class="pm-h1">Billing</h1><div class="pm-sub">Usage per school and monthly bills.</div></div><span class="sel">October 2026</span></div>
+  <div class="pm-tabs dim"><span class="pm-tab on">Usage</span><span class="pm-tab">Bills</span></div>
+  <div class="tbl dim"><table><thead><tr><th>School</th><th>Plan</th><th>WhatsApp</th></tr></thead><tbody><tr><td>Green Valley Public School</td><td>Premium</td><td>5,410 / 5,000</td></tr><tr class="hl"><td>Sri Vidya High School</td><td>Standard</td><td>870 / 1,000</td></tr><tr><td>Little Lotus School</td><td>Standard</td><td>2,000 / 1,000</td></tr></tbody></table></div>
+  <div class="drawer"><div class="drawer-h"><b>Sri Vidya High School</b><span class="btn sm">✕</span></div>
+   <div class="drawer-b">
+    <div class="stab"><span class="on" style="color:#4f2830;border-color:#773e48">Usage</span><span>Own prices (1)</span><span>Bills</span></div>
+    <div class="pm-row sb"><span class="sel" style="min-width:150px">WhatsApp</span><span class="hint">October · daily</span></div>
+    <div class="spark"><i style="height:20%"></i><i style="height:35%"></i><i style="height:42%"></i><i style="height:50%"></i><i style="height:18%"></i><i style="height:10%"></i><i style="height:46%"></i><i style="height:58%"></i><i style="height:62%"></i><i style="height:55%"></i><i style="height:14%"></i><i style="height:9%"></i><i style="height:70%"></i><i style="height:40%;opacity:.35"></i></div>
+    <dl class="kv"><dt>Used</dt><dd>870 of 1,000 included</dd><dt>Limit</dt><dd>3,000 (own price; plan 2,000)</dd><dt>Extra so far</dt><dd>₹0.00</dd></dl>
+    <div class="panel" style="padding:12px 0"><h3>Own prices</h3><div class="pm-row sb"><span>WhatsApp limit 3,000<span class="hint" style="display:block">"Exam month" · Ravi · 3 Oct</span></span><span class="btn sm danger">Remove</span></div><span class="btn sm" style="justify-self:start">Add own price</span></div>
+   </div></div>`,
+  what: ['Reuses the portal drawer; the table stays visible behind it', 'Three small tabs: Usage (daily bars per service), Own prices, Bills for this school', 'Own prices use the same fields as Service prices, plus a required reason'],
+  states: ['No usage this month: flat chart + "No WhatsApp messages yet this month"', 'No own prices: "Uses Standard plan prices"', 'Today\'s bar shown lighter: "partial day"'],
+  edge: ['Own price same as the plan → Save blocked: "Same as the plan"', 'Lowering a limit below what\'s used → warning "Sending pauses immediately (1,240 already used)" <span class="qref">Q27</span>', 'Raising a limit applies now (to unblock); other own-price changes apply next month', 'School changes plan later → own prices stay and still win; note "Plan is now Premium"'],
+  ids: 'school-drawer-tab-{usage|prices|bills}, school-drawer-service, school-drawer-add-price, school-drawer-remove-{meter}, school-drawer-close' },
+
+{ id: 'P5', name: 'Billing → Bills', where: 'Platform admin · second tab', portal: 'platform-admin', active: 'billing',
+  mock: `<div class="pm-row sb"><div><h1 class="pm-h1">Billing</h1><div class="pm-sub">Usage per school and monthly bills.</div></div><div class="pm-row"><span class="sel">September 2026</span><span class="btn">Download CSV</span></div></div>
+  <div class="pm-tabs"><span class="pm-tab">Usage</span><span class="pm-tab on">Bills <span class="chip c-warn" style="margin-left:4px">3</span></span></div>
+  <div class="alert info"><span>September bills were created automatically on <b>1 Oct, 6:00 AM</b> and emailed. Next run: <b>1 Nov</b>.</span></div><div class="alert bad"><span><b>1 bill</b> overdue. Reminders go out every 7 days.</span></div>
+  <div class="pm-row"><span class="sel">All statuses</span><span class="sel">Usage and plan bills</span></div>
+  <div class="tbl"><table><thead><tr><th>School</th><th>Bill</th><th class="num">Amount</th><th>Status</th><th></th></tr></thead><tbody>
+   <tr><td><b>Sri Vidya High School</b></td><td>September usage<span class="s">WLYL-202609-14-42</span></td><td class="num">₹28.32<span class="s">incl. GST</span></td><td><span class="chip c-warn">Due by 16 Oct</span></td><td class="num"><span class="btn sm">Record payment</span></td></tr>
+   <tr><td><b>Green Valley Public School</b></td><td>September usage<span class="s">WLYL-202609-7-41</span></td><td class="num">₹271.40</td><td><span class="chip c-bad">Overdue 3 days</span></td><td class="num"><span class="btn sm">Record payment</span></td></tr>
+   <tr><td><b>Little Lotus School</b></td><td>Plan · Standard 2026–27<span class="s">WLYL-P-2026-22</span></td><td class="num">₹10,030.00</td><td><span class="chip c-warn">Part paid · ₹5,000 left</span></td><td class="num"><span class="btn sm">Record payment</span></td></tr>
+   <tr><td><b>Bright Minds School</b></td><td>September usage</td><td class="num">₹0.00</td><td><span class="chip c-grey">No charge</span></td><td></td></tr>
+   <tr><td><b>Lotus Vidyalaya</b></td><td>September usage<span class="s">WLYL-202609-30-44</span></td><td class="num">₹70.80</td><td><span class="chip c-ok">Paid 5 Oct</span></td><td></td></tr>
+  </tbody></table></div>
+  <div class="hint">Billed ₹10,372.20 · Collected ₹5,100.80 · Outstanding ₹5,271.40</div>`,
+  what: ['Usage bills and plan bills in one list, same table style', 'A blue line says when bills were last created and when the next automatic run is; a red line counts overdue bills', 'Bills are created automatically on the 1st and emailed; the page only records payments, and the payment form opens inside the row', 'Click a bill → drawer with lines, GST, payments, history, "Add adjustment", "Resend email"'],
+  states: ['Empty: "No bills for September." plus "Close finished months to create bills." when relevant', 'Action error: inline under the row; button re-enabled'],
+  edge: ['The automatic run is safe to repeat: never a second bill for the same school and month', 'A run that fails for one school (e.g. missing price) → listed in the blue line with "Retry"; other schools are unaffected', '₹0 bill → "No charge", no email', 'Overdue after 15 days, red, reminder button <span class="qref">Q28</span>', 'Payment more than due blocked; less → "Part paid" <span class="qref">Q26</span>', 'Corrections never edit a closed bill → adjustment line on the next bill <span class="qref">Q12</span>', 'GST line shows "GST details pending" until invoice details exist <span class="qref">Q9</span>'],
+  ids: 'bills-filter-{status}, bills-record-payment-{billId}, bills-row-{billId}, bill-drawer-adjust, bill-drawer-resend, bill-drawer-close' },
+
+{ id: 'P6', name: 'School → Plan dialog (with price)', where: 'Platform admin · Schools → a school → Change plan (existing dialog, extended)', portal: 'platform-admin', active: 'schools',
+  mock: `<div class="pm-row sb dim"><div><h1 class="pm-h1">Sri Vidya High School</h1><div class="pm-sub">SVHS-014 · Hyderabad</div></div></div>
+  <div class="drawer" style="width:440px"><div class="drawer-h"><b>Change plan</b><span class="btn sm">✕</span></div>
+   <div class="drawer-b">
+    <div class="field"><span class="lbl">Plan</span><span class="sel" style="width:100%">Standard</span></div>
+    <div class="field"><span class="lbl">Billing</span><span class="seg"><span class="on">Yearly</span><span>Monthly</span></span></div>
+    <div class="fgrid"><div class="field"><span class="lbl">Starts</span><span class="inp">1 Nov 2026</span></div><div class="field"><span class="lbl">Ends</span><span class="inp">31 Oct 2027</span></div></div>
+    <div class="fgrid"><div class="field"><span class="lbl">List price</span><span class="inp" style="background:#f0f3ed">₹9,990</span></div><div class="field"><span class="lbl">Agreed price</span><span class="inp focus">₹8,500</span><span class="hint">15% off</span></div></div>
+    <div class="field"><span class="lbl">Reason for discount</span><span class="inp">Founding school offer, first year</span></div>
+    <div class="alert info">Saving creates a plan bill for <b>₹10,030.00</b> (₹8,500 + ₹1,530 GST), dated 1 Nov, and emails the school admin.</div>
+   </div>
+   <div class="drawer-f"><span class="btn">Cancel</span><span class="btn pri">Save plan</span></div></div>`,
+  what: ['The plan control that exists today, plus billing period, list price (read-only), agreed price and reason', 'A plain sentence says exactly what saving will do', 'Today\'s seat-overage confirm and renewal handling stay as they are'],
+  states: ['Plan has no price yet → Save blocked with "Set a price for Standard first" linking to P1', 'No change to price or dates → "No bill will be created"'],
+  edge: ['Agreed above list → allowed, amber warning', 'Discount without a reason → Save disabled', '₹0 agreed → reason preset "Complimentary"', 'Early renewal starts the day after the current end', 'Mid-term upgrade → shows the extra for the remaining days <span class="qref">Q18</span>; downgrade → "From renewal on 31 Oct 2027"', 'Monthly billing → no upfront bill; plan fee is a line on each monthly bill <span class="qref">Q8</span>'],
+  ids: 'school-plan-tier, school-plan-period-{yearly|monthly}, school-plan-start, school-plan-end, school-plan-agreed, school-plan-reason, school-plan-save, school-plan-cancel' },
+
+{ id: 'S1', name: 'School Profile → Plan & Billing', where: 'School admin · settings tab (was Plan & Features)', portal: 'school-admin', active: 'settings',
+  mock: `<div><h1 class="pm-h1">School Profile</h1><div class="pm-sub">Settings for Sri Vidya High School</div></div>
+  <div class="stab"><span>School Profile</span><span>Academic Years</span><span class="on">Plan &amp; Billing</span><span>Staff Accounts</span><span>Security</span></div>
+  <div class="panel"><div class="pm-row sb"><div><span class="chip c-acc" style="font-size:13px">Standard</span> <span style="margin-left:8px">₹8,500 / year + GST</span><span class="hint" style="display:block;margin-top:4px">Renews 31 Oct 2027 · Founding school offer · 4 of 5 staff accounts</span></div><div class="pm-row"><span class="btn">Compare plans</span><span class="btn pri">Request upgrade</span></div></div></div>
+  <div class="panel"><div class="pm-row sb"><h3>This month · 1 – 31 Oct</h3><span class="hint">about <b>₹70.50</b> extra so far · final on 1 Nov</span></div>
+   <div class="tbl"><table><thead><tr><th>Service</th><th>Used</th><th class="num">Extra so far</th></tr></thead><tbody>
+    <tr><td>WhatsApp messages</td><td>${bar('1,240', '1,000 included', 'x', 100)}</td><td class="num">₹48.00</td></tr>
+    <tr><td>AI usage</td><td>${bar('1.45M', '1M tokens included', 'x', 100)}</td><td class="num">₹22.50</td></tr>
+    <tr><td>Emails sent</td><td>655 <span class="hint">· included</span></td><td class="num">—</td></tr>
+   </tbody></table></div>
+   <div class="hint">Extra WhatsApp messages cost ₹0.20 each. Sending pauses at 2,000 this month.</div></div>
+  <div class="panel"><h3>Bills</h3>
+   <div class="tbl"><table><tbody>
+    <tr><td>September usage</td><td class="num">₹28.32</td><td><span class="chip c-warn">Due 16 Oct</span></td><td class="num"><span class="btn sm">View</span></td></tr>
+    <tr><td>Plan · Standard 2026–27</td><td class="num">₹10,030.00</td><td><span class="chip c-ok">Paid</span></td><td class="num"><span class="btn sm">View</span></td></tr>
+   </tbody></table></div></div>`,
+  what: ['One tab instead of two: plan, this month\'s usage and bills together', 'Uses the existing editorial panels (dividers, no cards) and the existing renewal request button', 'Bill "View" opens a drawer: lines, GST, how to pay (copyable bank/UPI text), payments received'],
+  states: ['No plan: "Your school isn\'t on a plan yet. Contact WLYL to choose one." + Compare plans', 'First month: "Usage appears here as your school sends messages and uses AI."', 'Teachers and other staff: tab hidden <span class="qref">Q10</span>'],
+  edge: ['Service not in the plan → row not shown', 'Exactly at included → green "All 1,000 included messages used. More cost ₹0.20 each."', 'Limit reached → red line "WhatsApp messages paused until 1 Nov. Contact WLYL support to raise the limit."', 'Price change next month → "From 1 Nov: ₹0.25 per extra message"', 'Joined or upgraded mid-month → full / higher included amount <span class="qref">Q24</span> <span class="qref">Q25</span>', 'Complimentary plan → "Complimentary" instead of ₹0', 'Retired plan → "No longer offered; you keep it until renewal"', 'Phone width → table rows stack as cards'],
+  ids: 'plan-billing-compare, plan-billing-request-upgrade, plan-billing-usage-{meter}, plan-billing-bill-{billId}, plan-billing-bill-drawer-copy, plan-billing-bill-drawer-close' },
+
+{ id: 'S2', name: 'Banner and send results', where: 'School admin · top of every page (existing PlanNotice) and inline after sends', portal: 'school-admin', active: 'students',
+  mock: `<div class="alert bad"><span><b>WhatsApp messages are paused</b> until 1 Nov: this month's limit of 2,000 is reached.</span><span class="btn sm">See usage</span></div>
+  <div><h1 class="pm-h1">Student Management</h1><div class="pm-sub">Add students and send their login details</div></div>
+  <div class="panel"><h3>Bulk import · 300 students</h3>
+   <div class="alert info"><span><b>300 students added.</b> Login details: 280 sent by WhatsApp and email, 20 by email only (WhatsApp limit reached).</span><span class="btn sm">Details</span></div>
+   <div class="alert warn"><span>Check 4 phone numbers: WhatsApp couldn't deliver to them.</span><span class="btn sm">Show</span></div></div>`,
+  what: ['No new banner system: PlanNotice shows one billing banner at a time, in priority order', 'Send results appear inline where the action happened, saying what was sent and how'],
+  states: ['Priority: plan expired (existing lock) > bill overdue > limit reached > plan expiring > 80% used', 'Dismissible for the day, except expired and overdue'],
+  edge: ['Plan doesn\'t include WhatsApp → no message; email is the normal path', 'Login and password messages never blocked if Q7 says so <span class="qref">Q7</span>', 'Dismissed 80% banner returns at 100%', 'Billing banners only for school admin and principal'],
+  ids: 'plan-notice, plan-notice-action, plan-notice-dismiss, send-result, send-result-details' },
+];
+
+const list = items => `<ul>${items.map(i => `<li>${i}</li>`).join('')}</ul>`;
+document.getElementById('screenList').innerHTML = SCREENS.map(s => `
+  <article class="screen" id="${s.id}">
+    <div class="screen-head"><span class="sid">${s.id}</span><h3>${s.name}</h3><span class="where">${s.where}</span></div>
+    ${shell(s.portal, s.active, s.mock, s.name)}
+    <div class="notes"><div><h4>What's on it</h4>${list(s.what)}</div><div><h4>States</h4>${list(s.states)}</div></div>
+    <details><summary>Edge cases (${s.edge.length}) and test IDs</summary><div class="in">${list(s.edge)}<div class="ids">${s.ids}</div></div></details>
+  </article>`).join('');
+</script>

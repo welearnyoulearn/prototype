@@ -134,6 +134,8 @@ JWT_SECRET            # JWT signing secret
 ENCRYPTION_KEY        # 64-char hex for AES-256-GCM
 RESEND_API_KEY        # Transactional email
 APP_URL               # Base URL for email links
+WHATSAPP_ACCESS_TOKEN    # Meta Cloud API token (platform number); unset = log-only, nothing is sent
+WHATSAPP_PHONE_NUMBER_ID # Meta phone number id of the platform WhatsApp number
 WHATSAPP_VERIFY_TOKEN # Meta webhook verification
 WHATSAPP_APP_SECRET   # Meta webhook HMAC secret
 ```
