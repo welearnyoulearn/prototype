@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "WLYL School Management API",
-    "version": "2026-10-18",
+    "version": "2026-10-20",
     "description": "Every API route in the WLYL platform, generated from the route handlers on the `dev` branch.\n\n## How to read this\n\n- **Sections and subcategories.** The sidebar groups routes by area, such as Fees & finance, then by topic, such as Waivers.\n- **Who can call.** The coloured badges on each route show which signed-in users it accepts. A red **Public** badge means the route has no sign-in check in code.\n- **Checks.** Extra rules inside the route, such as \"parent must own this student\", are listed under Checks.\n- **Feature flag.** Routes that are switched off unless the school's plan includes a feature say which one.\n\n## Signing in\n\nEach portal has its own session cookie: `wlyl-platform`, `wlyl-auth` (school admin), `wlyl-teacher`, `wlyl-student` and `wlyl-parent`. Sign in to the app in this browser, then use **Test Request** on any route. Scheduled jobs take `Authorization: Bearer $CRON_SECRET`."
   },
   "servers": [
@@ -35647,6 +35647,142 @@
                 "required": [
                   "token"
                 ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/parent/push/expo": {
+      "post": {
+        "tags": [
+          "Parent portal"
+        ],
+        "summary": "Register phone for push (parent app)",
+        "description": "Saves the Expo push token of the parent mobile app so school notifications reach the phone. Upserts on token: a phone that signs in as another parent moves to that parent.\n\n**Who can call:** parent.\n\n**Checks:** school and parent come from the session only; token must match `ExponentPushToken[...]` / `ExpoPushToken[...]`.",
+        "operationId": "postParentPushExpo",
+        "security": [
+          {
+            "parent": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid push token"
+          },
+          "401": {
+            "description": "Not signed in as a parent"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Parent",
+            "color": "#be185d"
+          }
+        ],
+        "x-source-file": "app/api/parent/push/expo/route.ts",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "token"
+                ],
+                "properties": {
+                  "token": {
+                    "type": "string",
+                    "maxLength": 255,
+                    "pattern": "^(ExponentPushToken|ExpoPushToken)\\[.+\\]$",
+                    "description": "Expo push token from expo-notifications getExpoPushTokenAsync()"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Parent portal"
+        ],
+        "summary": "Unregister phone from push (parent app)",
+        "description": "Forgets this Expo push token. Only deletes it if it belongs to the signed-in parent; otherwise a no-op.\n\n**Who can call:** parent.\n\n**Checks:** school and parent come from the session only; token must match `ExponentPushToken[...]` / `ExpoPushToken[...]`.",
+        "operationId": "deleteParentPushExpo",
+        "security": [
+          {
+            "parent": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deleted (or not found)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid push token"
+          },
+          "401": {
+            "description": "Not signed in as a parent"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Parent",
+            "color": "#be185d"
+          }
+        ],
+        "x-source-file": "app/api/parent/push/expo/route.ts",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "token"
+                ],
+                "properties": {
+                  "token": {
+                    "type": "string",
+                    "maxLength": 255,
+                    "pattern": "^(ExponentPushToken|ExpoPushToken)\\[.+\\]$",
+                    "description": "Expo push token from expo-notifications getExpoPushTokenAsync()"
+                  }
+                }
               }
             }
           }

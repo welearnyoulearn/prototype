@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { pushLinkFor } from './pushLinks'
+import { mobilePushLink, pushLinkFor } from './pushLinks'
 
 test('parents get a deep link into the parent app; other portals get none', () => {
   assert.equal(pushLinkFor('teacher', 'exam_scheduled', null), null)
@@ -27,4 +27,11 @@ test('schedule, update, cancel and reminder notifications open the exam list', (
 
 test('anything else (broadcasts, birthdays, unknown types) opens the notification list', () => {
   for (const type of ['teacher_broadcast', 'birthday', 'something_new']) assert.equal(pushLinkFor('parent', type, null), '/notifications', type)
+})
+
+test('the mobile app gets a screen it can open: exam detail links become the exam list', () => {
+  assert.equal(mobilePushLink('/exams/12'), '/exams')
+  assert.equal(mobilePushLink('/exams'), '/exams')
+  assert.equal(mobilePushLink('/notifications'), '/notifications')
+  assert.equal(mobilePushLink(null), '/notifications')
 })

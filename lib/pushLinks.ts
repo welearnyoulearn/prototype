@@ -31,3 +31,10 @@ export function pushLinkFor(role: PushRole, type: string, data: unknown): string
   if (EXAM_LIST_TYPES.has(type)) return '/exams'
   return '/notifications'
 }
+
+// The mobile app (wlyl-parent-mobile) opens only its top-level screens from a push (src/lib/push.ts
+// routeForPush) and sends anything else to /notifications, so an exam link becomes the exam list there.
+export function mobilePushLink(link: string | null): string {
+  if (!link) return '/notifications'
+  return link.startsWith('/exams/') ? '/exams' : link
+}

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
-import pool from '@/lib/db'
+import pool, { ensureDB } from '@/lib/db'
 import { getSession, getTeacherSession, getStudentSession, getParentSession } from '@/lib/auth'
 
 // Push-notification device registration. The web app and the parent app both call this after login
@@ -33,6 +33,7 @@ const removeBody = z.object({
 
 export async function POST(req: NextRequest) {
   try {
+    await ensureDB()
     const owner = await deviceOwner()
     if (!owner) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
@@ -60,6 +61,7 @@ export async function POST(req: NextRequest) {
 // Only removes a token that belongs to the caller.
 export async function DELETE(req: NextRequest) {
   try {
+    await ensureDB()
     const owner = await deviceOwner()
     if (!owner) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 

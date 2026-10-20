@@ -8,7 +8,7 @@
 // Protected: requires Authorization: Bearer <CRON_SECRET> header.
 
 import { NextRequest, NextResponse } from 'next/server'
-import { dispatchPendingPushes, isPushConfigured } from '@/lib/push'
+import { drainPendingPushes, isPushConfigured } from '@/lib/push'
 
 export async function GET(req: NextRequest) {
   return run(req)
@@ -28,7 +28,7 @@ async function run(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  if (!isPushConfigured()) return NextResponse.json({ ok: true, configured: false, sent: 0 })
-  const sent = await dispatchPendingPushes(500)
-  return NextResponse.json({ ok: true, configured: true, sent })
+  // configured = Firebase (browser) pushes are on; Expo (mobile app) pushes need no key and always go.
+  const sent = await drainPendingPushes({ batchSize: 100, maxBatches: 5 })
+  return NextResponse.json({ ok: true, configured: isPushConfigured(), sent })
 }

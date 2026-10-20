@@ -1,4 +1,5 @@
-// Push delivery for notifications, over Firebase Cloud Messaging (HTTP v1).
+// Push delivery for notifications: Firebase Cloud Messaging (HTTP v1) for browsers, and Expo's push service
+// for the parent mobile app (lib/expoPush.ts), from one dispatcher.
 //
 // The notifications table stays the source of truth (history, read state, the bell). This file only
 // wakes devices up. It talks to FCM directly with fetch + jose instead of firebase-admin: that SDK is
@@ -8,13 +9,16 @@
 // dispatchPendingPushes() claims those rows, looks up the recipients' device_tokens and sends. Callers
 // run it after their response (next/server after()), so a push problem can never fail a request.
 //
-// Env: FIREBASE_SERVICE_ACCOUNT — the service-account JSON (raw, or base64 of it). Unset = push is
-// off and every function here is a no-op, so the feature is safe to deploy before Firebase exists.
+// Env: FIREBASE_SERVICE_ACCOUNT — the service-account JSON (raw, or base64 of it). Unset = no Firebase
+// sends (browser devices are skipped), so it is safe to deploy before Firebase exists. Expo needs no key
+// here (its Firebase/APNs credentials live in EAS), so devices registered with platform 'expo' are always
+// pushed.
 
 import { z } from 'zod'
 import { SignJWT, importPKCS8 } from 'jose'
 import pool from '@/lib/db'
-import { pushLinkFor, type PushRole } from '@/lib/pushLinks'
+import { mobilePushLink, pushLinkFor, type PushRole } from '@/lib/pushLinks'
+import { pushKindFor, sendExpo } from '@/lib/expoPush'
 
 const serviceAccountSchema = z.object({
   project_id: z.string().min(1),
@@ -124,10 +128,9 @@ export type PushDrainOptions = { batchSize?: number; maxBatches?: number }
 
 /**
  * dispatchPendingPushes() in a loop, for jobs that create many notifications at once (cron sweeps
- * that notify a whole school). Stops as soon as a batch comes back short, or after maxBatches.
+ * that notify a whole school). Stops once nothing is pending, or after maxBatches.
  */
 export async function drainPendingPushes({ batchSize = 100, maxBatches = 20 }: PushDrainOptions = {}): Promise<number> {
-  if (!isPushConfigured()) return 0
   let sent = 0
   try {
     for (let i = 0; i < maxBatches; i++) {
@@ -162,13 +165,16 @@ function recipientOf(r: PendingRow): { role: PushRole; id: number } | null {
   return null
 }
 
+type Device = { recipient_role: string; recipient_id: number; token: string; platform: string }
+
 /**
  * Pushes every notification that has not been pushed yet. Safe to call from several places at once
  * and as often as you like: rows are claimed with FOR UPDATE SKIP LOCKED and stamped before sending,
- * so each notification is attempted at most once. Returns how many device sends succeeded.
+ * so each notification is attempted at most once. Browser devices go through Firebase (only when
+ * FIREBASE_SERVICE_ACCOUNT is set), mobile-app devices through Expo. Returns how many device sends
+ * were accepted.
  */
 export async function dispatchPendingPushes(limit = 100): Promise<number> {
-  if (!isPushConfigured()) return 0
   try {
     // Too old to be useful now — mark them done without sending.
     await pool.query(
@@ -192,44 +198,61 @@ export async function dispatchPendingPushes(limit = 100): Promise<number> {
     const targets = rows.flatMap(r => { const t = recipientOf(r); return t ? [{ row: r, ...t }] : [] })
     if (targets.length === 0) return 0
 
-    const { rows: devices } = await pool.query<{ recipient_role: string; recipient_id: number; token: string }>(
-      `SELECT d.recipient_role, d.recipient_id, d.token
+    const { rows: devices } = await pool.query<Device>(
+      `SELECT d.recipient_role, d.recipient_id, d.token, d.platform
          FROM device_tokens d
          JOIN unnest($1::text[], $2::int[]) AS r(role, id) ON d.recipient_role = r.role AND d.recipient_id = r.id`,
       [targets.map(t => t.role), targets.map(t => t.id)]
     )
-    const tokensByRecipient = new Map<string, string[]>()
+    const devicesByRecipient = new Map<string, Device[]>()
     for (const d of devices) {
       const key = `${d.recipient_role}:${d.recipient_id}`
-      tokensByRecipient.set(key, [...(tokensByRecipient.get(key) ?? []), d.token])
+      devicesByRecipient.set(key, [...(devicesByRecipient.get(key) ?? []), d])
     }
 
-    const jobs = targets.flatMap(t => {
-      // Deep link for the installed parent app; other portals have none.
+    const firebaseOn = isPushConfigured()
+    const fcmJobs: { token: string; message: PushMessage }[] = []
+    const expoJobs: { tokens: string[]; title: string; body: string; url: string; type: string; id: string }[] = []
+    for (const t of targets) {
+      const mine = devicesByRecipient.get(`${t.role}:${t.id}`) ?? []
+      if (mine.length === 0) continue
+      const title = t.row.title ?? 'New notification'
+      const body = (t.row.message ?? '').slice(0, BODY_MAX)
+      // Deep link for the parent apps; other portals have none.
       const link = pushLinkFor(t.role, t.row.type, t.row.data)
-      return (tokensByRecipient.get(`${t.role}:${t.id}`) ?? []).map(token => ({
-        token,
-        message: {
-          title: t.row.title ?? 'New notification',
-          body: (t.row.message ?? '').slice(0, BODY_MAX),
-          data: {
-            notification_id: String(t.row.id),
-            type: t.row.type,
-            ...(link ? { url: link } : {}),
-          },
-        } satisfies PushMessage,
-      }))
-    })
+      const expoTokens = mine.filter(d => d.platform === 'expo').map(d => d.token)
+      if (expoTokens.length > 0) {
+        expoJobs.push({ tokens: expoTokens, title, body, url: mobilePushLink(link), type: t.row.type, id: String(t.row.id) })
+      }
+      if (!firebaseOn) continue
+      for (const d of mine) {
+        if (d.platform === 'expo') continue
+        fcmJobs.push({
+          token: d.token,
+          message: { title, body, data: { notification_id: String(t.row.id), type: t.row.type, ...(link ? { url: link } : {}) } },
+        })
+      }
+    }
 
     let sent = 0
     const dead: string[] = []
-    for (let i = 0; i < jobs.length; i += SEND_CONCURRENCY) {
-      const batch = jobs.slice(i, i + SEND_CONCURRENCY)
+    for (let i = 0; i < fcmJobs.length; i += SEND_CONCURRENCY) {
+      const batch = fcmJobs.slice(i, i + SEND_CONCURRENCY)
       const results = await Promise.all(batch.map(j => sendPushToToken(j.token, j.message)))
       results.forEach((result, n) => {
         if (result === 'sent') sent++
         else if (result === 'unregistered') dead.push(batch[n].token)
       })
+    }
+    for (const job of expoJobs) {
+      const gone = await sendExpo(job.tokens, {
+        title: job.title,
+        body: job.body,
+        data: { url: job.url, type: job.type, notification_id: job.id },
+        kind: pushKindFor(job.type),
+      })
+      sent += job.tokens.length - gone.length
+      dead.push(...gone)
     }
     if (dead.length > 0) await pool.query(`DELETE FROM device_tokens WHERE token = ANY($1::text[])`, [dead])
     return sent
