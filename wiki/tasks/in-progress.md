@@ -4,6 +4,19 @@ Move an entry to [completed.md](completed.md) when it ships. Add new entries at 
 
 ---
 
+### Student AI tutor — RAG over board textbooks (#407)
+**Type:** Feature
+**Branch:** `feature/407-student-rag-tutor`
+**Portals:** Student (AI Hub, AI Pro tier)
+**Summary:** Students ask questions in AI Hub and get answers from Claude Haiku 5.5 grounded in their board + grade textbooks/handbooks (`master_subject_materials`, PDFs in R2), cited by book and page. Chats saved to `ai_chat_sessions` (parent-visible). 60 questions/student/IST day.
+**Progress:**
+- [x] pgvector + `material_chunks`; `scripts/index-materials.ts` (R2 → pages → chunks → embeddings); dry run on 2 PDFs OK
+- [x] Hybrid retrieval (vector + keyword, RRF) in `lib/rag/retrieve.ts`
+- [x] `/api/student/tutor` (NDJSON stream) and `StudentTutorChat` in the AI Pro branch of AI Hub
+- [ ] Embedding credential (`EMBEDDINGS_BASE_URL/API_KEY/MODEL`) — OmniRoute has no embedding provider yet — then run the full index (93 PDFs)
+- [ ] `ANTHROPIC_API_KEY` in the deploy env; run `e2e/student-tutor.spec.ts` against a non-production DB
+- [ ] Set `schools.board` for schools (231 of 234 are NULL → search falls back to all boards for the grade)
+
 ### Push notifications via Firebase (FCM)
 **Type:** Feature
 **Branch:** `feature/fcm-push-backend` (no GitHub issue yet — branch to be renamed with the issue number)

@@ -12,6 +12,12 @@ Non-obvious technical decisions and their reasoning for the WLYL School prototyp
 -->
 
 
+## 2026-10-20 — Student tutor RAG: pgvector in Supabase, OpenAI-compatible embeddings, Claude Haiku 5.5
+
+**Context:** #407 needs answers grounded in 93 board textbook/handbook PDFs (~4.2 GB in R2). Existing `textbook_chunks` was keyword-only and empty.
+**Decision:** Chunks + 1024-dim embeddings live in a new `material_chunks` table (pgvector HNSW + `simple` tsvector) next to the rest of the data, indexed offline by `scripts/index-materials.ts`. Retrieval fuses vector and keyword results (RRF), scoped by board + grade (+ subject, falling back to the whole grade). Embeddings go through any OpenAI-compatible `/embeddings` endpoint (default model `@cf/baai/bge-m3`, multilingual) so the provider (OmniRoute, Cloudflare Workers AI) is config, not code. Answers come from Claude Haiku 5.5, streamed, excerpts in the user turn, stable cached system prompt.
+**Consequences:** No separate vector DB to run. Changing the embedding model to a non-1024-dim one needs a migration and full re-index. Scanned PDFs (no text layer) get `index_error` and are skipped — OCR is out of scope.
+
 ## 2026-10-18 — Push notifications go through an outbox and FCM HTTP v1, not firebase-admin
 
 **Context:** Notifications are rows in `notifications`, written by raw `INSERT`s in about 19 route files, and the web bell polls every 30 seconds. We want pushes to the web app and the separate parent app through Firebase Cloud Messaging.

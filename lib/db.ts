@@ -87,7 +87,7 @@ const BOOTSTRAP_MARKER_KEY   = 'initial_schema_bootstrap'
 // silently never runs anywhere, and you will chase a "column does not exist" 500
 // that reproduces on production but never locally against a fresh DB.
 // Adding a migration statement and bumping this number is ONE change, not two.
-const SCHEMA_VERSION = 55
+const SCHEMA_VERSION = 57
 
 // Records the schema level this build finished applying, on the same row as the
 // bootstrap marker (no extra row, no extra round-trip to read it back).
@@ -4073,4 +4073,37 @@ async function runIncrementalMigrations() {
       failed JSONB NOT NULL DEFAULT '[]'
     );
   `)
+
+  // ── Student AI tutor: textbook/handbook chunks for RAG (#407) ──────────────
+  // indexed_at/chunk_count/index_error are written by scripts/index-materials.ts.
+  await pool.query(`
+    ALTER TABLE master_subject_materials ADD COLUMN IF NOT EXISTS indexed_at TIMESTAMPTZ;
+    ALTER TABLE master_subject_materials ADD COLUMN IF NOT EXISTS chunk_count INTEGER;
+    ALTER TABLE master_subject_materials ADD COLUMN IF NOT EXISTS index_error TEXT;
+  `)
+  // pgvector may be unavailable (e.g. a plain local Postgres). The tutor is optional,
+  // so a missing extension must not abort initDB for the whole app.
+  try {
+    await pool.query(`
+      CREATE EXTENSION IF NOT EXISTS vector;
+      CREATE TABLE IF NOT EXISTS material_chunks (
+        id BIGSERIAL PRIMARY KEY,
+        material_id INTEGER NOT NULL REFERENCES master_subject_materials(id) ON DELETE CASCADE,
+        board VARCHAR(20) NOT NULL,
+        grade VARCHAR(10) NOT NULL,
+        subject VARCHAR(100) NOT NULL,
+        page INTEGER NOT NULL,
+        chunk_index INTEGER NOT NULL,
+        content TEXT NOT NULL,
+        embedding vector(1024) NOT NULL,
+        tsv tsvector GENERATED ALWAYS AS (to_tsvector('simple', content)) STORED,
+        UNIQUE (material_id, chunk_index)
+      );
+      CREATE INDEX IF NOT EXISTS idx_material_chunks_scope ON material_chunks(board, grade, subject);
+      CREATE INDEX IF NOT EXISTS idx_material_chunks_tsv ON material_chunks USING GIN (tsv);
+      CREATE INDEX IF NOT EXISTS idx_material_chunks_embedding ON material_chunks USING hnsw (embedding vector_cosine_ops);
+    `)
+  } catch (err) {
+    console.warn('[db] pgvector unavailable — material_chunks not created; AI tutor retrieval disabled:', err)
+  }
 }

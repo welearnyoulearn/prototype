@@ -2,7 +2,8 @@
 
 import { motion, useReducedMotion } from 'framer-motion'
 import { ArrowUpRight } from 'lucide-react'
-import { StudentEmptyState, StudentPageIntro, studentReveal } from './StudentExperience'
+import { StudentPageIntro, studentReveal } from './StudentExperience'
+import StudentTutorChat from './StudentTutorChat'
 import { Sticker, type StickerName, type Tone } from './stickers'
 
 type AiTool = {
@@ -27,9 +28,10 @@ export default function StudentAiHub({ tier }: { tier: 'ai_basic' | 'ai_pro' | '
 
   if (tier === 'ai_pro') {
     return (
-      <div className="mx-auto max-w-3xl space-y-7">
-        <StudentPageIntro {...INTRO} description="Your school controls which assisted-learning tools are available in this workspace." />
-        <StudentEmptyState sticker="sparkles" tone="violet" title="AI Pro is being prepared" description="Your school has assigned AI Pro. The full doubt-clearing experience is not available yet, so there is nothing you need to set up." />
+      <div className="mx-auto max-w-5xl space-y-7">
+        <StudentPageIntro {...INTRO} title="AI Tutor" description="Ask doubts from your textbooks. Every answer links to the book page it came from."
+          aside={<span className="sb-chip" data-size="lg" data-tone="violet"><Sticker name="sparkles" size="xs" />AI Pro access</span>} />
+        <StudentTutorChat />
       </div>
     )
   }
