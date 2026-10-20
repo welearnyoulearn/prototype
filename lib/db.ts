@@ -87,7 +87,7 @@ const BOOTSTRAP_MARKER_KEY   = 'initial_schema_bootstrap'
 // silently never runs anywhere, and you will chase a "column does not exist" 500
 // that reproduces on production but never locally against a fresh DB.
 // Adding a migration statement and bumping this number is ONE change, not two.
-const SCHEMA_VERSION = 53
+const SCHEMA_VERSION = 55
 
 // Records the schema level this build finished applying, on the same row as the
 // bootstrap marker (no extra row, no extra round-trip to read it back).
@@ -3789,6 +3789,57 @@ async function runIncrementalMigrations() {
   `)
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_school_chapters_name_ci ON school_chapters(school_subject_id, LOWER(TRIM(chapter_name)))`)
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_school_topics_name_ci ON school_topics(school_chapter_id, LOWER(TRIM(topic_name)))`)
+
+  // ── Push notifications (FCM) ────────────────────────────────────────────────
+  // device_tokens: one row per installed browser/app. recipient_role + recipient_id mirror the
+  // notifications recipient columns ('school' rows are keyed by school_id, because a school-level
+  // notification goes to every admin of that school). token is UNIQUE so a device that logs in as
+  // someone else is re-pointed instead of keeping a second owner.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS device_tokens (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      recipient_role VARCHAR(10) NOT NULL CHECK (recipient_role IN ('teacher','student','parent','school')),
+      recipient_id INTEGER NOT NULL,
+      token TEXT NOT NULL UNIQUE,
+      platform VARCHAR(10) NOT NULL CHECK (platform IN ('web','android','ios','expo')),
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      last_seen_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `)
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_device_tokens_recipient ON device_tokens(recipient_role, recipient_id)`)
+  // notifications.push_sent_at is the outbox marker: NULL = not pushed yet. Rows that already exist
+  // when the column is first added are stamped so rolling this out never replays old notifications.
+  await pool.query(`
+    DO $$ BEGIN
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'notifications' AND column_name = 'push_sent_at') THEN
+        ALTER TABLE notifications ADD COLUMN push_sent_at TIMESTAMPTZ;
+        UPDATE notifications SET push_sent_at = NOW();
+      END IF;
+    END $$
+  `)
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_notifications_push_pending ON notifications(created_at) WHERE push_sent_at IS NULL`)
+
+  // The parent mobile app (wlyl-parent-mobile, Expo) registers Expo push tokens, which go through Expo's
+  // push service rather than to Firebase directly: one more device_tokens platform, 'expo'.
+  await pool.query(`
+    DO $$ BEGIN
+      ALTER TABLE device_tokens DROP CONSTRAINT IF EXISTS device_tokens_platform_check;
+      ALTER TABLE device_tokens ADD CONSTRAINT device_tokens_platform_check CHECK (platform IN ('web','android','ios','expo'));
+    END $$
+  `)
+  // An earlier, unmerged branch (#133) kept Expo tokens in their own table. Where a database has it, move
+  // the tokens across so those phones keep getting pushes. The old table is left in place.
+  await pool.query(`
+    DO $$ BEGIN
+      IF to_regclass('public.expo_push_tokens') IS NOT NULL THEN
+        INSERT INTO device_tokens (school_id, recipient_role, recipient_id, token, platform, created_at, last_seen_at)
+        SELECT school_id, 'parent', parent_id, token, 'expo', created_at, COALESCE(last_used_at, created_at)
+          FROM expo_push_tokens
+        ON CONFLICT (token) DO NOTHING;
+      END IF;
+    END $$
+  `)
 
   // Usage tracking, prices and limits for paid services (#358). Records hold ids and
   // counts only — never message text, phone numbers, emails or file names.

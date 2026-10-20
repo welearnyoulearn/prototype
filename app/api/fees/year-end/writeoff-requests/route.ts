@@ -1,4 +1,5 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
+import { dispatchPendingPushes } from '@/lib/push'
 import pool, { ensureDB } from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
 import { withWatchline } from '@/lib/logger'
@@ -110,6 +111,7 @@ async function handlePOST(req: NextRequest) {
          JSON.stringify({ academic_year, tab: 'fee-management' })]
       ).catch(() => { /* a missed notification must not undo the request */ })
     }
+    after(() => dispatchPendingPushes())
     return NextResponse.json({ approval_required: true, requested: created.length, skipped, requests: await listRequests(access.schoolId, academic_year) })
   } catch (err: unknown) {
     console.error('[writeoff-requests POST]', err)
@@ -153,6 +155,7 @@ async function handlePATCH(req: NextRequest) {
        `${access.actor} ${action === 'approve' ? 'approved' : 'rejected'} the ${r.academic_year} write-off for ${who?.student_name ?? 'a student'}${note ? ` — ${note}` : ''}.`,
        JSON.stringify({ academic_year: r.academic_year, tab: 'fee-management' })]
     ).catch(() => { /* a missed notification must not undo the decision */ })
+    after(() => dispatchPendingPushes())
     return NextResponse.json({ ok: true, requests: await listRequests(access.schoolId, r.academic_year) })
   } catch (err: unknown) {
     console.error('[writeoff-requests PATCH]', err)

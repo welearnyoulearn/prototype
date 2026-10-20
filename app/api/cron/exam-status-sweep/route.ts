@@ -15,7 +15,8 @@
 // trigger is always safe.
 // Protected: requires Authorization: Bearer <CRON_SECRET> header.
 
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
+import { drainPendingPushes } from '@/lib/push'
 import pool from '@/lib/db'
 
 export async function GET(req: NextRequest) {
@@ -93,6 +94,7 @@ async function run(req: NextRequest) {
       } catch { /* non-critical */ }
     }
 
+    after(() => drainPendingPushes())
     return NextResponse.json({ success: true, exams_opened: opened.length, notified })
   } catch (err) {
     console.error('[cron/exam-status-sweep]', err)

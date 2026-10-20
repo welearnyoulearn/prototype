@@ -1,4 +1,5 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
+import { dispatchPendingPushes } from '@/lib/push'
 import pool, { ensureDB } from '@/lib/db'
 import { requireExamsTeacher, isClassTeacherOf } from '@/lib/examsAuth'
 
@@ -107,6 +108,7 @@ export async function POST(
       client.release()
     }
 
+    after(() => dispatchPendingPushes())
     return NextResponse.json({ success: true, assigned: validated.filter(assignment => assignment.teacherId).length })
   } catch (err: unknown) {
     console.error('[API]', err)

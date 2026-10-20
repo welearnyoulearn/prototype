@@ -21,6 +21,7 @@ import StudentDashboard from './components/StudentDashboard'
 import AttendanceCalendar from '../components/AttendanceCalendar'
 import SchoolCalendarView from '../components/SchoolCalendarView'
 import StudentProfile from './components/StudentProfile'
+import { unregisterPushDevice } from '@/lib/pushClient'
 
 // Lazy-loaded — only downloaded when first opened
 function ModuleSkeleton() {
@@ -225,6 +226,7 @@ function StudentPortal() {
     if (logoutInFlight.current) return
     logoutInFlight.current = true
     const usageSessionId = getUsageSessionId()
+    await unregisterPushDevice()
     await fetch('/api/student/auth/logout', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

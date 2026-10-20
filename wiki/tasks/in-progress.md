@@ -4,6 +4,17 @@ Move an entry to [completed.md](completed.md) when it ships. Add new entries at 
 
 ---
 
+### Push notifications via Firebase (FCM)
+**Type:** Feature
+**Branch:** `feature/fcm-push-backend` (no GitHub issue yet — branch to be renamed with the issue number)
+**Summary:** Push for the web app and the parent app. Backend done: `device_tokens`, `/api/devices`, `lib/push.ts` sender and dispatcher, `/api/cron/push-dispatch`.
+**Progress:**
+- [x] device_tokens table, push_sent_at outbox column, register/unregister endpoints
+- [x] FCM sender and dispatcher; wired into `POST /api/notifications`
+- [x] Call `dispatchPendingPushes()` / `drainPendingPushes()` from every notification-creating route and cron
+- [x] Web: `firebase-messaging-sw.js`, "Turn on" prompt in NotificationBell, token registered on enable/visit and removed on logout (all four portals). Needs a real Firebase project to test end to end.
+- [x] Parent mobile app (Expo, #133): `/api/parent/push/expo` on `device_tokens`, Expo sender in the same dispatcher
+- [ ] `FIREBASE_SERVICE_ACCOUNT` in Vercel; real-phone test of the mobile app on a development or Play build
 ### Usage credits & real WhatsApp sending (#358, #359)
 **Type:** Feature
 **Portals:** Platform Admin, School Admin

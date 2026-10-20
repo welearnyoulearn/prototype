@@ -1,4 +1,5 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
+import { dispatchPendingPushes } from '@/lib/push'
 import pool, { ensureDB } from '@/lib/db'
 import { requireExamsAdmin } from '@/lib/examsAuth'
 import { findExamConflicts } from '@/lib/examConflicts'
@@ -451,6 +452,7 @@ export async function POST(req: NextRequest) {
       }
 
       await client.query('COMMIT')
+      after(() => dispatchPendingPushes())
       return NextResponse.json({
         success: true,
         exam_group_id: examGroupId,

@@ -23,6 +23,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { BookOpen, Building2, CalendarDays, ChevronDown, ClipboardCheck, Download, GraduationCap, LayoutDashboard, Library, GripVertical, LayoutGrid, LineChart, ListChecks, Megaphone, MessageSquareText, NotebookPen, Receipt, RefreshCcw, School, SlidersHorizontal, Users, Wallet, Wrench } from 'lucide-react'
 import Overview from './components/Overview'
 import StaffProfile from './components/StaffProfile'
+import { unregisterPushDevice } from '@/lib/pushClient'
 
 // Lazy-loaded — only downloaded when first opened
 function ModuleSkeleton() {
@@ -389,6 +390,7 @@ function SchoolAdmin() {
 
   async function handleLogout() {
     const usageSessionId = getUsageSessionId()
+    await unregisterPushDevice()
     await fetch('/api/auth/logout', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

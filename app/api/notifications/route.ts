@@ -1,7 +1,8 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
 import { z } from 'zod'
 import pool from '@/lib/db'
 import { getSession, getTeacherSession, getStudentSession, getParentSession } from '@/lib/auth'
+import { dispatchPendingPushes } from '@/lib/push'
 
 export async function GET(req: NextRequest) {
   try {
@@ -127,6 +128,7 @@ export async function POST(req: NextRequest) {
        toSchool ? schoolId : null, teacher?.teacherId ?? null, b.type, b.title ?? null, b.message ?? null,
        b.data ? JSON.stringify(b.data) : null]
     )
+    after(() => dispatchPendingPushes())
     return NextResponse.json(result.rows[0], { status: 201 })
   } catch (error) {
     console.error(error)

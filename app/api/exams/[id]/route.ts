@@ -1,4 +1,5 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
+import { dispatchPendingPushes } from '@/lib/push'
 import pool, { ensureDB } from '@/lib/db'
 import { requireExamsAccess, requireExamsAdmin, isClassTeacherOf, isTeacherLinkedToExam } from '@/lib/examsAuth'
 import { findExamConflicts } from '@/lib/examConflicts'
@@ -316,6 +317,7 @@ export async function PUT(
       )
     }
 
+    after(() => dispatchPendingPushes())
     return NextResponse.json(updated)
     } finally {
       await editClient.query('SELECT pg_advisory_unlock($1)', [actor.schoolId]).catch(() => undefined)
