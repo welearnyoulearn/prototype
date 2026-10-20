@@ -4,14 +4,15 @@ import { useEffect, useRef, useState, Suspense } from 'react'
 import { useRouter } from 'next/navigation'
 import dynamic from 'next/dynamic'
 import NotificationBell from '../components/NotificationBell'
-import { useNavNotificationCounts, NavBadge } from '../components/navNotifications'
+import { useNavNotifications, NavBadge } from '../components/navNotifications'
 import { useUsageHeartbeat } from '@/lib/useUsageHeartbeat'
 import { useFeatureTracking } from '@/lib/useFeatureTracking'
 import { useSectionNav } from '@/lib/useSectionNav'
 import { getUsageSessionId, clearUsageSessionId } from '@/lib/usageSession'
 import { PORTAL_NAV_KEY_ALIASES } from '@/lib/features'
 import PortalSidebar from '@/components/portal/PortalSidebar'
-import { LogOut, Menu } from 'lucide-react'
+import FeatureLauncher, { type LauncherSection } from '@/components/portal/FeatureLauncher'
+import { LayoutGrid, LogOut, Menu } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Sticker, type StickerName } from './components/stickers'
 
@@ -104,6 +105,11 @@ const NAV_SECTIONS: NavSection[] = [
 
 const NAV_ITEMS: NavItem[] = NAV_SECTIONS.flatMap(s => s.items)
 
+// Sticker for each section's chip in the "All features" window.
+const SECTION_STICKERS: Record<string, StickerName> = {
+  'HOME': 'house', 'LEARNING': 'party-popper', 'ACADEMIC': 'trophy', 'ACCOUNT': 'bust-in-silhouette', 'AI HUB': 'robot',
+}
+
 // Only nav keys that map to a plan-gated ALL_FEATURES entry get checked
 // against enabledFeatures — everything else (dashboard, profile) has always
 // been unconditionally available and stays that way. 'syllabus'/
@@ -133,7 +139,8 @@ function StudentPortal() {
     setVisitedNav(prev => (prev.has(activeNav) ? prev : new Set([...prev, activeNav])))
   }, [activeNav])
   const [sidebarOpen, setSidebarOpen] = useState(false)
-  const navCounts = useNavNotificationCounts('student')
+  const { counts: navCounts, latest: navLatest } = useNavNotifications('student')
+  const [launcherOpen, setLauncherOpen] = useState(false)
   const [loading,     setLoading]     = useState(true)
   const [enabledFeatures, setEnabledFeatures] = useState<Set<string> | null>(null)
   const [aiAccessTier, setAiAccessTier] = useState<'ai_basic' | 'ai_pro' | 'none' | null>(null)
@@ -236,6 +243,19 @@ function StudentPortal() {
   const firstName   = student.name.split(' ')[0]
   const currentItem = NAV_ITEMS.find(i => i.key === activeNav)
 
+  // "All features" window: the same visible items as the sidebar, grouped the same way.
+  const launcherSections: LauncherSection[] = NAV_SECTIONS
+    .map(section => ({
+      id: section.label.toLowerCase().replace(/s+/g, '-'),
+      label: section.label,
+      icon: <Sticker name={SECTION_STICKERS[section.label] ?? 'sparkles'} size="xs" />,
+      items: section.items
+        .filter(item => !item.comingSoon && isNavItemVisible(item.key))
+        .map(item => ({ key: item.key, label: item.label, icon: <Sticker name={item.sticker} size="md" /> })),
+    }))
+    .filter(section => section.items.length > 0)
+  const totalUnread = launcherSections.flatMap(s => s.items).reduce((n, i) => n + (navCounts[i.key] ?? 0), 0)
+
   return (
     <div className="portal-root" data-portal="student" data-student-ui="" data-section={activeNav}>
       <a href="#student-content" className="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:bg-white focus:p-3">Skip to content</a>
@@ -279,6 +299,29 @@ function StudentPortal() {
             </div>
           </div>
           <nav className="flex-1 overflow-y-auto px-3 py-2" aria-label="Student sections">
+            {/* All-features window: every icon + name, grouped, one click to open */}
+            <div className="pb-2">
+              <button
+                type="button"
+                onClick={() => setLauncherOpen(true)}
+                data-testid="nav-launcher"
+                aria-haspopup="dialog"
+                className="portal-nav-item !min-h-11 !border-[var(--sb-ink)] !bg-[var(--section-tone)] !font-extrabold"
+              >
+                <LayoutGrid className="h-5 w-5 shrink-0" aria-hidden="true" />
+                <span className="flex-1">All features</span>
+                <NavBadge navKey="launcher" count={totalUnread} className="!ml-0" />
+              </button>
+              <FeatureLauncher
+                open={launcherOpen}
+                onOpenChange={setLauncherOpen}
+                sections={launcherSections}
+                activeNav={activeNav}
+                counts={navCounts}
+                latest={navLatest}
+                onSelect={navigateTo}
+              />
+            </div>
             {NAV_SECTIONS.map(section => {
               const visibleItems = section.items.filter(item => isNavItemVisible(item.key))
               if (visibleItems.length === 0) return null
