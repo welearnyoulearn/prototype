@@ -390,33 +390,63 @@ export default function FeeManagement({
     setPassoutCollectLoading(null)
   }
 
+  // The Overview opens on the headline figures only (/api/fees/stats?scope=summary). The heavier
+  // breakdowns — class-wise analysis, top defaulters, payment modes, recent payments, passout dues —
+  // are fetched when the user presses "View details", then kept fresh on later refreshes.
+  const [detailsLoaded, setDetailsLoaded]   = useState(false)
+  const [detailsLoading, setDetailsLoading] = useState(false)
+  const detailsLoadedRef = useRef(false)
+
+  const loadDetails = useCallback(async () => {
+    if (!academicYear) return
+    setDetailsLoading(true)
+    try {
+      const [detRes, pmtRes] = await Promise.all([
+        fetch(`/api/fees/stats?school_id=${schoolId}&academic_year=${academicYear}&scope=details`),
+        fetch(`/api/fees/payments?school_id=${schoolId}&academic_year=${encodeURIComponent(academicYear)}`),
+      ])
+      if (detRes.ok) {
+        const dd = await detRes.json()
+        setStats(prev => prev ? { ...prev, monthly_trend: dd.monthly_trend, top_defaulters: dd.top_defaulters, by_payment_mode: dd.by_payment_mode, by_class: dd.by_class } : prev)
+        setGradeStats(Array.isArray(dd.by_class) ? dd.by_class : [])
+        clearLoadError('stats')
+        detailsLoadedRef.current = true; setDetailsLoaded(true)
+      } else setLoadError('stats', 'Could not load the detailed breakdown — try again')
+      if (pmtRes.ok) {
+        const all = await pmtRes.json() as Array<RecentPayment & { payment_status?: string }>
+        setRecentPayments(all.filter(p => p.payment_status === 'completed' || !p.payment_status).slice(0, 6))
+      }
+    } catch { setLoadError('stats', 'Network error — the detailed breakdown could not be loaded') }
+    finally { setDetailsLoading(false) }
+    loadPassout()
+  }, [schoolId, academicYear, loadPassout])
+
   const loadStats = useCallback(async () => {
     if (!academicYear) return
     setStatsLoading(true)
     try {
-      const [statsRes, pmtRes] = await Promise.all([
-        fetch(`/api/fees/stats?school_id=${schoolId}&academic_year=${academicYear}`),
-        fetch(`/api/fees/payments?school_id=${schoolId}&academic_year=${encodeURIComponent(academicYear)}`),
-      ])
+      const statsRes = await fetch(`/api/fees/stats?school_id=${schoolId}&academic_year=${academicYear}&scope=summary`)
       if (statsRes.ok) {
         clearLoadError('stats')
         const sd = await statsRes.json()
-        setStats(sd)
-        setGradeStats(Array.isArray(sd.by_class) ? sd.by_class : [])
+        // keep any detail sections the user has already opened; otherwise start them empty
+        setStats(prev => ({
+          ...sd,
+          monthly_trend: prev?.monthly_trend ?? [], top_defaulters: prev?.top_defaulters ?? [],
+          by_payment_mode: prev?.by_payment_mode ?? [], by_class: prev?.by_class ?? [],
+        }))
       } else setLoadError('stats', 'Could not load fee summary — try refreshing the page')
-      if (pmtRes.ok) {
-        const all = await pmtRes.json() as Array<RecentPayment & { payment_status?: string }>
-        setRecentPayments(
-          all
-            .filter(p => p.payment_status === 'completed' || !p.payment_status)
-            .slice(0, 6)
-        )
-      }
     } catch { setLoadError('stats', 'Network error — fee summary could not be loaded') }
     finally { setStatsLoading(false) }
-  }, [schoolId, academicYear])
+    if (detailsLoadedRef.current) loadDetails()
+  }, [schoolId, academicYear, loadDetails])
 
-  useEffect(() => { if (academicYear) { loadStats(); loadPassout() } }, [loadStats, loadPassout, academicYear])
+  // A different year is a different set of figures: collapse the details back to the button.
+  useEffect(() => {
+    detailsLoadedRef.current = false; setDetailsLoaded(false)
+    setStats(null); setGradeStats([]); setRecentPayments([])
+  }, [schoolId, academicYear])
+  useEffect(() => { if (academicYear) loadStats() }, [loadStats, academicYear])
 
   // ── Setup: categories + structures + lock + amendments ───────────────────────
   const loadSetup = useCallback(async () => {
@@ -465,11 +495,10 @@ export default function FeeManagement({
     } catch { setSetupStatus(null) }
     finally { setSetupStatusLoading(false) }
   }, [schoolId, academicYear])
-  // Also refetch on every tab change (not just academicYear) — otherwise leaving
-  // the Setup tab after creating categories/amounts/bills/lock would show a stale
-  // banner on Overview until academicYear happened to change again. This endpoint
-  // is cheap enough that refetching on tab switches is a non-issue.
-  useEffect(() => { if (academicYear) loadSetupStatus() }, [academicYear, activeTab, loadSetupStatus])
+  // Refetched when the year changes, and (via the effect below) whenever the Fee Plan data changes
+  // — head added, amounts saved, bills generated, plan locked. Not on every tab switch: those are
+  // the only things that change it, and the Fee Plan tab reports each one.
+  useEffect(() => { if (academicYear) loadSetupStatus() }, [academicYear, loadSetupStatus])
   // Fee Plan edits (head added, amounts saved, bills generated, plan locked) reload the plan data
   // without changing tab; refresh the banner's status then too so it doesn't contradict the checklist.
   useEffect(() => { if (academicYear && activeTab === 'setup') loadSetupStatus() }, [categories, structures, structureLock, academicYear, activeTab, loadSetupStatus])
@@ -976,6 +1005,7 @@ ${Number(pbSummary.carried_forward) > 0 ? `<p style="font-size:11px;color:#92400
           gradeStats={gradeStats} recentPayments={recentPayments}
           passoutData={passoutData} passoutLoading={passoutLoading} passoutError={loadErrors.passout}
           passoutCollectLoading={passoutCollectLoading} passoutCollectError={passoutCollectError}
+          detailsLoaded={detailsLoaded} detailsLoading={detailsLoading} onLoadDetails={loadDetails}
           onRetryStats={loadStats} onRetryPassout={loadPassout}
           onCollectPassout={collectPassoutStudent}
           onGoToCollect={() => setActiveTab('collect' as Tab)}

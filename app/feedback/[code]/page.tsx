@@ -1,4 +1,5 @@
 import FeedbackWizard from './FeedbackWizard'
+import CloudflareWebAnalytics from '@/components/CloudflareWebAnalytics'
 
 // Public, unauthenticated route — reached by scanning a school's feedback QR
 // poster. No server-side data fetching here on purpose: a bad/expired code
@@ -6,5 +7,10 @@ import FeedbackWizard from './FeedbackWizard'
 // distinction is made client-side by GET /api/feedback/resolve.
 export default async function FeedbackPage({ params }: { params: Promise<{ code: string }> }) {
   const { code } = await params
-  return <FeedbackWizard code={code} />
+  return (
+    <>
+      <FeedbackWizard code={code} />
+      <CloudflareWebAnalytics />
+    </>
+  )
 }

@@ -168,7 +168,7 @@ export async function backfillPortalCredentials({
         if (student.email) {
           sendsToFire.push(() => {
             sendStudentWelcomeEmail({
-              to: student.email, name: student.name, schoolName,
+              schoolId: schoolId, to: student.email, name: student.name, schoolName,
               rollNumber: student.roll_number, tempPassword: studentTempPassword!,
               loginUrl: `${appUrl}/student/login`,
             }).catch(console.error)
@@ -235,7 +235,7 @@ export async function backfillPortalCredentials({
               const studentName = student.name
               sendsToFire.push(() => {
                 sendParentWelcomeEmail({
-                  to: pe, parentName: parentDisplayName, studentName, schoolName,
+                  schoolId: schoolId, to: pe, parentName: parentDisplayName, studentName, schoolName,
                   tempPassword: parentTempPassword!, loginUrl: `${appUrl}/parent/login`,
                 }).catch(console.error)
               })
@@ -268,7 +268,7 @@ export async function backfillPortalCredentials({
         if (contact.email) {
           sendsToFire.push(() => {
             sendChildCredentialsToParentEmail({
-              to: contact.email!,
+              schoolId: schoolId, to: contact.email!,
               parentName: parentDisplayName,
               studentName, schoolName, rollNumber, tempPassword,
               loginUrl: `${appUrl}/student/login`,

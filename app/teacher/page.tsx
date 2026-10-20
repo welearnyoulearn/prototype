@@ -6,12 +6,14 @@ import dynamic from 'next/dynamic'
 import { FullPageLoader } from '@/components/loaders'
 import { FeaturesProvider } from '@/lib/features-context'
 import NotificationBell from '../components/NotificationBell'
+import { useNavNotifications, NavBadge } from '../components/navNotifications'
 import { useUsageHeartbeat } from '@/lib/useUsageHeartbeat'
 import { useFeatureTracking } from '@/lib/useFeatureTracking'
 import { useSectionNav } from '@/lib/useSectionNav'
 import { getUsageSessionId, clearUsageSessionId } from '@/lib/usageSession'
 import PortalSidebar from '@/components/portal/PortalSidebar'
-import { CalendarDays, Eye, Home, LogOut, Menu } from 'lucide-react'
+import FeatureLauncher, { type LauncherSection } from '@/components/portal/FeatureLauncher'
+import { CalendarDays, Eye, Home, LayoutGrid, LogOut, Menu, School, UserRound } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 
 // Always-loaded (landing tab, and small enough not to be worth its own chunk)
@@ -80,6 +82,13 @@ const NAV_KEY_TO_FEATURE: Record<string, string> = {
   syllabus: 'curriculum',
 }
 
+// Section icons for the "All features" window (the sidebar itself shows section labels only).
+const SECTION_ICONS: Record<string, React.ReactNode> = {
+  'MAIN': <Home className="w-3.5 h-3.5" aria-hidden="true" />,
+  'MY CLASSES': <School className="w-3.5 h-3.5" aria-hidden="true" />,
+  'MY ACCOUNT': <UserRound className="w-3.5 h-3.5" aria-hidden="true" />,
+}
+
 const NAV_SECTIONS: NavSection[] = [
   {
     label: 'MAIN',
@@ -122,6 +131,8 @@ function TeacherPortal() {
     return () => window.clearTimeout(update)
   }, [activeNav])
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const { counts: navCounts, latest: navLatest } = useNavNotifications('teacher')
+  const [launcherOpen, setLauncherOpen] = useState(false)
   const [selectedClass, setSelectedClass] = useState<{ id: number; grade: string; section: string; class_teacher_name: string | null; class_teacher_id?: number | null } | null>(null)
   const [classViewInitialTab, setClassViewInitialTab] = useState<string | undefined>(undefined)
   const [classViewOpenExamId, setClassViewOpenExamId] = useState<number | undefined>(undefined)
@@ -248,6 +259,19 @@ function TeacherPortal() {
 
   if (!teacher) return null
 
+  // Same plan gating as the sidebar below, flattened for the "All features" window.
+  const launcherSections: LauncherSection[] = NAV_SECTIONS
+    .map(section => ({
+      label: section.label,
+      icon: SECTION_ICONS[section.label] ?? <LayoutGrid className="w-3.5 h-3.5" aria-hidden="true" />,
+      items: section.items.filter(item => {
+        const featureKey = NAV_KEY_TO_FEATURE[item.key]
+        return !item.comingSoon && (!featureKey || enabledFeatures === null || enabledFeatures.has(featureKey))
+      }),
+    }))
+    .filter(section => section.items.length > 0)
+  const totalUnread = launcherSections.flatMap(s => s.items).reduce((n, i) => n + (navCounts[i.key] ?? 0), 0)
+
   return (
     <FeaturesProvider value={enabledFeatures ?? new Set()}>
     <div className="portal-root" data-portal="teacher">
@@ -298,6 +322,29 @@ function TeacherPortal() {
             <p className="mt-1 text-xs leading-relaxed text-[#647068]">{teacher.school_name}</p>
           </div>
           <nav className="flex-1 overflow-y-auto px-3 py-3" aria-label="Teacher sections">
+            {/* All-features window: every icon + name, grouped by section, one click to open */}
+            <div className="pb-3">
+              <button
+                type="button"
+                onClick={() => setLauncherOpen(true)}
+                data-testid="nav-launcher"
+                aria-haspopup="dialog"
+                className="flex h-10 w-full items-center gap-2.5 rounded-lg border border-[#c5d8c8] bg-[#dce9dc] px-3 text-[14px] font-semibold text-[#173e2f] transition-colors hover:bg-[#cfe1d0] focus-visible:outline-2 focus-visible:outline-[#235b46]"
+              >
+                <LayoutGrid className="h-5 w-5 flex-shrink-0" aria-hidden="true" />
+                <span className="flex-1 text-left">All features</span>
+                <NavBadge navKey="launcher" count={totalUnread} className="!ml-0" />
+              </button>
+              <FeatureLauncher
+                open={launcherOpen}
+                onOpenChange={setLauncherOpen}
+                sections={launcherSections}
+                activeNav={activeNav}
+                counts={navCounts}
+                latest={navLatest}
+                onSelect={navigateTo}
+              />
+            </div>
             {NAV_SECTIONS.map(section => {
               const visibleItems = section.items.filter(item => {
                 const featureKey = NAV_KEY_TO_FEATURE[item.key]
@@ -311,6 +358,7 @@ function TeacherPortal() {
                     <button key={item.key} onClick={() => { if (!item.comingSoon) navigateTo(item.key) }} className="portal-nav-item" aria-current={activeNav === item.key ? 'page' : undefined} disabled={item.comingSoon}>
                       <span className="shrink-0" aria-hidden="true">{item.icon}</span>
                       <span className="flex-1">{item.label}</span>
+                      <NavBadge count={navCounts[item.key]} navKey={item.key} />
                       {item.comingSoon && <span className="text-xs">Soon</span>}
                     </button>
                   ))}

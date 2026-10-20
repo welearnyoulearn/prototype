@@ -6,6 +6,7 @@ import dynamic from 'next/dynamic'
 import { motion, MotionConfig } from 'framer-motion'
 import { FeaturesProvider } from '@/lib/features-context'
 import NotificationBell from '../components/NotificationBell'
+import { useNavNotifications, NavBadge } from '../components/navNotifications'
 import CommandBar from './components/CommandBar'
 import { useRouter } from 'next/navigation'
 import { FullPageLoader } from '@/components/loaders'
@@ -15,10 +16,11 @@ import { useSectionNav } from '@/lib/useSectionNav'
 import { getUsageSessionId, clearUsageSessionId } from '@/lib/usageSession'
 import { ALL_FEATURES, PORTAL_NAV_KEY_ALIASES } from '@/lib/features'
 import PortalSidebar from '@/components/portal/PortalSidebar'
+import FeatureLauncher, { type LauncherSection } from '@/components/portal/FeatureLauncher'
 import { Skeleton } from '@/components/ui/skeleton'
 
 // Always-loaded (small, needed immediately)
-import { Building2, CalendarDays, ClipboardCheck, Download, GraduationCap, LayoutDashboard, Library, ListChecks, Megaphone, MessageSquareText, NotebookPen, Receipt, RefreshCcw, School, SlidersHorizontal, Users, Wallet } from 'lucide-react'
+import { BookOpen, Building2, CalendarDays, ChevronDown, ClipboardCheck, Download, GraduationCap, LayoutDashboard, Library, GripVertical, LayoutGrid, LineChart, ListChecks, Megaphone, MessageSquareText, NotebookPen, Receipt, RefreshCcw, School, SlidersHorizontal, Users, Wallet, Wrench } from 'lucide-react'
 import Overview from './components/Overview'
 import StaffProfile from './components/StaffProfile'
 import { unregisterPushDevice } from '@/lib/pushClient'
@@ -54,6 +56,7 @@ const SchoolSettings        = dynamic(() => import('./components/SchoolSettings'
 const FeeManagement         = dynamic(() => import('./components/FeeManagement'),          { loading: () => <ModuleSkeleton /> })
 const ExpenseManagement     = dynamic(() => import('./components/ExpenseManagement'),      { loading: () => <ModuleSkeleton /> })
 const YearRollover          = dynamic(() => import('./components/YearRollover'),           { loading: () => <ModuleSkeleton /> })
+const SchoolTraffic         = dynamic(() => import('./components/SchoolTraffic'),          { loading: () => <ModuleSkeleton /> })
 
 type School = {
   id: number
@@ -76,14 +79,18 @@ type NavItem = {
   tier?: Tier[]  // kept for reference only — actual visibility driven by platform feature config
 }
 
-// Section grouping for sidebar — Management first, then Scheduling
-const NAV_SECTIONS = [
-  { label: 'OVERVIEW',      keys: ['overview'] },
-  { label: 'PEOPLE',        keys: ['staff', 'students', 'class-management'] },
-  { label: 'MONEY MANAGEMENT', keys: ['fee-management', 'expenses'] },
-  { label: 'SCHEDULING',    keys: ['curriculum', 'library', 'attendance', 'academic-calendar', 'exam-schedule'] },
-  { label: 'COMMUNICATION', keys: ['announcements', 'feedback-management'] },
-  { label: 'TOOLS',         keys: ['export', 'settings', 'year-rollover'] },
+// Section grouping for sidebar — ordered by how often a school admin reaches for each
+// area: who (people) → money → the school day → teaching content → outreach → admin tools.
+// Within a section, the most-used / primary item comes first.
+// `label` is the stable key (saved order, test ids); `shortLabel` is what the header shows when it must fit 240px.
+const NAV_SECTIONS: { label: string; shortLabel?: string; keys: string[]; icon: React.ReactNode }[] = [
+  { label: 'OVERVIEW',      keys: ['overview'], icon: <LayoutDashboard className="w-3.5 h-3.5" aria-hidden="true" /> },
+  { label: 'PEOPLE',        keys: ['students', 'staff', 'class-management'], icon: <Users className="w-3.5 h-3.5" aria-hidden="true" /> },
+  { label: 'MONEY MANAGEMENT', shortLabel: 'MONEY', keys: ['fee-management', 'expenses'], icon: <Wallet className="w-3.5 h-3.5" aria-hidden="true" /> },
+  { label: 'SCHEDULING',    keys: ['attendance', 'academic-calendar', 'exam-schedule'], icon: <CalendarDays className="w-3.5 h-3.5" aria-hidden="true" /> },
+  { label: 'ACADEMICS',     keys: ['curriculum', 'syllabus-tracking', 'library'], icon: <BookOpen className="w-3.5 h-3.5" aria-hidden="true" /> },
+  { label: 'COMMUNICATION', keys: ['announcements', 'feedback-management'], icon: <Megaphone className="w-3.5 h-3.5" aria-hidden="true" /> },
+  { label: 'TOOLS',         keys: ['settings', 'export', 'traffic', 'year-rollover'], icon: <Wrench className="w-3.5 h-3.5" aria-hidden="true" /> },
 ]
 
 type NavOrder = { sections: string[]; items: Record<string, string[]> }
@@ -232,6 +239,12 @@ const NAV_ITEMS: NavItem[] = [
     tier: ['basic', 'standard', 'premium'],
     icon: (<RefreshCcw className="w-4 h-4" aria-hidden="true" />),
   },
+  {
+    // Not a plan feature: always on for school admin + principal (see canSeeTraffic).
+    key: 'traffic',
+    label: 'Traffic',
+    icon: (<LineChart className="w-4 h-4" aria-hidden="true" />),
+  },
 ]
 
 
@@ -246,8 +259,11 @@ function SchoolAdmin() {
   const { current: requestedNav, navigate: navigateSection, reset: resetSection } = useSectionNav<string>('overview')
   const [visited, setVisited] = useState<Set<string>>(new Set([requestedNav]))
   // Onboarding panels mount on first open of their sub-tab (then stay mounted to keep form state).
-  const [onboardOpened, setOnboardOpened] = useState<{ staff: boolean; students: boolean }>({ staff: false, students: false })
+  const [onboardOpened, setOnboardOpened] = useState<{ staff: boolean; students: boolean }>({ staff: false, students: true })
+  // The student list likewise mounts (and fetches) on first open of its sub-tab, since Onboard Students is the default.
+  const [studentListOpened, setStudentListOpened] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const { counts: navCounts, latest: navLatest } = useNavNotifications('admin')
   const [navQuery, setNavQuery] = useState('')
   // Sidebar only renders after the school loads client-side, so reading storage here is hydration-safe
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(() => {
@@ -266,6 +282,7 @@ function SchoolAdmin() {
   }
 
   const [arranging, setArranging] = useState(false)
+  const [launcherOpen, setLauncherOpen] = useState(false)
   const [navOrder, setNavOrder] = useState<NavOrder>(() => {
     const saved = readStored<NavOrder>(NAV_ORDER_KEY, { sections: [], items: {} })
     // 'MANAGEMENT' section was renamed 'MONEY MANAGEMENT' — carry any saved order over
@@ -282,6 +299,36 @@ function SchoolAdmin() {
     const next = [...list]; [next[i], next[j]] = [next[j], next[i]]
     return next
   }
+  // Drag-and-drop reordering (arrange mode). `scope` is '' for sections, the section label for items,
+  // so an item can only be dropped inside its own section.
+  const [dragging, setDragging] = useState<{ scope: string; key: string } | null>(null)
+  const [dragOver, setDragOver] = useState<string | null>(null)
+  const dropBefore = (list: string[], from: string, to: string) => {
+    if (from === to || !list.includes(from) || !list.includes(to)) return list
+    const next = list.filter(k => k !== from)
+    next.splice(list.indexOf(to), 0, from)
+    return next
+  }
+  const dragProps = (scope: string, key: string, onDropOn: (from: string) => void) => ({
+    draggable: true,
+    onDragStart: (e: React.DragEvent) => {
+      setDragging({ scope, key })
+      e.dataTransfer.effectAllowed = 'move'
+      e.dataTransfer.setData('text/plain', key) // Firefox needs data set to start a drag
+    },
+    onDragOver: (e: React.DragEvent) => {
+      if (dragging && dragging.scope === scope) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setDragOver(key) }
+    },
+    onDrop: (e: React.DragEvent) => {
+      e.preventDefault()
+      if (dragging && dragging.scope === scope) onDropOn(dragging.key)
+      setDragging(null); setDragOver(null)
+    },
+    onDragEnd: () => { setDragging(null); setDragOver(null) },
+  })
+  const dropClass = (scope: string, key: string) =>
+    dragging?.scope === scope && dragging.key === key ? 'opacity-40'
+      : dragging?.scope === scope && dragOver === key ? 'ring-2 ring-[#235b46] ring-offset-1 ring-offset-[#edf2eb]' : ''
   const moveSection = (visible: string[], label: string, dir: -1 | 1) =>
     saveNavOrder({ ...navOrder, sections: moveInList(visible, label, dir) })
   const moveItem = (sectionLabel: string, visible: string[], key: string, dir: -1 | 1) =>
@@ -291,14 +338,16 @@ function SchoolAdmin() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [staffSubTab, setStaffSubTab] = useState<'directory' | 'onboard'>('directory')
-  const [studentsSubTab, setStudentsSubTab] = useState<'list' | 'onboard'>('list')
+  const [studentsSubTab, setStudentsSubTab] = useState<'list' | 'onboard'>('onboard')
   const [staffRefreshKey, setStaffRefreshKey] = useState(0)
   const [studentRefreshKey, setStudentRefreshKey] = useState(0)
 
   const requestedFeatureKey = PORTAL_NAV_KEY_ALIASES[requestedNav] ?? requestedNav
   const requestedFeature = ALL_FEATURES.find(feature => feature.key === requestedFeatureKey)
+  const canSeeTraffic = myRole === 'school_admin' || myRole === 'principal'
   const requestedAllowed = requestedNav === 'profile'
     ? myRole === 'principal' || myRole === 'vice_principal'
+    : requestedNav === 'traffic' ? canSeeTraffic
     : enabledFeatures.has(requestedFeatureKey) && (!requestedFeature || requestedFeature.portals.includes('school-admin'))
   const fallbackNav = NAV_ITEMS.find(item => {
     const key = PORTAL_NAV_KEY_ALIASES[item.key] ?? item.key
@@ -320,12 +369,12 @@ function SchoolAdmin() {
 
   // `subTab` lets a caller land directly on a specific sub-tab (e.g. Class
   // Management's "Add Student" jumping straight to Students > Onboard
-  // instead of the default List) — optional, existing callers that only
+  // instead of the default sub-tab) — optional, existing callers that only
   // pass `key` keep the previous always-reset-to-default behavior.
   const navigateTo = useCallback((key: string, subTab?: string) => {
     setSidebarOpen(false)
     if (key === 'staff') setStaffSubTab((subTab as 'directory' | 'onboard') || 'directory')
-    if (key === 'students') setStudentsSubTab((subTab as 'list' | 'onboard') || 'list')
+    if (key === 'students') setStudentsSubTab((subTab as 'list' | 'onboard') || 'onboard')
     navigateSection(key)
     trackOpen(key)
     if (key !== 'overview' && key !== 'profile') {
@@ -428,12 +477,13 @@ function SchoolAdmin() {
   // entry (legacy keys not yet migrated into the catalog) default to visible
   // so nothing existing silently disappears.
   const isSchoolAdminScoped = (key: string) => {
+    if (key === 'traffic') return canSeeTraffic
     const featureKey = PORTAL_NAV_KEY_ALIASES[key] ?? key
     const feature = ALL_FEATURES.find(f => f.key === featureKey)
     return !feature || feature.portals.includes('school-admin')
   }
 
-  const navEnabled = (key: string) => enabledFeatures.has(PORTAL_NAV_KEY_ALIASES[key] ?? key)
+  const navEnabled = (key: string) => key === 'traffic' || enabledFeatures.has(PORTAL_NAV_KEY_ALIASES[key] ?? key)
 
   const enabledNavItems = NAV_ITEMS.filter(item =>
     tier !== 'none' &&
@@ -441,6 +491,23 @@ function SchoolAdmin() {
     isSchoolAdminScoped(item.key) &&
     !(isStaffAccount && item.key === 'settings')
   )
+
+  // Same grouping and saved order as the sidebar, flattened for the "All features" window.
+  const launcherSections: LauncherSection[] = applyOrder(
+    NAV_SECTIONS.filter(sec => sec.keys.some(k => enabledNavItems.some(i => i.key === k))),
+    navOrder.sections,
+    sec => sec.label,
+  ).map(sec => ({
+    label: sec.label,
+    icon: sec.icon,
+    items: applyOrder(sec.keys.filter(k => enabledNavItems.some(i => i.key === k)), navOrder.items[sec.label], k => k)
+      .map(k => enabledNavItems.find(i => i.key === k))
+      .filter((i): i is NavItem => i !== undefined),
+  }))
+  const sectionedKeys = NAV_SECTIONS.flatMap(s => s.keys)
+  const strayItems = enabledNavItems.filter(i => !sectionedKeys.includes(i.key))
+  if (strayItems.length > 0) launcherSections.push({ label: 'MORE', icon: <LayoutGrid className="w-3.5 h-3.5" aria-hidden="true" />, items: strayItems })
+  const totalUnread = enabledNavItems.reduce((n, i) => n + (navCounts[i.key] ?? 0), 0)
 
   if (loading) return <FullPageLoader portal="school-admin" sub="Setting up your school workspace…" />
 
@@ -557,7 +624,7 @@ function SchoolAdmin() {
             </div>
 
             {/* Nav */}
-            <nav className="flex-1 min-h-0 px-3 py-3 overflow-y-auto" aria-label="School sections">
+            <nav className="flex-1 min-h-0 px-3 py-3 overflow-y-auto overflow-x-hidden" aria-label="School sections">
               {tier === 'none' ? (
                 <div className="px-4 py-4">
                   <div className="flex items-start gap-2">
@@ -572,7 +639,30 @@ function SchoolAdmin() {
                 </div>
               ) : (
                 <>
+                  {/* All-features window: every icon + name, grouped by section, one click to open */}
                   <div className="px-1 pt-1 pb-2">
+                    <button
+                      type="button"
+                      onClick={() => setLauncherOpen(true)}
+                      data-testid="nav-launcher"
+                      aria-haspopup="dialog"
+                      className="flex h-10 w-full items-center gap-2.5 rounded-lg border border-[#c5d8c8] bg-[#dce9dc] px-3 text-[14px] font-semibold text-[#173e2f] transition-colors hover:bg-[#cfe1d0] focus-visible:outline-2 focus-visible:outline-[#235b46]"
+                    >
+                      <LayoutGrid className="h-5 w-5 flex-shrink-0" aria-hidden="true" />
+                      <span className="flex-1 text-left">All features</span>
+                      <NavBadge navKey="launcher" count={totalUnread} className="!ml-0" />
+                    </button>
+                    <FeatureLauncher
+                      open={launcherOpen}
+                      onOpenChange={setLauncherOpen}
+                      sections={launcherSections}
+                      activeNav={activeNav}
+                      counts={navCounts}
+                      latest={navLatest}
+                      onSelect={navigateTo}
+                    />
+                  </div>
+                  <div className="px-1 pb-2">
                     <input
                       type="search"
                       value={navQuery}
@@ -585,6 +675,11 @@ function SchoolAdmin() {
                   </div>
                   {navQuery.trim() && !enabledNavItems.some(i => i.label.toLowerCase().includes(navQuery.trim().toLowerCase())) && (
                     <p className="px-3 py-2 text-xs text-[#55635a]" data-testid="nav-search-empty">No menu items match “{navQuery.trim()}”.</p>
+                  )}
+                  {arranging && (
+                    <p className="mx-1 mb-2 rounded-lg bg-[#dce9dc] px-3 py-2 text-xs text-[#173e2f]" data-testid="nav-arrange-hint">
+                      Drag sections or items to reorder them, or use the arrows. Tap <strong>Done</strong> when finished.
+                    </p>
                   )}
                   {!navQuery.trim() && !arranging && (() => {
                     const recent = recentNav
@@ -603,7 +698,7 @@ function SchoolAdmin() {
                               type="button"
                               onClick={() => navigateTo(item.key)}
                               data-testid={`nav-recent-${item.key}`}
-                              className="px-2.5 py-1 rounded-full border border-[#dce2db] bg-white text-xs text-[#3b4a40] hover:bg-[#e3ece4] focus-visible:outline-2 focus-visible:outline-[#235b46]"
+                              className="px-2 py-0.5 rounded-full border border-[#dce2db] bg-white text-xs text-[#3b4a40] hover:bg-[#e3ece4] focus-visible:outline-2 focus-visible:outline-[#235b46]"
                             >
                               {item.label}
                             </button>
@@ -631,39 +726,69 @@ function SchoolAdmin() {
                         .filter((i): i is NavItem => i !== undefined)
                         .filter(i => !q || i.label.toLowerCase().includes(q))
                       if (sectionEnabled.length === 0) return null
-                      const collapsed = !q && !arranging && collapsedSections.has(section.label)
+                      // A section with one item (Overview) needs no collapsible header.
+                      const solo = section.keys.length === 1 && !arranging
+                      const collapsed = !solo && !q && !arranging && collapsedSections.has(section.label)
+                      // A collapsed section never hides what needs attention: the open page and any
+                      // item with unread updates stay listed under the header; the rest fold away.
+                      const shownItems = collapsed
+                        ? sectionEnabled.filter(i => activeNav === i.key || (navCounts[i.key] ?? 0) > 0)
+                        : sectionEnabled
+                      const hiddenCount = sectionEnabled.length - shownItems.length
+                      const sectionUnread = sectionEnabled.reduce((n, i) => n + (navCounts[i.key] ?? 0), 0)
                       return (
-                        <div key={section.label} className="mb-1">
-                          <div className="flex items-center">
-                            <button
-                              type="button"
-                              onClick={() => toggleSection(section.label)}
-                              aria-expanded={!collapsed}
-                              data-testid={`nav-section-${section.label.toLowerCase()}`}
-                              className="portal-nav-label flex-1 flex items-center justify-between text-left rounded hover:text-[#235b46] focus-visible:outline-2 focus-visible:outline-[#235b46]"
+                        <div key={section.label} className={solo ? 'mb-2 mt-3' : 'mb-2'}>
+                          {!solo && (
+                            <div
+                              className={`flex items-center rounded-xl ${arranging ? `cursor-grab active:cursor-grabbing ${dropClass('', section.label)}` : ''}`}
+                              data-testid={arranging ? `nav-drag-section-${section.label.toLowerCase()}` : undefined}
+                              {...(arranging ? dragProps('', section.label, from => saveNavOrder({ ...navOrder, sections: dropBefore(visibleLabels, from, section.label) })) : {})}
                             >
-                              <span>{section.label}</span>
-                              <svg className={`w-3 h-3 transition-transform ${collapsed ? '-rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" />
-                              </svg>
-                            </button>
-                            {arranging && (
-                              <span className="flex pt-3 pl-1">
-                                <MoveButtons
-                                  label={`${section.label} section`}
-                                  testId={`nav-move-section-${section.label.toLowerCase()}`}
-                                  canUp={sIdx > 0}
-                                  canDown={sIdx < visibleLabels.length - 1}
-                                  onMove={dir => moveSection(visibleLabels, section.label, dir)}
-                                />
-                              </span>
-                            )}
-                          </div>
-                          {!collapsed && sectionEnabled.map((item, iIdx) => {
+                              {arranging && <GripVertical className="h-4 w-4 flex-shrink-0 text-[#7a867e]" aria-hidden="true" />}
+                              <button
+                                type="button"
+                                onClick={() => toggleSection(section.label)}
+                                aria-expanded={!collapsed}
+                                data-testid={`nav-section-${section.label.toLowerCase()}`}
+                                title={collapsed && hiddenCount > 0 ? `Show ${hiddenCount} more` : undefined}
+                                className="group flex min-w-0 flex-1 items-center gap-2.5 rounded-xl px-2 py-1.5 text-left transition-colors hover:bg-white/70 focus-visible:outline-2 focus-visible:outline-[#235b46]"
+                              >
+                                <span className={`flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md ring-1 transition-colors ${collapsed ? 'bg-white/60 text-[#67736b] ring-[#dce2db]' : 'bg-[#dce9dc] text-[#235b46] ring-[#c5d8c8]'}`}>
+                                  {section.icon}
+                                </span>
+                                <span className="min-w-0 flex-1 truncate text-[11px] font-bold uppercase tracking-[.05em] text-[#3b4a40] group-hover:text-[#235b46]">{section.shortLabel ?? section.label}</span>
+                                {collapsed && sectionUnread > 0 && <NavBadge navKey={`section-${section.label.toLowerCase()}`} count={sectionUnread} className="!ml-0" />}
+                                {collapsed && hiddenCount > 0 && (
+                                  <span data-testid={`nav-section-hidden-${section.label.toLowerCase()}`} aria-label={`${hiddenCount} more items`} className="flex-shrink-0 text-[11px] font-semibold tabular-nums text-[#7a867e]">
+                                    +{hiddenCount}
+                                  </span>
+                                )}
+                                <ChevronDown className={`h-3.5 w-3.5 flex-shrink-0 text-[#67736b] transition-transform ${collapsed ? '-rotate-90' : ''}`} aria-hidden="true" />
+                              </button>
+                              {arranging && (
+                                <span className="flex pl-1">
+                                  <MoveButtons
+                                    label={`${section.label} section`}
+                                    testId={`nav-move-section-${section.label.toLowerCase()}`}
+                                    canUp={sIdx > 0}
+                                    canDown={sIdx < visibleLabels.length - 1}
+                                    onMove={dir => moveSection(visibleLabels, section.label, dir)}
+                                  />
+                                </span>
+                              )}
+                            </div>
+                          )}
+                          {shownItems.map((item, iIdx) => {
                             const isActive = activeNav === item.key
                             if (arranging) {
                               return (
-                                <div key={item.key} className="portal-nav-item cursor-default" data-testid={`nav-arrange-${item.key}`}>
+                                <div
+                                  key={item.key}
+                                  className={`portal-nav-item !min-h-9 !gap-2 !rounded-lg !px-2 !py-1 cursor-grab active:cursor-grabbing ${dropClass(section.label, item.key)}`}
+                                  data-testid={`nav-arrange-${item.key}`}
+                                  {...dragProps(section.label, item.key, from => saveNavOrder({ ...navOrder, items: { ...navOrder.items, [section.label]: dropBefore(orderedKeys, from, item.key) } }))}
+                                >
+                                  <GripVertical className="!h-4 !w-4 text-[#7a867e]" aria-hidden="true" />
                                   <span className="relative flex-shrink-0">{item.icon}</span>
                                   <span className="relative truncate flex-1">{item.label}</span>
                                   <MoveButtons
@@ -683,13 +808,14 @@ function SchoolAdmin() {
                                 data-testid={`nav-${item.key}`}
                                 title={item.label}
                                 whileTap={{ scale: 0.98 }}
-                                className="portal-nav-item"
+                                className="portal-nav-item group !min-h-9 !gap-2.5 !rounded-lg !px-2 !py-1 !text-[13.5px]"
                                 aria-current={isActive ? 'page' : undefined}
                               >
-                                <span className="relative flex-shrink-0">
+                                <span className={`relative flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md transition-colors [&_svg]:!h-3.5 [&_svg]:!w-3.5 ${isActive ? 'bg-[#235b46] text-white [&_svg]:!text-white' : 'bg-white/70 text-[#3b4a40] ring-1 ring-[#dce2db] group-hover:bg-white group-hover:text-[#235b46]'}`}>
                                   {item.icon}
                                 </span>
                                 <span className="relative truncate">{item.label}</span>
+                                <NavBadge count={navCounts[item.key]} navKey={item.key} className="shadow-sm ring-2 ring-[#edf2eb]" />
                               </motion.button>
                             )
                           })}
@@ -697,28 +823,6 @@ function SchoolAdmin() {
                       )
                     })
                   })()}
-
-                  <div className="px-2 pt-2 pb-1 flex items-center gap-3">
-                    <button
-                      type="button"
-                      onClick={() => setArranging(a => !a)}
-                      data-testid="nav-arrange-toggle"
-                      aria-pressed={arranging}
-                      className="text-xs font-medium text-[#235b46] hover:underline focus-visible:outline-2 focus-visible:outline-[#235b46] rounded"
-                    >
-                      {arranging ? 'Done' : 'Arrange menu'}
-                    </button>
-                    {arranging && (
-                      <button
-                        type="button"
-                        onClick={resetNavOrder}
-                        data-testid="nav-arrange-reset"
-                        className="text-xs text-[#55635a] hover:underline focus-visible:outline-2 focus-visible:outline-[#235b46] rounded"
-                      >
-                        Reset order
-                      </button>
-                    )}
-                  </div>
 
                   {/* Items with no section mapping */}
                   {(() => {
@@ -743,6 +847,7 @@ function SchoolAdmin() {
 
                               <span className="relative">{item.icon}</span>
                               <span className="relative truncate">{item.label}</span>
+                            <NavBadge count={navCounts[item.key]} navKey={item.key} />
                             </motion.button>
                           )
                         })}
@@ -764,6 +869,29 @@ function SchoolAdmin() {
                       ))}
                     </div>
                   )}
+
+                  {/* Menu customisation lives at the very bottom — it's a rare, secondary action */}
+                  <div className="mt-3 px-2 pt-3 pb-1 flex items-center gap-3 border-t border-[#dce2db]">
+                    <button
+                      type="button"
+                      onClick={() => setArranging(a => !a)}
+                      data-testid="nav-arrange-toggle"
+                      aria-pressed={arranging}
+                      className="text-xs font-medium text-[#235b46] hover:underline focus-visible:outline-2 focus-visible:outline-[#235b46] rounded"
+                    >
+                      {arranging ? 'Done' : 'Arrange menu'}
+                    </button>
+                    {arranging && (
+                      <button
+                        type="button"
+                        onClick={resetNavOrder}
+                        data-testid="nav-arrange-reset"
+                        className="text-xs text-[#55635a] hover:underline focus-visible:outline-2 focus-visible:outline-[#235b46] rounded"
+                      >
+                        Reset order
+                      </button>
+                    )}
+                  </div>
                 </>
               )}
             </nav>
@@ -840,15 +968,15 @@ function SchoolAdmin() {
                     <div className="mb-5">
                       <h2 className="text-xl font-bold text-gray-900 mb-1">Student Management</h2>
                       <div className="flex max-w-full gap-1 overflow-x-auto border-b border-[#dce2db]">
-                        {([['list', 'Student List'], ['onboard', 'Onboard Students']] as const).map(([key, label]) => (
-                          <button key={key} onClick={() => { setStudentsSubTab(key); if (key === 'onboard') setOnboardOpened(o => ({ ...o, students: true })) }}
+                        {([['onboard', 'Onboard Students'], ['list', 'Student List']] as const).map(([key, label]) => (
+                          <button key={key} onClick={() => { setStudentsSubTab(key); if (key === 'onboard') setOnboardOpened(o => ({ ...o, students: true })); else setStudentListOpened(true) }}
                             aria-pressed={studentsSubTab === key} className={`min-h-11 whitespace-nowrap border-b-2 px-4 text-sm font-medium transition-colors ${studentsSubTab === key ? 'border-[#235b46] text-[#235b46]' : 'border-transparent text-gray-600 hover:text-gray-900'}`}>
                             {label}
                           </button>
                         ))}
                       </div>
                     </div>
-                    <div hidden={studentsSubTab !== 'list'}><StudentsManagement schoolId={selectedSchool.id} refreshKey={studentRefreshKey} /></div>
+                    <div hidden={studentsSubTab !== 'list'}>{(studentListOpened || studentsSubTab === 'list') && <StudentsManagement schoolId={selectedSchool.id} refreshKey={studentRefreshKey} />}</div>
                     <div hidden={studentsSubTab !== 'onboard'}>{(onboardOpened.students || studentsSubTab === 'onboard') && <StudentOnboarding schoolId={selectedSchool.id} onRefresh={() => { setStudentRefreshKey(k => k + 1); setStudentsSubTab('list') }} />}</div>
                   </div>
                 )}
@@ -865,6 +993,7 @@ function SchoolAdmin() {
                 {visited.has('profile')          && <div hidden={activeNav !== 'profile'}><StaffProfile /></div>}
                 {visited.has('fee-management')   && <div hidden={activeNav !== 'fee-management'}><FeeManagement schoolId={selectedSchool.id} schoolName={selectedSchool.name} schoolLogoUrl={selectedSchool.logo_url ?? null} schoolLogoAlign={selectedSchool.logo_align ?? 'center'} schoolHeaderBlocks={selectedSchool.receipt_header_blocks ?? []} onGoToYearRollover={() => navigateTo('year-rollover')} /></div>}
                 {visited.has('expenses')         && <div hidden={activeNav !== 'expenses'}><ExpenseManagement schoolId={selectedSchool.id} /></div>}
+                {visited.has('traffic')          && <div hidden={activeNav !== 'traffic'}><SchoolTraffic /></div>}
                 {visited.has('year-rollover')    && <div hidden={activeNav !== 'year-rollover'}><YearRollover schoolId={selectedSchool.id} onGoToFeeYearEnd={() => navigateTo('fee-management')} /></div>}
               </FeaturesProvider>
             )}

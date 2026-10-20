@@ -301,7 +301,7 @@ export async function POST(req: NextRequest) {
       if (email) {
         const name_ = await getSchoolName()
         sendStudentWelcomeEmail({
-          to: email, name, schoolName: name_, rollNumber: studentRollNumber,
+          schoolId: school_id, to: email, name, schoolName: name_, rollNumber: studentRollNumber,
           tempPassword, loginUrl: `${appUrl}/student/login`,
         }).catch(console.error)
       }
@@ -342,7 +342,7 @@ export async function POST(req: NextRequest) {
         if (parentResult.resolvedEmail) {
           const name_ = await getSchoolName()
           sendChildCredentialsToParentEmail({
-            to: parentResult.resolvedEmail,
+            schoolId: school_id, to: parentResult.resolvedEmail,
             parentName: parentDisplayName,
             studentName: name,
             schoolName: name_,
@@ -430,7 +430,7 @@ async function provisionParentAccount({
       const displayName = parentName || parentEmail || resolvedPhone || 'there'
       if (parentEmail) {
         sendParentWelcomeEmail({
-          to: parentEmail, parentName: displayName, studentName, schoolName,
+          schoolId: schoolId, to: parentEmail, parentName: displayName, studentName, schoolName,
           tempPassword, loginUrl: `${appUrl}/parent/login`,
         }).catch(console.error)
       }
