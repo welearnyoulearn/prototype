@@ -4,7 +4,8 @@
 //
 //   pnpm tsx scripts/index-materials.ts [--material-id N] [--limit N] [--force] [--dry-run]
 //
-// Default: only materials never indexed (indexed_at IS NULL). --force re-indexes all.
+// Default: materials never indexed (indexed_at IS NULL) and, when EMBEDDINGS_* is set, ones with
+// keyword-only (NULL-embedding) chunks — so re-running resumes/backfills. --force re-indexes all.
 // --dry-run downloads, parses and chunks but neither embeds nor writes to the DB.
 // MANUAL USE ONLY — runs against whatever DATABASE_URL/.env.local points to.
 import dotenv from 'dotenv'
@@ -64,12 +65,18 @@ async function main() {
   const { chunkPages } = await import('../lib/rag/chunk')
   const { embeddingsConfigured, embedTexts, toPgVector } = await import('../lib/rag/embeddings')
   const embed = embeddingsConfigured()
-  if (!embed && !dryRun) console.log('Embeddings not configured — indexing for keyword search only (re-run with --force once EMBEDDINGS_* is set).')
+  if (!embed && !dryRun) console.log('Embeddings not configured — indexing for keyword search only (re-run once EMBEDDINGS_* is set to backfill).')
   const r2 = r2Config()
 
   const where: string[] = []
   const params: number[] = []
-  if (!values.force) where.push('m.indexed_at IS NULL')
+  if (!values.force) {
+    where.push(
+      embed
+        ? '(m.indexed_at IS NULL OR EXISTS (SELECT 1 FROM material_chunks c WHERE c.material_id = m.id AND c.embedding IS NULL))'
+        : 'm.indexed_at IS NULL',
+    )
+  }
   if (materialId) {
     params.push(materialId)
     where.push(`m.id = $${params.length}`)
@@ -107,7 +114,7 @@ async function main() {
       if (chunks.length === 0) throw new Error('No extractable text (scanned PDF?)')
 
       if (!dryRun) {
-        const vectors = embed ? await embedTexts(chunks.map((c) => c.content)) : null
+        const vectors = embed ? await embedTexts(chunks.map((c) => c.content), { rateLimitTries: 10 }) : null
         const client = await pool.connect()
         try {
           await client.query('BEGIN')

@@ -1,10 +1,11 @@
 // Text embeddings for the student tutor (#407) via any OpenAI-compatible /embeddings
-// endpoint (Cloudflare Workers AI, OmniRoute, …). material_chunks.embedding is vector(1024),
-// so the model must produce 1024-dim vectors (bge-m3 does).
+// endpoint that honours `dimensions` (e.g. Gemini gemini-embedding-001). material_chunks.embedding
+// is vector(1024), so the model must produce (or be truncated to) 1024-dim vectors.
 
 export const EMBEDDING_DIMS = 1024
-const BATCH_SIZE = 50
+const BATCH_SIZE = 20
 const MAX_TRIES = 3
+const DEFAULT_429_WAIT_S = 60
 
 type EmbeddingsResponse = { data?: { index: number; embedding: number[] }[] }
 
@@ -21,19 +22,21 @@ function config(): { url: string; apiKey: string; model: string } {
   return {
     url: `${baseUrl.replace(/\/+$/, '')}/embeddings`,
     apiKey,
-    model: process.env.EMBEDDINGS_MODEL || '@cf/baai/bge-m3',
+    model: process.env.EMBEDDINGS_MODEL || 'gemini-embedding-001',
   }
 }
 
-async function embedBatch(input: string[], cfg: ReturnType<typeof config>): Promise<number[][]> {
+async function embedBatch(input: string[], cfg: ReturnType<typeof config>, maxTries429: number): Promise<number[][]> {
+  let waitMs = 0
   for (let attempt = 1; ; attempt++) {
-    if (attempt > 1) await new Promise((r) => setTimeout(r, 1000 * 2 ** (attempt - 2)))
+    if (attempt > 1) await new Promise((r) => setTimeout(r, waitMs))
+    waitMs = 1000 * 2 ** (attempt - 1)
     let res: Response
     try {
       res = await fetch(cfg.url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.apiKey}` },
-        body: JSON.stringify({ model: cfg.model, input }),
+        body: JSON.stringify({ model: cfg.model, input, dimensions: EMBEDDING_DIMS }),
       })
     } catch (err) {
       if (attempt >= MAX_TRIES) throw new Error(`Embeddings request failed: ${String(err)}`)
@@ -53,20 +56,25 @@ async function embedBatch(input: string[], cfg: ReturnType<typeof config>): Prom
       }
       return vectors
     }
-    const retryable = res.status === 429 || res.status >= 500
-    if (!retryable || attempt >= MAX_TRIES) {
+    const rateLimited = res.status === 429
+    const retryAfter = Number(res.headers.get('retry-after'))
+    if (rateLimited) waitMs = (res.headers.get('retry-after') && Number.isFinite(retryAfter) ? retryAfter : DEFAULT_429_WAIT_S) * 1000
+    const retryable = rateLimited || res.status >= 500
+    if (!retryable || attempt >= (rateLimited ? maxTries429 : MAX_TRIES)) {
       const detail = (await res.text().catch(() => '')).slice(0, 300)
       throw new Error(`Embeddings request failed: HTTP ${res.status} ${detail}`)
     }
   }
 }
 
-export async function embedTexts(texts: string[]): Promise<number[][]> {
+// rateLimitTries > 1 waits out 429s (Retry-After, else 60 s) — for the offline indexer only;
+// a student request should fail fast and fall back to keyword search.
+export async function embedTexts(texts: string[], { rateLimitTries = 1 } = {}): Promise<number[][]> {
   if (texts.length === 0) return []
   const cfg = config()
   const out: number[][] = []
   for (let i = 0; i < texts.length; i += BATCH_SIZE) {
-    out.push(...(await embedBatch(texts.slice(i, i + BATCH_SIZE), cfg)))
+    out.push(...(await embedBatch(texts.slice(i, i + BATCH_SIZE), cfg, rateLimitTries)))
   }
   return out
 }
