@@ -1,5 +1,6 @@
 // Indexes master curriculum PDFs (textbooks/handbooks in R2) into material_chunks for
 // the student AI tutor (#407): download → per-page text → chunk → embed → store.
+// Without EMBEDDINGS_* the chunks are stored with a NULL embedding (keyword search only).
 //
 //   pnpm tsx scripts/index-materials.ts [--material-id N] [--limit N] [--force] [--dry-run]
 //
@@ -61,7 +62,9 @@ async function main() {
   const { default: pool } = await import('../lib/db')
   const { r2Config } = await import('../lib/r2')
   const { chunkPages } = await import('../lib/rag/chunk')
-  const { embedTexts, toPgVector } = await import('../lib/rag/embeddings')
+  const { embeddingsConfigured, embedTexts, toPgVector } = await import('../lib/rag/embeddings')
+  const embed = embeddingsConfigured()
+  if (!embed && !dryRun) console.log('Embeddings not configured — indexing for keyword search only (re-run with --force once EMBEDDINGS_* is set).')
   const r2 = r2Config()
 
   const where: string[] = []
@@ -104,16 +107,16 @@ async function main() {
       if (chunks.length === 0) throw new Error('No extractable text (scanned PDF?)')
 
       if (!dryRun) {
-        const vectors = await embedTexts(chunks.map((c) => c.content))
+        const vectors = embed ? await embedTexts(chunks.map((c) => c.content)) : null
         const client = await pool.connect()
         try {
           await client.query('BEGIN')
           await client.query('DELETE FROM material_chunks WHERE material_id = $1', [m.id])
           for (let i = 0; i < chunks.length; i += ROWS_PER_INSERT) {
             const batch = chunks.slice(i, i + ROWS_PER_INSERT)
-            const rowValues: (string | number)[] = []
+            const rowValues: (string | number | null)[] = []
             const tuples = batch.map((c, j) => {
-              rowValues.push(m.id, m.board, m.grade, m.subject_name, c.page, c.chunkIndex, c.content, toPgVector(vectors[i + j]))
+              rowValues.push(m.id, m.board, m.grade, m.subject_name, c.page, c.chunkIndex, c.content, vectors ? toPgVector(vectors[i + j]) : null)
               const b = j * 8
               return `($${b + 1}, $${b + 2}, $${b + 3}, $${b + 4}, $${b + 5}, $${b + 6}, $${b + 7}, $${b + 8}::vector)`
             })

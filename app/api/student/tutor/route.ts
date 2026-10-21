@@ -3,7 +3,7 @@ import { z } from 'zod'
 import pool from '@/lib/db'
 import { getStudentSession } from '@/lib/auth'
 import { retrieveChunks } from '@/lib/rag/retrieve'
-import { streamTutorAnswer, TutorError, type TutorTurn } from '@/lib/tutor'
+import { streamTutorAnswer, tutorConfigured, TutorError, type TutorTurn } from '@/lib/tutor'
 
 // Student AI tutor (AI Pro). Answers stream back as NDJSON lines:
 //   {"type":"sources",...} → {"type":"delta","text":...}… → {"type":"done","sessionId":N}  (or {"type":"error"})
@@ -92,7 +92,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: `You've asked ${DAILY_LIMIT} questions today — great effort! The tutor will be back tomorrow.` }, { status: 429 })
     }
 
-    if (!process.env.ANTHROPIC_API_KEY) return NextResponse.json({ error: 'AI tutor is not configured yet' }, { status: 503 })
+    if (!tutorConfigured()) return NextResponse.json({ error: 'AI tutor is not configured yet' }, { status: 503 })
 
     const { rows: [school] } = await pool.query<{ board: string | null }>(`SELECT board FROM schools WHERE id = $1`, [session.schoolId])
     const scope = { board: school?.board ?? null, grade: session.grade, query: message, limit: 6 }

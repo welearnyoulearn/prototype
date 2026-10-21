@@ -1,7 +1,7 @@
 // Hybrid (vector + full-text) retrieval over material_chunks for the student tutor (#407).
 // Server-only: uses the pg pool and the embeddings API key.
 import pool from '@/lib/db'
-import { embedTexts, toPgVector } from '@/lib/rag/embeddings'
+import { embeddingsConfigured, embedTexts, toPgVector } from '@/lib/rag/embeddings'
 
 export type RetrievedChunk = {
   id: number
@@ -86,8 +86,8 @@ export async function retrieveChunks(opts: {
         .then((r) => ids(r.rows))
     : Promise.resolve([] as number[])
 
-  // An embeddings outage degrades to keyword search rather than failing the tutor.
-  const vectorRanked = embedTexts([query])
+  // No embedding provider, or an embeddings outage, degrades to keyword search rather than failing the tutor.
+  const vectorRanked = !embeddingsConfigured() ? Promise.resolve([] as number[]) : embedTexts([query])
     .then(async ([vec]) => {
       // The HNSW index picks candidates before the grade/board/subject filter; iterative
       // scan keeps searching until LIMIT filtered rows are found instead of returning few.
@@ -97,7 +97,7 @@ export async function retrieveChunks(opts: {
         await client.query(`SET LOCAL hnsw.iterative_scan = strict_order`)
         const r = await client.query<{ id: string }>(
           `SELECT c.id FROM material_chunks c
-            WHERE ${filter}
+            WHERE ${filter} AND c.embedding IS NOT NULL
             ORDER BY c.embedding <=> $${n}::vector
             LIMIT ${CANDIDATES}`,
           [...params, toPgVector(vec)],

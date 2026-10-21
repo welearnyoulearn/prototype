@@ -8,6 +8,10 @@ const MAX_TRIES = 3
 
 type EmbeddingsResponse = { data?: { index: number; embedding: number[] }[] }
 
+export function embeddingsConfigured(): boolean {
+  return Boolean(process.env.EMBEDDINGS_BASE_URL && process.env.EMBEDDINGS_API_KEY)
+}
+
 function config(): { url: string; apiKey: string; model: string } {
   const baseUrl = process.env.EMBEDDINGS_BASE_URL
   const apiKey = process.env.EMBEDDINGS_API_KEY

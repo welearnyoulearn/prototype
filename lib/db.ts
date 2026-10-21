@@ -87,7 +87,7 @@ const BOOTSTRAP_MARKER_KEY   = 'initial_schema_bootstrap'
 // silently never runs anywhere, and you will chase a "column does not exist" 500
 // that reproduces on production but never locally against a fresh DB.
 // Adding a migration statement and bumping this number is ONE change, not two.
-const SCHEMA_VERSION = 57
+const SCHEMA_VERSION = 58
 
 // Records the schema level this build finished applying, on the same row as the
 // bootstrap marker (no extra row, no extra round-trip to read it back).
@@ -4105,5 +4105,11 @@ async function runIncrementalMigrations() {
     `)
   } catch (err) {
     console.warn('[db] pgvector unavailable — material_chunks not created; AI tutor retrieval disabled:', err)
+  }
+  // Chunks indexed without an embedding provider keep embedding NULL (keyword search only).
+  try {
+    await pool.query(`ALTER TABLE material_chunks ALTER COLUMN embedding DROP NOT NULL`)
+  } catch (err) {
+    console.warn('[db] material_chunks.embedding DROP NOT NULL skipped:', err)
   }
 }
