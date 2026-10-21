@@ -11,8 +11,8 @@ import { PASSWORD_RULES } from './passwordPolicy'
 const COOKIE_MAX_AGE = 60 * 60 * 24 * 7 // 7 days — teacher/student/parent/platform cookies
 
 // School-staff sessions are short-lived and server-tracked (user_sessions table).
-export const SESSION_IDLE_MINUTES = 20   // no authenticated activity for this long → logged out
-export const SESSION_MAX_HOURS    = 12   // hard cap, however active the user is
+import { SESSION_IDLE_MINUTES, SESSION_MAX_HOURS, parentSessionLimits } from './portalSessionPolicy'
+export { SESSION_IDLE_MINUTES, SESSION_MAX_HOURS }
 
 // ─── Cookie names ─────────────────────────────────────────────────────────────
 export { COOKIE_ADMIN, COOKIE_PLATFORM, COOKIE_TEACHER, COOKIE_STUDENT, COOKIE_PARENT }
@@ -59,6 +59,7 @@ export type ParentJWTPayload = {
   name: string
   email: string
   sid?: string
+  mobile?: boolean   // set at login by the mobile app: long-lived session, see MOBILE_SESSION_DAYS
 }
 
 // ─── Password helpers ─────────────────────────────────────────────────────────
@@ -198,13 +199,13 @@ function verify<T extends object>(token: string): T | null {
 }
 
 // persistent=false writes a session cookie (no maxAge) that the browser drops on close.
-async function setCookie(name: string, value: string, persistent = true) {
+async function setCookie(name: string, value: string, persistent = true, maxAge = COOKIE_MAX_AGE) {
   const cookieStore = await cookies()
   cookieStore.set(name, value, {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'lax',
-    ...(persistent ? { maxAge: COOKIE_MAX_AGE } : {}),
+    ...(persistent ? { maxAge } : {}),
     path: '/',
   })
 }
@@ -352,13 +353,19 @@ export async function requireSchoolAdmin(): Promise<JWTPayload | null> {
 
 type PortalActorType = 'teacher' | 'student' | 'parent'
 
-export async function createPortalSession(actorType: PortalActorType, actorId: number, schoolId: number): Promise<string> {
+export async function createPortalSession(
+  actorType: PortalActorType,
+  actorId: number,
+  schoolId: number,
+  opts: { longLived?: boolean } = {},
+): Promise<string> {
   const sid = randomUUID()
   const userAgent = (await headers()).get('user-agent')?.slice(0, 300) ?? null
+  const hours = actorType === 'parent' && opts.longLived ? parentSessionLimits(true).maxHours : SESSION_MAX_HOURS
   await pool.query(
     `INSERT INTO portal_sessions (id, actor_type, actor_id, school_id, expires_at, user_agent)
      VALUES ($1, $2, $3, $4, NOW() + make_interval(hours => $5), $6)`,
-    [sid, actorType, actorId, schoolId, SESSION_MAX_HOURS, userAgent],
+    [sid, actorType, actorId, schoolId, hours, userAgent],
   )
   return sid
 }
@@ -381,18 +388,20 @@ export async function revokePortalSessions(
   )
 }
 
-async function validatePortalSession<T extends { sid?: string; schoolId: number }>(
+async function validatePortalSession<T extends { sid?: string; schoolId: number; mobile?: boolean }>(
   payload: T | null,
   actorType: PortalActorType,
   actorId: number,
 ): Promise<T | null> {
   if (!payload?.sid) return null
+  // Only a parent token minted by the login route can carry `mobile`; it is signed, so it can't be forged.
+  const idleMinutes = actorType === 'parent' ? parentSessionLimits(payload.mobile).idleMinutes : SESSION_IDLE_MINUTES
   const { rows } = await pool.query(
     `SELECT 1 FROM portal_sessions
       WHERE id = $1 AND actor_type = $2 AND actor_id = $3 AND school_id = $4
         AND revoked_at IS NULL AND expires_at > NOW()
         AND last_seen_at > NOW() - make_interval(mins => $5)`,
-    [payload.sid, actorType, actorId, payload.schoolId, SESSION_IDLE_MINUTES],
+    [payload.sid, actorType, actorId, payload.schoolId, idleMinutes],
   )
   if (!rows.length) return null
   await pool.query(`UPDATE portal_sessions SET last_seen_at = NOW() WHERE id = $1 AND last_seen_at < NOW() - INTERVAL '30 seconds'`, [payload.sid])
@@ -464,7 +473,14 @@ export function getStudentSessionFromRequest(req: NextRequest): StudentJWTPayloa
 // ─── Parent JWT ───────────────────────────────────────────────────────────────
 export function signParentToken(payload: ParentJWTPayload): string                { return sign(payload) }
 export function verifyParentToken(token: string): ParentJWTPayload | null         { return verify<ParentJWTPayload>(token) }
-export async function setParentAuthCookie(payload: ParentJWTPayload)              { await setCookie(COOKIE_PARENT, sign(payload, `${SESSION_MAX_HOURS}h`), false) }
+// Web: browser-session cookie capped at SESSION_MAX_HOURS. Mobile: a persistent cookie, so the
+// phone's cookie jar keeps it across app restarts, for MOBILE_SESSION_DAYS.
+export async function setParentAuthCookie(payload: ParentJWTPayload) {
+  const { maxHours, cookieMaxAgeSeconds } = parentSessionLimits(payload.mobile)
+  const token = sign(payload, `${maxHours}h`)
+  if (cookieMaxAgeSeconds === null) await setCookie(COOKIE_PARENT, token, false)
+  else await setCookie(COOKIE_PARENT, token, true, cookieMaxAgeSeconds)
+}
 export async function clearParentAuthCookie()                                     { await clearCookie(COOKIE_PARENT) }
 
 export async function getParentSession(opts: { allowFirstLogin?: boolean } = {}): Promise<ParentJWTPayload | null> {
