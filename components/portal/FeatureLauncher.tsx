@@ -59,15 +59,22 @@ export default function FeatureLauncher({ open, onOpenChange, sections, activeNa
   return (
     <Dialog.Root open={open} onOpenChange={next => { onOpenChange(next); if (!next) setQuery('') }}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-[100] bg-black/40 backdrop-blur-[2px]" />
+        <Dialog.Overlay className="fixed inset-0 z-(--z-modal) bg-black/40 backdrop-blur-[2px]" />
         <Dialog.Content
           aria-describedby={undefined}
+          onOpenAutoFocus={e => {
+            if (window.matchMedia('(pointer: coarse)').matches) {
+              e.preventDefault()
+              ;(e.currentTarget as HTMLElement).focus()
+            }
+          }}
+          tabIndex={-1}
           data-testid="feature-launcher"
-          className="fixed left-1/2 top-1/2 z-[101] flex max-h-[85vh] w-[min(760px,calc(100vw-24px))] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-2xl border border-[#dce2db] bg-[#fbfcfa] shadow-2xl"
+          className="fixed left-1/2 top-1/2 z-[calc(var(--z-modal)+1)] flex max-h-[calc(100dvh-1.5rem)] w-[min(760px,calc(100vw-1.5rem))] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-2xl border border-[#dce2db] bg-[#fbfcfa] shadow-2xl"
         >
-          <div className="flex items-center gap-3 border-b border-[#dce2db] px-4 py-3">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-[#dce2db] px-4 py-3">
             <Dialog.Title className="text-base font-semibold text-[#202a25]">{text.title}</Dialog.Title>
-            <div className="relative ml-auto w-full max-w-xs">
+            <div className="relative order-last w-full sm:order-none sm:ml-auto sm:max-w-xs">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#7a867e]" aria-hidden="true" />
               <input
                 type="search"
@@ -76,10 +83,10 @@ export default function FeatureLauncher({ open, onOpenChange, sections, activeNa
                 placeholder={text.findPlaceholder}
                 aria-label={text.findPlaceholder}
                 data-testid="launcher-search"
-                className="h-9 w-full rounded-lg border border-[#dce2db] bg-white pl-9 pr-3 text-[13px] text-[#3b4a40] placeholder:text-[#7a867e] focus-visible:outline-2 focus-visible:outline-[#235b46]"
+                className="h-9 w-full rounded-lg border border-[#dce2db] bg-white pl-9 pr-3 text-base text-[#3b4a40] sm:text-[13px] placeholder:text-[#7a867e] focus-visible:outline-2 focus-visible:outline-[#235b46]"
               />
             </div>
-            <Dialog.Close className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg text-[#47574c] hover:bg-[#e3ece4] focus-visible:outline-2 focus-visible:outline-[#235b46]" aria-label={text.close} data-testid="launcher-close">
+            <Dialog.Close className="ml-auto flex h-9 w-9 flex-shrink-0 sm:ml-0 items-center justify-center rounded-lg text-[#47574c] hover:bg-[#e3ece4] focus-visible:outline-2 focus-visible:outline-[#235b46]" aria-label={text.close} data-testid="launcher-close">
               <X className="h-5 w-5" aria-hidden="true" />
             </Dialog.Close>
           </div>
@@ -128,7 +135,7 @@ export default function FeatureLauncher({ open, onOpenChange, sections, activeNa
                   <h3 className="text-[11px] font-bold uppercase tracking-[.08em] text-[#3b4a40]">{section.label}</h3>
                   <span className="h-px flex-1 bg-[#dce2db]" />
                 </div>
-                <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+                <div className="grid grid-cols-2 gap-2 min-[360px]:grid-cols-3 sm:grid-cols-4">
                   {section.items.map(item => {
                     const isActive = activeNav === item.key
                     return (
