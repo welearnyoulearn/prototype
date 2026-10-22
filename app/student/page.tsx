@@ -12,7 +12,8 @@ import { getUsageSessionId, clearUsageSessionId } from '@/lib/usageSession'
 import { PORTAL_NAV_KEY_ALIASES } from '@/lib/features'
 import PortalSidebar from '@/components/portal/PortalSidebar'
 import FeatureLauncher, { type LauncherSection } from '@/components/portal/FeatureLauncher'
-import { LayoutGrid, LogOut, Menu } from 'lucide-react'
+import FeatureLauncherButton from '@/components/portal/FeatureLauncherButton'
+import { LogOut, Menu } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Sticker, type StickerName } from './components/stickers'
 
@@ -301,17 +302,7 @@ function StudentPortal() {
           <nav className="flex-1 overflow-y-auto px-3 py-2" aria-label="Student sections">
             {/* All-features window: every icon + name, grouped, one click to open */}
             <div className="pb-2">
-              <button
-                type="button"
-                onClick={() => setLauncherOpen(true)}
-                data-testid="nav-launcher"
-                aria-haspopup="dialog"
-                className="portal-nav-item !min-h-11 !border-[var(--sb-ink)] !bg-[var(--section-tone)] !font-extrabold"
-              >
-                <LayoutGrid className="h-5 w-5 shrink-0" aria-hidden="true" />
-                <span className="flex-1">All features</span>
-                <NavBadge navKey="launcher" count={totalUnread} className="!ml-0" />
-              </button>
+              <FeatureLauncherButton label="All features" unread={totalUnread} onClick={() => setLauncherOpen(true)} />
               <FeatureLauncher
                 open={launcherOpen}
                 onOpenChange={setLauncherOpen}

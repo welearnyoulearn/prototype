@@ -21,7 +21,8 @@ import AttendanceCalendar from '../components/AttendanceCalendar'
 import SchoolCalendarView from '../components/SchoolCalendarView'
 import PortalSidebar from '@/components/portal/PortalSidebar'
 import FeatureLauncher, { type LauncherSection } from '@/components/portal/FeatureLauncher'
-import { CalendarDays, Home, GraduationCap, LayoutGrid, Phone, School, UserRound } from 'lucide-react'
+import FeatureLauncherButton from '@/components/portal/FeatureLauncherButton'
+import { CalendarDays, Home, GraduationCap, Phone, School, UserRound } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import { unregisterPushDevice } from '@/lib/pushClient'
 
@@ -686,17 +687,7 @@ function ParentDashboard() {
           <nav className="flex-1 overflow-y-auto p-3" aria-label={lang === 'te' ? 'నావిగేషన్' : 'Parent workspace'}>
           {/* All-features window: every icon + name, grouped, one click to open */}
           <div className="pb-3">
-            <button
-              type="button"
-              onClick={() => setLauncherOpen(true)}
-              data-testid="nav-launcher"
-              aria-haspopup="dialog"
-              className="flex h-10 w-full items-center gap-2.5 rounded-lg border border-[#c5d8c8] bg-[#dce9dc] px-3 text-[14px] font-semibold text-[#173e2f] transition-colors hover:bg-[#cfe1d0] focus-visible:outline-2 focus-visible:outline-[#235b46]"
-            >
-              <LayoutGrid className="h-5 w-5 flex-shrink-0" aria-hidden="true" />
-              <span className="flex-1 text-left">{T.allFeatures}</span>
-              <NavBadge navKey="launcher" count={totalUnread} className="!ml-0" />
-            </button>
+            <FeatureLauncherButton label={T.allFeatures} unread={totalUnread} onClick={() => setLauncherOpen(true)} />
             <FeatureLauncher
               open={launcherOpen}
               onOpenChange={setLauncherOpen}
