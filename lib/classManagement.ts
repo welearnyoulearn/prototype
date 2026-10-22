@@ -41,7 +41,7 @@ function gradeAllowed(teachesGrades: string | null, grade: string): boolean {
 
 export async function validateTeacherForClass(
   client: PoolClient,
-  options: { teacherId: number; schoolId: number; grade: string; subjectName?: string; addGradeIfMissing?: boolean },
+  options: { teacherId: number; schoolId: number; grade: string; subjectName?: string; addGradeIfMissing?: boolean; addSubjectIfMissing?: boolean },
 ) {
   const { rows: [teacher] } = await client.query<{
     id: number
@@ -77,18 +77,32 @@ export async function validateTeacherForClass(
     // Staff Management stays in step with the class timetable.
     gradesAdded = `${(teacher.teaches_grades ?? '').trim()},${options.grade.trim()}`
   }
+  let subjectAdded: string | null = null
   if (options.subjectName && !teacherMatchesSubject(options.subjectName, teacher.subject ?? '')) {
-    throw new ClassWorkflowError(
-      `${teacher.name} is not configured to teach ${options.subjectName}`,
-      422,
-      'TEACHER_SUBJECT_MISMATCH',
-    )
+    if (!options.addSubjectIfMissing) {
+      throw new ClassWorkflowError(
+        `${teacher.name} is not configured to teach ${options.subjectName}`,
+        422,
+        'TEACHER_SUBJECT_MISMATCH',
+      )
+    }
+    // Explicit admin assignment of a teacher outside the subject: append the
+    // subject to their details so Staff Management matches the class timetable.
+    const current = (teacher.subject ?? '').trim()
+    subjectAdded = current ? `${current}, ${options.subjectName.trim()}` : options.subjectName.trim()
+    if (subjectAdded.length > 100) {
+      throw new ClassWorkflowError(`${teacher.name} already has too many subjects to add ${options.subjectName}`, 422, 'TEACHER_SUBJECT_LIMIT')
+    }
   }
   if (gradesAdded) {
     await client.query('UPDATE teachers SET teaches_grades = $1 WHERE id = $2', [gradesAdded, teacher.id])
     teacher.teaches_grades = gradesAdded
   }
-  return { ...teacher, grades_added: gradesAdded !== null }
+  if (subjectAdded) {
+    await client.query('UPDATE teachers SET subject = $1 WHERE id = $2', [subjectAdded, teacher.id])
+    teacher.subject = subjectAdded
+  }
+  return { ...teacher, grades_added: gradesAdded !== null, subject_added: subjectAdded !== null }
 }
 
 async function currentAcademicYear(client: PoolClient, schoolId: number): Promise<string | null> {
@@ -206,4 +220,49 @@ export async function ensureClassWithSetup(client: PoolClient, options: EnsureCl
 
   const setup = await setupSubjects(client, classRow)
   return { classRow, created, restored, ...setup }
+}
+
+// Exams copy each subject's teacher from class_subjects when they are created, so a teacher
+// assigned (or changed, or removed) afterwards would otherwise never get — or lose — access to
+// the exams already scheduled for that class. This brings the exam rows that are still open
+// (scheduled or collecting) and not yet submitted in line with the class subject's current
+// teacher. Submitted rows keep the teacher who actually entered those marks, and released or
+// cancelled exams are history, so neither is touched. A newly assigned teacher on an exam whose
+// marks entry is already open is notified, since the usual "entry opened" notification has passed.
+export async function syncOpenExamSubjectTeachers(client: PoolClient, classSubjectIds: number[]): Promise<number> {
+  if (classSubjectIds.length === 0) return 0
+  const { rows } = await client.query<{
+    school_id: number; exam_id: number; exam_name: string; class_id: number; exam_status: string
+    subject_name: string; teacher_id: number | null
+  }>(
+    `UPDATE exam_subjects es
+        SET teacher_id = cs.teacher_id, teacher_name = t.name
+       FROM class_subjects cs
+       LEFT JOIN teachers t ON t.id = cs.teacher_id,
+            exam_records e
+      WHERE es.class_subject_id = cs.id AND cs.id = ANY($1::int[])
+        AND e.id = es.exam_id AND e.status IN ('scheduled', 'collecting')
+        AND es.status <> 'submitted'
+        AND es.teacher_id IS DISTINCT FROM cs.teacher_id
+      RETURNING e.school_id, e.id AS exam_id, e.exam_name, e.class_id, e.status AS exam_status,
+                es.subject_name, es.teacher_id`,
+    [classSubjectIds],
+  )
+  for (const row of rows) {
+    if (!row.teacher_id || row.exam_status !== 'collecting') continue
+    const { rows: [cls] } = await client.query<{ grade: string; section: string }>(
+      'SELECT grade, section FROM classes WHERE id = $1', [row.class_id],
+    )
+    await client.query(
+      `INSERT INTO notifications (school_id, recipient_teacher_id, type, title, message, data)
+       VALUES ($1, $2, 'exam_entry_open', $3, $4, $5)`,
+      [
+        row.school_id, row.teacher_id,
+        `Enter marks — ${row.exam_name}`,
+        `Marks entry is open for ${row.subject_name} in ${row.exam_name} (Grade ${cls?.grade}-${cls?.section}) and you are now its subject teacher.`,
+        JSON.stringify({ exam_id: row.exam_id, class_id: row.class_id }),
+      ],
+    )
+  }
+  return rows.length
 }

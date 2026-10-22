@@ -353,6 +353,7 @@ export default function ClassManagement({ schoolId, onNavigate }: Props) {
             allClasses={classes}
             onClassUpdated={(updates) => setClasses(prev => prev.map(c => c.id === updates.id ? { ...c, ...updates } : c))}
             onTeacherGradesUpdated={(teacherId, teachesGrades) => setTeachers(prev => prev.map(t => t.id === teacherId ? { ...t, teaches_grades: teachesGrades } : t))}
+            onTeacherSubjectUpdated={(teacherId, subject) => setTeachers(prev => prev.map(t => t.id === teacherId ? { ...t, subject } : t))}
             onNavigate={onNavigate}
           />
         ) : (
@@ -459,7 +460,7 @@ export default function ClassManagement({ schoolId, onNavigate }: Props) {
 
 // ─── Class Detail (right panel) ────────────────────────────────────────────────
 function ClassDetail({
-  cls, schoolId, teachers, allClasses, onClassUpdated, onTeacherGradesUpdated, onNavigate
+  cls, schoolId, teachers, allClasses, onClassUpdated, onTeacherGradesUpdated, onTeacherSubjectUpdated, onNavigate
 }: {
   cls: ClassRow
   schoolId: number
@@ -467,6 +468,7 @@ function ClassDetail({
   allClasses: ClassRow[]
   onClassUpdated: (updates: Partial<ClassRow> & { id: number }) => void
   onTeacherGradesUpdated: (teacherId: number, teachesGrades: string) => void
+  onTeacherSubjectUpdated: (teacherId: number, subject: string) => void
   onNavigate?: (tab: string, subTab?: string) => void
 }) {
   const hasAttendance = useFeature('attendance')
@@ -579,12 +581,18 @@ function ClassDetail({
     try {
       const res = await fetch(`/api/classes/${cls.id}`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ class_teacher_id: ctId || null }),
+        // Any teaching staff member can be picked; one who doesn't teach this grade yet gets it added.
+        body: JSON.stringify({
+          class_teacher_id: ctId || null,
+          ...(ctId && !canTeachGrade(teachers.find(t => t.id === parseInt(ctId))?.teaches_grades, cls.grade) ? { add_grade_to_teacher: true } : {}),
+        }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
       const t = teachers.find(t => t.id === parseInt(ctId)) || null
+      if (data.teacher_grades_updated) onTeacherGradesUpdated(data.teacher_grades_updated.teacher_id, data.teacher_grades_updated.teaches_grades)
       onClassUpdated({ id: cls.id, class_teacher_id: data.class_teacher_id, class_teacher_name: t?.name || null })
+      if (data.teacher_grades_updated) setSubjectMsg({ text: `Class teacher assigned — Grade ${cls.grade} added to their details`, ok: true })
       setEditingClassTeacher(false)
       setCtConflict(null)
     } catch (saveError) {
@@ -596,14 +604,29 @@ function ClassDetail({
     if (!inlineTeacher) return
     setSavingSubjectTeacher(true)
     try {
-      const data = await fetchJson<{ teacher_grades_updated?: { teacher_id: number; teaches_grades: string } | null }>(`/api/classes/${cls.id}/subjects`, {
+      // Any teaching staff member can be picked. One whose subject doesn't cover this subject gets it
+      // added to their details (the server only does so when this flag is sent).
+      const subjectName = subjects.find(s => s.id === subjectId)?.subject_name ?? ''
+      const picked = teachers.find(t => t.id === parseInt(inlineTeacher))
+      const needsSubject = !!picked && !!subjectName && !canTeachSubject(picked.subject, subjectName)
+      const data = await fetchJson<{
+        teacher_grades_updated?: { teacher_id: number; teaches_grades: string } | null
+        teacher_subject_updated?: { teacher_id: number; subject: string } | null
+        exams_updated?: number
+      }>(`/api/classes/${cls.id}/subjects`, {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ subject_id: subjectId, teacher_id: parseInt(inlineTeacher) }),
+        body: JSON.stringify({ subject_id: subjectId, teacher_id: parseInt(inlineTeacher), ...(needsSubject ? { add_subject_to_teacher: true } : {}) }),
       })
       if (data?.teacher_grades_updated) onTeacherGradesUpdated(data.teacher_grades_updated.teacher_id, data.teacher_grades_updated.teaches_grades)
+      if (data?.teacher_subject_updated) onTeacherSubjectUpdated(data.teacher_subject_updated.teacher_id, data.teacher_subject_updated.subject)
       await loadSubjects()
       setAssigningTeacherId(null); setInlineTeacher('')
-      setSubjectMsg({ text: data?.teacher_grades_updated ? `Subject teacher assigned — Grade ${cls.grade} added to their details` : 'Subject teacher assigned', ok: true })
+      const added = [
+        data?.teacher_subject_updated ? subjectName : null,
+        data?.teacher_grades_updated ? `Grade ${cls.grade}` : null,
+      ].filter(Boolean).join(' and ')
+      const examsNote = data?.exams_updated ? ` · ${data.exams_updated} upcoming exam${data.exams_updated === 1 ? '' : 's'} updated with this teacher` : ''
+      setSubjectMsg({ text: (added ? `Subject teacher assigned — ${added} added to their details` : 'Subject teacher assigned') + examsNote, ok: true })
     } catch (assignError) {
       setSubjectMsg({ text: assignError instanceof Error ? assignError.message : 'Could not assign subject teacher', ok: false })
     } finally { setSavingSubjectTeacher(false) }
@@ -627,10 +650,19 @@ function ClassDetail({
                     className="border border-violet-300 rounded-lg px-3 py-1.5 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-violet-300 min-w-[200px]">
                     <option value="">— No class teacher —</option>
                     {(() => {
+                      // Every teaching staff member is listed; one outside this grade gets it added on save.
                       const teaching   = teachers.filter(t => t.staff_type !== 'non_teaching')
                       const eligible   = teaching.filter(t => canTeachGrade(t.teaches_grades, cls.grade))
+                      const otherGrade = teaching.filter(t => !canTeachGrade(t.teaches_grades, cls.grade))
                       return (
-                        eligible.map(t => <option key={t.id} value={t.id}>{t.name}{t.subject ? ` · ${t.subject}` : ''}</option>)
+                        <>
+                          {eligible.length > 0 && <optgroup label={`Teaches Grade ${cls.grade}`}>
+                            {eligible.map(t => <option key={t.id} value={t.id}>{t.name}{t.subject ? ` · ${t.subject}` : ''}</option>)}
+                          </optgroup>}
+                          {otherGrade.length > 0 && <optgroup label={`Other staff — Grade ${cls.grade} will be added to their details`}>
+                            {otherGrade.map(t => <option key={t.id} value={t.id}>{t.name}{t.subject ? ` · ${t.subject}` : ''} (Gr {t.teaches_grades})</option>)}
+                          </optgroup>}
+                        </>
                       )
                     })()}
                   </select>
@@ -896,8 +928,8 @@ function ClassDetail({
                                     {otherGrade.length > 0 && <optgroup label={`Grade ${cls.grade} will be added to their details`}>
                                       {otherGrade.map(t => <option key={t.id} value={t.id}>{t.name}{t.subject ? ` · ${t.subject}` : ''} (Gr {t.teaches_grades})</option>)}
                                     </optgroup>}
-                                    {otherSubject.length > 0 && <optgroup label="Different subject">
-                                      {otherSubject.map(t => <option key={t.id} value={t.id} disabled>{t.name}{t.subject ? ` · ${t.subject}` : ''}</option>)}
+                                    {otherSubject.length > 0 && <optgroup label={`Other teachers — ${s.subject_name} will be added to their details`}>
+                                      {otherSubject.map(t => <option key={t.id} value={t.id}>{t.name}{t.subject ? ` · ${t.subject}` : ''}{!canTeachGrade(t.teaches_grades, cls.grade) ? ` (Gr ${t.teaches_grades})` : ''}</option>)}
                                     </optgroup>}
                                   </>
                                 )

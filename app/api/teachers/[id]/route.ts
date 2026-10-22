@@ -11,6 +11,7 @@ import { sendWhatsappMessage } from '@/lib/whatsapp'
 import { findAutoAssignableSubjects, findStaleAssignments, type ClassSubjectRow } from '@/lib/matchTeacher'
 import { normalizeStaffInput, validateStaffStatus } from '@/lib/staffValidation'
 import { invalidateCache } from '@/lib/responseCache'
+import { syncOpenExamSubjectTeachers } from '@/lib/classManagement'
 import { canonicalStaffSubject, getStaffSubjectOptions } from '@/lib/staffSubjectOptions'
 
 const EDITABLE_FIELDS = new Set([
@@ -121,13 +122,18 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       return NextResponse.json({ error: merged.errors.join('; ') }, { status: 422 })
     }
     const data = merged.data
-    if (body.subject !== undefined && data.staff_type === 'teaching' && data.subject) {
-      const canonical = canonicalStaffSubject(data.subject, await getStaffSubjectOptions(existing.school_id, client))
-      if (!canonical) {
+    // A subject is unchanged when the form sends back what is already stored. That includes the
+    // comma-separated list Class Management builds when an admin assigns a teacher to an extra
+    // subject, which is not a single catalog value and must not make unrelated edits fail.
+    if (body.subject !== undefined && data.staff_type === 'teaching' && data.subject && data.subject !== (existing.subject || null)) {
+      const subjectOptions = await getStaffSubjectOptions(existing.school_id, client)
+      const parts = data.subject.split(',').map(part => part.trim()).filter(Boolean)
+      const canonicalParts = parts.map(part => canonicalStaffSubject(part, subjectOptions))
+      if (!parts.length || canonicalParts.some(part => !part)) {
         await client.query('ROLLBACK')
         return NextResponse.json({ error: 'Subject must be selected from the master syllabus or this school’s custom subjects' }, { status: 422 })
       }
-      data.subject = canonical
+      data.subject = canonicalParts.join(', ')
     }
     const nextStatus = (body.status as 'active' | 'inactive' | undefined) ?? existing.status
     const becomingInactive = nextStatus === 'inactive' && existing.status !== 'inactive'
@@ -194,7 +200,10 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         await client.query('UPDATE class_subjects SET teacher_id=NULL WHERE id=$1 AND teacher_id=$2', [row.id, id])
         invalidateCache(`subjects:class:${row.class_id}`)
       }
-      if (stale.length) invalidateCache(`health:${teacher.school_id}`)
+      if (stale.length) {
+        await syncOpenExamSubjectTeachers(client, stale.map(row => row.id))
+        invalidateCache(`health:${teacher.school_id}`)
+      }
     }
     if ((subjectChanged || gradesChanged) && teacher.staff_type === 'teaching' && teacher.status === 'active' && teacher.subject) {
       const { rows: unfilled } = await client.query<ClassSubjectRow>(
@@ -207,7 +216,10 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         await client.query('UPDATE class_subjects SET teacher_id=$1 WHERE id=$2 AND teacher_id IS NULL', [id, match.id])
         invalidateCache(`subjects:class:${match.class_id}`)
       }
-      if (matches.length) invalidateCache(`health:${teacher.school_id}`)
+      if (matches.length) {
+        await syncOpenExamSubjectTeachers(client, matches.map(match => match.id))
+        invalidateCache(`health:${teacher.school_id}`)
+      }
     }
     const school = await client.query<{ name: string }>('SELECT name FROM schools WHERE id=$1', [teacher.school_id])
     schoolName = school.rows[0]?.name || schoolName
