@@ -302,3 +302,9 @@ h1.portal-section-heading { margin-bottom: 8px; font-size: 26px; line-height: 1.
   .portal-nav-item:hover { transform: none; }
 }
 }
+
+/* "All features" button: a soft light glint sweeps across three times after load, then stops. */
+.launcher-shine { position: absolute; inset: 0; pointer-events: none; overflow: hidden; border-radius: inherit; }
+.launcher-shine::before { content: ''; position: absolute; top: -20%; bottom: -20%; left: 0; width: 38%; background: linear-gradient(100deg, transparent 0%, rgb(255 255 255 / .38) 50%, transparent 100%); transform: translateX(-160%) skewX(-18deg); animation: launcher-shine 3.2s ease-in-out 1.2s 3; }
+@keyframes launcher-shine { 0% { transform: translateX(-160%) skewX(-18deg); } 38%, 100% { transform: translateX(380%) skewX(-18deg); } }
+@media (prefers-reduced-motion: reduce) { .launcher-shine { display: none; } }
