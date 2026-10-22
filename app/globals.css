@@ -703,6 +703,60 @@ input, select, textarea {
   .pl-footer { flex-direction: column; justify-content: center; gap: 0; padding: 12px 0; }
 }
 
+/* Natural palette — muted, earthy tones; flat headers instead of loud gradients. */
+.pl-shell { --pl-brand: #3d6b55; --accent: #b0702a; --glow: #e8cfa6; background: #f7f3ea; }
+.pl-shell[data-active="teacher"] { --accent: #3f7a73; --glow: #b9d6cd; }
+.pl-shell[data-active="parent"] { --accent: #b4624d; --glow: #e8c3b6; }
+.pl-shell[data-active="admin"] { --accent: #3d6b55; --glow: #bcd5c0; }
+.pl-blob { opacity: .35; }
+.pl-blob-a { background: #efe3cc; }
+.pl-blob-b { background: #dce8e1; }
+.pl-blob-c { background: #efdfd5; }
+.pl-blob-focus { opacity: .28; }
+.pl-slide { --soft: #f3e6d2; --deep: #7a4a17; --slide-accent: #b0702a; --slide-accent-2: #9a5f20; border-color: rgb(255 255 255 / .8); box-shadow: 0 18px 44px rgb(70 55 30 / .12), 0 1px 3px rgb(70 55 30 / .08); }
+.pl-slide[data-portal="teacher"] { --soft: #dfece7; --deep: #2a5651; --slide-accent: #3f7a73; --slide-accent-2: #346761; }
+.pl-slide[data-portal="parent"] { --soft: #f3e1d9; --deep: #7a3f30; --slide-accent: #b4624d; --slide-accent-2: #9d5241; }
+.pl-slide[data-portal="admin"] { --soft: #e0ebe0; --deep: #2c5240; --slide-accent: #3d6b55; --slide-accent-2: #315a47; }
+.pl-slide-top { background: linear-gradient(160deg, var(--slide-accent), var(--slide-accent-2)); }
+.pl-slide-top::before, .pl-slide-top::after { display: none; }
+.pl-art::before { background: rgb(255 255 255 / .16); border-color: rgb(255 255 255 / .22); box-shadow: none; backdrop-filter: none; }
+.pl-slide-icon { background: #fffaf2; }
+.pl-slide-go, .pl-slide[data-offset="0"] .pl-slide-go { background: var(--slide-accent); box-shadow: 0 4px 10px color-mix(in srgb, var(--slide-accent) 28%, transparent); text-shadow: none; }
+.pl-slide[data-offset="0"]:hover .pl-slide-go { background: var(--slide-accent-2); filter: none; }
+.pl-chip { box-shadow: none; }
+.pl-word em::before { opacity: .18; }
+.pl-word em, .pl-intro h1 { text-shadow: none; }
+.pl-switch { background: rgb(255 253 248 / .85); box-shadow: 0 4px 14px rgb(70 55 30 / .06); }
+.pl-switch a[data-portal="student"] { --tab: #a2631f; --tab-soft: #f3e6d2; }
+.pl-switch a[data-portal="teacher"] { --tab: #346761; --tab-soft: #dfece7; }
+.pl-switch a[data-portal="parent"] { --tab: #9d5241; --tab-soft: #f3e1d9; }
+.pl-switch a[data-portal="admin"] { --tab: #315a47; --tab-soft: #e0ebe0; }
+
+/* Sign-in inside the portal card: the carousel freezes and the front card grows into a form. */
+.pl-slide { --auth-accent: var(--slide-accent); --auth-accent-hover: var(--deep); transition: transform 750ms cubic-bezier(.2,.8,.2,1), opacity 600ms ease, filter 600ms ease, box-shadow 400ms ease, height 450ms cubic-bezier(.2,.8,.2,1); }
+.pl-slide-go { width: 100%; border: 0; font-family: inherit; cursor: pointer; }
+.pl-slide-go:disabled { opacity: .7; cursor: wait; }
+.pl-slide-go:focus-visible { outline: 3px solid color-mix(in srgb, var(--slide-accent) 45%, transparent); outline-offset: 3px; }
+.pl-stage { transition: height 450ms cubic-bezier(.2,.8,.2,1); }
+.pl-shell[data-signin] .pl-stage { height: 456px; }
+.pl-slide[data-signin] { height: 436px; cursor: default; }
+.pl-shell[data-signin] .pl-slide:not([data-offset="0"]) { pointer-events: none; opacity: .5; }
+.pl-shell[data-signin] .pl-nav, .pl-shell[data-signin] .pl-switch, .pl-shell[data-signin] .pl-help { opacity: .45; pointer-events: none; }
+.pl-shell[data-signin] .pl-switch a { pointer-events: none; }
+.pl-form { display: flex; flex-direction: column; gap: 12px; flex: 1; }
+.pl-form .auth-input { min-height: 44px; }
+.pl-form label { margin-bottom: 4px; font-size: 13px; }
+.pl-form [role="alert"] { margin-bottom: 0; padding: 8px 12px; font-size: 13px; line-height: 1.4; }
+.pl-form-row { display: flex; align-items: center; justify-content: space-between; }
+.pl-form-row a, .pl-form-back { display: inline-flex; align-items: center; gap: 2px; border: 0; background: none; color: var(--slide-accent); font: inherit; font-size: 13px; font-weight: 650; cursor: pointer; }
+.pl-form-row a:hover, .pl-form-back:hover { text-decoration: underline; text-underline-offset: 3px; }
+.pl-form-back svg { width: 15px; height: 15px; }
+.pl-form .pl-slide-go { margin-top: auto; }
+@media (max-width: 640px) {
+  .pl-shell[data-signin] .pl-stage { height: 456px; }
+  .pl-slide[data-signin] { height: 436px; }
+}
+
 /* Portal-specific visual language used by landing and authentication. */
 .portal-identity-visual { --identity-accent: #b56d22; --identity-soft: #f1dcc0; --identity-deep: #72400f; position: relative; color: white; }
 .portal-identity-visual[data-identity="teacher"] { --identity-accent: #63a5a2; --identity-soft: #cce3df; --identity-deep: #184d50; }

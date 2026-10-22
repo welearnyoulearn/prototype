@@ -89,16 +89,17 @@ test.describe('Portal Access Verification', () => {
       await page.goto('/')
       await expect(page.getByTestId('portal-selection')).toBeVisible()
 
-      // Verify all 4 cards are clickable and lead to correct URLs
-      for (const [card, expectedUrl] of [
-        ['school-admin', '/login?role=school'],
-        ['teacher', '/teacher/login'],
-        ['student', '/student/login'],
-        ['parent', '/parent/login'],
+      // Choosing a portal opens its sign-in form inside the same card, on the same page
+      for (const [card, formId] of [
+        ['school-admin', 'school-admin-login-form'],
+        ['teacher', 'teacher-login-form'],
+        ['student', 'student-login-form'],
+        ['parent', 'parent-login-form'],
       ] as const) {
         await page.goto('/')
         await page.getByTestId(`portal-card-${card}`).click()
-        await expect(page).toHaveURL(new RegExp(expectedUrl.replace(/[?]/g, '\\?')))
+        await expect(page).toHaveURL(/\/$/)
+        await expect(page.getByTestId(formId)).toBeVisible()
       }
     })
 

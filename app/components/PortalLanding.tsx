@@ -5,25 +5,37 @@ import { useRouter } from 'next/navigation'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import {
   useCallback, useEffect, useRef, useState, useSyncExternalStore,
-  type CSSProperties, type MouseEvent, type PointerEvent,
+  type FormEvent, type MouseEvent, type PointerEvent,
 } from 'react'
 import {
   ArrowRight, BarChart3, Bell, BookOpen, CalendarCheck, ChevronLeft, ChevronRight, ClipboardCheck,
   IndianRupee, ListChecks, LockKeyhole, Moon, PenLine, Sun, Sunrise, TrendingUp, Trophy, Users, Wallet,
 } from 'lucide-react'
 import { ParentIcon, SchoolIcon, StudentIcon, TeacherIcon } from './PortalIcons'
+import { AuthError, AuthInput, PasswordField } from './AuthShell'
+import { ButtonLoader } from '@/components/loaders'
+import { setUsageSessionId } from '@/lib/usageSession'
 
 type PortalId = 'student' | 'teacher' | 'parent' | 'admin'
 type DayPart = 'morning' | 'afternoon' | 'evening'
 type Icon = typeof BookOpen | typeof StudentIcon
+type LoginConfig = {
+  endpoint: string; field: 'rollNumber' | 'email' | 'identifier'; label: string; type: string; placeholder: string
+  hint?: string; autoComplete: string; inputTestId: string; submit: string; forgot: string; changePassword: string; home: string
+}
 
 const portals: Array<{
   id: PortalId; testId: string; title: string; verb: string; description: string; href: string; icon: Icon; features: Array<[string, Icon]>; art: [string, string]
+  login: LoginConfig
 }> = [
-  { id: 'student', testId: 'student', title: 'Student', verb: 'learn.', description: 'Your lessons, attendance, results and every win along the way.', href: '/student/login', icon: StudentIcon, art: ['/landing/student-3d.png', '/student-icons/books.png'], features: [['Lessons', BookOpen], ['Attendance', CalendarCheck], ['Achievements', Trophy]] },
-  { id: 'teacher', testId: 'teacher', title: 'Teacher', verb: 'teach.', description: 'Your classes, attendance, marks and syllabus, all in one calm place.', href: '/teacher/login', icon: TeacherIcon, art: ['/landing/teacher-3d.png', '/student-icons/light-bulb.png'], features: [['Attendance', ClipboardCheck], ['Marks', PenLine], ['Syllabus', ListChecks]] },
-  { id: 'parent', testId: 'parent', title: 'Parent', verb: 'stay close.', description: "Your child's progress, school notices and fees, always within reach.", href: '/parent/login', icon: ParentIcon, art: ['/landing/parent-3d.png', '/landing/heart-3d.png'], features: [['Progress', TrendingUp], ['Notices', Bell], ['Fees', Wallet]] },
-  { id: 'admin', testId: 'school-admin', title: 'School', verb: 'lead.', description: 'Staff, students, fees and the everyday running of your school.', href: '/login?role=school', icon: SchoolIcon, art: ['/landing/school-3d.png', '/student-icons/trophy.png'], features: [['People', Users], ['Fees', IndianRupee], ['Reports', BarChart3]] },
+  { id: 'student', testId: 'student', title: 'Student', verb: 'learn.', description: 'Your lessons, attendance, results and every win along the way.', href: '/student/login', icon: StudentIcon, art: ['/landing/student-3d.png', '/student-icons/books.png'], features: [['Lessons', BookOpen], ['Attendance', CalendarCheck], ['Achievements', Trophy]],
+    login: { endpoint: '/api/student/auth/login', field: 'rollNumber', label: 'Roll number', type: 'text', placeholder: 'e.g. 2024-GR9-001', hint: 'Shared in your welcome email', autoComplete: 'username', inputTestId: 'student-roll-input', submit: 'Open my workspace', forgot: '/student/forgot-password', changePassword: '/student/change-password', home: '/student' } },
+  { id: 'teacher', testId: 'teacher', title: 'Teacher', verb: 'teach.', description: 'Your classes, attendance, marks and syllabus, all in one calm place.', href: '/teacher/login', icon: TeacherIcon, art: ['/landing/teacher-3d.png', '/student-icons/light-bulb.png'], features: [['Attendance', ClipboardCheck], ['Marks', PenLine], ['Syllabus', ListChecks]],
+    login: { endpoint: '/api/teacher/auth/login', field: 'email', label: 'Email address', type: 'email', placeholder: 'your.email@school.edu', autoComplete: 'email', inputTestId: 'teacher-email-input', submit: 'Sign in', forgot: '/teacher/forgot-password', changePassword: '/teacher/change-password', home: '/teacher' } },
+  { id: 'parent', testId: 'parent', title: 'Parent', verb: 'stay close.', description: "Your child's progress, school notices and fees, always within reach.", href: '/parent/login', icon: ParentIcon, art: ['/landing/parent-3d.png', '/landing/heart-3d.png'], features: [['Progress', TrendingUp], ['Notices', Bell], ['Fees', Wallet]],
+    login: { endpoint: '/api/parent/auth/login', field: 'identifier', label: 'Email or phone number', type: 'text', placeholder: 'your@email.com or phone', autoComplete: 'username', inputTestId: 'parent-email-input', submit: 'Sign in', forgot: '/parent/forgot-password', changePassword: '/parent/change-password', home: '/parent' } },
+  { id: 'admin', testId: 'school-admin', title: 'School', verb: 'lead.', description: 'Staff, students, fees and the everyday running of your school.', href: '/login?role=school', icon: SchoolIcon, art: ['/landing/school-3d.png', '/student-icons/trophy.png'], features: [['People', Users], ['Fees', IndianRupee], ['Reports', BarChart3]],
+    login: { endpoint: '/api/auth/login', field: 'email', label: 'Email address', type: 'text', placeholder: 'you@school.com', autoComplete: 'email', inputTestId: 'school-email-input', submit: 'Sign in', forgot: '/forgot-password', changePassword: '/change-password?first=1', home: '/school-admin' } },
 ]
 
 const COUNT = portals.length
@@ -53,15 +65,78 @@ function readDayPart(): DayPart {
 const greetingIcon = { morning: Sunrise, afternoon: Sun, evening: Moon }
 const mod = (n: number) => ((n % COUNT) + COUNT) % COUNT
 
-export default function PortalLanding() {
+function SignInForm({ portal, onBack }: { portal: (typeof portals)[number]; onBack: () => void }) {
   const router = useRouter()
+  const { login } = portal
+  const formRef = useRef<HTMLFormElement>(null)
+  const [identifier, setIdentifier] = useState('')
+  const [password, setPassword] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => { formRef.current?.querySelector('input')?.focus() }, [])
+
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault()
+    setError(''); setLoading(true)
+    try {
+      const res = await fetch(login.endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ [login.field]: identifier.trim(), password }),
+      })
+      const data = await res.json()
+      if (!res.ok) { setError(data.error || 'Login failed'); return }
+      setUsageSessionId(data.usageSessionId)
+      try { localStorage.setItem(LAST_PORTAL_KEY, portal.id) } catch {}
+
+      if (portal.id === 'admin') {
+        if (data.role === 'platform_admin') {
+          window.location.href = data.firstLogin ? '/change-password?first=1&portal=platform' : '/platform-admin'
+        } else if (['school_admin', 'principal', 'vice_principal'].includes(data.role)) {
+          if (data.account) {
+            try { localStorage.setItem('wlyl_last_staff_account', JSON.stringify({ name: data.account.name, email: data.account.email, role: data.account.role })) } catch {}
+          }
+          if (data.firstLogin) router.push('/change-password?first=1')
+          else if (!data.profileCompleted) router.push('/profile-setup')
+          else router.push('/school-admin')
+        } else {
+          setError('This portal is for school staff only. Please pick the right portal.')
+        }
+        return
+      }
+      router.push(data.passwordChanged ? login.home : login.changePassword)
+    } catch {
+      setError('Connection error. Please try again.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <form ref={formRef} onSubmit={handleSubmit} className="pl-form" data-testid={`${portal.testId}-login-form`}>
+      <AuthError message={error} />
+      <AuthInput label={login.label} type={login.type} value={identifier} onChange={setIdentifier} placeholder={login.placeholder}
+        hint={login.hint} autoComplete={login.autoComplete} testId={login.inputTestId} ring="" />
+      <PasswordField label="Password" value={password} onChange={setPassword} placeholder="Enter your password" ring="" autoComplete="current-password" />
+      <div className="pl-form-row">
+        <button type="button" className="pl-form-back" onClick={onBack} data-testid={`${portal.testId}-back-btn`}><ChevronLeft aria-hidden="true" /> Back</button>
+        <Link href={login.forgot}>Forgot password?</Link>
+      </div>
+      <button type="submit" disabled={loading} className="pl-slide-go" data-testid={`${portal.testId}-submit-btn`}>
+        {loading ? <ButtonLoader label="Signing in…" /> : login.submit}
+      </button>
+    </form>
+  )
+}
+
+export default function PortalLanding() {
   const reduceMotion = useReducedMotion()
   const lastPortal = useSyncExternalStore(subscribeToStorage, readLastPortal, () => null)
   const dayPart = useSyncExternalStore(noopSubscribe, readDayPart, () => null)
   const [turn, setTurn] = useState(0)
   const [interacted, setInteracted] = useState(false)
-  const [transitioning, setTransitioning] = useState<PortalId | null>(null)
-  const [origin, setOrigin] = useState({ x: '50%', y: '50%' })
+  const [signIn, setSignIn] = useState<PortalId | null>(null)
   const swipeStart = useRef<number | null>(null)
   const swiped = useRef(false)
 
@@ -69,6 +144,7 @@ export default function PortalLanding() {
   const current = portals[active]
 
   const select = useCallback((index: number) => {
+    if (signIn) return
     setInteracted(true)
     setTurn(t => {
       let delta = index - mod(t)
@@ -76,51 +152,54 @@ export default function PortalLanding() {
       if (delta < -COUNT / 2) delta += COUNT
       return t + delta
     })
-  }, [])
+  }, [signIn])
 
   const step = useCallback((direction: 1 | -1) => {
+    if (signIn) return
     setInteracted(true)
     setTurn(t => t + direction)
+  }, [signIn])
+
+  // Opens the sign-in form inside the portal's own card and freezes the carousel on it.
+  const openPortal = useCallback((id: PortalId) => {
+    setInteracted(true)
+    setTurn(t => {
+      let delta = portals.findIndex(p => p.id === id) - mod(t)
+      if (delta > COUNT / 2) delta -= COUNT
+      if (delta < -COUNT / 2) delta += COUNT
+      return t + delta
+    })
+    setSignIn(id)
   }, [])
 
-  const openPortal = useCallback((id: PortalId, href: string, point?: { x: number; y: number }) => {
-    try { localStorage.setItem(LAST_PORTAL_KEY, id) } catch {}
-    if (reduceMotion) { router.push(href); return }
-    setOrigin(point ? { x: `${point.x}px`, y: `${point.y}px` } : { x: '50%', y: '50%' })
-    setTransitioning(id)
-    window.setTimeout(() => router.push(href), 260)
-  }, [reduceMotion, router])
-
-  function enter(event: MouseEvent<HTMLAnchorElement>, id: PortalId, href: string) {
-    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) {
-      try { localStorage.setItem(LAST_PORTAL_KEY, id) } catch {}
-      return
-    }
+  function enter(event: MouseEvent<HTMLElement>, id: PortalId) {
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return
     event.preventDefault()
-    openPortal(id, href, { x: event.clientX, y: event.clientY })
+    openPortal(id)
   }
 
   // Gently turns on its own so first-time visitors see every portal, and
   // stops for good the moment someone interacts.
   useEffect(() => {
-    if (interacted || reduceMotion) return
+    if (interacted || reduceMotion || signIn) return
     const id = window.setInterval(() => setTurn(t => t + 1), AUTO_TURN_MS)
     return () => window.clearInterval(id)
-  }, [interacted, reduceMotion])
+  }, [interacted, reduceMotion, signIn])
 
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
       if (event.metaKey || event.ctrlKey || event.altKey || event.repeat) return
+      if (event.key === 'Escape' && signIn) { setSignIn(null); return }
       const target = event.target as HTMLElement | null
       if (target && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))) return
       if (event.key === 'ArrowRight') { event.preventDefault(); step(1); return }
       if (event.key === 'ArrowLeft') { event.preventDefault(); step(-1); return }
       const portal = portals[Number(event.key) - 1]
-      if (portal) openPortal(portal.id, portal.href)
+      if (portal && !signIn) openPortal(portal.id)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [openPortal, step])
+  }, [openPortal, step, signIn])
 
   function parallax(event: PointerEvent<HTMLDivElement>) {
     if (reduceMotion || event.pointerType !== 'mouse') return
@@ -130,7 +209,7 @@ export default function PortalLanding() {
   }
 
   function onSwipeStart(event: PointerEvent<HTMLDivElement>) {
-    if (event.pointerType === 'mouse') return
+    if (event.pointerType === 'mouse' || signIn) return
     swipeStart.current = event.clientX
   }
 
@@ -143,10 +222,9 @@ export default function PortalLanding() {
     step(dx < 0 ? 1 : -1)
   }
 
-  function onSlideClick(event: MouseEvent<HTMLAnchorElement>, index: number) {
-    if (swiped.current) { swiped.current = false; event.preventDefault(); return }
-    if (index !== active) { event.preventDefault(); select(index); return }
-    enter(event, portals[index].id, portals[index].href)
+  function onSlideClick(index: number) {
+    if (swiped.current) { swiped.current = false; return }
+    if (index !== active) select(index)
   }
 
   const GreetingIcon = dayPart ? greetingIcon[dayPart] : Sun
@@ -156,8 +234,7 @@ export default function PortalLanding() {
       className="pl-shell"
       onPointerMove={parallax}
       data-active={current.id}
-      data-transitioning={transitioning ?? undefined}
-      style={{ '--transition-x': origin.x, '--transition-y': origin.y } as CSSProperties}
+      data-signin={signIn ?? undefined}
     >
       <div className="pl-ambient" aria-hidden="true">
         <span className="pl-blob pl-blob-a" />
@@ -223,15 +300,14 @@ export default function PortalLanding() {
               if (offset === COUNT - 1) offset = -1
               const isFront = offset === 0
               return (
-                <Link
+                <div
                   key={portal.id}
-                  href={portal.href}
                   className="pl-slide"
                   data-portal={portal.id}
                   data-offset={offset}
                   aria-hidden={!isFront}
-                  tabIndex={isFront ? 0 : -1}
-                  onClick={event => onSlideClick(event, index)}
+                  data-signin={isFront && signIn === portal.id ? '' : undefined}
+                  onClick={() => onSlideClick(index)}
                 >
                   {lastPortal === portal.id && <span className="pl-last">Last used</span>}
                   <span className="pl-slide-top">
@@ -250,15 +326,29 @@ export default function PortalLanding() {
                     </span>
                   </span>
                   <span className="pl-slide-body">
-                    <span className="pl-slide-desc">{portal.description}</span>
-                    <span className="pl-chips" aria-hidden="true">
-                      {portal.features.map(([label, FeatureIcon]) => (
-                        <span key={label} className="pl-chip"><FeatureIcon />{label}</span>
-                      ))}
-                    </span>
-                    <span className="pl-slide-go">Enter {portal.title} portal <ArrowRight aria-hidden="true" /></span>
+                    {isFront && signIn === portal.id ? (
+                      <SignInForm portal={portal} onBack={() => setSignIn(null)} />
+                    ) : (
+                      <>
+                        <span className="pl-slide-desc">{portal.description}</span>
+                        <span className="pl-chips" aria-hidden="true">
+                          {portal.features.map(([label, FeatureIcon]) => (
+                            <span key={label} className="pl-chip"><FeatureIcon />{label}</span>
+                          ))}
+                        </span>
+                        <button
+                          type="button"
+                          className="pl-slide-go"
+                          tabIndex={isFront ? 0 : -1}
+                          data-testid={`enter-${portal.testId}`}
+                          onClick={event => { if (isFront) { event.stopPropagation(); openPortal(portal.id) } }}
+                        >
+                          Enter {portal.title} portal <ArrowRight aria-hidden="true" />
+                        </button>
+                      </>
+                    )}
                   </span>
-                </Link>
+                </div>
               )
             })}
           </div>
@@ -276,7 +366,7 @@ export default function PortalLanding() {
               aria-keyshortcuts={String(index + 1)}
               onPointerEnter={event => { if (event.pointerType === 'mouse') select(index) }}
               onFocus={() => select(index)}
-              onClick={event => enter(event, portal.id, portal.href)}
+              onClick={event => enter(event, portal.id)}
             >
               <portal.icon aria-hidden="true" />
               <span>{portal.title}</span>
@@ -296,7 +386,6 @@ export default function PortalLanding() {
         <Link href="/admin">Platform administration</Link>
       </footer>
 
-      <div className="pl-wash" aria-hidden="true" />
     </div>
   )
 }
