@@ -16,5 +16,5 @@ const KNOWN = ['OVERVIEW', 'PEOPLE', 'MONEY MANAGEMENT', 'SCHEDULING', 'ACADEMIC
 
 export function hueForSection(label: string, index: number) {
   const known = KNOWN.indexOf(label.toUpperCase())
-  return HUES[(known >= 0 ? known : Math.max(0, index) + KNOWN.length) % HUES.length]
+  return HUES[(known >= 0 ? known : Math.max(0, index)) % HUES.length]
 }

@@ -14,6 +14,7 @@ import { getUsageSessionId, clearUsageSessionId } from '@/lib/usageSession'
 import PortalSidebar from '@/components/portal/PortalSidebar'
 import FeatureLauncher, { type LauncherSection } from '@/components/portal/FeatureLauncher'
 import FeatureLauncherButton from '@/components/portal/FeatureLauncherButton'
+import { hueForSection } from '@/components/portal/sectionHues'
 import { CalendarDays, Eye, Home, LayoutGrid, LogOut, Menu, School, UserRound } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 
@@ -336,7 +337,8 @@ function TeacherPortal() {
                 onSelect={navigateTo}
               />
             </div>
-            {NAV_SECTIONS.map(section => {
+            {NAV_SECTIONS.map((section, sIdx) => {
+              const hue = hueForSection(section.label, sIdx)
               const visibleItems = section.items.filter(item => {
                 const featureKey = NAV_KEY_TO_FEATURE[item.key]
                 return !featureKey || enabledFeatures === null || enabledFeatures.has(featureKey)
@@ -344,10 +346,10 @@ function TeacherPortal() {
               if (visibleItems.length === 0) return null
               return (
                 <div key={section.label} className="mb-4">
-                  <p className="portal-nav-label">{section.label}</p>
+                  <p className={`portal-nav-label ${hue.head}`}>{section.label}</p>
                   {visibleItems.map(item => (
                     <button key={item.key} onClick={() => { if (!item.comingSoon) navigateTo(item.key) }} className="portal-nav-item" aria-current={activeNav === item.key ? 'page' : undefined} disabled={item.comingSoon}>
-                      <span className="shrink-0" aria-hidden="true">{item.icon}</span>
+                      <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md ${activeNav === item.key ? hue.solid : hue.icon}`} aria-hidden="true">{item.icon}</span>
                       <span className="flex-1">{item.label}</span>
                       <NavBadge count={navCounts[item.key]} navKey={item.key} />
                       {item.comingSoon && <span className="text-xs">Soon</span>}
