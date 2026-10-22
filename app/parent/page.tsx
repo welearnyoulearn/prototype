@@ -22,6 +22,7 @@ import SchoolCalendarView from '../components/SchoolCalendarView'
 import PortalSidebar from '@/components/portal/PortalSidebar'
 import FeatureLauncher, { type LauncherSection } from '@/components/portal/FeatureLauncher'
 import FeatureLauncherButton from '@/components/portal/FeatureLauncherButton'
+import { HUES } from '@/components/portal/sectionHues'
 import { CalendarDays, Home, GraduationCap, Phone, School, UserRound } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import { unregisterPushDevice } from '@/lib/pushClient'
@@ -700,12 +701,14 @@ function ParentDashboard() {
               onSelect={navigateTo}
             />
           </div>
-          {NAV.filter(item => isNavItemVisible(item.key)).map(item => (
+          {NAV.filter(item => isNavItemVisible(item.key)).map((item, nIdx) => { const hue = HUES[nIdx % HUES.length]; return (
             <button key={item.key} onClick={() => navigateTo(item.key)} aria-current={activeNav === item.key ? 'page' : undefined}
               className="portal-nav-item">
-              <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={item.icon} />
-              </svg>
+              <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md ${activeNav === item.key ? hue.solid : hue.icon}`}>
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={item.icon} />
+                </svg>
+              </span>
               {T.nav[item.key as keyof typeof T.nav]}
               {item.key !== 'fees' && item.key !== 'results' && <NavBadge count={navCounts[item.key]} navKey={item.key} />}
               {item.key === 'fees' && (feeSummary?.overdue_count ?? 0) > 0 && (
@@ -719,7 +722,7 @@ function ParentDashboard() {
                 </span>
               )}
             </button>
-          ))}
+          )})}
           </nav>
           <div className="portal-account">
             <p className="truncate text-sm font-medium">{parentInfo?.name}</p>
