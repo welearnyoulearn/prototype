@@ -4,6 +4,7 @@ import { useState, type ReactNode } from 'react'
 import { Dialog } from 'radix-ui'
 import { Bell, Search, X } from 'lucide-react'
 import type { NavNote } from '@/app/components/navNotifications'
+import { hueForSection } from './sectionHues'
 
 export type LauncherItem = { key: string; label: string; icon: ReactNode }
 /** `id` keeps test ids stable when `label` is translated. */
@@ -128,12 +129,14 @@ export default function FeatureLauncher({ open, onOpenChange, sections, activeNa
               </section>
             )}
             {filtered.length === 0 && <p className="py-8 text-center text-sm text-[#55635a]" data-testid="launcher-empty">{text.noMatch(query.trim())}</p>}
-            {filtered.map(section => (
+            {filtered.map(section => {
+              const hue = hueForSection(section.id ?? section.label, sections.findIndex(x => (x.id ?? x.label) === (section.id ?? section.label)))
+              return (
               <section key={section.id ?? section.label} aria-label={section.label} data-testid={`launcher-section-${(section.id ?? section.label).toLowerCase()}`}>
                 <div className="mb-2 flex items-center gap-2">
-                  <span className="flex h-6 w-6 items-center justify-center rounded-md bg-[#dce9dc] text-[#235b46] ring-1 ring-[#c5d8c8]">{section.icon}</span>
-                  <h3 className="text-[11px] font-bold uppercase tracking-[.08em] text-[#3b4a40]">{section.label}</h3>
-                  <span className="h-px flex-1 bg-[#dce2db]" />
+                  <span className={`flex h-6 w-6 items-center justify-center rounded-md ${hue.badge}`}>{section.icon}</span>
+                  <h3 className={`text-[11px] font-bold uppercase tracking-[.08em] ${hue.head}`}>{section.label}</h3>
+                  <span className={`h-px flex-1 ${hue.rule}`} />
                 </div>
                 <div className="grid grid-cols-2 gap-2 min-[360px]:grid-cols-3 sm:grid-cols-4">
                   {section.items.map(item => {
@@ -146,9 +149,9 @@ export default function FeatureLauncher({ open, onOpenChange, sections, activeNa
                         data-testid={`launcher-${item.key}`}
                         title={(latest[item.key] ?? []).map(n => n.title).join(' • ') || hints[item.key] || undefined}
                         aria-current={isActive ? 'page' : undefined}
-                        className={`relative flex flex-col items-center gap-2 rounded-xl border p-3 text-center transition-colors hover:border-[#235b46]/40 hover:bg-[#edf2eb] focus-visible:outline-2 focus-visible:outline-[#235b46] ${isActive ? 'border-[#235b46] bg-[#dce9dc]' : 'border-[#dce2db] bg-white'}`}
+                        className={`relative flex flex-col items-center gap-2 rounded-xl border p-3 text-center transition-colors focus-visible:outline-2 focus-visible:outline-[#235b46] ${isActive ? hue.active : `bg-white ${hue.tile}`}`}
                       >
-                        <span className={`flex h-11 w-11 items-center justify-center rounded-xl [&_svg]:!h-5 [&_svg]:!w-5 ${isActive ? 'bg-[#235b46] text-white' : 'bg-[#edf2eb] text-[#235b46]'}`}>{item.icon}</span>
+                        <span className={`flex h-11 w-11 items-center justify-center rounded-xl [&_svg]:!h-5 [&_svg]:!w-5 ${isActive ? hue.solid : hue.icon}`}>{item.icon}</span>
                         <span className="text-[13px] font-medium leading-tight text-[#202a25]">{item.label}</span>
                         {(counts[item.key] ?? 0) > 0 && (
                           <span
@@ -164,7 +167,8 @@ export default function FeatureLauncher({ open, onOpenChange, sections, activeNa
                   })}
                 </div>
               </section>
-            ))}
+              )
+            })}
           </div>
         </Dialog.Content>
       </Dialog.Portal>
