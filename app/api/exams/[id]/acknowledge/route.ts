@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse, after } from 'next/server'
 import { dispatchPendingPushes } from '@/lib/push'
 import pool, { ensureDB } from '@/lib/db'
-import { requireExamsAccess, parentOwnsStudent, examAppliesToStudent } from '@/lib/examsAuth'
+import { requireExamsParent, parentOwnsStudent, examAppliesToStudent } from '@/lib/examsAuth'
 
 // POST /api/exams/[id]/acknowledge
 // A parent acknowledges seeing their child's released result.
@@ -25,8 +25,8 @@ export async function POST(
     const body = await req.json()
     const { student_id, school_id } = body
 
-    const actor = await requireExamsAccess(school_id)
-    if (!actor || actor.kind !== 'parent') {
+    const actor = await requireExamsParent(school_id)
+    if (!actor) {
       return NextResponse.json({ error: 'Only a parent can acknowledge a result' }, { status: 403 })
     }
     if (!student_id) return NextResponse.json({ error: 'student_id required' }, { status: 400 })

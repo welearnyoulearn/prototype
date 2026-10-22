@@ -1,5 +1,6 @@
 import pool from './db'
 import type { Pool, PoolClient } from 'pg'
+import { headers } from 'next/headers'
 import {
   getPlatformSession, getSession, getTeacherSession, getStudentSession, getParentSession,
 } from './auth'
@@ -55,30 +56,71 @@ async function resolveTeacherActor(requestedSchoolId: string | number | null | u
   return { kind: 'teacher', schoolId: teacher.schoolId, teacherId: teacher.teacherId, actorName: teacher.name }
 }
 
+async function resolveStudentActor(requestedSchoolId: string | number | null | undefined):
+  Promise<Extract<ExamActor, { kind: 'student' }> | null> {
+  const student = await getStudentSession()
+  if (!student) return null
+  if (requestedSchoolId != null && Number(requestedSchoolId) !== Number(student.schoolId)) return null
+  return { kind: 'student', schoolId: student.schoolId, studentId: student.studentId, actorName: student.name }
+}
+
+async function resolveParentActor(requestedSchoolId: string | number | null | undefined):
+  Promise<Extract<ExamActor, { kind: 'parent' }> | null> {
+  const parent = await getParentSession()
+  if (!parent) return null
+  if (requestedSchoolId != null && Number(requestedSchoolId) !== Number(parent.schoolId)) return null
+  return { kind: 'parent', schoolId: parent.schoolId, parentId: parent.parentId, actorName: parent.name }
+}
+
+type ActorKind = ExamActor['kind']
+
+// Which portal a request came from, read from the page that issued the fetch
+// (Referer path). Only used to choose between logins the browser really holds,
+// so it can never grant a role the caller doesn't already have a valid session for.
+async function portalHint(): Promise<ActorKind | null> {
+  try {
+    const referer = (await headers()).get('referer')
+    if (!referer) return null
+    const path = new URL(referer).pathname
+    if (path.startsWith('/parent')) return 'parent'
+    if (path.startsWith('/student')) return 'student'
+    if (path.startsWith('/teacher')) return 'teacher'
+    if (path.startsWith('/school-admin') || path.startsWith('/platform-admin')) return 'admin'
+  } catch { /* no usable referer — fall back to the default order */ }
+  return null
+}
+
 // Read-only access: any school-scoped role (admin staff, teacher, student,
 // parent) whose own session's school matches the requested one. Platform
-// admin may access any school. Admin sessions are checked first so a stray
-// teacher/student/parent cookie in the same browser can't downgrade them.
+// admin may access any school.
+//
+// A browser can hold several portal logins at once (cookies are shared per
+// host), so when more than one is valid the portal the request came from wins;
+// without a usable Referer the order is admin, teacher, student, parent. Routes
+// that only make sense for one role should use requireExamsAdmin/Teacher/Parent
+// instead, which ignore the other cookies entirely.
 export async function requireExamsAccess(requestedSchoolId: string | number | null | undefined): Promise<ExamActor | null> {
-  const admin = await resolveAdminActor(requestedSchoolId)
-  if (admin) return admin
-
-  const teacher = await resolveTeacherActor(requestedSchoolId)
-  if (teacher) return teacher
-
-  const student = await getStudentSession()
-  if (student) {
-    if (requestedSchoolId != null && Number(requestedSchoolId) !== Number(student.schoolId)) return null
-    return { kind: 'student', schoolId: student.schoolId, studentId: student.studentId, actorName: student.name }
+  const resolvers: Record<ActorKind, () => Promise<ExamActor | null>> = {
+    admin:   () => resolveAdminActor(requestedSchoolId),
+    teacher: () => resolveTeacherActor(requestedSchoolId),
+    student: () => resolveStudentActor(requestedSchoolId),
+    parent:  () => resolveParentActor(requestedSchoolId),
   }
+  const defaultOrder: ActorKind[] = ['admin', 'teacher', 'student', 'parent']
+  const hint = await portalHint()
+  const order = hint ? [hint, ...defaultOrder.filter(kind => kind !== hint)] : defaultOrder
 
-  const parent = await getParentSession()
-  if (parent) {
-    if (requestedSchoolId != null && Number(requestedSchoolId) !== Number(parent.schoolId)) return null
-    return { kind: 'parent', schoolId: parent.schoolId, parentId: parent.parentId, actorName: parent.name }
+  for (const kind of order) {
+    const actor = await resolvers[kind]()
+    if (actor) return actor
   }
-
   return null
+}
+
+// Parent-only — child summary, result acknowledgement.
+export async function requireExamsParent(requestedSchoolId: string | number | null | undefined):
+  Promise<Extract<ExamActor, { kind: 'parent' }> | null> {
+  return resolveParentActor(requestedSchoolId)
 }
 
 // Admin-only (school staff or platform admin) — exam creation, scheduling,

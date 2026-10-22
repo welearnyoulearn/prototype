@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
-import { requireExamsAccess, parentOwnsStudent } from '@/lib/examsAuth'
+import { requireExamsParent, parentOwnsStudent } from '@/lib/examsAuth'
 import { buildStudentAttendanceView } from '@/lib/attendanceStudentView'
 
 export async function GET(req: NextRequest) {
@@ -11,8 +11,8 @@ export async function GET(req: NextRequest) {
     const student_id = searchParams.get('student_id')
     const class_id = searchParams.get('class_id')
 
-    const actor = await requireExamsAccess(school_id)
-    if (!actor || actor.kind !== 'parent') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    const actor = await requireExamsParent(school_id)
+    if (!actor) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
     if (!student_id || !class_id) {
       return NextResponse.json({ error: 'student_id, class_id required' }, { status: 400 })
