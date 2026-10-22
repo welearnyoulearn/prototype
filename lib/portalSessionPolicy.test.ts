@@ -20,8 +20,10 @@ test('web parents keep the short session: 20 min idle, 12 h cap, browser-session
   assert.equal(SESSION_MAX_HOURS, 12)
 })
 
-test('mobile parents stay signed in: one year, persistent cookie, no short idle timeout', () => {
+test('mobile parents stay signed in for life: 50 years, persistent cookie, no short idle timeout', () => {
   const limits = parentSessionLimits(true)
+  assert.ok(MOBILE_SESSION_DAYS >= 50 * 365)
+  assert.ok(limits.cookieMaxAgeSeconds! < 2 ** 31)
   assert.equal(limits.idleMinutes, MOBILE_SESSION_DAYS * 24 * 60)
   assert.equal(limits.maxHours, MOBILE_SESSION_DAYS * 24)
   assert.equal(limits.cookieMaxAgeSeconds, MOBILE_SESSION_DAYS * 24 * 60 * 60)
