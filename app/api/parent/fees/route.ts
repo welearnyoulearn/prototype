@@ -1,36 +1,26 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
-import { getAnySession, getParentSession, schoolHasFeature } from '@/lib/auth'
+import { getParentSession, schoolHasFeature } from '@/lib/auth'
 import { resolveAcademicYear } from '@/lib/academicYear'
 import { claimIdempotencyKey, saveIdempotentResponse } from '@/lib/idempotency'
 
 // GET /api/parent/fees?school_id=X&student_id=Y&academic_year=2025-26
 export async function GET(req: NextRequest) {
   try {
-    const session = await getAnySession()
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    // Parent-only endpoint: resolve the parent login directly. getAnySession() prefers a school-admin
+    // cookie, so an admin signed in on the same browser would be rejected here as a non-parent.
+    const parent = await getParentSession()
+    if (!parent) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     const p = req.nextUrl.searchParams
     const school_id   = p.get('school_id')
     const student_id  = p.get('student_id')
     if (!school_id || !student_id) return NextResponse.json({ error: 'school_id, student_id required' }, { status: 400 })
-    // getAnySession() only confirms SOME valid login exists, for whichever role —
-    // this endpoint is parent-only (only app/parent/page.tsx calls it; there is
-    // no student/teacher/admin fees screen that does). Without this check, a
-    // logged-in student or teacher session — neither of which has any
-    // parent-link relationship to verify — could pass ANY same-school
-    // student_id and read that student's fee ledger, payment history, and
-    // transaction references; POST had the same gap for submitting a payment
-    // against another student's bill.
-    if (session.role !== 'parent') {
+    if (parent.schoolId !== parseInt(school_id)) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
-    if (session.schoolId !== parseInt(school_id)) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-    }
-    const parent = await getParentSession()
     const linkRes = await pool.query(
       'SELECT 1 FROM student_parents WHERE student_id = $1 AND parent_id = $2',
-      [student_id, parent?.parentId]
+      [student_id, parent.parentId]
     )
     if (linkRes.rowCount === 0) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
@@ -174,29 +164,21 @@ export async function GET(req: NextRequest) {
 //
 export async function POST(req: NextRequest) {
   try {
-    const session = await getAnySession()
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    // Parent-only endpoint: resolve the parent login directly. getAnySession() prefers a school-admin
+    // cookie, so an admin signed in on the same browser would be rejected here as a non-parent.
+    const parent = await getParentSession()
+    if (!parent) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     const { school_id, student_id, ledger_id, ledger_ids, amount, total_amount, transaction_ref, upi_id, idempotency_key } = await req.json()
     if (!school_id || !student_id) {
       return NextResponse.json({ error: 'school_id, student_id required' }, { status: 400 })
     }
-    // getAnySession() only confirms SOME valid login exists, for whichever role —
-    // this endpoint is parent-only (see the matching comment on GET above).
-    // Without this check, a logged-in student or teacher session could submit a
-    // fabricated payment against ANOTHER same-school student's ledger by
-    // supplying its IDs directly, since every query below trusts
-    // school_id/student_id/ledger_id straight from the request body.
-    if (session.role !== 'parent') {
+    if (parent.schoolId !== Number(school_id)) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
-    if (session.schoolId !== Number(school_id)) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-    }
-    const parent = await getParentSession()
     const linkRes = await pool.query(
       'SELECT 1 FROM student_parents WHERE student_id = $1 AND parent_id = $2',
-      [student_id, parent?.parentId]
+      [student_id, parent.parentId]
     )
     if (linkRes.rowCount === 0) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
