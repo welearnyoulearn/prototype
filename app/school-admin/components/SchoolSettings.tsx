@@ -1,23 +1,26 @@
 'use client'
 
 import { useEffect, useState, useCallback, useRef } from 'react'
+import { ExportButtons, useRenewalRequest } from '@/components/PlanNotice'
 import { useRouter } from 'next/navigation'
-import { getBoardLabels } from '@/lib/board-syllabus/data'
 import { ALL_FEATURES, CATEGORY_ORDER } from '@/lib/features'
-import { useFeature } from '@/lib/features-context'
+import { BillStatusChip, UsageBar, extraPrice, fetchJSON, firstOfMonth, priceText } from '@/components/billing/parts'
+import { inr, qty } from '@/lib/billingFormat'
+import type { Bill, MyUsageResponse, PlanTerm } from '@/lib/billingTypes'
+import { Skeleton } from '@/components/ui/skeleton'
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { useConfirm } from '@/components/ui/use-confirm'
+import YearEndResponsibilities from './YearEndResponsibilities'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type SchoolData = {
   id: number; name: string; type: string; city: string; country: string
   phone: string; email: string; address: string
-  school_code: string; grading_scheme: GradeRow[]; board?: string
+  school_code: string
   logo_url?: string | null; receipt_header_blocks?: ReceiptHeaderBlock[]
   logo_align?: 'left' | 'center' | 'right' | null
 }
-
-type GradeRow = { grade: string; min: number; max: number }
 
 type ReceiptHeaderBlock = {
   text: string
@@ -37,30 +40,26 @@ type AcademicYear = {
 
 type StaffAccount = {
   id: number; full_name: string; email: string; role: string
-  status: string; first_login: boolean; created_at: string
+  status: string; first_login: boolean; created_at: string; is_primary_admin: boolean
 }
 
 type Subscription = {
   tier: 'basic' | 'standard' | 'premium' | 'none'
   staff_limit?: number | null
   updated_at?: string
+  plan_start_date?: string | null
+  plan_end_date?: string | null
+  plan_status?: 'none' | 'active' | 'expiring' | 'grace' | 'expired'
+  days_left?: number | null
+  grace_ends?: string | null
 }
 
-type SettingsTab = 'profile' | 'academic-years' | 'plan' | 'staff' | 'security' | 'danger'
+const fmtPlanDate = (d: string) =>
+  d ? new Date(d + 'T00:00:00Z').toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric', timeZone: 'UTC' }) : ''
+
+type SettingsTab = 'profile' | 'academic-years' | 'plan' | 'staff' | 'security'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
-
-const BOARDS = getBoardLabels()
-
-const DEFAULT_GRADING: GradeRow[] = [
-  { grade: 'A+', min: 90, max: 100 },
-  { grade: 'A',  min: 80, max: 89  },
-  { grade: 'B+', min: 70, max: 79  },
-  { grade: 'B',  min: 60, max: 69  },
-  { grade: 'C',  min: 50, max: 59  },
-  { grade: 'D',  min: 35, max: 49  },
-  { grade: 'F',  min: 0,  max: 34  },
-]
 
 const ROLE_LABELS: Record<string, string> = {
   school_admin: 'School Admin', principal: 'Principal', vice_principal: 'Vice Principal',
@@ -117,9 +116,8 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
   const [error, setError]     = useState('')
   const [profile, setProfile] = useState({
     name: '', type: '', city: '', country: '', phone: '', email: '',
-    address: '', board: '',
+    address: '',
   })
-  const [scheme, setScheme] = useState<GradeRow[]>(DEFAULT_GRADING)
   const [logoUrl, setLogoUrl] = useState('')
   const [logoAlign, setLogoAlign] = useState<'left' | 'center' | 'right'>('center')
   const [headerBlocks, setHeaderBlocks] = useState<ReceiptHeaderBlock[]>([])
@@ -161,6 +159,8 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
 
   // ── Plan & features ────────────────────────────────────────────────────────
   const [subscription, setSubscription] = useState<Subscription | null>(null)
+  const renewal = useRenewalRequest(null)
+  const [canRequestPlan, setCanRequestPlan] = useState(false)   // school administrator / principal
   const [enabledFeatures, setEnabledFeatures] = useState<Set<string>>(new Set())
   const [planLoading, setPlanLoading] = useState(false)
 
@@ -173,6 +173,13 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
   const [staffSuccess, setStaffSuccess] = useState('')
   const [resendingId, setResendingId] = useState<number | null>(null)
   const [resendMsg, setResendMsg]   = useState<{ id: number; text: string; ok: boolean } | null>(null)
+  // Only a School Administrator can add / deactivate / reactivate (the server enforces it);
+  // this just stops showing buttons that would be refused. Defaults to false until known.
+  const [canManageStaff, setCanManageStaff] = useState(false)
+  const [myStaffId, setMyStaffId] = useState<number | null>(null)
+  // Result of the last deactivate / reactivate — shown above the list. These handlers
+  // used to ignore the server's answer and flip the row anyway.
+  const [staffActionMsg, setStaffActionMsg] = useState<string>('')
 
   // ── Security ───────────────────────────────────────────────────────────────
   const [curPwd, setCurPwd]         = useState('')
@@ -180,12 +187,6 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
   const [confirmPwd, setConfirmPwd] = useState('')
   const [pwdSaving, setPwdSaving]   = useState(false)
   const [pwdMsg, setPwdMsg]         = useState<{ text: string; ok: boolean } | null>(null)
-
-  // ── Danger zone ────────────────────────────────────────────────────────────
-  const [exportSending, setExportSending] = useState(false)
-  const [closureSending, setClosureSending] = useState(false)
-  const [closureReason, setClosureReason] = useState('')
-  const [dangerMsg, setDangerMsg]   = useState<{ text: string; ok: boolean } | null>(null)
 
   // ── Load functions ─────────────────────────────────────────────────────────
 
@@ -200,9 +201,7 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
         name: d.name ?? '', type: d.type ?? '', city: d.city ?? '',
         country: d.country ?? '', phone: d.phone ?? '', email: d.email ?? '',
         address: d.address ?? '',
-        board: d.board ?? '',
       })
-      if (d.grading_scheme?.length) setScheme(d.grading_scheme)
       setLogoUrl(d.logo_url ?? '')
       setLogoAlign(d.logo_align ?? 'center')
       setHeaderBlocks(d.receipt_header_blocks?.length ? d.receipt_header_blocks : [])
@@ -220,7 +219,11 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
   const loadPlan = useCallback(async () => {
     setPlanLoading(true)
     try {
-      const subR = await fetch(`/api/schools/${schoolId}/subscription`)
+      const [subR, statusR] = await Promise.all([
+        fetch(`/api/schools/${schoolId}/subscription`),
+        fetch('/api/plan/status').catch(() => null),
+      ])
+      if (statusR?.ok) setCanRequestPlan((await statusR.json()).can_manage === true)
       if (subR.ok) {
         const sub: Subscription = await subR.json()
         setSubscription(sub)
@@ -236,10 +239,20 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
   }, [schoolId])
 
   const loadStaff = useCallback(async () => {
-    setStaffLoading(true)
+    setStaffLoading(true); setStaffActionMsg('')
     try {
-      const r = await fetch(`/api/school-admin/staff-accounts?school_id=${schoolId}`)
-      if (r.ok) setStaffList(await r.json())
+      // The seat limit comes from the plan and the role decides which buttons show. The
+      // plan used to be fetched only when the Plan tab was opened, so opening Staff
+      // Accounts first showed no limit and offered the Add form even when the school
+      // was already full.
+      const [listR, meR, subR] = await Promise.all([
+        fetch(`/api/school-admin/staff-accounts?school_id=${schoolId}`).catch(() => null),
+        fetch('/api/auth/me').catch(() => null),
+        fetch(`/api/schools/${schoolId}/subscription`).catch(() => null),
+      ])
+      if (listR?.ok) setStaffList(await listR.json())
+      if (meR?.ok) { const me = await meR.json(); setCanManageStaff(me.role === 'school_admin'); setMyStaffId(me.id ?? null) }
+      if (subR?.ok) setSubscription(await subR.json())
     } finally { setStaffLoading(false) }
   }, [schoolId])
 
@@ -247,6 +260,10 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
   useEffect(() => { if (tab === 'academic-years') loadYears() }, [tab, loadYears])
   useEffect(() => { if (tab === 'plan') loadPlan() }, [tab, loadPlan])
   useEffect(() => { if (tab === 'staff') loadStaff() }, [tab, loadStaff])
+
+  // All seats taken → Reactivate would be refused (it uses a seat just like Add does).
+  const staffSeatsFull = subscription?.staff_limit != null &&
+    staffList.filter(x => x.status === 'active').length >= subscription.staff_limit
 
   // ── Profile save ───────────────────────────────────────────────────────────
 
@@ -257,7 +274,7 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
       const r = await fetch(`/api/schools/${schoolId}`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          ...profile, board: profile.board || null,
+          ...profile,
           logo_url: logoUrl || null,
           logo_align: logoAlign,
           receipt_header_blocks: headerBlocks.filter(b => b.text.trim()),
@@ -314,24 +331,6 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
     } finally {
       setLogoUploading(false)
     }
-  }
-
-  async function saveGrading(e: React.FormEvent) {
-    e.preventDefault()
-    for (let i = 0; i < scheme.length; i++) {
-      if (scheme[i].min > scheme[i].max) { setError(`Row ${i + 1}: min must be ≤ max`); return }
-    }
-    setSaving(true); setError(''); setSaved(false)
-    try {
-      const r = await fetch(`/api/schools/${schoolId}`, {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ grading_scheme: scheme }),
-      })
-      if (!r.ok) throw new Error((await r.json()).error)
-      setSaved(true); setTimeout(() => setSaved(false), 3000)
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Failed to save grading scheme')
-    } finally { setSaving(false) }
   }
 
   // ── Academic year actions ──────────────────────────────────────────────────
@@ -505,19 +504,30 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
   async function deactivateStaff(id: number) {
     const ok = await confirm('Deactivate this account? They will lose access immediately.', { title: 'Deactivate account?', confirmText: 'Deactivate', destructive: true })
     if (!ok) return
-    await fetch('/api/school-admin/staff-accounts', {
-      method: 'DELETE', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id }),
-    })
-    setStaffList(prev => prev.map(s => s.id === id ? { ...s, status: 'inactive' } : s))
+    setStaffActionMsg('')
+    // Only flip the row when the server actually did it. This used to ignore the answer,
+    // so a refused request (not an admin, last administrator, network error) still
+    // showed "Deactivated" until the page was reloaded.
+    try {
+      const r = await fetch('/api/school-admin/staff-accounts', {
+        method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id }),
+      })
+      if (!r.ok) { setStaffActionMsg((await r.json().catch(() => ({}))).error || 'Could not deactivate this account'); return }
+      setStaffList(prev => prev.map(s => s.id === id ? { ...s, status: 'inactive' } : s))
+    } catch { setStaffActionMsg('Network error — the account was not deactivated') }
   }
 
   async function reactivateStaff(id: number) {
-    await fetch('/api/school-admin/staff-accounts', {
-      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id }),
-    })
-    setStaffList(prev => prev.map(s => s.id === id ? { ...s, status: 'active' } : s))
+    setStaffActionMsg('')
+    try {
+      const r = await fetch('/api/school-admin/staff-accounts', {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id }),
+      })
+      if (!r.ok) { setStaffActionMsg((await r.json().catch(() => ({}))).error || 'Could not reactivate this account'); return }
+      setStaffList(prev => prev.map(s => s.id === id ? { ...s, status: 'active' } : s))
+    } catch { setStaffActionMsg('Network error — the account was not reactivated') }
   }
 
   async function resendCredentials(id: number) {
@@ -558,40 +568,12 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
     } finally { setPwdSaving(false) }
   }
 
-  // ── Danger zone actions ────────────────────────────────────────────────────
-
-  async function sendAccountRequest(type: 'export' | 'closure') {
-    if (type === 'closure' && !closureReason.trim()) {
-      setDangerMsg({ text: 'Please provide a reason for closure', ok: false }); return
-    }
-    const setter = type === 'export' ? setExportSending : setClosureSending
-    setter(true); setDangerMsg(null)
-    try {
-      const r = await fetch('/api/school-admin/account-request', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type, reason: closureReason, school_id: schoolId }),
-      })
-      const d = await r.json()
-      if (r.ok) {
-        setDangerMsg({
-          text: type === 'export'
-            ? '✓ Data export request sent — our team will contact you within 2 business days'
-            : '✓ Closure request sent — our team will review and contact you',
-          ok: true,
-        })
-        if (type === 'closure') setClosureReason('')
-      } else {
-        setDangerMsg({ text: d.error || 'Failed to send request', ok: false })
-      }
-    } finally { setter(false) }
-  }
-
   // ── Shared helpers ─────────────────────────────────────────────────────────
 
   function resetTabState() {
     setError(''); setSaved(false)
     setStaffError(''); setStaffSuccess('')
-    setPwdMsg(null); setDangerMsg(null); setYearsMsg(null); setResendMsg(null)
+    setPwdMsg(null); setYearsMsg(null); setResendMsg(null)
   }
 
   const pwdChecks = [
@@ -605,13 +587,10 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
   const TABS: { key: SettingsTab; label: string; icon: string }[] = [
     { key: 'profile',        label: 'School Profile',   icon: '🏫' },
     { key: 'academic-years', label: 'Academic Years',   icon: '📅' },
-    { key: 'plan',           label: 'Plan & Features',  icon: '⭐' },
+    { key: 'plan',           label: 'Plan & Billing',   icon: '⭐' },
     { key: 'staff',          label: 'Staff Accounts',   icon: '👥' },
     { key: 'security',       label: 'Security',         icon: '🔒' },
-    { key: 'danger',         label: 'Danger Zone',      icon: '⚠️' },
   ]
-
-  const hasExamSchedule = useFeature('exam-marks')
 
   if (loading) return <div className="text-center py-12 text-muted-foreground text-sm">Loading settings…</div>
 
@@ -632,7 +611,7 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
             onClick={() => { setTab(key); resetTabState() }}
             className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5 ${
               tab === key ? 'bg-white text-indigo-700 ' : 'text-gray-500 hover:text-gray-700'
-            } ${key === 'danger' && tab !== 'danger' ? 'hover:text-red-500' : ''}`}>
+            }`}>
             <span className="text-xs">{icon}</span>{label}
           </button>
         ))}
@@ -701,65 +680,6 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
               <textarea rows={2} placeholder="Full address…" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
                 value={profile.address} onChange={e => setProfile(f => ({ ...f, address: e.target.value }))} />
             </div>
-
-            {/* Board */}
-            <div className="border-t border-gray-100 pt-5 space-y-3">
-              <div>
-                <h3 className="text-sm font-semibold text-gray-700">Curriculum Board</h3>
-                <p className="text-xs text-muted-foreground mt-0.5">Used for syllabus management and curriculum planning</p>
-              </div>
-              <div className="max-w-xs">
-                <select value={profile.board} onChange={e => setProfile(f => ({ ...f, board: e.target.value }))}
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
-                  <option value="">— Select Board —</option>
-                  {BOARDS.map(b => <option key={b.value} value={b.value}>{b.label}</option>)}
-                </select>
-              </div>
-            </div>
-
-            {/* Grading scheme — only when exam-schedule feature is enabled */}
-            {hasExamSchedule && (
-              <div className="border-t border-gray-100 pt-5 space-y-3">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h3 className="text-sm font-semibold text-gray-700">Grading Scheme</h3>
-                    <p className="text-xs text-muted-foreground mt-0.5">Used for exam results and report cards</p>
-                  </div>
-                  <button type="button" onClick={() => setScheme(DEFAULT_GRADING)}
-                    className="text-xs text-indigo-600 hover:text-indigo-800 border border-indigo-200 px-3 py-1.5 rounded-lg">
-                    Reset to Default
-                  </button>
-                </div>
-                <div className="border border-gray-100 rounded-md overflow-hidden">
-                  <div className="grid grid-cols-4 bg-gray-50 border-b border-gray-100">
-                    {['Grade Label','Min %','Max %',''].map(h => (
-                      <div key={h} className="px-4 py-2.5 text-xs font-semibold text-gray-500">{h}</div>
-                    ))}
-                  </div>
-                  <div className="divide-y divide-gray-50">
-                    {scheme.map((row, idx) => (
-                      <div key={idx} className="grid grid-cols-4 items-center px-4 py-2 gap-2">
-                        <input className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm font-bold text-center focus:outline-none focus:ring-2 focus:ring-indigo-500 w-20"
-                          value={row.grade} maxLength={4} placeholder="A+"
-                          onChange={e => setScheme(prev => prev.map((r, i) => i === idx ? { ...r, grade: e.target.value } : r))} />
-                        <input type="number" min={0} max={100}
-                          className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-center focus:outline-none focus:ring-2 focus:ring-indigo-500 w-24"
-                          value={row.min} onChange={e => setScheme(prev => prev.map((r, i) => i === idx ? { ...r, min: Number(e.target.value) } : r))} />
-                        <input type="number" min={0} max={100}
-                          className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-center focus:outline-none focus:ring-2 focus:ring-indigo-500 w-24"
-                          value={row.max} onChange={e => setScheme(prev => prev.map((r, i) => i === idx ? { ...r, max: Number(e.target.value) } : r))} />
-                        <button type="button" onClick={() => setScheme(prev => prev.filter((_, i) => i !== idx))}
-                          className="text-red-400 hover:text-red-600 text-xs justify-self-start">Remove</button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                <button type="button" onClick={() => setScheme(prev => [...prev, { grade: '', min: 0, max: 0 }])}
-                  className="text-sm text-indigo-600 hover:text-indigo-800 border border-indigo-200 px-4 py-2 rounded-lg">
-                  + Add Grade
-                </button>
-              </div>
-            )}
 
             {/* Receipt Branding — logo + styled header lines shown on printed fee receipts */}
             <div className="border-t border-gray-100 pt-5 space-y-3">
@@ -916,8 +836,6 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
                 className={`px-6 py-2.5 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-60 ${saved ? 'bg-green-600 hover:bg-green-700' : 'bg-indigo-600 hover:bg-indigo-700'}`}>
                 {saving ? 'Saving…' : saved ? '✓ Saved' : 'Save Profile & Settings'}
               </button>
-              <button type="button" onClick={() => { saveGrading(new Event('submit') as unknown as React.FormEvent) }}
-                className="hidden" />
             </div>
           </form>
         </div>
@@ -1013,13 +931,16 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
               <div className="flex gap-2">
                 <button onClick={saveYear} disabled={yearSaving}
                   className="px-5 py-2 bg-amber-600 text-white text-sm font-medium rounded-lg hover:bg-amber-700 disabled:opacity-50">
-                  {yearSaving ? 'Saving…' : 'Save Changes'}
+                  {yearSaving ? 'Checking…' : 'Review & Save'}
                 </button>
                 <button onClick={cancelEditYear}
                   className="px-5 py-2 border border-gray-200 text-gray-600 text-sm rounded-lg hover:bg-gray-50">
                   Cancel
                 </button>
               </div>
+              <p className="text-xs text-amber-700">
+                You&apos;ll be asked to confirm with your password on the next step — the date isn&apos;t saved until you do.
+              </p>
             </div>
           )}
 
@@ -1191,18 +1112,52 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
                         {subscription?.tier === 'none' ? 'No Plan Assigned' : (subscription?.tier ?? 'none')}
                       </span>
                     </div>
-                    {subscription?.updated_at && subscription.tier !== 'none' && (
-                      <p className="text-xs text-muted-foreground mt-1.5">
-                        Active since {new Date(subscription.updated_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' })}
+                    {subscription?.plan_end_date && subscription.tier !== 'none' && (
+                      <p className="text-xs text-muted-foreground mt-1.5" data-testid="plan-dates">
+                        Valid {subscription.plan_start_date ? `from ${fmtPlanDate(subscription.plan_start_date)} ` : ''}until {fmtPlanDate(subscription.plan_end_date)}
                       </p>
                     )}
                   </div>
-                  <a href="mailto:support@welearnyoulearn.com?subject=Plan Upgrade Request"
-                    className="text-sm font-medium text-indigo-600 hover:text-indigo-800 border border-indigo-200 px-4 py-2 rounded-lg hover:bg-indigo-50 transition-colors">
-                    Upgrade Plan →
-                  </a>
+                  {canRequestPlan && (
+                    <div className="text-right">
+                      <button data-testid="plan-request-renewal" onClick={renewal.request} disabled={renewal.sending || renewal.sent}
+                        className="text-sm font-medium text-indigo-600 hover:text-indigo-800 border border-indigo-200 px-4 py-2 rounded-lg hover:bg-indigo-50 transition-colors disabled:opacity-60">
+                        {renewal.sent ? 'Request sent' : renewal.sending ? 'Sending…' : 'Request renewal / upgrade'}
+                      </button>
+                      {renewal.msg && <p className={`text-xs mt-1.5 ${renewal.error ? 'text-red-700' : 'text-green-700'}`} data-testid="plan-request-result">{renewal.msg}</p>}
+                    </div>
+                  )}
                 </div>
               </div>
+
+              {(subscription?.plan_status === 'expiring' || subscription?.plan_status === 'grace' || subscription?.plan_status === 'expired') && (
+                <div data-testid="plan-expiry-banner"
+                  className={`rounded-md p-4 text-sm border ${subscription.plan_status === 'expiring' ? 'bg-amber-50 border-amber-200 text-amber-800' : 'bg-red-50 border-red-200 text-red-800'}`}>
+                  {subscription.plan_status === 'expiring' && `Your plan ends ${subscription.days_left === 0 ? 'today' : `in ${subscription.days_left} day${subscription.days_left === 1 ? '' : 's'}`} (${fmtPlanDate(subscription.plan_end_date ?? '')}). Renew to keep every feature.`}
+                  {subscription.plan_status === 'grace' && `Your plan ended on ${fmtPlanDate(subscription.plan_end_date ?? '')}. Everything still works until ${fmtPlanDate(subscription.grace_ends ?? '')} — renew before then.`}
+                  {subscription.plan_status === 'expired' && `Your plan expired on ${fmtPlanDate(subscription.plan_end_date ?? '')}. Your data and logins are safe; features return as soon as the plan is renewed.`}
+                  {' '}<a className="underline font-medium" href="mailto:support@welearnyoulearn.com?subject=Plan Renewal">Contact us to renew</a>
+                </div>
+              )}
+
+              {/* Price, this month's usage and bills — school administrator / principal only */}
+              {canRequestPlan && subscription?.tier !== 'none' && (
+                <div className="bg-white border border-gray-100 rounded-md p-5 space-y-4" data-testid="plan-billing-card">
+                  <MyPlanPrice />
+
+                  <MyUsage />
+
+                  <MyBills />
+                </div>
+              )}
+
+              {canRequestPlan && (
+                <div className="bg-white border border-gray-100 rounded-md p-5" data-testid="plan-export-card">
+                  <p className="text-sm font-semibold text-gray-800">Export your school’s data</p>
+                  <p className="text-xs text-muted-foreground mt-0.5 mb-3">Download your records as Excel files any time. Passwords are never included.</p>
+                  <ExportButtons />
+                </div>
+              )}
 
               {/* Features grid */}
               {subscription?.tier === 'none' ? (
@@ -1264,6 +1219,32 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
             })()}
           </div>
 
+          {/* Over the plan's limit — after a downgrade, or when the plan's limit was lowered. */}
+          {!staffLoading && (() => {
+            const limit = subscription?.staff_limit ?? null
+            const active = staffList.filter(s => s.status === 'active').length
+            const over = limit !== null ? Math.max(0, active - limit) : 0
+            if (over === 0) return null
+            return (
+              <div className="bg-amber-50 border border-amber-200 rounded-md px-4 py-3 text-sm text-amber-800 space-y-1" data-testid="staff-over-limit-banner">
+                <p className="font-semibold">Your plan allows {limit} staff account{limit === 1 ? '' : 's'}, but {active} are active.</p>
+                <p>
+                  Everyone keeps working — nobody has been switched off. Until you deactivate {over} more account{over === 1 ? '' : 's'}
+                  {' '}(or your school moves to a larger plan) you can&apos;t add or reactivate staff accounts.
+                  Deactivated accounts are kept and can be reactivated later when there is room.
+                </p>
+              </div>
+            )
+          })()}
+          {!staffLoading && !canManageStaff && (
+            <div className="bg-gray-50 border border-gray-200 text-gray-600 px-4 py-3 rounded-lg text-sm">
+              Only a school administrator can add, deactivate or reactivate staff accounts.
+            </div>
+          )}
+          {staffActionMsg && (
+            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">{staffActionMsg}</div>
+          )}
+
           {/* Staff list */}
           {staffLoading ? (
             <p className="text-sm text-muted-foreground">Loading…</p>
@@ -1294,6 +1275,9 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
                         {s.status === 'inactive' && (
                           <span className="text-xs bg-red-100 text-red-600 px-2 py-0.5 rounded-full font-medium">Deactivated</span>
                         )}
+                        {s.is_primary_admin && (
+                          <span className="text-xs bg-blue-100 text-blue-600 px-2 py-0.5 rounded-full font-medium">Setup account</span>
+                        )}
 
                       </div>
                       <p className="text-xs text-muted-foreground truncate mt-0.5">{s.email}</p>
@@ -1305,14 +1289,20 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
                             className="text-xs border border-indigo-200 text-indigo-600 hover:bg-indigo-50 px-2.5 py-1.5 rounded-lg disabled:opacity-50 transition-colors">
                             {resendingId === s.id ? 'Sending…' : 'Resend Invite Link'}
                           </button>
-                          <button onClick={() => deactivateStaff(s.id)}
-                            className="text-xs border border-red-200 text-red-500 hover:bg-red-50 px-2.5 py-1.5 rounded-lg transition-colors">
-                            Deactivate
-                          </button>
+                          {/* You can never deactivate yourself, and nobody can deactivate the setup account
+                              (the school's recovery login) — the server refuses both, but showing a button
+                              that always fails is just confusing. */}
+                          {canManageStaff && s.id !== myStaffId && !s.is_primary_admin && (
+                            <button onClick={() => deactivateStaff(s.id)}
+                              className="text-xs border border-red-200 text-red-500 hover:bg-red-50 px-2.5 py-1.5 rounded-lg transition-colors">
+                              Deactivate
+                            </button>
+                          )}
                         </>
-                      ) : (
-                        <button onClick={() => reactivateStaff(s.id)}
-                          className="text-xs border border-green-200 text-green-600 hover:bg-green-50 px-2.5 py-1.5 rounded-lg transition-colors">
+                      ) : canManageStaff && (
+                        <button onClick={() => reactivateStaff(s.id)} disabled={staffSeatsFull}
+                          title={staffSeatsFull ? 'All staff seats on your plan are in use — deactivate another account or upgrade first' : undefined}
+                          className="text-xs border border-green-200 text-green-600 hover:bg-green-50 px-2.5 py-1.5 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
                           Reactivate
                         </button>
                       )}
@@ -1326,8 +1316,10 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
             </div>
           )}
 
-          {/* Add staff form */}
-          {(() => {
+          {/* Add staff form — School Administrators only (the server refuses everyone else) */}
+          <YearEndResponsibilities schoolId={schoolId} canManage={canManageStaff} />
+
+          {canManageStaff && (() => {
             const limit = subscription?.staff_limit ?? null
             const count = staffList.filter(s => s.status === 'active').length
             const atLimit = limit !== null && count >= limit
@@ -1430,60 +1422,163 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
         </div>
       )}
 
-      {/* ══ DANGER ZONE TAB ═══════════════════════════════════════════════════ */}
-      {tab === 'danger' && (
-        <div className="space-y-4">
-          {dangerMsg && (
-            <div className={`px-4 py-3 rounded-md text-sm border ${dangerMsg.ok ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-100 text-red-600'}`}>
-              {dangerMsg.text}
-            </div>
-          )}
+    </div>
+  )
+}
 
-          {/* Export data */}
-          <div className="bg-white border border-gray-200 rounded-md p-6 space-y-3">
-            <div>
-              <h3 className="text-sm font-semibold text-gray-800">Export My Data</h3>
-              <p className="text-xs text-gray-500 mt-0.5">
-                Request a full export of your school data — students, teachers, fees, attendance records.
-                Our team will prepare and send it within 2 business days.
-              </p>
-            </div>
-            <button onClick={() => sendAccountRequest('export')} disabled={exportSending}
-              className="px-5 py-2 border border-gray-300 text-gray-700 hover:bg-gray-50 text-sm font-medium rounded-lg transition-colors disabled:opacity-50">
-              {exportSending ? 'Sending request…' : 'Request Data Export'}
-            </button>
-          </div>
+const fmtDay = (d: string) => new Date(`${d}T00:00:00Z`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })
 
-          {/* Account closure */}
-          <div className="bg-white border border-red-200 rounded-md p-6 space-y-4">
-            <div>
-              <h3 className="text-sm font-semibold text-red-700">Request Account Closure</h3>
-              <p className="text-xs text-gray-500 mt-0.5">
-                This sends a closure request to our team. Your account will be reviewed and deactivated manually.
-                All data is preserved for 90 days before permanent deletion.
-              </p>
+// "You pay ₹8,500 / year + GST · renews 31 Oct 2027 · reason" from the school's current plan term; hidden without one.
+function MyPlanPrice() {
+  const [term, setTerm] = useState<PlanTerm | null>(null)
+  useEffect(() => {
+    fetchJSON<{ tier: string; name: string; term: PlanTerm | null }>('/api/billing/plan')
+      .then(r => setTerm(r.term))
+      .catch(e => console.error('[plan-billing] plan', e))
+  }, [])
+  if (!term) return null
+  const price = term.agreedPrice === 0 ? 'Complimentary'
+    : `${inr(term.agreedPrice, Number.isInteger(term.agreedPrice) ? 0 : 2)} / ${term.billingPeriod === 'yearly' ? 'year' : 'month'} + GST`
+  return (
+    <div data-testid="plan-billing-price">
+      <p className="text-sm font-semibold text-gray-800">{term.agreedPrice === 0 ? price : `You pay ${price}`}</p>
+      <p className="text-xs text-muted-foreground mt-0.5">renews {fmtDay(term.endDate)}{term.discountReason ? ` · ${term.discountReason}` : ''}</p>
+    </div>
+  )
+}
+
+// The school's own bills, newest first, with a drawer for lines, GST and payments.
+function MyBills() {
+  const [bills, setBills] = useState<Bill[] | null>(null)
+  const [error, setError] = useState('')
+  const [openId, setOpenId] = useState<number | null>(null)
+  const load = useCallback(async () => {
+    setError('')
+    try { setBills(await fetchJSON<Bill[]>('/api/billing/invoices')) }
+    catch (e) { console.error('[plan-billing] bills', e); setError(e instanceof Error ? e.message : 'Something went wrong') }
+  }, [])
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch on mount
+  useEffect(() => { load() }, [load])
+  const open = bills?.find(b => b.id === openId) ?? null
+  const suffix = (b: Bill) => b.status === 'due' ? `by ${fmtDay(b.dueDate)}` : b.status === 'overdue' ? `since ${fmtDay(b.dueDate)}`
+    : b.status === 'part_paid' ? `${inr(Math.round((b.total - b.paid) * 100) / 100)} left` : undefined
+
+  return (
+    <div data-testid="plan-billing-bills">
+      <p className="text-sm font-semibold text-gray-800">Bills</p>
+      <p className="text-xs text-muted-foreground">Created automatically on the 1st of each month and emailed to you.</p>
+      {error && (
+        <p className="mt-2 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2" role="alert" data-testid="plan-billing-bills-error">
+          Couldn&apos;t load bills. <span className="text-xs">({error})</span>{' '}
+          <button data-testid="plan-billing-bills-retry" onClick={load} className="underline font-medium">Try again</button>
+        </p>
+      )}
+      {!bills && !error && <div className="mt-2 space-y-2" data-testid="plan-billing-bills-loading"><Skeleton className="h-8 w-full" /><Skeleton className="h-8 w-full" /></div>}
+      {bills && bills.length === 0 && <p className="text-sm text-muted-foreground mt-2" data-testid="plan-billing-bills-empty">No bills yet.</p>}
+      {bills && bills.length > 0 && (
+        <div className="mt-2 divide-y divide-gray-100">
+          {bills.map(b => (
+            <div key={b.id} className="flex flex-wrap items-center justify-between gap-3 py-2.5 text-sm" data-testid={`plan-billing-bill-${b.id}`}>
+              <span className="text-gray-700">{b.title}<span className="block text-xs text-muted-foreground">{b.number ?? 'Nothing to charge'}</span></span>
+              <span className="flex items-center gap-3">
+                <span className="tabular-nums">{inr(b.total)}</span><BillStatusChip status={b.status} suffix={suffix(b)} />
+                <button data-testid={`plan-billing-bill-view-${b.id}`} onClick={() => setOpenId(b.id)} className="px-2.5 py-1 rounded-md text-xs border border-gray-300 text-gray-700 hover:bg-gray-50">View</button>
+              </span>
             </div>
-            <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-xs text-red-700 space-y-1">
-              <p className="font-semibold">⚠ Before you request closure:</p>
-              <ul className="list-disc list-inside space-y-0.5 mt-1">
-                <li>All teachers and students will lose access immediately</li>
-                <li>Fee records and reports will be unavailable</li>
-                <li>Data is retained for 90 days then permanently deleted</li>
-              </ul>
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-gray-600 mb-1.5">Reason for closure *</label>
-              <textarea value={closureReason} onChange={e => setClosureReason(e.target.value)} rows={3}
-                placeholder="Please describe why you want to close your account…"
-                className="w-full border border-gray-200 rounded-md px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-red-400 resize-none" />
-            </div>
-            <button onClick={() => sendAccountRequest('closure')} disabled={closureSending || !closureReason.trim()}
-              className="px-5 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-semibold rounded-lg transition-colors disabled:opacity-50">
-              {closureSending ? 'Sending request…' : 'Send Closure Request'}
-            </button>
-          </div>
+          ))}
         </div>
       )}
+      <Sheet open={!!open} onOpenChange={o => !o && setOpenId(null)}>
+        <SheetContent className="w-full overflow-y-auto sm:max-w-md" data-testid="plan-billing-bill-drawer">
+          {open && <>
+            <SheetHeader><SheetTitle>{open.title}</SheetTitle><SheetDescription>{open.number ?? 'No bill number (nothing to charge)'} · dated {fmtDay(open.billDate)} · due {fmtDay(open.dueDate)}</SheetDescription></SheetHeader>
+            <div className="px-4 pb-6 space-y-4 text-sm">
+              <BillStatusChip status={open.status} suffix={suffix(open)} />
+              {open.lines.length === 0 ? <p className="text-muted-foreground">Nothing was used beyond your plan, so there is nothing to pay.</p> : (
+                <div className="space-y-2">
+                  {open.lines.map(l => (
+                    <div key={l.id} className="flex justify-between gap-3"><span className="text-gray-800">{l.description}</span><span className="tabular-nums">{inr(l.amount)}</span></div>
+                  ))}
+                  <div className="border-t border-gray-200 pt-2 space-y-1 tabular-nums">
+                    <div className="flex justify-between"><span className="text-muted-foreground">Subtotal</span><span>{inr(open.subtotal)}</span></div>
+                    <div className="flex justify-between"><span className="text-muted-foreground">GST 18%</span><span>{inr(open.gst)}</span></div>
+                    <div className="flex justify-between font-semibold"><span>Total</span><span>{inr(open.total)}</span></div>
+                  </div>
+                </div>
+              )}
+              {open.payments.length > 0 && (
+                <div className="border-t border-gray-200 pt-3">
+                  <p className="font-semibold text-gray-800">Payments received</p>
+                  {open.payments.map(p => (
+                    <div key={p.id} className="flex justify-between gap-3 mt-1"><span className="text-gray-700">{fmtDay(p.paidOn)}{p.reference ? ` · ${p.reference}` : ''}</span><span className="tabular-nums">{inr(p.amount)}</span></div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </>}
+        </SheetContent>
+      </Sheet>
+    </div>
+  )
+}
+
+// This month's usage for the logged-in school (live).
+function MyUsage() {
+  const [data, setData] = useState<MyUsageResponse | null>(null)
+  const [error, setError] = useState('')
+  const load = useCallback(async () => {
+    setError('')
+    try { setData(await fetchJSON<MyUsageResponse>('/api/billing/usage')) }
+    catch (e) { console.error('[plan-billing] usage', e); setError(e instanceof Error ? e.message : 'Something went wrong') }
+  }, [])
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch on mount / month change
+  useEffect(() => { load() }, [load])
+
+  if (error) return (
+    <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2" role="alert" data-testid="plan-billing-usage-error">
+      Couldn&apos;t load this month&apos;s usage. <span className="text-xs">({error})</span>{' '}
+      <button data-testid="plan-billing-usage-retry" onClick={load} className="underline font-medium">Try again</button>
+    </p>
+  )
+  if (!data) return <div className="space-y-2" data-testid="plan-billing-usage-loading"><Skeleton className="h-4 w-48" /><Skeleton className="h-10 w-full" /></div>
+
+  const [y, m] = data.month.split('-').map(Number)
+  const nextFirst = firstOfMonth(new Date(Date.UTC(y, m, 1)).toISOString().slice(0, 7))   // '1 Nov'
+  const capped = data.charged.find(c => c.price.cap != null)
+  const upcoming = data.charged.filter(c => c.nextPrice)
+  return (
+    <div data-testid="plan-billing-usage">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <p className="text-sm font-semibold text-gray-800">This month · {data.monthLabel}</p>
+        <p className="text-xs text-muted-foreground">about <strong>{inr(data.extra)}</strong> extra so far · final on {nextFirst}</p>
+      </div>
+      {data.charged.length === 0 && data.counted.length === 0 && <p className="text-sm text-muted-foreground mt-2">Nothing used yet this month.</p>}
+      <div className="mt-2 divide-y divide-gray-100">
+        {data.charged.map(c => (
+          <div key={c.meter.key} className="flex flex-wrap items-center justify-between gap-3 py-2.5" data-testid={`plan-billing-usage-${c.meter.key}`}>
+            <span className="text-sm text-gray-700 w-40">{c.meter.name}</span>
+            <div className="flex-1 min-w-[160px]"><UsageBar used={c.usage.used} included={c.usage.included} paused={c.usage.paused} unit="included" /></div>
+            <span className="text-sm tabular-nums w-20 text-right">{c.usage.extra > 0 ? inr(c.usage.extra) : '—'}</span>
+          </div>
+        ))}
+        {data.counted.map(c => (
+          <div key={c.meter.key} className="flex justify-between py-2.5 text-sm" data-testid={`plan-billing-counted-${c.meter.key}`}><span className="text-gray-700">{c.meter.name}</span><span className="text-muted-foreground">{qty(c.quantity)} · included</span></div>
+        ))}
+      </div>
+      {data.charged.filter(c => c.usage.paused).map(c => (
+        <p key={c.meter.key} className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mt-2" role="status" data-testid={`plan-billing-paused-${c.meter.key}`}>
+          {c.meter.name} reached this month&apos;s limit and {c.meter.key === 'whatsapp.message' ? 'sending is' : 'it is'} paused until {nextFirst}.{c.meter.key === 'whatsapp.message' ? ' Login and password messages still go out.' : ''}
+        </p>
+      ))}
+      {capped && (
+        <p className="text-xs text-muted-foreground mt-2">
+          Extra {capped.meter.name.replace(/^[A-Z][a-z]+(?=\s|$)/, w => w.toLowerCase())} cost {capped.meter.unitSize > 1 ? extraPrice(capped.meter, capped.price.unitPrice) : `${inr(capped.price.unitPrice)} each`}.
+          {capped.price.atCap === 'block' && ` Sending pauses at ${(capped.price.cap ?? 0).toLocaleString('en-IN')} this month.`}
+        </p>
+      )}
+      {upcoming.map(c => (
+        <p key={c.meter.key} className="text-xs text-amber-700 mt-1" data-testid={`plan-billing-next-${c.meter.key}`}>From {nextFirst}: {c.meter.name} {priceText(c.meter, c.nextPrice!)}</p>
+      ))}
     </div>
   )
 }

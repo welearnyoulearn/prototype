@@ -98,6 +98,7 @@
     "doc": "wiki/features/fee-management.md",
     "ui": [
       "app/school-admin/components/FeeManagement.tsx",
+      "app/school-admin/components/YearEndResponsibilities.tsx",
       "app/school-admin/components/fee-management"
     ]
   },

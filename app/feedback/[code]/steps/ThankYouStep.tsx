@@ -2,6 +2,7 @@
 
 import { INK, TEAL, GOLD, CORAL, GREEN } from '@/app/components/ulearn/theme'
 import { PrimaryButton } from './WizardButtons'
+import CategoryIcon, { HeroIcon } from '../CategoryIcon'
 
 const CONFETTI_COLORS = [TEAL, CORAL, GREEN, GOLD]
 
@@ -23,16 +24,22 @@ export default function ThankYouStep({ onRestart }: { onRestart: () => void }) {
           />
         ))}
       </div>
-      <div className="text-center text-6xl mb-1">🎉</div>
+      <HeroIcon icon="🎉" size={88} motion="excited" />
       <h1 className="text-center text-xl font-bold mb-1" style={{ color: INK }} data-testid="feedback-thankyou-heading">Thank you!</h1>
       <p className="text-center text-sm mb-1" style={{ color: '#6B7280' }}>Your feedback is helping our school grow 🌱</p>
-      <div className="mt-3 text-center text-2xl tracking-[6px]">🌱 → 🌿 → 🌳 → ⭐</div>
+      <div className="mt-4 flex items-center justify-center gap-2" aria-hidden="true">
+        <CategoryIcon icon="🌱" size={30} />
+        <span className="text-sm font-bold" style={{ color: '#9CB5A6' }}>›</span>
+        <CategoryIcon icon="🌳" size={38} />
+        <span className="text-sm font-bold" style={{ color: '#9CB5A6' }}>›</span>
+        <CategoryIcon icon="⭐" size={46} animated />
+      </div>
       <div className="mt-6">
         <PrimaryButton data-testid="feedback-give-more-btn" onClick={onRestart} className="w-full">
           Give more feedback
         </PrimaryButton>
       </div>
-      <p className="mt-4 text-center text-xs" style={{ color: '#C7CDD6' }}>🏅 Feedback Champion badge earned</p>
+      <p className="mt-4 flex items-center justify-center gap-1.5 text-xs font-semibold" style={{ color: '#8A948E' }}><CategoryIcon icon="🏅" size={22} />Feedback Champion badge earned</p>
     </div>
   )
 }

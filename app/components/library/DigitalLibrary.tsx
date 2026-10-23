@@ -3,9 +3,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
 import { GRADE_SEQUENCE } from '@/lib/grades'
-import { ArrowUpRight, BookOpen, LibraryBig, Search } from 'lucide-react'
+import { ArrowUpRight, Search } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
-import { StudentEmptyState, StudentPageIntro } from '@/app/student/components/StudentExperience'
+import { StudentAlert, StudentEmptyState, StudentPageIntro } from '@/app/student/components/StudentExperience'
+import { Sticker, subjectSticker, subjectTone } from '@/app/student/components/stickers'
 
 type LibraryRow = {
   subject_id: number
@@ -130,15 +131,82 @@ export default function DigitalLibrary({ apiUrl, experience = 'shared' }: { apiU
     list.sort((a, b) => GRADE_SEQUENCE.indexOf(a.grade) - GRADE_SEQUENCE.indexOf(b.grade) || a.subject_name.localeCompare(b.subject_name))
   }
 
+  if (experience === 'student') {
+    const totalBooks = rows.length
+    return (
+      <div className="space-y-8">
+        <StudentPageIntro eyebrow="Study resources" title="Digital library" sticker="books" tone="violet"
+          description="Browse the textbooks and handbooks your school has made available, shelved by subject."
+          aside={<span className="sb-chip" data-size="lg" data-tone="yellow"><Sticker name="open-book" size="xs" />{totalBooks} book{totalBooks === 1 ? '' : 's'} on the shelf</span>} />
+
+        <div className="flex flex-wrap items-center gap-3">
+          <label className="sb-search">
+            <Sticker name="magnifying-glass" size="xs" />
+            <span className="sr-only">Search the library</span>
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search a subject or book title" data-testid="library-search" className="w-full py-2.5 pl-10 pr-3 text-sm font-semibold" />
+          </label>
+          {boards.length > 1 && (
+            <select value={board} onChange={e => setBoard(e.target.value)} data-testid="library-board-filter" aria-label="Board" className="px-3 py-2 text-sm font-bold">
+              <option value="">All boards</option>
+              {boards.map(b => <option key={b} value={b}>{b}</option>)}
+            </select>
+          )}
+          {grades.length > 1 && (
+            <select value={grade} onChange={e => setGrade(e.target.value)} data-testid="library-grade-filter" aria-label="Grade" className="px-3 py-2 text-sm font-bold">
+              <option value="">All grades</option>
+              {grades.map(g => <option key={g} value={g}>{gradeLabel(g)}</option>)}
+            </select>
+          )}
+        </div>
+
+        {loading ? (
+          <div className="sb-shelf" role="status" aria-live="polite" aria-busy="true"><span className="sr-only">Preparing your library…</span>{[1, 2, 3].map(i => <Skeleton key={i} className="h-56 rounded-[14px]" />)}</div>
+        ) : error ? (
+          <StudentAlert onRetry={loadLibrary}>We couldn’t open the library. {error}</StudentAlert>
+        ) : filtered.length === 0 ? (
+          <StudentEmptyState sticker={rows.length === 0 ? 'sleeping-face' : 'magnifying-glass'} tone="violet"
+            title={rows.length === 0 ? 'The shelf is empty for now' : 'No matching books'}
+            description={rows.length === 0 ? 'Your school has not added any textbooks or handbooks yet.' : 'Try a different word, or clear one of the filters.'} />
+        ) : (
+          <div className="space-y-10">
+            {Array.from(byBoard.entries()).map(([b, subjectGroups]) => (
+              <section key={b} aria-label={b}>
+                {byBoard.size > 1 && <span className="sb-kicker mb-5" data-tone="paper">{b}</span>}
+                <div className="sb-shelf pt-4">
+                  {subjectGroups.map((g, i) => (
+                    <motion.article key={g.key} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2, delay: Math.min(i * 0.04, 0.3) }}
+                      className="sb-book" data-tone={subjectTone(g.subject_name)} data-testid="library-subject-card">
+                      <div className="sb-book-cover">
+                        <Sticker name={subjectSticker(g.subject_name)} size="xl" tilt={i % 2 ? 8 : -8} />
+                        <h3 className="sb-display mt-2 text-2xl">{g.subject_name}</h3>
+                        <span className="sb-chip mt-2" data-tone="paper">{gradeLabel(g.grade)}</span>
+                      </div>
+                      <div className="sb-book-pages">
+                        {g.materials.map(m => (
+                          <a key={m.material_id} href={m.file_url} target="_blank" rel="noopener noreferrer" data-testid="library-material-link" className="sb-book-link">
+                            <Sticker name={m.material_type === 'handbook' ? 'notebook' : 'open-book'} size="xs" />
+                            <span className="min-w-0 flex-1">
+                              <span className="block break-words leading-snug">{m.title}</span>
+                              <span className="sb-chip mt-1" data-tone={m.material_type === 'handbook' ? 'yellow' : 'blue'}>{TYPE_LABEL[m.material_type] ?? m.material_type}</span>
+                            </span>
+                            <ArrowUpRight size={15} className="shrink-0" aria-hidden="true" />
+                          </a>
+                        ))}
+                      </div>
+                    </motion.article>
+                  ))}
+                </div>
+              </section>
+            ))}
+          </div>
+        )}
+      </div>
+    )
+  }
+
   return (
     <div>
-      {experience === 'student' ? (
-        <StudentPageIntro eyebrow="Study resources" title="Digital library" description="Browse the textbooks and handbooks your school has made available, organised by subject." aside={
-          <div className="flex items-center gap-2 text-xs font-medium text-[#68736b]"><LibraryBig size={17} className="text-[#a85f16]" aria-hidden="true" />School collection</div>
-        } />
-      ) : (
-        <div className="mb-6"><h2 className="text-xl font-bold text-gray-900">WLYL Digital Library</h2><p className="text-sm text-gray-500 mt-0.5">Browse every textbook and handbook, organised by board, grade and subject.</p></div>
-      )}
+      <div className="mb-6"><h2 className="text-xl font-bold text-gray-900">WLYL Digital Library</h2><p className="text-sm text-gray-500 mt-0.5">Browse every textbook and handbook, organised by board, grade and subject.</p></div>
 
       <div className="flex flex-wrap items-center gap-3 my-6">
         <label className="relative flex min-w-[200px] flex-1 items-center">
@@ -167,7 +235,7 @@ export default function DigitalLibrary({ apiUrl, experience = 'shared' }: { apiU
       ) : error ? (
         <div role="alert" className="border-l-2 border-red-600 bg-red-50 px-4 py-5 text-sm text-red-800"><p>We couldn’t open the library. {error}</p><button type="button" onClick={loadLibrary} className="mt-3 min-h-10 font-semibold underline underline-offset-4">Try again</button></div>
       ) : filtered.length === 0 ? (
-        experience === 'student' ? <StudentEmptyState icon={<BookOpen size={22} />} title={rows.length === 0 ? 'No library materials yet' : 'No matching books'} description={rows.length === 0 ? 'Your school has not added any textbooks or handbooks to this library yet.' : 'Try a different search term or clear one of the filters.'} /> : <div className="py-16 text-center text-muted-foreground text-sm"><p>{rows.length === 0 ? 'No materials have been uploaded to the library yet.' : 'Nothing matches your filters.'}</p></div>
+        <div className="py-16 text-center text-muted-foreground text-sm"><p>{rows.length === 0 ? 'No materials have been uploaded to the library yet.' : 'Nothing matches your filters.'}</p></div>
       ) : (
         <div className="space-y-8">
           {Array.from(byBoard.entries()).map(([b, subjectGroups]) => (

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
-import { requireSyllabusWriteAccess, getTeacherSession } from '@/lib/auth'
+import { canAccessSyllabusClass, canWriteSyllabusClass, requireSyllabusWriteAccess, getTeacherSession } from '@/lib/auth'
 
 // POST /api/syllabus/setup/copy-from-sibling
 // Body: { school_id, source_class_id, target_class_id, school_subject_id }
@@ -30,7 +30,11 @@ export async function POST(req: NextRequest) {
     }
 
     const writeSession = await requireSyllabusWriteAccess(school_id)
-    if (!writeSession) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    if (!writeSession ||
+        !await canAccessSyllabusClass(writeSession, source_class_id) ||
+        !await canWriteSyllabusClass(writeSession, target_class_id)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
 
     // Both classes must actually belong to this school, and both must be
     // for the same school_subject_id's grade — defense in depth against a
@@ -45,6 +49,18 @@ export async function POST(req: NextRequest) {
     }
     if (classRows[0].grade !== classRows[1].grade) {
       return NextResponse.json({ error: 'Source and target class must be the same grade' }, { status: 400 })
+    }
+
+    const { rows: [subjectRow] } = await pool.query(
+      `SELECT subject_name, grade FROM school_subjects WHERE id = $1 AND school_id = $2`,
+      [school_subject_id, school_id],
+    )
+    if (!subjectRow || subjectRow.grade !== classRows[0].grade) {
+      return NextResponse.json({ error: 'Subject does not belong to these classes' }, { status: 400 })
+    }
+    if (!await canAccessSyllabusClass(writeSession, source_class_id, subjectRow.subject_name) ||
+        !await canWriteSyllabusClass(writeSession, target_class_id, subjectRow.subject_name)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
     const { rows: [sourceStatus] } = await pool.query(

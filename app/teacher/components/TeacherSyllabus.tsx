@@ -5,6 +5,7 @@ import { SyllabusTracking, type TeacherObj } from './ClassView'
 import { INK, GOLD, BORDER, CREAM } from '@/app/components/ulearn/theme'
 import { Pills, UlearnCard } from '@/app/components/ulearn/primitives'
 import { Skeleton } from '@/components/ui/skeleton'
+import NotificationBell from '../../components/NotificationBell'
 
 type ClassOption = {
   id: number
@@ -47,10 +48,7 @@ export default function TeacherSyllabus({
       const list = Array.isArray(allClasses) ? allClasses : []
       const picked = new Map<number, ClassOption>()
 
-      if (teacher.class_teacher_grade && teacher.class_teacher_section) {
-        const own = list.find(c => c.grade === teacher.class_teacher_grade && c.section === teacher.class_teacher_section)
-        if (own) picked.set(own.id, own)
-      }
+      list.filter(c => c.class_teacher_id === teacher.id).forEach(c => picked.set(c.id, c))
       const assigned = Array.isArray(classSubjects) ? classSubjects : []
       assigned.forEach(a => {
         const cls = list.find(c => c.id === a.class_id)
@@ -67,7 +65,7 @@ export default function TeacherSyllabus({
       // class-pill selection back to the first class every time.
       setActiveKey(prev => prev || (found.length > 0 ? `${found[0].grade}-${found[0].section}` : prev))
     }).finally(() => setLoading(false))
-  }, [teacher.id, teacher.class_teacher_grade, teacher.class_teacher_section, schoolId])
+  }, [teacher.id, schoolId])
 
   if (loading) return (
     <div className="space-y-4" role="status" aria-live="polite" aria-busy="true">
@@ -96,7 +94,7 @@ export default function TeacherSyllabus({
   return (
     <div className="space-y-4">
       <div className="rounded-lg border-l-4 p-4 sm:p-5" style={{ background: CREAM, borderColor: BORDER, borderLeftColor: GOLD }}>
-        <h2 className="text-lg font-semibold" style={{ color: INK }}>Syllabus</h2>
+        <h2 className="text-lg font-semibold flex items-center gap-2" style={{ color: INK }}>Syllabus <NotificationBell teacherId={teacher.id} group="syllabus" /></h2>
         <p className="text-sm text-gray-500 mt-0.5">
           Pick a class to track what&apos;s been taught and mark topics as covered.
         </p>

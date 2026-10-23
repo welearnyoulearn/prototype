@@ -48,7 +48,7 @@ test.describe.serial('Announcement workflow — targeting, drafts, seen, acknowl
     await setSubscription(platform, schoolId, 'premium')
     admin = await newCtx()
     expect((await call(admin, 'post', '/api/auth/login', { email: school.email, password: school.temp_password })).status).toBe(200)
-    expect((await call(admin, 'post', '/api/auth/change-password', { newPassword: PASS })).status).toBe(200)
+    expect((await call(admin, 'post', '/api/auth/change-password', { currentPassword: school.temp_password, newPassword: PASS })).status).toBe(200)
     expect((await call(admin, 'put', '/api/auth/profile', { full_name: `Flow Principal ${ts}`, phone: '9000000041' })).status).toBe(200)
 
     const other = await createSchool(platform, { name: `Notice Flow Other ${ts}`, email: `flowo${ts}@e2etest.com`, phone: phone(91) })
@@ -56,7 +56,7 @@ test.describe.serial('Announcement workflow — targeting, drafts, seen, acknowl
     await setSubscription(platform, otherId, 'premium')
     adminOther = await newCtx()
     expect((await call(adminOther, 'post', '/api/auth/login', { email: other.email, password: other.temp_password })).status).toBe(200)
-    expect((await call(adminOther, 'post', '/api/auth/change-password', { newPassword: PASS })).status).toBe(200)
+    expect((await call(adminOther, 'post', '/api/auth/change-password', { currentPassword: other.temp_password, newPassword: PASS })).status).toBe(200)
     anon = await newCtx()
 
     const mk = async (grade: string, section: string) => (await call(admin, 'post', '/api/classes', { school_id: schoolId, grade, section })).body.id as number

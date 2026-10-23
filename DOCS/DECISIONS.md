@@ -12,6 +12,40 @@ Non-obvious technical decisions and their reasoning for the WLYL School prototyp
 -->
 
 
+## 2026-10-18 — Push notifications go through an outbox and FCM HTTP v1, not firebase-admin
+
+**Context:** Notifications are rows in `notifications`, written by raw `INSERT`s in about 19 route files, and the web bell polls every 30 seconds. We want pushes to the web app and the separate parent app through Firebase Cloud Messaging.
+**Decision:** Keep `notifications` as the source of truth and treat push as a delivery step. `notifications.push_sent_at` is NULL until a notification has been pushed; `dispatchPendingPushes()` (lib/push.ts) claims unsent rows with `FOR UPDATE SKIP LOCKED`, stamps them, looks up `device_tokens` for the recipient and sends. Any route can call it from `after()`, and `/api/cron/push-dispatch` covers the rest, so existing insert sites keep their `INSERT`s and only gain one `after()` line (routes use `dispatchPendingPushes()`, bulk crons use `drainPendingPushes()`). FCM is called over its HTTP v1 REST API with a service-account JWT signed by `jose`, which is already a dependency. Rows older than 24 hours are stamped without sending, and existing rows are stamped when the column is added, so rollout never replays old notifications.
+**Web client:** the page uses the Firebase JS SDK (`firebase/messaging`, loaded lazily) only to obtain the FCM token; the service worker does not load it and just shows the Web Push message FCM delivers. It is registered under its own scope, `/firebase-cloud-messaging-push-scope`, because `/sw-attendance.js` already owns `/` and a scope holds one worker. A visible tab gets the message by `postMessage` (the bell refreshes) instead of a system notification.
+**Parent app:** `wlyl-parent-app` is a Next.js PWA installed on Android that proxies `/api/*` to this platform (not React Native), so it registers FCM tokens through the same `/api/devices`, with the parent cookie it already has. Push data for parents includes `url`, an app route chosen by `lib/pushLinks.ts` from the notification type and `data.exam_id`; the app owns its routes, so the mapping is in one place and falls back to `/notifications`.
+**Parent mobile app (Expo):** `wlyl-parent-mobile` is a React Native / Expo app that already registers Expo push tokens and expects `/api/parent/push/expo` (#133). Rather than run #133's separate table and per-route calls next to the Firebase outbox, its Expo client (`lib/expoPush.ts`) is a second sender inside the same dispatcher: Expo tokens live in `device_tokens` with platform `expo`, and the sound channel comes from the notification type (`pushKindFor`). The app keeps its credentials in EAS (its own Firebase project), so the server needs no key for these and the app needed no change.
+**Alternatives considered:** `firebase-admin` (large for a serverless cold start, and one more dependency to patch); sending push inside every `INSERT` site (easy to miss one, and a push failure could break the request); a Postgres trigger (cannot call FCM).
+**Consequences:** Delivery is at-most-once: a notification is stamped before it is sent, so a crash mid-send loses it rather than duplicating it. Vercel Hobby cron is daily, so `/api/cron/push-dispatch` is not in `vercel.json`; a new route that inserts into `notifications` must add the `after()` call or its notifications wait for the next dispatch.
+
+## 2026-10-18 — The cross-site guard trusts the parent app by an explicit origin list
+
+**Context:** Sign-in, sign-out and password routes refuse a browser request whose `Origin` host differs from ours (#262), which stops login CSRF. The installed parent app, `wlyl-parent-app`, is a PWA that rewrites `/api/*` to this platform so the parent cookie stays first-party. Its browser sends the PWA's origin, the proxied request arrives with our host, and so every parent sign-in was refused with 403 once #262 reached an environment the app talks to.
+**Decision:** The check moved to `lib/crossSite.ts` (dependency-free, so `proxy.ts` can still run on the Edge) and now allows an `Origin` that exactly matches an entry of `TRUSTED_APP_ORIGINS`. Anything else behaves as before. With the variable unset nothing is trusted.
+**Alternatives considered:** dropping the guard for parent routes (reopens login CSRF for parents); having the app strip `Origin` and `Sec-Fetch-*` before proxying (hides the problem and defeats the guard for every route); wildcard or suffix matching (a look-alike subdomain would pass).
+**Consequences:** Each deployment must set `TRUSTED_APP_ORIGINS` to the parent app's address (and `http://localhost:3002` for local work). Moving the app to a new domain needs a config change here first.
+## 2026-10-09 — Usage is recorded per service in one place, priced per plan by month (#358)
+
+**Context:** Paid services (WhatsApp, AI, email, exports) had no usage record, so nothing could be limited or billed, and the old `plan_pricing` columns only knew about WhatsApp.
+
+**Decision:** `lib/usage.ts` is the only writer: `recordUsage()` after the provider accepts (idempotency key per provider id, daily totals in `usage_daily`), `checkAllowance()` before costly actions. Services live in `usage_meters`; prices in `usage_prices` keyed by plan and `effective_month`, so a price edit always lands on next month and a month's price never changes once it starts. A school's own price (`school_usage_overrides`) wins field by field and applies at once. Open questions in the platform handoff were answered with their recommended options: WhatsApp and AI charged, AI per 1,000 tokens, exact paisa rounding, login/password WhatsApp messages exempt from the limit, usage visible to school admin and principal only, our provider cost never shown to schools.
+
+**Alternatives considered:** one shared credit for all services (rejected: unclear on bills); snapshotting prices into each billing cycle (not needed while prices are already versioned by month).
+
+**Consequences:** a new paid service is a `usage_meters` row plus one `recordUsage()` call at its shared helper. `recordUsage()` takes its own pool connection, so call it after the caller's transaction commits. Metering failures are logged and never block the action (checkAllowance fails open).
+
+## 2026-09-28 — Plan features are enforced centrally in proxy.ts (#253)
+
+**Context:** Plan features only hid navigation tabs. Of roughly 95 feature API routes, only the fee and portal-access ones called `schoolHasFeature`, so a school on a lower plan could use any feature by calling its API directly. Adding a check to every handler would be easy to forget on the next new route.
+
+**Decision:** `proxy.ts` maps protected API areas to canonical feature keys and refuses a school-side session's request when its school lacks that feature (`403 FEATURE_DISABLED`). It resolves one school/feature pair through `/api/internal/feature-entitlement`, backed by `schoolHasFeature`, and caches the answer for 15 seconds. The gate fails closed when entitlement cannot be verified. Requests without a valid school session are left to route authentication; Platform Admin bypasses school plan gating.
+
+**Consequences:** a new API area for a plan feature must be added to `FEATURE_API_PREFIXES`. Screens that embed another feature's data (class management's attendance strip, the teacher class view's exams/syllabus) show empty when that feature is off, which matches the hidden tab.
+
 ## 2026-09-21 — One central Year Rollover, gated by fee year-end (#199)
 
 **Context:** Fee Year-End could create the next academic year and switch the current year on its own ("Start Year Rollover"), while the Year Rollover tab promoted students. The two did not know about each other, so a school could end up on the new year with students not promoted, and the year could be created or switched from three places.

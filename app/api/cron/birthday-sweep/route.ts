@@ -20,7 +20,8 @@
 //
 // Protected: requires Authorization: Bearer <CRON_SECRET> header.
 
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
+import { drainPendingPushes } from '@/lib/push'
 import pool from '@/lib/db'
 import { getOrCreateClassCircle } from '@/lib/classCircle'
 import { getISTDateParts } from '@/lib/birthday'
@@ -125,6 +126,7 @@ async function run(req: NextRequest) {
       }
     }
 
+    after(() => drainPendingPushes())
     return NextResponse.json({ date: dateStr, studentPosts, teacherNotifications, parentNotifications })
   } catch (error) {
     console.error('[cron/birthday-sweep]', error)

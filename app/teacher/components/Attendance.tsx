@@ -8,6 +8,7 @@ import HistoryView from './attendance/HistoryView'
 import ClassDashboard from '@/app/components/attendance-dashboard/ClassDashboard'
 import { useApi } from '@/app/components/attendance-dashboard/parts'
 import type { Overview, Session } from './attendance/types'
+import NotificationBell from '../../components/NotificationBell'
 
 // Teacher attendance. Any teacher can mark any class, Morning or Afternoon:
 //   1. pick a class + session (each shows if it is already marked, and by whom),
@@ -59,7 +60,7 @@ export default function Attendance({ teacherId, schoolId }: Props) {
       {!open && (
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div>
-            <h2 className="text-xl font-bold text-gray-900">Attendance</h2>
+            <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">Attendance <NotificationBell teacherId={teacherId} group="attendance" /></h2>
             <p className="text-sm text-gray-500 mt-0.5">Choose a class and a session. Once marked, a session is locked for other teachers.</p>
           </div>
           <div className="inline-flex bg-gray-100 rounded-xl p-1" role="tablist" aria-label="Attendance mode">

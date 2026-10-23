@@ -47,6 +47,15 @@ const en = {
 
   // Overview
   yourChild: 'Your Child',
+  // "All features" window
+  allFeatures: 'All features',
+  findFeature: 'Find a feature…',
+  closeAllFeatures: 'Close all features',
+  whatsNew: "What's new",
+  unreadCount: (n: number) => `${n} unread`,
+  moreCount: (n: number) => `+${n} more`,
+  noFeatureMatch: (q: string) => `No features match “${q}”.`,
+  navGroups: { home: 'Home', learning: 'Learning', school: 'School', account: 'Account' },
   thisMonth: 'This month',
   upcomingExams: 'Upcoming Exams',
   pendingSignoff: 'Pending Sign-off',
@@ -196,6 +205,14 @@ const te: typeof en = {
 
   // Overview
   yourChild: 'మీ పిల్లవాడు',
+  allFeatures: 'అన్ని ఫీచర్లు',
+  findFeature: 'ఫీచర్ కోసం వెతకండి…',
+  closeAllFeatures: 'అన్ని ఫీచర్లను మూసివేయండి',
+  whatsNew: 'కొత్తవి',
+  unreadCount: (n: number) => `${n} చదవనివి`,
+  moreCount: (n: number) => `+${n} మరిన్ని`,
+  noFeatureMatch: (q: string) => `“${q}” కి సరిపోయే ఫీచర్లు లేవు.`,
+  navGroups: { home: 'హోమ్', learning: 'అభ్యాసం', school: 'పాఠశాల', account: 'ఖాతా' },
   thisMonth: 'ఈ నెల',
   upcomingExams: 'రాబోయే పరీక్షలు',
   pendingSignoff: 'సంతకం పెండింగ్',

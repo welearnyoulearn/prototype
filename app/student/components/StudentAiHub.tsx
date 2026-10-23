@@ -1,22 +1,26 @@
 'use client'
 
 import { motion, useReducedMotion } from 'framer-motion'
-import { ArrowUpRight, Bot, MessageSquareText, Sparkles } from 'lucide-react'
+import { ArrowUpRight } from 'lucide-react'
 import { StudentEmptyState, StudentPageIntro, studentReveal } from './StudentExperience'
+import { Sticker, type StickerName, type Tone } from './stickers'
 
 type AiTool = {
   name: string
   description: string
   url: string
-  icon: typeof Sparkles
+  sticker: StickerName
+  tone: Tone
   detail: string
 }
 
 const AI_TOOLS: AiTool[] = [
-  { name: 'Gemini', description: "Google's AI assistant for explanations and step-by-step help across subjects.", url: 'https://gemini.google.com', icon: Sparkles, detail: 'Quick explanations' },
-  { name: 'Claude', description: "Anthropic's AI assistant for patient, detailed breakdowns of difficult concepts.", url: 'https://claude.ai', icon: Bot, detail: 'Detailed breakdowns' },
-  { name: 'ChatGPT', description: "OpenAI's AI assistant for broad subject support and practice questions.", url: 'https://chatgpt.com', icon: MessageSquareText, detail: 'Practice and support' },
+  { name: 'Gemini', description: "Google's AI assistant for explanations and step-by-step help across subjects.", url: 'https://gemini.google.com', sticker: 'light-bulb', tone: 'blue', detail: 'Quick explanations' },
+  { name: 'Claude', description: "Anthropic's AI assistant for patient, detailed breakdowns of difficult concepts.", url: 'https://claude.ai', sticker: 'brain', tone: 'orange', detail: 'Detailed breakdowns' },
+  { name: 'ChatGPT', description: "OpenAI's AI assistant for broad subject support and practice questions.", url: 'https://chatgpt.com', sticker: 'speech-balloon', tone: 'mint', detail: 'Practice and support' },
 ]
+
+const INTRO = { eyebrow: 'School-enabled AI', title: 'AI Hub', sticker: 'robot' as const, tone: 'orange' as const }
 
 export default function StudentAiHub({ tier }: { tier: 'ai_basic' | 'ai_pro' | 'none' | null }) {
   const reduceMotion = useReducedMotion()
@@ -24,32 +28,38 @@ export default function StudentAiHub({ tier }: { tier: 'ai_basic' | 'ai_pro' | '
   if (tier === 'ai_pro') {
     return (
       <div className="mx-auto max-w-3xl space-y-7">
-        <StudentPageIntro eyebrow="School-enabled AI" title="AI Hub" description="Your school controls which assisted-learning tools are available in this workspace." />
-        <StudentEmptyState icon={<Sparkles size={22} />} title="AI Pro is being prepared" description="Your school has assigned AI Pro. The full doubt-clearing experience is not available yet, so there is nothing you need to configure." />
+        <StudentPageIntro {...INTRO} description="Your school controls which assisted-learning tools are available in this workspace." />
+        <StudentEmptyState sticker="sparkles" tone="violet" title="AI Pro is being prepared" description="Your school has assigned AI Pro. The full doubt-clearing experience is not available yet, so there is nothing you need to set up." />
       </div>
     )
   }
 
   return (
-    <div className="mx-auto max-w-4xl space-y-7">
-      <StudentPageIntro eyebrow="School-enabled AI" title="AI Hub" description="Choose the assistant that best matches how you want a concept explained. These links open the provider in a new tab." aside={
-        <span className="text-xs font-medium text-[#68736b]">AI Basic access</span>
-      } />
-      <div className="divide-y divide-[#e2ded5] border-y border-[#dcd8cd]">
-        {AI_TOOLS.map((tool, index) => {
-          const Icon = tool.icon
-          return (
-            <motion.a key={tool.name} custom={index} variants={studentReveal} initial={reduceMotion ? false : 'hidden'} animate="visible" href={tool.url} target="_blank" rel="noopener noreferrer"
-              className="group grid min-h-32 items-center gap-5 px-2 py-6 transition-colors hover:bg-[#f5eee2] sm:grid-cols-[46px_150px_1fr_auto] sm:px-4">
-              <span className="grid h-11 w-11 place-items-center rounded-full bg-[#f1e2ca] text-[#8b4a10]" aria-hidden="true"><Icon size={19} /></span>
-              <span><span className="block text-sm font-semibold text-[#202a25]">{tool.name}</span><span className="mt-1 block text-[10px] font-bold uppercase tracking-[.08em] text-[#8a928c]">{tool.detail}</span></span>
-              <span className="text-sm leading-6 text-[#68736b]">{tool.description}</span>
-              <span className="inline-flex items-center gap-2 text-xs font-semibold text-[#6f3b0b]">Open <ArrowUpRight size={15} className="transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5" aria-hidden="true" /></span>
-            </motion.a>
-          )
-        })}
+    <div className="mx-auto max-w-4xl space-y-9">
+      <StudentPageIntro {...INTRO} description="Pick the assistant that matches how you want a concept explained. Each one opens in a new tab."
+        aside={<span className="sb-chip" data-size="lg" data-tone="violet"><Sticker name="sparkles" size="xs" />AI Basic access</span>} />
+
+      <div className="sb-windows">
+        {AI_TOOLS.map((tool, index) => (
+          <motion.a key={tool.name} custom={index} variants={studentReveal} initial={reduceMotion ? false : 'hidden'} animate="visible"
+            href={tool.url} target="_blank" rel="noopener noreferrer" data-testid={`ai-tool-${tool.name.toLowerCase()}`}
+            className="sb-window sb-press" data-tone={tool.tone} aria-label={`Open ${tool.name} in a new tab — ${tool.detail}`}>
+            <span className="sb-window-bar" aria-hidden="true"><i /><i /><i /><span className="ml-1 truncate">{tool.name}.exe</span></span>
+            <span className="sb-window-body">
+              <Sticker name={tool.sticker} size="xl" tilt={index % 2 ? 8 : -8} />
+              <span className="sb-chip w-fit" data-tone={tool.tone}>{tool.detail}</span>
+              <span className="sb-display text-2xl">{tool.name}</span>
+              <span className="text-sm leading-6 text-[#4a4034]">{tool.description}</span>
+              <span className="sb-btn mt-auto w-fit" data-size="sm" data-tone="yellow">Open <ArrowUpRight size={15} aria-hidden="true" /></span>
+            </span>
+          </motion.a>
+        ))}
       </div>
-      <p className="text-xs leading-5 text-[#7a837c]">Use AI suggestions as study support and check important answers against your teacher or textbook.</p>
+
+      <div className="sb-note max-w-xl" data-tone="yellow" style={{ '--tilt': '-1deg' } as React.CSSProperties}>
+        <p className="sb-hand flex items-center gap-2 text-2xl">quick tip <Sticker name="pencil" size="sm" tilt={-20} /></p>
+        <p className="mt-1 text-sm font-semibold">Use AI as a study buddy, not an answer machine — check important answers with your teacher or textbook.</p>
+      </div>
     </div>
   )
 }

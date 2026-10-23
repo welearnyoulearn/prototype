@@ -1,11 +1,13 @@
 import { createHash } from 'crypto'
-import { NextRequest, NextResponse } from 'next/server'
-import { HeadObjectCommand } from '@aws-sdk/client-s3'
+import { NextRequest, NextResponse, after } from 'next/server'
+import { DeleteObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3'
 import pool from '@/lib/db'
 import { r2Config } from '@/lib/r2'
+import { recordUsage } from '@/lib/usage'
 import { getClientIp } from '@/lib/request-ip'
-import { resolveActiveFeedbackSchool } from '@/lib/feedback-public-access'
+import { resolveFeedbackCode } from '@/lib/feedback-public-access'
 import { feedbackSubmitSchema } from '@/lib/validation/feedback'
+import { VOICE_LIMIT_LABEL, VOICE_MAX_BYTES } from '@/lib/feedback-defaults'
 
 const RATE_LIMIT_WINDOW = '10 minutes'
 const RATE_LIMIT_MAX = 5
@@ -23,7 +25,8 @@ function priorityForRating(rating: number): 'high' | 'medium' | null {
 // Exactly one of ratings / advanced_form_type must be present.
 //
 // Public, unauthenticated — the whole point of a QR-code feedback poster.
-// `code` resolves the school (feedback_settings.public_code); every other
+// `code` resolves the school (feedback_settings.public_code, or a
+// feedback_qr_points.code, which also tags the submission); every other
 // identifier in the payload is either school-scoped-and-verified
 // (voice_key) or free-form user content (name/phone/free_text).
 export async function POST(req: NextRequest) {
@@ -45,9 +48,22 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Cannot submit both ratings and an advanced form' }, { status: 400 })
     }
 
-    const resolved = await resolveActiveFeedbackSchool(client, body.code)
-    if (!resolved) return NextResponse.json({ error: 'not_found' }, { status: 404 })
+    const resolved = await resolveFeedbackCode(client, body.code)
+    if (resolved.status === 'not_found') return NextResponse.json({ error: 'not_found' }, { status: 404 })
+    if (resolved.status === 'closed') return NextResponse.json({ error: 'closed' }, { status: 410 })
     const schoolId = resolved.schoolId
+
+    // A QR point fixes the audience and the form — enforce it here, not
+    // just in the wizard, since this route is public.
+    const point = resolved.qrPoint
+    if (point) {
+      if (!point.roles.includes(body.role)) {
+        return NextResponse.json({ error: 'This form is not open to that role' }, { status: 400 })
+      }
+      if (point.form_type === 'rating' ? !!body.advanced_form_type : body.advanced_form_type !== point.form_type) {
+        return NextResponse.json({ error: 'Wrong form for this QR code' }, { status: 400 })
+      }
+    }
 
     const duplicateKeys = ratings.map(r => r.category_key).filter((k, i, arr) => arr.indexOf(k) !== i)
     if (duplicateKeys.length > 0) {
@@ -75,17 +91,26 @@ export async function POST(req: NextRequest) {
     // exist — prevents a client passing another school's key or a
     // never-uploaded one.
     let voiceKey: string | null = null
+    let voiceBytes = 0
     if (body.voice_key) {
       if (!body.voice_key.startsWith(`feedback/${schoolId}/`)) {
         return NextResponse.json({ error: 'Invalid voice_key' }, { status: 400 })
       }
+      const r2 = r2Config()
+      let head
       try {
-        const r2 = r2Config()
-        await r2.client.send(new HeadObjectCommand({ Bucket: r2.bucket, Key: body.voice_key }))
-        voiceKey = body.voice_key
+        head = await r2.client.send(new HeadObjectCommand({ Bucket: r2.bucket, Key: body.voice_key }))
       } catch {
         return NextResponse.json({ error: 'Voice recording not found — please re-record and try again' }, { status: 400 })
       }
+      // The presigned PUT can't cap size, so enforce it here: an oversized or
+      // non-audio object is deleted and the submission asked to re-record.
+      if ((head.ContentLength ?? 0) > VOICE_MAX_BYTES || !(head.ContentType ?? '').startsWith('audio/')) {
+        await r2.client.send(new DeleteObjectCommand({ Bucket: r2.bucket, Key: body.voice_key })).catch(() => {})
+        return NextResponse.json({ error: `Voice note is too long — please keep it under ${VOICE_LIMIT_LABEL}` }, { status: 400 })
+      }
+      voiceKey = body.voice_key
+      voiceBytes = head.ContentLength ?? 0
     }
 
     // Resolve each rated category against this school's live category rows
@@ -101,7 +126,11 @@ export async function POST(req: NextRequest) {
         [schoolId, body.role, categoryKeys]
       )
       byKey = new Map(categories.map(c => [c.key, c]))
-      const unknown = categoryKeys.filter(k => !byKey.has(k))
+      const allowedIds = point?.category_ids ?? []
+      const unknown = categoryKeys.filter(k => {
+        const cat = byKey.get(k)
+        return !cat || (allowedIds.length > 0 && !allowedIds.includes(cat.id))
+      })
       if (unknown.length > 0) {
         return NextResponse.json({ error: `Unknown category: ${unknown.join(', ')}` }, { status: 400 })
       }
@@ -111,13 +140,14 @@ export async function POST(req: NextRequest) {
 
     const { rows: [submission] } = await client.query(
       `INSERT INTO feedback_submissions
-         (school_id, role, is_anonymous, submitter_name, submitter_phone, quick_pick_tags, free_text, voice_object_key, ip_hash, advanced_form_type, advanced_form_data)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+         (school_id, role, is_anonymous, submitter_name, submitter_phone, quick_pick_tags, free_text, voice_object_key, ip_hash, advanced_form_type, advanced_form_data, qr_point_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
        RETURNING id, created_at`,
       [
         schoolId, body.role, body.is_anonymous, submitterName, submitterPhone,
         body.quick_picks?.join(',') || null, body.free_text || null, voiceKey, ipHash,
         body.advanced_form_type || null, body.advanced_form_data ? JSON.stringify(body.advanced_form_data) : null,
+        point?.id ?? null,
       ]
     )
 
@@ -140,6 +170,14 @@ export async function POST(req: NextRequest) {
     }
 
     await client.query('COMMIT')
+    // after(): recordUsage needs its own pool connection, and `client` is held until finally.
+    if (voiceKey) {
+      const key = voiceKey
+      after(() => recordUsage({
+        schoolId, meterKey: 'storage.upload', quantity: Math.round(voiceBytes / 1_048_576 * 1e4) / 1e4,
+        source: 'upload.feedback_voice', idempotencyKey: `upload:${key}`,
+      }))
+    }
 
     return NextResponse.json({ id: submission.id, created_at: submission.created_at }, { status: 201 })
   } catch (err: unknown) {

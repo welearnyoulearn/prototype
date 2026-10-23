@@ -15,11 +15,17 @@ import { useSectionNav } from '@/lib/useSectionNav'
 import { getUsageSessionId, clearUsageSessionId } from '@/lib/usageSession'
 import { PORTAL_NAV_KEY_ALIASES } from '@/lib/features'
 import NotificationBell from '../components/NotificationBell'
+import { useNavNotifications, NavBadge } from '../components/navNotifications'
+import TestCalendar from '../components/TestCalendar'
 import AttendanceCalendar from '../components/AttendanceCalendar'
 import SchoolCalendarView from '../components/SchoolCalendarView'
 import PortalSidebar from '@/components/portal/PortalSidebar'
-import { CalendarDays } from 'lucide-react'
+import FeatureLauncher, { type LauncherSection } from '@/components/portal/FeatureLauncher'
+import FeatureLauncherButton from '@/components/portal/FeatureLauncherButton'
+import { HUES } from '@/components/portal/sectionHues'
+import { CalendarDays, Home, GraduationCap, Phone, School, UserRound } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
+import { unregisterPushDevice } from '@/lib/pushClient'
 
 // Used by printParentReceipt below — fee category names (admin-set),
 // transaction references (parent-typed, directly attacker-controlled) and
@@ -31,6 +37,12 @@ function escHtml(s: unknown): string {
   return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string))
 }
 
+// tel: only wants digits (and a leading +) — the stored number may have spaces/dashes for
+// readability, so strip everything else before building the link.
+function telHref(phone: string): string {
+  return `tel:${phone.replace(/[^\d+]/g, '')}`
+}
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 type Child = { id: number; name: string; grade: string; section: string; roll_number: string; school_id: number }
 type Student = {
@@ -39,6 +51,11 @@ type Student = {
   parent_name: string | null; parent_phone: string | null
 }
 type ParentInfo = { id: number; name: string; email: string; school_id: number; school_name: string; children: Child[]; date_of_birth?: string | null }
+
+type SubjectMark = {
+  subject_name: string; max_marks: number; marks_obtained: number | null
+  is_absent: boolean; percentage: number | null; pass: boolean | null
+}
 
 type Summary = {
   upcoming_exams: Array<{
@@ -59,7 +76,7 @@ type Summary = {
 type FeeLedger = {
   id: number; category_name: string; period_label: string; frequency: string
   amount_due: number; amount_paid: number; balance: number
-  due_date: string; status: string
+  due_date: string; status: string; source_academic_year?: string | null
 }
 type FeePayment = {
   id: number; receipt_number: string; amount: number; payment_mode: string
@@ -72,7 +89,8 @@ type FeeWaiver = {
   granted_by_name: string | null; created_at: string
   category_name: string; period_label: string; amount_due: number
 }
-type FeeSummary = { total_due: number; total_paid: number; total_outstanding: number; total_waived: number; overdue_count: number }
+type FeeSummary = { total_due: number; total_paid: number; total_outstanding: number; carried_outstanding?: number; total_waived: number; overdue_count: number }
+type PriorDues = { total: number; items: Array<{ id: number; academic_year: string; category_name: string; period_label: string; due_date: string; balance: number }> }
 
 type Activity = {
   id: number; action_type: string; action_detail: string | null; created_at: string
@@ -139,6 +157,12 @@ function ParentDashboard() {
   const [showChildPicker, setShowChildPicker] = useState(false)
   const [student, setStudent] = useState<Student | null>(null)
   const [summary, setSummary] = useState<Summary | null>(null)
+  // Who to call: the class teacher and the school's own administration line/address —
+  // shown on Overview so a parent doesn't need to hunt for a separate screen.
+  const [contact, setContact] = useState<{
+    class_teacher: { name: string; phone: string | null } | null
+    school: { name: string; phone: string | null; email: string | null; address: string | null } | null
+  } | null>(null)
   // Sidebar section nav lives in the URL's `tab` param — real navigation, so
   // the browser/phone Back button moves through the portal's own screens.
   // resetNav replaces instead of pushing, used when switching between
@@ -175,6 +199,7 @@ function ParentDashboard() {
   const [feePayments, setFeePayments] = useState<FeePayment[]>([])
   const [feeWaivers, setFeeWaivers] = useState<FeeWaiver[]>([])
   const [feeSummary, setFeeSummary] = useState<FeeSummary | null>(null)
+  const [priorDues, setPriorDues] = useState<PriorDues | null>(null)
   const [feeLoading, setFeeLoading] = useState(false)
   const [feeAcYear, setFeeAcYear] = useState('')
   const [feeAcYears, setFeeAcYears] = useState<string[]>([])
@@ -202,7 +227,29 @@ function ParentDashboard() {
   const [ackSaving, setAckSaving] = useState(false)
   const [ackError, setAckError]   = useState('')
 
+  // Per-subject breakdown for a result card, loaded on demand when the
+  // parent expands it — the summary list only ever carried the overall
+  // total, never a subject-by-subject view.
+  const [expandedResultId, setExpandedResultId] = useState<number | null>(null)
+  const [resultSubjects, setResultSubjects] = useState<Record<number, SubjectMark[] | 'loading' | 'error'>>({})
+
+  async function toggleResultDetail(examId: number) {
+    if (expandedResultId === examId) { setExpandedResultId(null); return }
+    setExpandedResultId(examId)
+    if (resultSubjects[examId] || !student) return
+    setResultSubjects(prev => ({ ...prev, [examId]: 'loading' }))
+    try {
+      const data = await fetch(`/api/students/${student.id}/exams?school_id=${student.school_id}&class_id=${student.class_id}`).then(r => r.json())
+      const exam = Array.isArray(data) ? data.find((e: { exam_id: number }) => e.exam_id === examId) : null
+      setResultSubjects(prev => ({ ...prev, [examId]: exam?.subjects ?? 'error' }))
+    } catch {
+      setResultSubjects(prev => ({ ...prev, [examId]: 'error' }))
+    }
+  }
+
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const { counts: navCounts, latest: navLatest } = useNavNotifications('parent')
+  const [launcherOpen, setLauncherOpen] = useState(false)
 
   const [lang, setLang] = useState<Lang>('en')
   useEffect(() => {
@@ -237,6 +284,7 @@ function ParentDashboard() {
       setFeePayments(d.payments || [])
       setFeeWaivers(d.waivers || [])
       setFeeSummary(d.summary || null)
+      setPriorDues(d.prior_dues && d.prior_dues.total > 0 ? d.prior_dues : null)
     } catch { setFeeLedger([]); setFeePayments([]); setFeeWaivers([]) }
     setFeeLoading(false)
   }, [])
@@ -265,8 +313,14 @@ function ParentDashboard() {
     const s: Student = { ...child, class_id: cid, parent_name: null, parent_phone: null }
     setStudent(s)
     setShowChildPicker(false)
-    setSummary(null); setFeeLedger([]); setFeePayments([]); setFeeWaivers([]); setFeeSummary(null)
+    setSummary(null); setFeeLedger([]); setFeePayments([]); setFeeWaivers([]); setFeeSummary(null); setPriorDues(null)
+    setContact(null)
     resetNav('overview'); setVisited(new Set(['overview']))
+
+    fetch(`/api/parent/subjects?student_id=${child.id}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => setContact(d ? { class_teacher: d.class_teacher ?? null, school: d.school ?? null } : null))
+      .catch(() => setContact(null))
 
     await loadSummary(s)
     Promise.all([
@@ -335,6 +389,7 @@ function ParentDashboard() {
 
   async function handleLogout() {
     const usageSessionId = getUsageSessionId()
+    await unregisterPushDevice()
     await fetch('/api/parent/auth/logout', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -533,6 +588,36 @@ function ParentDashboard() {
   const latestPct = latestResult?.total_obtained !== null && latestResult?.total_max
     ? Math.round((latestResult.total_obtained! / latestResult.total_max!) * 100) : null
 
+  // "All features" window: the same visible items as the sidebar, grouped by purpose. Fees and Results
+  // carry the same overdue / to-sign counts the sidebar badges show (not the raw notification counts).
+  const visibleNav = NAV.filter(item => isNavItemVisible(item.key))
+  const launcherItem = (key: string) => {
+    const item = visibleNav.find(i => i.key === key)
+    return item ? [{
+      key,
+      label: T.nav[key as keyof typeof T.nav],
+      icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={item.icon} /></svg>,
+    }] : []
+  }
+  const launcherSections: LauncherSection[] = ([
+    { id: 'home', label: T.navGroups.home, icon: <Home className="w-3.5 h-3.5" aria-hidden="true" />, keys: ['overview'] },
+    { id: 'learning', label: T.navGroups.learning, icon: <GraduationCap className="w-3.5 h-3.5" aria-hidden="true" />, keys: ['attendance', 'results', 'exams', 'syllabus', 'library'] },
+    { id: 'school', label: T.navGroups.school, icon: <School className="w-3.5 h-3.5" aria-hidden="true" />, keys: ['calendar', 'fees'] },
+    { id: 'account', label: T.navGroups.account, icon: <UserRound className="w-3.5 h-3.5" aria-hidden="true" />, keys: ['profile'] },
+  ] as const)
+    .map(section => ({ id: section.id, label: section.label, icon: section.icon, items: section.keys.flatMap(launcherItem) }))
+    .filter(section => section.items.length > 0)
+  const launcherCounts: Record<string, number> = {
+    ...navCounts,
+    fees: feeSummary?.overdue_count ?? 0,
+    results: summary?.unacknowledged_count ?? 0,
+  }
+  const launcherHints: Record<string, string> = {
+    ...((feeSummary?.overdue_count ?? 0) > 0 ? { fees: T.feeOverdue(feeSummary!.overdue_count) } : {}),
+    ...((summary?.unacknowledged_count ?? 0) > 0 ? { results: T.resultsToSign(summary!.unacknowledged_count) } : {}),
+  }
+  const totalUnread = visibleNav.reduce((n, i) => n + (launcherCounts[i.key] ?? 0), 0)
+
   return (
     <div className="portal-root" data-portal="parent">
       <a href="#parent-content" className="portal-skip-link">Skip to content</a>
@@ -601,13 +686,31 @@ function ParentDashboard() {
             <p className="mt-1 text-xs text-muted-foreground">{parentInfo?.school_name}</p>
           </div>
           <nav className="flex-1 overflow-y-auto p-3" aria-label={lang === 'te' ? 'నావిగేషన్' : 'Parent workspace'}>
-          {NAV.filter(item => isNavItemVisible(item.key)).map(item => (
+          {/* All-features window: every icon + name, grouped, one click to open */}
+          <div className="pb-3">
+            <FeatureLauncherButton label={T.allFeatures} unread={totalUnread} onClick={() => setLauncherOpen(true)} />
+            <FeatureLauncher
+              open={launcherOpen}
+              onOpenChange={setLauncherOpen}
+              sections={launcherSections}
+              activeNav={activeNav}
+              counts={launcherCounts}
+              latest={navLatest}
+              hints={launcherHints}
+              text={{ title: T.allFeatures, findPlaceholder: T.findFeature, close: T.closeAllFeatures, whatsNew: T.whatsNew, unread: T.unreadCount, more: T.moreCount, noMatch: T.noFeatureMatch }}
+              onSelect={navigateTo}
+            />
+          </div>
+          {NAV.filter(item => isNavItemVisible(item.key)).map((item, nIdx) => { const hue = HUES[nIdx % HUES.length]; return (
             <button key={item.key} onClick={() => navigateTo(item.key)} aria-current={activeNav === item.key ? 'page' : undefined}
               className="portal-nav-item">
-              <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={item.icon} />
-              </svg>
+              <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md ${activeNav === item.key ? hue.solid : hue.icon}`}>
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={item.icon} />
+                </svg>
+              </span>
               {T.nav[item.key as keyof typeof T.nav]}
+              {item.key !== 'fees' && item.key !== 'results' && <NavBadge count={navCounts[item.key]} navKey={item.key} />}
               {item.key === 'fees' && (feeSummary?.overdue_count ?? 0) > 0 && (
                 <span className="ml-auto bg-red-500 text-white text-xs font-bold w-4 h-4 rounded-full flex items-center justify-center">
                   {feeSummary!.overdue_count}
@@ -619,7 +722,7 @@ function ParentDashboard() {
                 </span>
               )}
             </button>
-          ))}
+          )})}
           </nav>
           <div className="portal-account">
             <p className="truncate text-sm font-medium">{parentInfo?.name}</p>
@@ -680,6 +783,45 @@ function ParentDashboard() {
               )}
             </div>
 
+            {/* Contact & Support — who to call, right from Overview */}
+            {contact && (contact.class_teacher || contact.school) && (
+              <section className="border-b border-border pb-6" aria-labelledby="parent-contact">
+                <p id="parent-contact" className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">Contact &amp; Support</p>
+                <div className="flex flex-wrap gap-3">
+                  {contact.class_teacher && (
+                    <div className="flex items-center justify-between gap-3 flex-1 min-w-64 rounded-lg border border-border bg-white px-4 py-3">
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-gray-800 truncate">{contact.class_teacher.name}</p>
+                        <p className="text-xs text-muted-foreground">Class teacher</p>
+                      </div>
+                      {contact.class_teacher.phone && (
+                        <a href={telHref(contact.class_teacher.phone)} data-testid="call-class-teacher"
+                          className="inline-flex items-center justify-center w-10 h-10 shrink-0 rounded-full bg-primary/10 text-primary hover:bg-primary/20 transition-colors" title={`Call ${contact.class_teacher.name}`}>
+                          <Phone size={17} aria-hidden="true" />
+                        </a>
+                      )}
+                    </div>
+                  )}
+                  {contact.school && (
+                    <div className="flex items-center justify-between gap-3 flex-1 min-w-64 rounded-lg border border-border bg-white px-4 py-3">
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-gray-800 truncate">{contact.school.name}</p>
+                        <p className="text-xs text-muted-foreground">School administration</p>
+                      </div>
+                      {contact.school.phone && (
+                        <a href={telHref(contact.school.phone)} data-testid="call-administration"
+                          className="inline-flex items-center justify-center w-10 h-10 shrink-0 rounded-full bg-primary/10 text-primary hover:bg-primary/20 transition-colors" title={`Call ${contact.school.name}`}>
+                          <Phone size={17} aria-hidden="true" />
+                        </a>
+                      )}
+                    </div>
+                  )}
+                </div>
+                {contact.school?.address && (
+                  <p className="mt-3 text-xs text-muted-foreground whitespace-pre-line">{contact.school.address}</p>
+                )}
+              </section>
+            )}
 
             {/* Latest result */}
             {isNavItemVisible('results') && latestResult && (
@@ -756,6 +898,7 @@ function ParentDashboard() {
             <ParentSyllabus
               schoolId={student.school_id}
               classId={student.class_id}
+              studentId={student.id}
               studentName={student.name}
               grade={student.grade}
               section={student.section}
@@ -782,7 +925,7 @@ function ParentDashboard() {
               student who is not linked to the logged-in parent). */}
           {visited.has('attendance') && (
           <div hidden={activeNav !== 'attendance'} className="max-w-3xl space-y-5">
-            <h2 className="text-base font-bold text-gray-800">{T.nav.attendance}</h2>
+            <h2 className="text-base font-bold text-gray-800 flex items-center gap-2">{T.nav.attendance} {parentInfo?.id && <NotificationBell parentId={parentInfo.id} group="attendance" />}</h2>
             <AttendanceCalendar key={student.id} endpoint={`/api/parent/attendance?student_id=${student.id}`} who="parent" />
           </div>
           )}
@@ -869,7 +1012,27 @@ function ParentDashboard() {
                     <div className={`${feeSummary.total_outstanding > 0 ? 'bg-red-50 border-red-100' : 'bg-gray-50 border-gray-100'} border rounded-xl p-4 text-center`}>
                       <p className={`text-xs ${feeSummary.total_outstanding > 0 ? 'text-red-500' : 'text-muted-foreground'}`}>{T.outstanding}</p>
                       <p className={`text-xl font-semibold mt-1 ${feeSummary.total_outstanding > 0 ? 'text-red-600' : 'text-muted-foreground'}`}>{fmt(feeSummary.total_outstanding)}</p>
+                      {Number(feeSummary.carried_outstanding) > 0 && (
+                        <p className="text-[11px] text-amber-700 mt-1">incl. {fmt(Number(feeSummary.carried_outstanding))} carried from an earlier year</p>
+                      )}
                     </div>
+                  </div>
+                )}
+
+                {/* Unpaid bills from earlier years are not in the figures above — show them so they are never invisible */}
+                {priorDues && (
+                  <div data-testid="parent-prior-dues" className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
+                    <p className="text-sm font-semibold text-amber-900">
+                      {fmt(priorDues.total)} from earlier years is still unpaid
+                    </p>
+                    <p className="text-xs text-amber-800 mt-0.5">
+                      This is <strong>not included</strong> in the totals above. Please contact the school office to pay it.
+                    </p>
+                    <ul className="mt-2 space-y-0.5 text-xs text-amber-900">
+                      {[...new Set(priorDues.items.map(i => i.academic_year))].map(y => (
+                        <li key={y}>{y === 'passout' ? 'Passout dues' : y}: {fmt(priorDues.items.filter(i => i.academic_year === y).reduce((s, i) => s + Number(i.balance), 0))}</li>
+                      ))}
+                    </ul>
                   </div>
                 )}
 
@@ -1124,7 +1287,10 @@ function ParentDashboard() {
                             )}
                             {(!hasOnlinePayments || !isPending || payingLedger) && <div className="w-4 flex-shrink-0" />}
                             <div className="flex-1 min-w-0">
-                              <p className="text-sm font-medium text-gray-800">{entry.category_name}</p>
+                              <p className="text-sm font-medium text-gray-800">
+                                {entry.category_name}
+                                {entry.source_academic_year && <span className="ml-2 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800">carried from {entry.source_academic_year}</span>}
+                              </p>
                               <p className="text-xs text-muted-foreground">{entry.period_label} · {T.dueDate} {entry.due_date}</p>
                             </div>
                             <div className="flex items-center gap-3 flex-shrink-0">
@@ -1230,7 +1396,8 @@ function ParentDashboard() {
           {/* ── EXAM CALENDAR ─────────────────────────────────────────────── */}
           {visited.has('exams') && (
           <div hidden={activeNav !== 'exams'} className="max-w-3xl space-y-4">
-            <h2 className="text-base font-bold text-gray-800">{T.examCalendar}</h2>
+            <h2 className="text-base font-bold text-gray-800 flex items-center gap-2">{T.examCalendar} {parentInfo?.id && <NotificationBell parentId={parentInfo.id} group="exams" />}</h2>
+            <TestCalendar mode="parent" schoolId={student.school_id} studentId={student.id} />
             {summary?.upcoming_exams && summary.upcoming_exams.length > 0 ? (
               <div className="space-y-3">
                 {summary.upcoming_exams.map(e => {
@@ -1271,7 +1438,7 @@ function ParentDashboard() {
           {/* ── RESULTS ───────────────────────────────────────────────────── */}
           {visited.has('results') && (
           <div hidden={activeNav !== 'results'} className="max-w-2xl space-y-4">
-            <h2 className="text-base font-bold text-gray-800">{T.nav.results} & {T.parentSignoff}</h2>
+            <h2 className="text-base font-bold text-gray-800 flex items-center gap-2">{T.nav.results} & {T.parentSignoff} {parentInfo?.id && <NotificationBell parentId={parentInfo.id} group="marks" />}</h2>
             {(!summary?.released_results || summary.released_results.length === 0) ? (
               <div className="bg-white rounded-xl border border-gray-200 py-16 text-center">
                 <p className="text-muted-foreground text-sm">{T.noResults}</p>
@@ -1295,6 +1462,46 @@ function ParentDashboard() {
                       )}
                     </div>
                   </div>
+                  <button onClick={() => toggleResultDetail(r.id)}
+                    className="w-full flex items-center justify-between px-4 py-2 text-xs font-semibold text-blue-600 border-b border-gray-100 hover:bg-blue-50/50 transition-colors">
+                    {expandedResultId === r.id ? 'Hide subject-wise marks' : 'View subject-wise marks'}
+                    <span className={`transition-transform ${expandedResultId === r.id ? 'rotate-180' : ''}`}>⌄</span>
+                  </button>
+                  {expandedResultId === r.id && (
+                    <div className="px-4 py-3 border-b border-gray-100 bg-gray-50/50">
+                      {resultSubjects[r.id] === 'loading' ? (
+                        <p className="text-xs text-muted-foreground text-center py-2">Loading subjects…</p>
+                      ) : resultSubjects[r.id] === 'error' || !resultSubjects[r.id] ? (
+                        <p className="text-xs text-red-500 text-center py-2">Couldn&rsquo;t load subject marks.</p>
+                      ) : (
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className="text-left text-muted-foreground">
+                              <th className="font-semibold pb-1.5">Subject</th>
+                              <th className="font-semibold pb-1.5 text-right">Marks</th>
+                              <th className="font-semibold pb-1.5 text-right pl-3">Result</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-100">
+                            {(resultSubjects[r.id] as SubjectMark[]).map(sub => (
+                              <tr key={sub.subject_name}>
+                                <td className="py-1.5 text-gray-700">{sub.subject_name}</td>
+                                <td className="py-1.5 text-right tabular-nums text-gray-700">
+                                  {sub.is_absent ? 'Absent' : sub.marks_obtained !== null ? `${sub.marks_obtained}/${sub.max_marks}` : '—'}
+                                </td>
+                                <td className="py-1.5 text-right pl-3">
+                                  {sub.pass === null ? <span className="text-gray-300">—</span> :
+                                    <span className={`font-bold px-1.5 py-0.5 rounded-full ${sub.pass ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'}`}>
+                                      {sub.pass ? 'Pass' : 'Fail'}
+                                    </span>}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      )}
+                    </div>
+                  )}
                   <div className="px-4 py-3">
                     {r.parent_acknowledged ? (
                       <div className="flex items-center gap-2 text-xs text-green-700 bg-green-50 rounded-lg px-3 py-2">

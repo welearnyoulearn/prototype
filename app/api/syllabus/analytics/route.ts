@@ -81,7 +81,7 @@ export async function GET(req: NextRequest) {
         LEFT JOIN school_topics st ON st.school_chapter_id = sc.id
         LEFT JOIN class_topic_visibility ctv ON ctv.class_id = c.id AND ctv.school_topic_id = st.id
         LEFT JOIN school_topic_progress stp ON stp.school_topic_id = st.id AND stp.class_id = c.id
-        WHERE c.school_id = $1 AND COALESCE(ccv.is_active, TRUE)
+        WHERE c.school_id = $1 AND c.deleted_at IS NULL AND COALESCE(ccv.is_active, TRUE)
         GROUP BY c.id, c.grade, c.section, ss.subject_name, sc.id
       )
     `
@@ -97,14 +97,14 @@ export async function GET(req: NextRequest) {
         ${chapterCoverageCTE}
         SELECT
           cc.class_id, cc.grade, cc.section, cc.subject,
-          te.name AS teacher_name,
+          te.id AS teacher_id, te.name AS teacher_name,
           COUNT(*)::int AS total,
           COUNT(*) FILTER (WHERE cc.topic_count > 0 AND cc.topics_covered = cc.topic_count)::int AS covered,
           COALESCE(SUM(cc.topics_covered::numeric / NULLIF(cc.topic_count, 0)) FILTER (WHERE cc.topic_count > 0), 0) AS weighted_sum
         FROM chapter_coverage cc
         LEFT JOIN class_subjects cs ON cs.class_id = cc.class_id AND cs.subject_name = cc.subject
         LEFT JOIN teachers te ON te.id = cs.teacher_id
-        GROUP BY cc.class_id, cc.grade, cc.section, cc.subject, te.name
+        GROUP BY cc.class_id, cc.grade, cc.section, cc.subject, te.id, te.name
         ORDER BY cc.grade, cc.section, cc.subject
       `, [school_id, academic_year]),
 
@@ -148,7 +148,8 @@ export async function GET(req: NextRequest) {
           LEFT JOIN school_topic_progress stp ON stp.school_topic_id = st.id AND stp.class_id = cs.class_id
           WHERE st.school_chapter_id = sc.id
         ) topic_count ON TRUE
-        WHERE te.school_id = $1 AND COALESCE(ccv.is_active, TRUE)
+        WHERE te.school_id = $1 AND te.status = 'active' AND te.removed_at IS NULL
+          AND c.deleted_at IS NULL AND COALESCE(ccv.is_active, TRUE)
         GROUP BY te.id, te.name, c.id, c.grade, c.section, cs.subject_name
         ORDER BY te.name, c.grade, c.section, cs.subject_name
       `, [school_id, academic_year]),
@@ -175,7 +176,7 @@ export async function GET(req: NextRequest) {
     const classMap: Record<number, {
       class_id: number; grade: string; section: string
       total: number; covered: number; weighted_sum: number
-      subjects: { subject: string; teacher_name: string | null; total: number; covered: number; pct: number }[]
+      subjects: { subject: string; teacher_id: number | null; teacher_name: string | null; total: number; covered: number; pct: number }[]
     }> = {}
 
     for (const r of byClassRes.rows) {
@@ -194,6 +195,7 @@ export async function GET(req: NextRequest) {
       cls.weighted_sum  += Number(r.weighted_sum)
       cls.subjects.push({
         subject: r.subject,
+        teacher_id: r.teacher_id == null ? null : Number(r.teacher_id),
         teacher_name: r.teacher_name ?? null,
         total:   r.total,
         covered: r.covered,
@@ -234,9 +236,14 @@ export async function GET(req: NextRequest) {
       })
     }
 
+    const classes = Object.values(classMap)
+    const overallTotal = classes.reduce((sum, c) => sum + c.total, 0)
+    const overallWeighted = classes.reduce((sum, c) => sum + c.weighted_sum, 0)
+
     return NextResponse.json({
       academic_year,
-      by_class: Object.values(classMap).map(({ weighted_sum, ...c }) => ({
+      overall_pct: overallTotal > 0 ? Math.round((overallWeighted / overallTotal) * 100) : null,
+      by_class: classes.map(({ weighted_sum, ...c }) => ({
         ...c,
         pct: c.total > 0 ? Math.round((weighted_sum / c.total) * 100) : null,
       })),

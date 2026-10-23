@@ -1,8 +1,10 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useConfirm } from '@/components/ui/use-confirm'
+import { overLimitSchoolsMessage } from '@/lib/planChangeMessage'
 
-type Feature    = { key: string; label: string; category: string; portals: string[] }
+type Feature   = { key: string; label: string; category: string; portals: string[] }
 
 const PORTAL_LABEL: Record<string, string> = { 'school-admin': 'School', student: 'Student', parent: 'Parent' }
 type Matrix     = Record<string, Record<string, boolean>>  // feature_key → { basic, standard, premium }
@@ -17,6 +19,7 @@ const TIERS = [
 const CATEGORY_ORDER = ['Core', 'Scheduling', 'Analytics', 'Finance', 'Communication', 'Administration']
 
 export default function FeaturePlansPage() {
+  const { confirm, ConfirmDialog } = useConfirm()
   const [features, setFeatures]     = useState<Feature[]>([])
   const [matrix, setMatrix]         = useState<Matrix>({})
   const [staffLimits, setStaffLimits] = useState<StaffLimits>({ basic: '2', standard: '5', premium: '', none: '1' })
@@ -68,16 +71,31 @@ export default function FeaturePlansPage() {
           assignments.push({ feature_key: featureKey, tier, enabled })
         }
       }
-      const res = await fetch('/api/platform/features', {
+      const send = (confirmOverLimit: boolean) => fetch('/api/platform/features', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ assignments, staffLimits }),
+        body: JSON.stringify({ assignments, staffLimits, confirmOverLimit: confirmOverLimit || undefined }),
       })
-      if (!res.ok) throw new Error()
+      let res = await send(false)
+      // Lowering a plan's staff limit applies to every school on that plan. If that leaves any
+      // school with more active staff than the new limit, show which ones and ask first.
+      if (res.status === 409) {
+        const d = await res.json().catch(() => ({}))
+        if (d.code === 'OVER_SEAT_LIMIT') {
+          const ok = await confirm(overLimitSchoolsMessage(d.affected), { title: 'Some schools would go over their staff limit', confirmText: 'Save anyway', destructive: true })
+          if (!ok) return
+          res = await send(true)
+        }
+      }
+      if (!res.ok) {
+        // Show the server's reason (e.g. an invalid staff limit) instead of a bare "Failed".
+        const d = await res.json().catch(() => ({}))
+        throw new Error(d.error || 'Failed to save')
+      }
       setSaved(true)
       setShowSavedPopup(true)
       setTimeout(() => setSaved(false), 3000)
-    } catch { setError('Failed to save') }
+    } catch (e) { setError(e instanceof Error ? e.message : 'Failed to save') }
     finally { setSaving(false) }
   }
 
@@ -263,6 +281,7 @@ export default function FeaturePlansPage() {
           </div>
         </div>
       )}
+      {ConfirmDialog}
     </div>
   )
 }

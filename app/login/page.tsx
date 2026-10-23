@@ -84,7 +84,7 @@ function LoginForm() {
       setUsageSessionId(data.usageSessionId)
 
       if (data.role === 'platform_admin') {
-        window.location.href = '/platform-admin'
+        window.location.href = data.firstLogin ? '/change-password?first=1&portal=platform' : '/platform-admin'
       } else if (['school_admin', 'principal', 'vice_principal'].includes(data.role)) {
         if (data.account) writeLastAccount(data.account)
         if (data.firstLogin) router.push('/change-password?first=1')

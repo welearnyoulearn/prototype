@@ -1,6 +1,7 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
+import { dispatchPendingPushes } from '@/lib/push'
 import pool, { ensureDB } from '@/lib/db'
-import { requireExamsAccess, parentOwnsStudent } from '@/lib/examsAuth'
+import { requireExamsParent, parentOwnsStudent, examAppliesToStudent } from '@/lib/examsAuth'
 
 // POST /api/exams/[id]/acknowledge
 // A parent acknowledges seeing their child's released result.
@@ -24,13 +25,16 @@ export async function POST(
     const body = await req.json()
     const { student_id, school_id } = body
 
-    const actor = await requireExamsAccess(school_id)
-    if (!actor || actor.kind !== 'parent') {
+    const actor = await requireExamsParent(school_id)
+    if (!actor) {
       return NextResponse.json({ error: 'Only a parent can acknowledge a result' }, { status: 403 })
     }
     if (!student_id) return NextResponse.json({ error: 'student_id required' }, { status: 400 })
     if (!await parentOwnsStudent(actor.parentId, Number(student_id))) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
+    if (!await examAppliesToStudent(Number(exam_id), Number(student_id), actor.schoolId)) {
+      return NextResponse.json({ error: 'Student is not included in this exam' }, { status: 403 })
     }
 
     const { rows: [exam] } = await pool.query(
@@ -43,15 +47,15 @@ export async function POST(
       'SELECT name, phone FROM parents WHERE id = $1', [actor.parentId]
     )
 
-    await pool.query(`
+    const acknowledgement = await pool.query(`
       INSERT INTO parent_mark_acks (exam_id, student_id, parent_id, school_id, parent_name, parent_phone, acknowledged_at)
       VALUES ($1, $2, $3, $4, $5, $6, NOW())
-      ON CONFLICT (exam_id, student_id) DO UPDATE SET
-        parent_id = EXCLUDED.parent_id,
-        parent_name = EXCLUDED.parent_name,
-        parent_phone = EXCLUDED.parent_phone,
-        acknowledged_at = NOW()
+      ON CONFLICT (exam_id, student_id) DO NOTHING
+      RETURNING id
     `, [exam_id, student_id, actor.parentId, actor.schoolId, parent?.name ?? actor.actorName, parent?.phone ?? null])
+    if (acknowledgement.rows.length === 0) {
+      return NextResponse.json({ success: true, already_acknowledged: true })
+    }
 
     // Let the class teacher know a parent signed off, so their ack-tracking
     // view can move this student from "needs a nudge" without a refresh.
@@ -73,6 +77,7 @@ export async function POST(
       }
     } catch { /* non-critical */ }
 
+    after(() => dispatchPendingPushes())
     return NextResponse.json({ success: true })
   } catch (err: unknown) {
     console.error('[API]', err)

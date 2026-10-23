@@ -38,13 +38,14 @@ export async function GET(req: NextRequest) {
       section: string
       total_chapters: number
       covered_chapters: number
+      weighted_coverage_pct: number | null
     }
 
     let rows: SnapshotRow[]
     if (class_id) {
       const res = await pool.query<SnapshotRow>(
         `SELECT scs.snapshot_date::text, ss.subject_name AS subject, c.grade, c.section,
-                scs.total_chapters, scs.covered_chapters
+                scs.total_chapters, scs.covered_chapters, scs.weighted_coverage_pct
          FROM syllabus_coverage_snapshots scs
          JOIN school_subjects ss ON ss.id = scs.school_subject_id
          JOIN classes c ON c.id = scs.class_id
@@ -56,7 +57,7 @@ export async function GET(req: NextRequest) {
     } else {
       const res = await pool.query<SnapshotRow>(
         `SELECT scs.snapshot_date::text, ss.subject_name AS subject, c.grade, c.section,
-                scs.total_chapters, scs.covered_chapters
+                scs.total_chapters, scs.covered_chapters, scs.weighted_coverage_pct
          FROM syllabus_coverage_snapshots scs
          JOIN school_subjects ss ON ss.id = scs.school_subject_id
          JOIN classes c ON c.id = scs.class_id
@@ -80,7 +81,9 @@ export async function GET(req: NextRequest) {
     for (const r of rows) {
       const key = seriesKey(r)
       if (!seriesMap.has(key)) seriesMap.set(key, new Map())
-      const pct = r.total_chapters > 0 ? Math.round((r.covered_chapters / r.total_chapters) * 100) : 0
+      const pct = r.weighted_coverage_pct != null
+        ? Math.round(Number(r.weighted_coverage_pct))
+        : (r.total_chapters > 0 ? Math.round((r.covered_chapters / r.total_chapters) * 100) : 0)
       seriesMap.get(key)!.set(r.snapshot_date, pct)
     }
 
