@@ -18,6 +18,7 @@ type ClassOption = {
   grade: string
   section: string
   class_teacher_name: string | null
+  class_teacher_id: number | null
 }
 
 type Student = {
@@ -57,8 +58,7 @@ export default function MyStudents({ teacher, schoolId }: Props) {
   // Student detail view — shared with ClassView's Students tab
   const [detailStudent, setDetailStudent] = useState<Student | null>(null)
 
-  const isClassTeacher = teacher.class_teacher_grade === selectedClass?.grade &&
-    teacher.class_teacher_section === selectedClass?.section
+  const isClassTeacher = selectedClass?.class_teacher_id === teacher.id
 
   useEffect(() => {
     Promise.all([
@@ -66,10 +66,9 @@ export default function MyStudents({ teacher, schoolId }: Props) {
       fetch(`/api/classes?school_id=${schoolId}`).then(r => r.json()).catch(() => []),
     ]).then(([classSubjects, allClasses]: [ClassSubjectAssignment[], ClassOption[]]) => {
       const classMap = new Map<string, ClassOption>()
-      if (teacher.class_teacher_grade && teacher.class_teacher_section) {
-        const cls = allClasses.find(c => c.grade === teacher.class_teacher_grade && c.section === teacher.class_teacher_section)
-        if (cls) classMap.set(`${cls.grade}-${cls.section}`, cls)
-      }
+      allClasses.filter(c => c.class_teacher_id === teacher.id).forEach(cls => {
+        classMap.set(`${cls.grade}-${cls.section}`, cls)
+      })
       // Class Management's class_subjects assignment — same source used by
       // Syllabus/My Classes (a class is "theirs" the moment it's assigned).
       classSubjects.forEach((a: ClassSubjectAssignment) => {
@@ -84,8 +83,8 @@ export default function MyStudents({ teacher, schoolId }: Props) {
       setClasses(myClasses)
       if (myClasses.length === 1) {
         setSelectedClass(myClasses[0])
-      } else if (teacher.class_teacher_grade && teacher.class_teacher_section) {
-        const own = myClasses.find(c => c.grade === teacher.class_teacher_grade && c.section === teacher.class_teacher_section)
+      } else {
+        const own = myClasses.find(c => c.class_teacher_id === teacher.id)
         if (own) setSelectedClass(own)
       }
     }).finally(() => setLoading(false))
@@ -102,11 +101,16 @@ export default function MyStudents({ teacher, schoolId }: Props) {
   }, [schoolId])
 
   useEffect(() => {
-    setDetailStudent(null)
-    // Only the class teacher gets the full roster — a subject teacher sees
-    // an explanatory message instead, so there's nothing to fetch for them.
-    if (selectedClass && isClassTeacher) fetchStudents(selectedClass)
-    else setStudents([])
+    let cancelled = false
+    void Promise.resolve().then(() => {
+      if (cancelled) return
+      setDetailStudent(null)
+      // Only the class teacher gets the full roster — a subject teacher sees
+      // an explanatory message instead, so there's nothing to fetch for them.
+      if (selectedClass && isClassTeacher) void fetchStudents(selectedClass)
+      else setStudents([])
+    })
+    return () => { cancelled = true }
   }, [selectedClass, isClassTeacher, fetchStudents])
 
   function openDetail(s: Student) {

@@ -37,12 +37,13 @@ each API route re-checks the session in Node (lib/auth.ts)
 - `IdleSessionGuard` (mounted by `app/school-admin/layout.tsx`) heart-beats (`POST /api/auth/session`) and checks validity every 60 s, redirecting to `/login?role=school&reason=timeout`.
 - A session ends on: logout, login as another user in the same browser, deactivation, password change (others) or reset (all).
 - Adding staff: Settings → Staff Accounts → name, email, role. A one-time set-password link (48 h) is emailed; "Resend Invite Link" voids earlier links.
+- **Setting a password** (first login or voluntary change, all five portals): `validateNewPassword()` (`lib/auth.ts`) is the one rule — 8–128 characters, upper + lower case, a number, a symbol, not a common password, not the login identifier itself; its character-class checks live in `lib/passwordPolicy.ts` so the New Password screen's live checklist can never drift from what the server actually enforces. First-login screens never ask for the current/temp password — the signed-in session (JWT `firstLogin`/`passwordChanged`, tamper-proof) is what decides that, not anything the client sends. (#277)
 - The login page keeps `wlyl_last_staff_account` (name, email, role) in `localStorage` — never a password or session.
 - Platform "Reset Password" for a school resets only the owner (the account with a `school_code`).
 
 ## Known gaps
 
-- Several state-changing API routes have no session check — see `docs/KNOWN_ISSUES.md` (#131) and the architecture dossier §12.1.
+- Every protected API checks the session on the server and plan features are enforced in `proxy.ts` (#253) — see the architecture dossier §12.1 and `docs/KNOWN_ISSUES.md` for what remains.
 - No 2FA or SSO. Two parallel teacher-auth route sets exist (`/api/teacher-auth/*`, `/api/teacher/auth/*`).
 
 ## Related

@@ -1,30 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 import { resolveAcademicYear } from '@/lib/academicYear'
-import { requireSyllabusAccess, requireSyllabusWriteAccess, getTeacherSession } from '@/lib/auth'
-
-// Deleting a custom chapter/topic is destructive (cascades away any
-// school_topic_progress history recorded against it) — unlike add/mark-
-// covered, which any teacher role can already do via requireSyllabusWriteAccess,
-// delete is scoped to only the class's OWN assigned teacher for that subject:
-// the class teacher (sees/manages every subject for their own class), or
-// whoever class_subjects.teacher_id names for this exact (class, subject)
-// pair. School-admin/principal/VP/platform_admin bypass this — they're not
-// "a teacher" and already passed the broader requireSyllabusWriteAccess role
-// check above the call site.
-async function assertAssignedTeacherForDelete(role: string, classId: string, subject: string): Promise<NextResponse | null> {
-  if (role !== 'teacher') return null // non-teacher roles already passed the write-access role check
-  const session = await getTeacherSession()
-  if (!session) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-  const { rows: [cls] } = await pool.query('SELECT class_teacher_id FROM classes WHERE id = $1', [classId])
-  if (cls?.class_teacher_id === session.teacherId) return null
-  const { rows: [assignment] } = await pool.query(
-    'SELECT 1 FROM class_subjects WHERE class_id = $1 AND subject_name = $2 AND teacher_id = $3',
-    [classId, subject, session.teacherId]
-  )
-  if (assignment) return null
-  return NextResponse.json({ error: 'Only this class’s assigned teacher for this subject can delete custom content' }, { status: 403 })
-}
+import { canAccessSyllabusClass, canWriteSyllabusClass, requireSyllabusAccess, requireSyllabusWriteAccess } from '@/lib/auth'
+import type { PoolClient } from 'pg'
 
 type SyllabusTopicRow = {
   id: number
@@ -56,7 +34,10 @@ export async function GET(req: NextRequest) {
   if (!school_id || !class_id) {
     return NextResponse.json({ error: 'school_id and class_id required' }, { status: 400 })
   }
-  if (!await requireSyllabusAccess(school_id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const access = await requireSyllabusAccess(school_id)
+  if (!access || !await canAccessSyllabusClass(access, class_id, subject)) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
 
   try {
     await ensureDB()
@@ -74,6 +55,20 @@ export async function GET(req: NextRequest) {
     const { grade } = classRes.rows[0]
 
     const academic_year = req.nextUrl.searchParams.get('academic_year') || await resolveAcademicYear(school_id)
+    let teacherSubjects: string[] | null = null
+    if (access.role === 'teacher') {
+      const { rows: [teacherScope] } = await pool.query(
+        `SELECT class_teacher_id FROM classes WHERE id = $1 AND school_id = $2 AND deleted_at IS NULL`,
+        [class_id, access.schoolId],
+      )
+      if (Number(teacherScope?.class_teacher_id) !== Number(access.actorId)) {
+        const { rows: assignments } = await pool.query(
+          `SELECT DISTINCT subject_name FROM class_subjects WHERE class_id = $1 AND teacher_id = $2`,
+          [class_id, access.actorId],
+        )
+        teacherSubjects = assignments.map(r => r.subject_name)
+      }
+    }
 
     // 2. Query subjects, chapters, topics, and join with section progress for class_id
     //
@@ -136,11 +131,14 @@ export async function GET(req: NextRequest) {
     // chapter's own columns. Instead each topic row carries its own
     // `topic_is_active` flag through to the grouping loop below, which skips
     // adding an inactive topic to `ch.topics` without discarding the chapter.
-    const args: (string | number)[] = [class_id, school_id, grade, academic_year]
+    const args: (string | number | string[])[] = [class_id, school_id, grade, academic_year]
 
     if (subject) {
       query += ` AND ss.subject_name = $5`
       args.push(subject)
+    } else if (teacherSubjects) {
+      query += ` AND ss.subject_name = ANY($5::text[])`
+      args.push(teacherSubjects)
     }
 
     query += ` ORDER BY ss.subject_name, sc.chapter_order, sc.chapter_name, st.topic_order, st.topic_name`
@@ -243,6 +241,7 @@ export async function GET(req: NextRequest) {
     )
     for (const { subject_name } of assignedRes.rows) {
       if (subject && subject_name !== subject) continue
+      if (teacherSubjects && !teacherSubjects.some(s => s.toLowerCase() === String(subject_name).toLowerCase())) continue
       if (!grouped[subject_name]) {
         grouped[subject_name] = { subject: subject_name, board: null, total: 0, covered: 0, chapters: {} }
       }
@@ -308,9 +307,9 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ error: 'school_id, class_id, subject, chapter_name required' }, { status: 400 })
   }
   const writeSession = await requireSyllabusWriteAccess(school_id)
-  if (!writeSession) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-  const scopeError = await assertAssignedTeacherForDelete(writeSession.role, class_id, subject)
-  if (scopeError) return scopeError
+  if (!writeSession || !await canWriteSyllabusClass(writeSession, class_id, subject)) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
 
   try {
     await ensureDB()
@@ -324,11 +323,12 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ error: 'Class not found' }, { status: 404 })
     }
     const { grade } = classRes.rows[0]
+    const academic_year = sp.get('academic_year') || await resolveAcademicYear(school_id)
 
     // 2. Fetch school subject
     const subjectRes = await pool.query(
-      'SELECT id FROM school_subjects WHERE school_id = $1 AND grade = $2 AND subject_name = $3',
-      [school_id, grade, subject]
+      'SELECT id FROM school_subjects WHERE school_id = $1 AND grade = $2 AND subject_name = $3 AND academic_year = $4',
+      [school_id, grade, subject, academic_year]
     )
     if (subjectRes.rows.length === 0) {
       return NextResponse.json({ error: 'Subject not found' }, { status: 404 })
@@ -368,38 +368,59 @@ export async function DELETE(req: NextRequest) {
 // Body: { school_id, class_id, subject, chapter_name, chapter_order, topic_name, topic_order }
 export async function POST(req: NextRequest) {
   const body = await req.json()
+  let client: PoolClient | null = null
 
   try {
     await ensureDB()
     const topics = body.topics ?? [body]
 
-    if (!topics.length) return NextResponse.json({ error: 'No topics provided' }, { status: 400 })
+    if (!Array.isArray(topics) || !topics.length) return NextResponse.json({ error: 'No topics provided' }, { status: 400 })
+    if (topics.length > 200) return NextResponse.json({ error: 'A maximum of 200 topics may be added at once' }, { status: 413 })
+
+    const yearBySchool = new Map<string, string>()
+    for (const t of topics) {
+      const { school_id, class_id, subject, chapter_name, topic_name, topic_order } = t
+      if (!school_id || !class_id || !subject || !chapter_name || !topic_name) {
+        return NextResponse.json({ error: 'school_id, class_id, subject, chapter_name, topic_name required' }, { status: 400 })
+      }
+      if ([subject, chapter_name, topic_name].some(value => typeof value !== 'string' || !value.trim() || value.trim().length > 300)) {
+        return NextResponse.json({ error: 'Subject, chapter and topic names must be 1-300 characters' }, { status: 400 })
+      }
+      if (topic_order !== undefined && (!Number.isInteger(topic_order) || topic_order < 0 || topic_order > 10000)) {
+        return NextResponse.json({ error: 'topic_order must be an integer between 0 and 10000' }, { status: 400 })
+      }
+      const writeSession = await requireSyllabusWriteAccess(school_id)
+      if (!writeSession || !await canWriteSyllabusClass(writeSession, class_id, subject)) {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      }
+      const key = String(school_id)
+      if (!yearBySchool.has(key)) yearBySchool.set(key, t.academic_year || await resolveAcademicYear(school_id))
+    }
+
+    client = await pool.connect()
+    await client.query('BEGIN')
+    for (const schoolId of yearBySchool.keys()) await client.query('SELECT pg_advisory_xact_lock($1)', [Number(schoolId)])
 
     const inserted = []
 
     for (const t of topics) {
       const { school_id, class_id, subject, chapter_name, chapter_order, topic_name, topic_order, book_type, book_name, audience } = t
-      if (!school_id || !class_id || !subject || !chapter_name || !topic_name) {
-        return NextResponse.json({ error: 'school_id, class_id, subject, chapter_name, topic_name required' }, { status: 400 })
-      }
-      if (!await requireSyllabusWriteAccess(school_id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-
       // 1. Fetch class grade
-      const classRes = await pool.query(
+      const classRes = await client.query(
         'SELECT grade FROM classes WHERE id = $1 AND school_id = $2',
         [class_id, school_id]
       )
       if (classRes.rows.length === 0) {
-        return NextResponse.json({ error: 'Class not found for topic creation' }, { status: 404 })
+        throw new Error('Class was removed while topics were being created')
       }
       const { grade } = classRes.rows[0]
 
-      const academic_year = t.academic_year || await resolveAcademicYear(school_id)
+      const academic_year = t.academic_year || yearBySchool.get(String(school_id))!
 
       // 2. Find or create school subject
       let school_subject_id: number
-      const subjectRes = await pool.query(
-        'SELECT id FROM school_subjects WHERE school_id = $1 AND grade = $2 AND subject_name = $3 AND academic_year = $4',
+      const subjectRes = await client.query(
+        'SELECT id FROM school_subjects WHERE school_id = $1 AND grade = $2 AND LOWER(TRIM(subject_name)) = LOWER(TRIM($3)) AND academic_year = $4',
         [school_id, grade, subject, academic_year]
       )
       if (subjectRes.rows.length === 0) {
@@ -414,7 +435,7 @@ export async function POST(req: NextRequest) {
         // parameter-type inference can deduce two different types for the
         // same parameter and Postgres errors with 42P08 "inconsistent types
         // deduced for parameter".
-        const insertSubj = await pool.query(
+        const insertSubj = await client.query(
           `INSERT INTO school_subjects (school_id, grade, subject_name, academic_year, master_subject_id, board)
            SELECT $1, $2::varchar, $3::varchar, $4,
              CASE WHEN COUNT(*) = 1 THEN MAX(id) END,
@@ -430,9 +451,9 @@ export async function POST(req: NextRequest) {
 
       // 3. Find or create school chapter
       let school_chapter_id: number
-      const chapterRes = await pool.query(
-        'SELECT id FROM school_chapters WHERE school_subject_id = $1 AND chapter_name = $2',
-        [school_subject_id, chapter_name]
+      const chapterRes = await client.query(
+        'SELECT id FROM school_chapters WHERE school_subject_id = $1 AND LOWER(TRIM(chapter_name)) = LOWER(TRIM($2))',
+        [school_subject_id, chapter_name.trim()]
       )
       if (chapterRes.rows.length === 0) {
         // chapter_order is caller-optional (teacher-created chapters never
@@ -442,7 +463,7 @@ export async function POST(req: NextRequest) {
         // bulk-import route uses for master_chapters.
         let resolvedChapterOrder = chapter_order
         if (resolvedChapterOrder == null) {
-          const orderRes = await pool.query(
+          const orderRes = await client.query(
             'SELECT COALESCE(MAX(chapter_order), -1) + 1 AS next FROM school_chapters WHERE school_subject_id = $1',
             [school_subject_id]
           )
@@ -458,10 +479,10 @@ export async function POST(req: NextRequest) {
         // teacher's explicit "Add Chapter" action, where the caller should
         // pass the active book tab's own values so the new chapter joins
         // that book's group instead of starting a new one).
-        const insertCh = await pool.query(
+        const insertCh = await client.query(
           `INSERT INTO school_chapters (school_subject_id, chapter_name, chapter_order, is_custom, book_type, book_name, audience)
            VALUES ($1, $2, $3, TRUE, $4, $5, $6) RETURNING id`,
-          [school_subject_id, chapter_name, resolvedChapterOrder, book_type || 'textbook', book_name || null, audience || 'student']
+          [school_subject_id, chapter_name.trim(), resolvedChapterOrder, book_type || 'textbook', book_name || null, audience || 'student']
         )
         school_chapter_id = insertCh.rows[0].id
       } else {
@@ -472,27 +493,31 @@ export async function POST(req: NextRequest) {
       // scoped per-chapter so subtopics land as 1.1, 1.2, 1.3 in order added.
       let resolvedTopicOrder = topic_order
       if (resolvedTopicOrder == null) {
-        const topicOrderRes = await pool.query(
+        const topicOrderRes = await client.query(
           'SELECT COALESCE(MAX(topic_order), -1) + 1 AS next FROM school_topics WHERE school_chapter_id = $1',
           [school_chapter_id]
         )
         resolvedTopicOrder = topicOrderRes.rows[0].next
       }
-      const topicRes = await pool.query(
+      const topicRes = await client.query(
         `INSERT INTO school_topics (school_chapter_id, topic_name, topic_order, is_custom)
          VALUES ($1, $2, $3, TRUE)
          RETURNING *`,
-        [school_chapter_id, topic_name, resolvedTopicOrder]
+        [school_chapter_id, topic_name.trim(), resolvedTopicOrder]
       )
       inserted.push(topicRes.rows[0])
     }
 
+    await client.query('COMMIT')
     return NextResponse.json({ inserted })
   } catch (err) {
+    if (client) await client.query('ROLLBACK').catch(() => {})
     console.error('Syllabus POST error:', err)
     if (err && typeof err === 'object' && 'code' in err && err.code === '23505') {
       return NextResponse.json({ error: 'A topic with this name already exists in this chapter' }, { status: 409 })
     }
     return NextResponse.json({ error: 'Failed to add topics' }, { status: 500 })
+  } finally {
+    client?.release()
   }
 }

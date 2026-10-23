@@ -19,6 +19,8 @@ const ACTION_LABELS: Record<string, { label: string; color: string }> = {
   delete_school:       { label: 'Deleted School',       color: 'bg-red-100 text-red-700' },
   update_subscription: { label: 'Changed Plan',         color: 'bg-purple-100 text-purple-700' },
   reset_password:      { label: 'Reset Password',       color: 'bg-amber-100 text-amber-700' },
+  plan_renewal_request: { label: 'Renewal Requested',   color: 'bg-amber-100 text-amber-700' },
+  school_data_export:  { label: 'School Data Export',   color: 'bg-gray-100 text-gray-700' },
   backfill_portal_access: { label: 'Activated Portal Access', color: 'bg-teal-100 text-teal-700' },
 }
 
@@ -26,6 +28,10 @@ function formatDetails(action: string, details: Record<string, unknown>): string
   if (action === 'update_subscription') {
     return `${details.from ?? '?'} → ${details.to ?? '?'}`
   }
+  if (action === 'plan_renewal_request') {
+    return `${details.tier ?? '?'} · ${details.plan_status ?? ''}${details.plan_end_date ? ` · ends ${details.plan_end_date}` : ''}`
+  }
+  if (action === 'school_data_export') return `${details.dataset ?? ''}`
   if (action === 'update_school' && Array.isArray(details.updated_fields)) {
     return `Fields: ${(details.updated_fields as string[]).join(', ')}`
   }

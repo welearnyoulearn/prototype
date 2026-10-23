@@ -6,17 +6,22 @@ import dynamic from 'next/dynamic'
 import { FullPageLoader } from '@/components/loaders'
 import { FeaturesProvider } from '@/lib/features-context'
 import NotificationBell from '../components/NotificationBell'
+import { useNavNotifications, NavBadge } from '../components/navNotifications'
 import { useUsageHeartbeat } from '@/lib/useUsageHeartbeat'
 import { useFeatureTracking } from '@/lib/useFeatureTracking'
 import { useSectionNav } from '@/lib/useSectionNav'
 import { getUsageSessionId, clearUsageSessionId } from '@/lib/usageSession'
 import PortalSidebar from '@/components/portal/PortalSidebar'
-import { CalendarDays, Eye, Home, LogOut, Menu } from 'lucide-react'
+import FeatureLauncher, { type LauncherSection } from '@/components/portal/FeatureLauncher'
+import FeatureLauncherButton from '@/components/portal/FeatureLauncherButton'
+import { hueForSection } from '@/components/portal/sectionHues'
+import { CalendarDays, Eye, Home, LayoutGrid, LogOut, Menu, School, UserRound } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 
 // Always-loaded (landing tab, and small enough not to be worth its own chunk)
 import SmartSnapshot from './components/SmartSnapshot'
 import TeacherSyllabus from './components/TeacherSyllabus'
+import { unregisterPushDevice } from '@/lib/pushClient'
 
 // Lazy-loaded — only downloaded when first opened
 function ModuleSkeleton() {
@@ -39,6 +44,7 @@ const SchoolCalendarView = dynamic(() => import('../components/SchoolCalendarVie
 const MyStudents     = dynamic(() => import('./components/MyStudents'),     { loading: () => <ModuleSkeleton /> })
 const MyClasses      = dynamic(() => import('./components/MyClasses'),      { loading: () => <ModuleSkeleton /> })
 const TeacherLibrary = dynamic(() => import('./components/TeacherLibrary'), { loading: () => <ModuleSkeleton /> })
+const TeacherExamSchedule = dynamic(() => import('./components/TeacherExamSchedule'), { loading: () => <ModuleSkeleton /> })
 
 type Teacher = {
   id: number
@@ -54,6 +60,7 @@ type Teacher = {
   teaches_grades: string | null
   class_teacher_grade: string | null
   class_teacher_section: string | null
+  class_teacher_assignments: { id: number; grade: string; section: string }[]
   status: string
   school_id: number
   school_name: string
@@ -73,7 +80,15 @@ const NAV_KEY_TO_FEATURE: Record<string, string> = {
   attendance: 'attendance',
   calendar: 'calendar',
   library: 'library',
+  'exam-schedule': 'exam-marks',
   syllabus: 'curriculum',
+}
+
+// Section icons for the "All features" window (the sidebar itself shows section labels only).
+const SECTION_ICONS: Record<string, React.ReactNode> = {
+  'MAIN': <Home className="w-3.5 h-3.5" aria-hidden="true" />,
+  'MY CLASSES': <School className="w-3.5 h-3.5" aria-hidden="true" />,
+  'MY ACCOUNT': <UserRound className="w-3.5 h-3.5" aria-hidden="true" />,
 }
 
 const NAV_SECTIONS: NavSection[] = [
@@ -90,6 +105,7 @@ const NAV_SECTIONS: NavSection[] = [
       { key: 'my-students', label: 'My Students', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg> },
       { key: 'syllabus', label: 'Syllabus', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" /></svg> },
       { key: 'library', label: 'Digital Library', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253m0-13v13" /></svg> },
+      { key: 'exam-schedule', label: 'Exam Schedule', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg> },
       { key: 'attendance', label: 'Attendance', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" /></svg> },
       { key: 'calendar', label: 'School Calendar', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg> },
     ],
@@ -111,10 +127,15 @@ function TeacherPortal() {
   const { current: activeNav, navigate: navigateSection } = useSectionNav<string>('snapshot')
   const [visitedNav, setVisitedNav] = useState<Set<string>>(new Set([activeNav]))
   useEffect(() => {
-    setVisitedNav(prev => (prev.has(activeNav) ? prev : new Set([...prev, activeNav])))
+    const update = window.setTimeout(() => {
+      setVisitedNav(prev => (prev.has(activeNav) ? prev : new Set([...prev, activeNav])))
+    }, 0)
+    return () => window.clearTimeout(update)
   }, [activeNav])
   const [sidebarOpen, setSidebarOpen] = useState(false)
-  const [selectedClass, setSelectedClass] = useState<{ id: number; grade: string; section: string; class_teacher_name: string | null } | null>(null)
+  const { counts: navCounts, latest: navLatest } = useNavNotifications('teacher')
+  const [launcherOpen, setLauncherOpen] = useState(false)
+  const [selectedClass, setSelectedClass] = useState<{ id: number; grade: string; section: string; class_teacher_name: string | null; class_teacher_id?: number | null } | null>(null)
   const [classViewInitialTab, setClassViewInitialTab] = useState<string | undefined>(undefined)
   const [classViewOpenExamId, setClassViewOpenExamId] = useState<number | undefined>(undefined)
 
@@ -149,6 +170,7 @@ function TeacherPortal() {
 
   const handleLogout = useCallback(async () => {
     const usageSessionId = getUsageSessionId()
+    await unregisterPushDevice()
     await fetch('/api/teacher/auth/logout', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -239,6 +261,19 @@ function TeacherPortal() {
 
   if (!teacher) return null
 
+  // Same plan gating as the sidebar below, flattened for the "All features" window.
+  const launcherSections: LauncherSection[] = NAV_SECTIONS
+    .map(section => ({
+      label: section.label,
+      icon: SECTION_ICONS[section.label] ?? <LayoutGrid className="w-3.5 h-3.5" aria-hidden="true" />,
+      items: section.items.filter(item => {
+        const featureKey = NAV_KEY_TO_FEATURE[item.key]
+        return !item.comingSoon && (!featureKey || enabledFeatures === null || enabledFeatures.has(featureKey))
+      }),
+    }))
+    .filter(section => section.items.length > 0)
+  const totalUnread = launcherSections.flatMap(s => s.items).reduce((n, i) => n + (navCounts[i.key] ?? 0), 0)
+
   return (
     <FeaturesProvider value={enabledFeatures ?? new Set()}>
     <div className="portal-root" data-portal="teacher">
@@ -289,7 +324,21 @@ function TeacherPortal() {
             <p className="mt-1 text-xs leading-relaxed text-[#647068]">{teacher.school_name}</p>
           </div>
           <nav className="flex-1 overflow-y-auto px-3 py-3" aria-label="Teacher sections">
-            {NAV_SECTIONS.map(section => {
+            {/* All-features window: every icon + name, grouped by section, one click to open */}
+            <div className="pb-3">
+              <FeatureLauncherButton label="All features" unread={totalUnread} onClick={() => setLauncherOpen(true)} />
+              <FeatureLauncher
+                open={launcherOpen}
+                onOpenChange={setLauncherOpen}
+                sections={launcherSections}
+                activeNav={activeNav}
+                counts={navCounts}
+                latest={navLatest}
+                onSelect={navigateTo}
+              />
+            </div>
+            {NAV_SECTIONS.map((section, sIdx) => {
+              const hue = hueForSection(section.label, sIdx)
               const visibleItems = section.items.filter(item => {
                 const featureKey = NAV_KEY_TO_FEATURE[item.key]
                 return !featureKey || enabledFeatures === null || enabledFeatures.has(featureKey)
@@ -297,11 +346,12 @@ function TeacherPortal() {
               if (visibleItems.length === 0) return null
               return (
                 <div key={section.label} className="mb-4">
-                  <p className="portal-nav-label">{section.label}</p>
+                  <p className={`portal-nav-label ${hue.head}`}>{section.label}</p>
                   {visibleItems.map(item => (
                     <button key={item.key} onClick={() => { if (!item.comingSoon) navigateTo(item.key) }} className="portal-nav-item" aria-current={activeNav === item.key ? 'page' : undefined} disabled={item.comingSoon}>
-                      <span className="shrink-0" aria-hidden="true">{item.icon}</span>
+                      <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md ${activeNav === item.key ? hue.solid : hue.icon}`} aria-hidden="true">{item.icon}</span>
                       <span className="flex-1">{item.label}</span>
+                      <NavBadge count={navCounts[item.key]} navKey={item.key} />
                       {item.comingSoon && <span className="text-xs">Soon</span>}
                     </button>
                   ))}
@@ -315,8 +365,8 @@ function TeacherPortal() {
               <div className="min-w-0">
                 <p className="truncate text-sm font-medium text-[#202a25]">{teacher.name}</p>
                 <p className="mt-0.5 text-xs text-[#647068]">
-                  {teacher.class_teacher_grade && teacher.class_teacher_section
-                    ? `Class teacher · Grade ${teacher.class_teacher_grade}`
+                  {teacher.class_teacher_assignments?.length
+                    ? `Class teacher · ${teacher.class_teacher_assignments.length} class${teacher.class_teacher_assignments.length === 1 ? '' : 'es'}`
                     : teacher.department || 'Teacher'}
                 </p>
               </div>
@@ -327,7 +377,7 @@ function TeacherPortal() {
         <main id="teacher-content" tabIndex={-1} className="portal-main">
           <div className="mx-auto w-full max-w-7xl">
           {visitedNav.has('snapshot')       && <div hidden={activeNav !== 'snapshot'}><SmartSnapshot teacher={teacher} schoolId={teacher.school_id} onNavigate={navigateTo} onViewClass={cls => { setSelectedClass(cls); navigateTo('class-view') }} /></div>}
-          {visitedNav.has('class-view') && selectedClass && <div hidden={activeNav !== 'class-view'}><ClassView key={selectedClass.id} classId={selectedClass.id} grade={selectedClass.grade} section={selectedClass.section} schoolId={teacher.school_id} teacherName={teacher.name} teacherId={teacher.id} isClassTeacher={teacher.class_teacher_grade === selectedClass.grade && teacher.class_teacher_section === selectedClass.section} teacher={{ id: teacher.id, name: teacher.name, subject: teacher.subject, department: teacher.department, class_teacher_grade: teacher.class_teacher_grade, class_teacher_section: teacher.class_teacher_section }} onBack={() => navigateTo('snapshot')} initialTab={classViewInitialTab} openExamId={classViewOpenExamId} /></div>}
+          {visitedNav.has('class-view') && selectedClass && <div hidden={activeNav !== 'class-view'}><ClassView key={selectedClass.id} classId={selectedClass.id} grade={selectedClass.grade} section={selectedClass.section} schoolId={teacher.school_id} teacherName={teacher.name} teacherId={teacher.id} isClassTeacher={selectedClass.class_teacher_id === teacher.id || teacher.class_teacher_assignments?.some(c => c.id === selectedClass.id)} teacher={{ id: teacher.id, name: teacher.name, subject: teacher.subject, department: teacher.department, class_teacher_grade: teacher.class_teacher_grade, class_teacher_section: teacher.class_teacher_section }} onBack={() => navigateTo('snapshot')} initialTab={classViewInitialTab} openExamId={classViewOpenExamId} /></div>}
           {visitedNav.has('attendance')     && <div hidden={activeNav !== 'attendance'}><Attendance teacherId={teacher.id} schoolId={teacher.school_id} /></div>}
           {visitedNav.has('calendar')       && <div hidden={activeNav !== 'calendar'}><SchoolCalendarView /></div>}
           {visitedNav.has('profile')        && <div hidden={activeNav !== 'profile'}><TeacherProfile teacher={teacher} onUpdate={setTeacher as (t: unknown) => void} availableYears={availableYears} selectedAcademicYear={selectedAcademicYear} schoolCurrentYear={schoolCurrentYear} onSelectYear={setSelectedAcademicYear} /></div>}
@@ -335,6 +385,7 @@ function TeacherPortal() {
           {visitedNav.has('my-students')    && <div hidden={activeNav !== 'my-students'}><MyStudents teacher={{ id: teacher.id, name: teacher.name, subject: teacher.subject, department: teacher.department, class_teacher_grade: teacher.class_teacher_grade, class_teacher_section: teacher.class_teacher_section }} schoolId={teacher.school_id} /></div>}
           {visitedNav.has('syllabus')       && <div hidden={activeNav !== 'syllabus'}><TeacherSyllabus teacher={{ id: teacher.id, name: teacher.name, subject: teacher.subject, department: teacher.department, class_teacher_grade: teacher.class_teacher_grade, class_teacher_section: teacher.class_teacher_section }} schoolId={teacher.school_id} academicYear={selectedAcademicYear} readOnly={isViewingPastYear} /></div>}
           {visitedNav.has('library')        && <div hidden={activeNav !== 'library'}><TeacherLibrary teacher={{ id: teacher.id, class_teacher_grade: teacher.class_teacher_grade, class_teacher_section: teacher.class_teacher_section }} schoolId={teacher.school_id} /></div>}
+          {visitedNav.has('exam-schedule')  && <div hidden={activeNav !== 'exam-schedule'}><TeacherExamSchedule teacherId={teacher.id} schoolId={teacher.school_id} /></div>}
           </div>
         </main>
       </div>

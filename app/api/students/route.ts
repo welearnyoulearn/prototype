@@ -1,13 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
 import { invalidateCache } from '@/lib/responseCache'
-import { hashPassword, generateTempPassword, getAnySession, requireSchoolAdmin, schoolHasFeature } from '@/lib/auth'
+import {
+  hashPortalPassword, generateTempPassword, getPlatformSession, getSession, getTeacherSession,
+  requireSchoolAdmin, schoolHasAnyFeature, schoolHasFeature,
+} from '@/lib/auth'
+import { STUDENT_READ_FEATURES } from '@/lib/featureRoutes'
 import { sendStudentWelcomeEmail, sendParentWelcomeEmail, sendChildCredentialsToParentEmail } from '@/lib/email'
 import { sendWhatsappMessage } from '@/lib/whatsapp'
-import { findOrCreateParent, linkStudentParent, generateStudentId } from '@/lib/studentOnboarding'
+import { findOrCreateParent, linkStudentParent, generateUniqueStudentIds } from '@/lib/studentOnboarding'
 import { gradeOrderSql } from '@/lib/grades'
-import { isValidName, NAME_INVALID_MESSAGE } from '@/lib/nameValidation'
+import { normalizeStudentInput } from '@/lib/studentValidation'
 import { withWatchline } from '@/lib/logger'
+import { ClassWorkflowError, ensureClassWithSetup } from '@/lib/classManagement'
 
 // Never `SELECT *`: students carries password_hash, which would otherwise be
 // serialised straight to the browser. Enumerate every safe column instead.
@@ -31,8 +36,10 @@ function parseCount(raw: string | null, fallback: number): number {
 // its cost matters just as much for diagnosing slow fee-tab loads as theirs.
 async function handleGET(req: NextRequest) {
   try {
-    const session = await getAnySession()
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const platform = await getPlatformSession()
+    const admin = platform ? null : await getSession()
+    const teacher = platform || admin ? null : await getTeacherSession()
+    if (!platform && !admin && !teacher) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
     try {
       const { searchParams } = new URL(req.url)
@@ -40,27 +47,44 @@ async function handleGET(req: NextRequest) {
       const grade = searchParams.get('grade')
       const section = searchParams.get('section')
 
-      if (session.role !== 'platform_admin' && school_id && Number(school_id) !== Number(session.schoolId)) {
+      const scopedSchoolId = platform?.role === 'platform_admin'
+        ? Number(school_id)
+        : Number(admin?.schoolId ?? teacher?.schoolId)
+      if (!Number.isInteger(scopedSchoolId)) {
+        return NextResponse.json({ error: 'Invalid school_id' }, { status: 400 })
+      }
+      if (!platform && school_id && Number(school_id) !== scopedSchoolId) {
         return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
       }
 
-      // The tenant scope comes from the SESSION, never from the presence of a param.
-      // getAnySession() admits student/parent logins, so when school_id was simply
-      // omitted the guard above never fired and the WHERE clause came out empty —
-      // any logged-in student could dump every school's roster. Only platform_admin
-      // may retarget the scope, and even then it falls back to their own school
-      // (getAnySession never returns a session without a schoolId).
-      const scopedSchoolId = session.role === 'platform_admin' && school_id
-        ? Number(school_id)
-        : session.schoolId
-      if (!Number.isInteger(scopedSchoolId)) {
-        return NextResponse.json({ error: 'Invalid school_id' }, { status: 400 })
+      if (admin && !(await schoolHasAnyFeature(scopedSchoolId, STUDENT_READ_FEATURES))) {
+        return NextResponse.json({ error: 'Feature not enabled' }, { status: 403 })
+      }
+
+      // Teachers receive only a roster for a class they are explicitly assigned
+      // to as class teacher or subject teacher. Student and parent sessions never
+      // reach this route; their self/child endpoints derive identity from cookies.
+      if (teacher) {
+        if (!grade || !section) {
+          return NextResponse.json({ error: 'grade and section are required for teacher access' }, { status: 400 })
+        }
+        const assigned = await pool.query(
+          `SELECT 1
+           FROM classes c
+           LEFT JOIN class_subjects cs ON cs.class_id = c.id AND cs.teacher_id = $1
+           WHERE c.school_id = $2 AND c.grade = $3 AND c.section = $4
+             AND (c.class_teacher_id = $1 OR cs.teacher_id = $1)
+           LIMIT 1`,
+          [teacher.teacherId, scopedSchoolId, grade, section],
+        )
+        if (assigned.rowCount === 0) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
       }
 
       // Lightweight mode: just the distinct grades with active students, for screens
       // that need to know which grades are actually in use (e.g. fee setup validation)
       // without paying for a full roster fetch.
       if (searchParams.get('grades_only') === '1') {
+        if (teacher) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
         const { rows } = await pool.query(
           `SELECT DISTINCT grade FROM students WHERE school_id = $1 AND (status IS NULL OR status = 'active')`,
           [scopedSchoolId]
@@ -68,13 +92,62 @@ async function handleGET(req: NextRequest) {
         return NextResponse.json(rows.map(r => r.grade))
       }
 
+      // Summary mode: counts and the grade/section/status breakdown, so a paginated
+      // directory can show accurate totals and filter options without the full roster.
+      if (searchParams.get('summary') === '1') {
+        if (teacher) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+        const { rows } = await pool.query(
+          `SELECT grade, UPPER(section) AS section, COALESCE(status, 'active') AS status, COUNT(*)::int AS count
+           FROM students WHERE school_id = $1
+           GROUP BY grade, UPPER(section), COALESCE(status, 'active')`,
+          [scopedSchoolId]
+        )
+        const counts = { total: 0, active: 0, inactive: 0 }
+        for (const r of rows) {
+          counts.total += r.count
+          if (r.status === 'inactive') counts.inactive += r.count
+          else counts.active += r.count
+        }
+        return NextResponse.json({ counts, classes: rows })
+      }
+
+      // Lightweight mode: only the roll-number fields, for onboarding duplicate checks.
+      if (searchParams.get('rolls_only') === '1') {
+        if (teacher) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+        const { rows } = await pool.query(
+          `SELECT grade, section, school_roll_number, status FROM students
+           WHERE school_id = $1 AND school_roll_number IS NOT NULL`,
+          [scopedSchoolId]
+        )
+        return NextResponse.json(rows)
+      }
+
       // school_id is seeded as $1 rather than pushed conditionally, so there is no
       // code path that can emit a school-less query.
       const values: (string | number)[] = [scopedSchoolId]
       const conditions: string[] = ['school_id = $1']
 
+      // Directory filters are opt-in via `status` / `q`. Section matching turns
+      // case-insensitive alongside them, because the directory treats "a" and "A" as one class.
+      const status = searchParams.get('status')
+      if (status !== null && !['active', 'inactive', 'all'].includes(status)) {
+        return NextResponse.json({ error: 'status must be active, inactive or all' }, { status: 400 })
+      }
+
       if (grade) { values.push(grade); conditions.push(`grade = $${values.length}`) }
-      if (section) { values.push(section); conditions.push(`section = $${values.length}`) }
+      if (section) {
+        values.push(section)
+        conditions.push(status !== null ? `UPPER(section) = UPPER($${values.length})` : `section = $${values.length}`)
+      }
+      if (status === 'active') conditions.push(`(status IS NULL OR status = 'active')`)
+      else if (status === 'inactive') conditions.push(`status = 'inactive'`)
+
+      const q = (searchParams.get('q') ?? '').trim().slice(0, 100)
+      if (q) {
+        values.push(`%${q.replace(/[\\%_]/g, '\\$&')}%`)
+        const n = values.length
+        conditions.push(`(name ILIKE $${n} OR roll_number ILIKE $${n} OR school_roll_number::text LIKE $${n})`)
+      }
 
       const where = `WHERE ${conditions.join(' AND ')}`
 
@@ -129,15 +202,13 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json()
-    const { school_id, name, email, grade, section, phone, parent_name, parent_phone, parent_email, roll_number, school_roll_number } = body
-    if (!school_id || !name) return NextResponse.json({ error: 'school_id and name are required' }, { status: 400 })
-    if (!isValidName(name)) return NextResponse.json({ error: `Name: ${NAME_INVALID_MESSAGE}` }, { status: 400 })
+    const school_id = Number(body.school_id)
+    if (!Number.isInteger(school_id)) return NextResponse.json({ error: 'Valid school_id is required' }, { status: 400 })
     if (admin.schoolId !== school_id) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-    if (!section?.trim()) return NextResponse.json({ error: 'Section is required' }, { status: 400 })
-    if (!parent_name?.trim()) return NextResponse.json({ error: 'Parent name is required' }, { status: 400 })
-    if (!isValidName(parent_name)) return NextResponse.json({ error: `Parent Name: ${NAME_INVALID_MESSAGE}` }, { status: 400 })
-    if (!parent_phone?.trim()) return NextResponse.json({ error: 'Parent phone is required' }, { status: 400 })
-    if (school_roll_number == null || school_roll_number === '') return NextResponse.json({ error: 'Roll number is required' }, { status: 400 })
+    if (!await schoolHasFeature(school_id, 'students')) return NextResponse.json({ error: 'Feature not enabled' }, { status: 403 })
+    const validated = normalizeStudentInput(body)
+    if (!validated.data) return NextResponse.json({ error: validated.errors.join(' · '), errors: validated.errors }, { status: 422 })
+    const { name, email, grade, section, phone, parent_name, parent_phone, parent_email, school_roll_number } = validated.data
 
     if (phone?.trim()) {
       const dupPhone = await pool.query(
@@ -172,14 +243,6 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Auto-create class if it doesn't exist
-    if (grade && section) {
-      await pool.query(
-        `INSERT INTO classes (school_id, grade, section) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`,
-        [school_id, grade, section]
-      )
-    }
-
     const [studentPortalEnabled, parentPortalEnabled] = await Promise.all([
       schoolHasFeature(school_id, 'student-portal'),
       schoolHasFeature(school_id, 'parent-portal'),
@@ -195,24 +258,37 @@ export async function POST(req: NextRequest) {
 
     // Generate student temp password (only if the portal is enabled for this school)
     const tempPassword = studentPortalEnabled ? generateTempPassword(8) : null
-    const passwordHash = tempPassword ? await hashPassword(tempPassword) : null
+    const passwordHash = tempPassword ? await hashPortalPassword(tempPassword) : null
 
-    // roll_number is the system login id — auto-generate it the same way
-    // bulk import does (via generateStudentId) whenever the caller doesn't
-    // supply one explicitly. Without this, a student created through this
-    // route ended up with roll_number NULL and could never log in even when
-    // the student-portal feature was enabled and a password was generated.
-    const effectiveRollNumber: string = roll_number?.trim() || generateStudentId(await getSchoolName())
+    // roll_number is the system ID — the student's permanent id and login. It is always
+    // generated server-side (never taken from the request: nothing enforced uniqueness of a
+    // caller-supplied value, so it could duplicate another student's login) and is not editable.
+    const [effectiveRollNumber] = await generateUniqueStudentIds(pool, 1)
 
-    const result = await pool.query(
-      `INSERT INTO students
-         (school_id, name, email, grade, section, phone, parent_name, parent_phone, parent_email,
-          roll_number, school_roll_number, status, password_hash, password_changed)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'active',$12,FALSE)
-       RETURNING ${STUDENT_COLUMNS}`,
-      [school_id, name, email, grade, section, phone, parent_name, parent_phone, parent_email,
-       effectiveRollNumber, school_roll_number ?? null, passwordHash]
-    )
+    const client = await pool.connect()
+    let result
+    try {
+      await client.query('BEGIN')
+      await ensureClassWithSetup(client, { schoolId: school_id, grade, section, restoreDeleted: false })
+      result = await client.query(
+        `INSERT INTO students
+           (school_id, name, email, grade, section, phone, parent_name, parent_phone, parent_email,
+            roll_number, school_roll_number, status, password_hash, password_changed)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'active',$12,FALSE)
+         RETURNING ${STUDENT_COLUMNS}`,
+        [school_id, name, email, grade, section, phone, parent_name, parent_phone, parent_email,
+         effectiveRollNumber, school_roll_number ?? null, passwordHash]
+      )
+      await client.query('COMMIT')
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => {})
+      if (error instanceof ClassWorkflowError) {
+        return NextResponse.json({ error: error.message, code: error.code }, { status: error.status })
+      }
+      throw error
+    } finally {
+      client.release()
+    }
 
     const student = result.rows[0]
     const appUrl = process.env.APP_URL || 'http://localhost:3000'
@@ -225,7 +301,7 @@ export async function POST(req: NextRequest) {
       if (email) {
         const name_ = await getSchoolName()
         sendStudentWelcomeEmail({
-          to: email, name, schoolName: name_, rollNumber: studentRollNumber,
+          schoolId: school_id, to: email, name, schoolName: name_, rollNumber: studentRollNumber,
           tempPassword, loginUrl: `${appUrl}/student/login`,
         }).catch(console.error)
       }
@@ -266,7 +342,7 @@ export async function POST(req: NextRequest) {
         if (parentResult.resolvedEmail) {
           const name_ = await getSchoolName()
           sendChildCredentialsToParentEmail({
-            to: parentResult.resolvedEmail,
+            schoolId: school_id, to: parentResult.resolvedEmail,
             parentName: parentDisplayName,
             studentName: name,
             schoolName: name_,
@@ -299,6 +375,9 @@ export async function POST(req: NextRequest) {
     )
   } catch (error) {
     console.error(error)
+    if ((error as { code?: string }).code === '23505') {
+      return NextResponse.json({ error: 'A student with this roll number, email, or phone already exists' }, { status: 409 })
+    }
     return NextResponse.json({ error: 'Failed to create student' }, { status: 500 })
   }
 }
@@ -323,7 +402,7 @@ async function provisionParentAccount({
     let tempPassword: string | null = null
     if (allowCreate) {
       tempPassword = generateTempPassword(10)
-      parentHash = await hashPassword(tempPassword)
+      parentHash = await hashPortalPassword(tempPassword)
     }
 
     const client = await pool.connect()
@@ -351,7 +430,7 @@ async function provisionParentAccount({
       const displayName = parentName || parentEmail || resolvedPhone || 'there'
       if (parentEmail) {
         sendParentWelcomeEmail({
-          to: parentEmail, parentName: displayName, studentName, schoolName,
+          schoolId: schoolId, to: parentEmail, parentName: displayName, studentName, schoolName,
           tempPassword, loginUrl: `${appUrl}/parent/login`,
         }).catch(console.error)
       }

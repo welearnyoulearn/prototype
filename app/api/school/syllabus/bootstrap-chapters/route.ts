@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 import { resolveAcademicYear } from '@/lib/academicYear'
-import { requireSyllabusWriteAccess } from '@/lib/auth'
+import { canWriteSyllabusClass, requireSyllabusWriteAccess } from '@/lib/auth'
 
 // POST /api/school/syllabus/bootstrap-chapters
 // body: { school_id, class_id, subject, count }
@@ -22,7 +22,10 @@ export async function POST(req: NextRequest) {
     if (!school_id || !class_id || !subject) {
       return NextResponse.json({ error: 'school_id, class_id, subject required' }, { status: 400 })
     }
-    if (!await requireSyllabusWriteAccess(school_id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    const writeSession = await requireSyllabusWriteAccess(school_id)
+    if (!writeSession || !await canWriteSyllabusClass(writeSession, class_id, subject)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
 
     const n = Number(count)
     if (!Number.isInteger(n) || n < 1 || n > MAX_BOOTSTRAP_CHAPTERS) {
@@ -39,9 +42,14 @@ export async function POST(req: NextRequest) {
     const { grade } = classRes.rows[0]
     const academic_year = req.nextUrl.searchParams.get('academic_year') || await resolveAcademicYear(school_id)
 
-    let school_subject_id: number
-    const subjectRes = await pool.query(
-      'SELECT id FROM school_subjects WHERE school_id = $1 AND grade = $2 AND subject_name = $3 AND academic_year = $4',
+    const client = await pool.connect()
+    try {
+      await client.query('BEGIN')
+      await client.query('SELECT pg_advisory_xact_lock($1)', [Number(school_id)])
+
+      let school_subject_id: number
+      const subjectRes = await client.query(
+      'SELECT id FROM school_subjects WHERE school_id = $1 AND grade = $2 AND LOWER(TRIM(subject_name)) = LOWER(TRIM($3)) AND academic_year = $4',
       [school_id, grade, subject, academic_year]
     )
     if (subjectRes.rows.length === 0) {
@@ -57,7 +65,7 @@ export async function POST(req: NextRequest) {
       // can deduce two different types for the same parameter across those
       // positions and Postgres errors with 42P08 "inconsistent types
       // deduced for parameter" — confirmed both $2 and $3 need it, not just $2.
-      const insertSubj = await pool.query(
+      const insertSubj = await client.query(
         `INSERT INTO school_subjects (school_id, grade, subject_name, academic_year, master_subject_id, board)
          SELECT $1, $2::varchar, $3::varchar, $4,
            CASE WHEN COUNT(*) = 1 THEN MAX(id) END,
@@ -71,33 +79,40 @@ export async function POST(req: NextRequest) {
       school_subject_id = subjectRes.rows[0].id
     }
 
-    const orderRes = await pool.query(
+      const orderRes = await client.query(
       'SELECT COALESCE(MAX(chapter_order), -1) + 1 AS next FROM school_chapters WHERE school_subject_id = $1',
       [school_subject_id]
     )
-    let nextOrder: number = orderRes.rows[0].next
+      let nextOrder: number = orderRes.rows[0].next
 
     // Chapter names must not collide with anything already there — start
     // numbering from the count of existing chapters + 1 so "Chapter 1" isn't
     // reused if the teacher bootstraps twice.
-    const existingCountRes = await pool.query(
+      const existingCountRes = await client.query(
       'SELECT COUNT(*)::int AS n FROM school_chapters WHERE school_subject_id = $1',
       [school_subject_id]
     )
-    const startAt = existingCountRes.rows[0].n + 1
+      const startAt = existingCountRes.rows[0].n + 1
 
-    const created = []
-    for (let i = 0; i < n; i++) {
-      const chapterName = `Chapter ${startAt + i}`
-      const insertCh = await pool.query(
-        'INSERT INTO school_chapters (school_subject_id, chapter_name, chapter_order, is_custom) VALUES ($1, $2, $3, TRUE) RETURNING *',
-        [school_subject_id, chapterName, nextOrder]
-      )
-      created.push(insertCh.rows[0])
-      nextOrder += 1
+      const created = []
+      for (let i = 0; i < n; i++) {
+        const chapterName = `Chapter ${startAt + i}`
+        const insertCh = await client.query(
+          'INSERT INTO school_chapters (school_subject_id, chapter_name, chapter_order, is_custom) VALUES ($1, $2, $3, TRUE) RETURNING *',
+          [school_subject_id, chapterName, nextOrder]
+        )
+        created.push(insertCh.rows[0])
+        nextOrder += 1
+      }
+
+      await client.query('COMMIT')
+      return NextResponse.json({ ok: true, chapters: created })
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {})
+      throw err
+    } finally {
+      client.release()
     }
-
-    return NextResponse.json({ ok: true, chapters: created })
   } catch (err) {
     console.error('school/syllabus/bootstrap-chapters POST error:', err)
     return NextResponse.json({ error: 'Failed to create chapters' }, { status: 500 })

@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { isSchoolLocked, LOCKED_MESSAGE_PORTAL } from '@/lib/planAccess'
 import pool, { ensureDB } from '@/lib/db'
-import { verifyPassword, setParentAuthCookie, ParentJWTPayload, schoolHasFeature } from '@/lib/auth'
+import { verifyPasswordForLogin, setParentAuthCookie, ParentJWTPayload, schoolHasFeature, createPortalSession } from '@/lib/auth'
 import { recordSessionStart } from '@/lib/usageTracking'
+import { checkAuthRateLimit, clearAuthRateLimit, LOGIN_LIMIT } from '@/lib/authRateLimit'
+import { isMobileClient, MOBILE_CLIENT_HEADER } from '@/lib/portalSessionPolicy'
 
 // Login accepts either the parent's email or phone in one field. Matching by
 // phone is only safe because parents now carries a per-school unique index
@@ -70,6 +73,9 @@ export async function POST(req: NextRequest) {
     if (!trimmed || !password) {
       return NextResponse.json({ error: 'Email or phone, and password, are required' }, { status: 400 })
     }
+    if (!await checkAuthRateLimit(req, 'parent-login', trimmed, LOGIN_LIMIT)) {
+      return NextResponse.json({ error: 'Too many login attempts. Please try again later.' }, { status: 429, headers: { 'Retry-After': '900' } })
+    }
 
     const matches = await pool.query(
       `SELECT p.id, p.name, p.email, p.school_id, p.password_hash, p.password_changed
@@ -80,6 +86,7 @@ export async function POST(req: NextRequest) {
     )
 
     if (matches.rows.length === 0) {
+      await verifyPasswordForLogin(password)
       return NextResponse.json({ error: 'Invalid email/phone or password' }, { status: 401 })
     }
 
@@ -90,11 +97,12 @@ export async function POST(req: NextRequest) {
     // data, never a merge candidate — see lib/db.ts migration comment).
     let parent: typeof matches.rows[number] | null = null
     for (const candidate of matches.rows) {
-      if (await verifyPassword(password, candidate.password_hash)) { parent = candidate; break }
+      if (await verifyPasswordForLogin(password, candidate.password_hash)) { parent = candidate; break }
     }
     if (!parent) {
       return NextResponse.json({ error: 'Invalid email/phone or password' }, { status: 401 })
     }
+    await clearAuthRateLimit(req, 'parent-login', trimmed)
 
     const sameSchoolDuplicates = matches.rows.filter(r => r.school_id === parent!.school_id)
     if (sameSchoolDuplicates.length > 1) {
@@ -128,8 +136,19 @@ export async function POST(req: NextRequest) {
       passwordChanged: parent.password_changed,
       name: parent.name || trimmed,
       email: parent.email,
+      // The mobile app stays signed in until the parent logs out; the web portal keeps its short session.
+      ...(isMobileClient(req.headers.get(MOBILE_CLIENT_HEADER)) ? { mobile: true } : {}),
     }
 
+    // A school whose plan has ended is locked: no portal access for teachers, students or parents.
+
+    if (await isSchoolLocked(parent.school_id)) {
+
+      return NextResponse.json({ error: LOCKED_MESSAGE_PORTAL, code: 'PLAN_EXPIRED' }, { status: 403 })
+
+    }
+
+    payload.sid = await createPortalSession('parent', parent.id, parent.school_id, { longLived: payload.mobile === true })
     await setParentAuthCookie(payload)
 
     const usageSessionId = await recordSessionStart({

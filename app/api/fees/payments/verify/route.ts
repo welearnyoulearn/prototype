@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { ledgerStatusSql } from '@/lib/feeLedgerStatus'
 import pool from '@/lib/db'
 import { sendFeePaymentConfirmedEmail, sendFeePaymentRejectedEmail } from '@/lib/email'
 import { requireFeeAccess, schoolHasFeature } from '@/lib/auth'
@@ -13,7 +14,7 @@ async function handleGET(req: NextRequest) {
     if (!await requireFeeAccess(school_id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     try {
       const { rows } = await pool.query(
-        `SELECT fp.*, s.name AS student_name, s.roll_number, s.grade, s.section,
+        `SELECT fp.*, s.name AS student_name, s.roll_number, s.school_roll_number, s.grade, s.section,
                 fc.name AS category_name, l.period_label, l.amount_due, l.amount_paid,
                 GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0) AS ledger_balance
          FROM fee_payments fp
@@ -58,19 +59,19 @@ async function handlePOST(req: NextRequest) {
   try {
     const client = await pool.connect()
     try {
-      const { payment_id, action, verified_by: clientActor, rejection_reason } = await req.json()
+      const { payment_id, action, rejection_reason } = await req.json()
       if (!payment_id || !action) {
         return NextResponse.json({ error: 'payment_id, action required' }, { status: 400 })
       }
       // Resolve the payment's school and verify ownership
       const { rows: [pmtRow] } = await client.query(`SELECT school_id FROM fee_payments WHERE id = $1`, [payment_id])
-      if (!pmtRow) { client.release(); return NextResponse.json({ error: 'Payment not found' }, { status: 404 }) }
+      if (!pmtRow) { return NextResponse.json({ error: 'Payment not found' }, { status: 404 }) }
       // Pass `client` — requireFeeAccess's school-staff path runs a real query
       // (session validation); calling it with the default `pool` here, after
       // this handler's own pool.connect() above, deadlocks on a max:1 pool.
       const access = await requireFeeAccess(pmtRow.school_id, client)
-      if (!access) { client.release(); return NextResponse.json({ error: 'Forbidden' }, { status: 403 }) }
-      const verified_by = clientActor || access.actor
+      if (!access) { return NextResponse.json({ error: 'Forbidden' }, { status: 403 }) }
+      const verified_by = access.actor
 
       await client.query('BEGIN')
 
@@ -183,11 +184,7 @@ async function handlePOST(req: NextRequest) {
         await client.query(
           `UPDATE student_fee_ledger
            SET amount_paid = amount_paid + $1,
-               status = CASE
-                 WHEN COALESCE(waiver_amount,0) + amount_paid + $1 >= amount_due THEN 'paid'
-                 WHEN amount_paid + $1 > 0 THEN 'partial'
-                 ELSE status
-               END
+               status = ${ledgerStatusSql({ due: 'amount_due', paid: 'amount_paid + $1', waiver: 'waiver_amount' })}
            WHERE id = $2`,
           [payment.amount, payment.ledger_id]
         )
@@ -215,6 +212,7 @@ async function handlePOST(req: NextRequest) {
           if (detail?.parent_email) {
             sendFeePaymentConfirmedEmail({
               to: detail.parent_email,
+              schoolId: pmtRow.school_id,
               parentName: detail.parent_name || 'Parent',
               studentName: detail.student_name,
               schoolName: detail.school_name,
@@ -260,6 +258,7 @@ async function handlePOST(req: NextRequest) {
           if (detail?.parent_email) {
             sendFeePaymentRejectedEmail({
               to: detail.parent_email,
+              schoolId: pmtRow.school_id,
               parentName: detail.parent_name || 'Parent',
               studentName: detail.student_name,
               schoolName: detail.school_name,

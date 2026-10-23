@@ -37,6 +37,7 @@ API routes these screens call (all exist):
 - `GET/POST/PUT` /api/attendance
 - `GET/POST` /api/classes
 - `DELETE/GET/PUT` /api/classes/{}
+- `POST` /api/classes/{}/restore
 - `DELETE/GET/PATCH/POST` /api/classes/{}/subjects
 - `GET` /api/school/subjects
 - `GET/POST` /api/students

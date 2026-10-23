@@ -5,7 +5,7 @@
 //
 // Schedule: every Monday at 02:00 UTC via vercel.json cron.
 // Idempotent: UNIQUE(class_id, school_subject_id, snapshot_date) means a
-// re-run on the same day is a no-op (ON CONFLICT DO NOTHING) rather than a
+// re-run on the same day updates that day's point rather than creating a
 // duplicate row — safe to trigger manually without double-counting a week.
 //
 // Uses the exact same chapter-covered definition as GET /api/syllabus/analytics:
@@ -30,11 +30,12 @@ export async function POST(req: NextRequest) {
 
 async function run(req: NextRequest) {
   const cronSecret = process.env.CRON_SECRET
-  if (cronSecret) {
-    const auth = req.headers.get('authorization') ?? ''
-    if (auth.replace('Bearer ', '') !== cronSecret) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
+  if (!cronSecret) {
+    return NextResponse.json({ error: 'Cron is not configured' }, { status: 503 })
+  }
+  const auth = req.headers.get('authorization') ?? ''
+  if (auth !== `Bearer ${cronSecret}`) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
   const snapshotDate = new Date().toISOString().slice(0, 10)
@@ -66,13 +67,16 @@ async function run(req: NextRequest) {
             LEFT JOIN school_topics st ON st.school_chapter_id = sc.id
             LEFT JOIN class_topic_visibility ctv ON ctv.class_id = c.id AND ctv.school_topic_id = st.id
             LEFT JOIN school_topic_progress stp ON stp.school_topic_id = st.id AND stp.class_id = c.id
-            WHERE c.school_id = $1 AND COALESCE(ccv.is_active, TRUE)
+            WHERE c.school_id = $1 AND c.deleted_at IS NULL AND COALESCE(ccv.is_active, TRUE)
             GROUP BY c.id, ss.id, sc.id
           )
           SELECT
             class_id, school_subject_id,
             COUNT(*)::int AS total_chapters,
-            COUNT(*) FILTER (WHERE topic_count > 0 AND topics_covered = topic_count)::int AS covered_chapters
+            COUNT(*) FILTER (WHERE topic_count > 0 AND topics_covered = topic_count)::int AS covered_chapters,
+            CASE WHEN COUNT(*) > 0 THEN
+              ROUND(100 * COALESCE(SUM(topics_covered::numeric / NULLIF(topic_count, 0)) FILTER (WHERE topic_count > 0), 0) / COUNT(*), 2)
+            ELSE 0 END AS weighted_coverage_pct
           FROM chapter_coverage
           GROUP BY class_id, school_subject_id
           `,
@@ -82,10 +86,13 @@ async function run(req: NextRequest) {
         for (const r of rows) {
           await pool.query(
             `INSERT INTO syllabus_coverage_snapshots
-               (school_id, class_id, school_subject_id, academic_year, snapshot_date, total_chapters, covered_chapters)
-             VALUES ($1, $2, $3, $4, $5, $6, $7)
-             ON CONFLICT (class_id, school_subject_id, snapshot_date) DO NOTHING`,
-            [school.id, r.class_id, r.school_subject_id, academic_year, snapshotDate, r.total_chapters, r.covered_chapters]
+               (school_id, class_id, school_subject_id, academic_year, snapshot_date, total_chapters, covered_chapters, weighted_coverage_pct)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+             ON CONFLICT (class_id, school_subject_id, snapshot_date) DO UPDATE SET
+               total_chapters = EXCLUDED.total_chapters,
+               covered_chapters = EXCLUDED.covered_chapters,
+               weighted_coverage_pct = EXCLUDED.weighted_coverage_pct`,
+            [school.id, r.class_id, r.school_subject_id, academic_year, snapshotDate, r.total_chapters, r.covered_chapters, r.weighted_coverage_pct]
           )
           rowsWritten++
         }

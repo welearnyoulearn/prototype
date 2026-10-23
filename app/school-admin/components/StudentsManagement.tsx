@@ -1,13 +1,18 @@
 ﻿'use client'
 
-import { useEffect, useState, useCallback, useMemo } from 'react'
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import dynamic from 'next/dynamic'
-import { Users } from 'lucide-react'
+import { Users, Eye, Pencil, ChevronRight } from 'lucide-react'
 import { isValidName, NAME_INVALID_MESSAGE } from '@/lib/nameValidation'
+import { EMAIL_RE, INDIAN_MOBILE_RE, parsePositiveInteger } from '@/lib/studentValidation'
 import { EmptyState } from '@/components/ui/empty-state'
 import { useConfirm } from '@/components/ui/use-confirm'
 
 type Props = { schoolId: number; refreshKey?: number }
+
+const PAGE_SIZE = 50
+type ClassCount = { grade: string | null; section: string | null; status: string; count: number }
+type Summary = { counts: { total: number; active: number; inactive: number }; classes: ClassCount[] }
 
 type Student = {
   id: number
@@ -172,7 +177,7 @@ function DuplicatesPanel({
 
       {!dupLoading && dupGroups.length === 0 && dupTotalCount === 0 && (
         <div className="bg-white rounded-md border border-gray-200 py-12 text-center">
-          <p className="text-muted-foreground text-sm">Click "Scan for Duplicates" to check for duplicate students</p>
+          <p className="text-muted-foreground text-sm">Click &quot;Scan for Duplicates&quot; to check for duplicate students</p>
         </div>
       )}
 
@@ -275,8 +280,14 @@ const StudentProfile = dynamic(() => import('./StudentProfile'), { ssr: false })
 
 export default function StudentsManagement({ schoolId, refreshKey }: Props) {
   const { confirm, ConfirmDialog } = useConfirm()
-  const [students, setStudents] = useState<Student[]>([])
+  const [students, setStudents] = useState<Student[]>([])   // the current page only
+  const [total, setTotal] = useState(0)                      // rows matching the filters, across all pages
+  const [summary, setSummary] = useState<Summary | null>(null)
+  const [page, setPage] = useState(0)
+  const [reloadTick, setReloadTick] = useState(0)
   const [loading, setLoading] = useState(true)
+  const [initialLoading, setInitialLoading] = useState(true)
+  const requestId = useRef(0)
   const [error, setError] = useState('')
   const [gradeFilter, setGradeFilter] = useState('all')
   const [sectionFilter, setSectionFilter] = useState('all')
@@ -294,6 +305,7 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
   const [dupConfirm, setDupConfirm] = useState<'selected' | 'all' | null>(null)
   const [dupDeleting, setDupDeleting] = useState(false)
   const [search, setSearch] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
   const [selected, setSelected] = useState<Student | null>(null)
   const [profileId, setProfileId] = useState<number | null>(null)
   const [editing, setEditing] = useState(false)
@@ -306,23 +318,42 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
   }, [])
 
   useEffect(() => {
-    setLoading(true)
-    fetch(`/api/students?school_id=${schoolId}`).then(r => r.json()).then(stu => {
-      // Normalise section to uppercase so "a" and "A" are the same class
-      const normStu = Array.isArray(stu) ? stu.map((s: Student) => ({ ...s, section: s.section?.toUpperCase() ?? s.section })) : []
-      setStudents(normStu)
-    }).catch(() => setError('Failed to load students')).finally(() => setLoading(false))
-  }, [schoolId, refreshKey])
+    const t = setTimeout(() => { setDebouncedSearch(search.trim()); setPage(0) }, 300)
+    return () => clearTimeout(t)
+  }, [search])
 
-  async function reloadStudents() {
-    setLoading(true)
-    try {
-      const res = await fetch(`/api/students?school_id=${schoolId}`)
-      const data = await res.json()
-      setStudents(Array.isArray(data) ? data : [])
-    } catch { setError('Failed to refresh students') }
-    finally { setLoading(false) }
-  }
+  // Counts and grade/section options come from a small summary, not the roster.
+  useEffect(() => {
+    fetch(`/api/students?school_id=${schoolId}&summary=1`).then(r => r.json())
+      .then((d: Summary) => { if (d?.counts) setSummary(d) })
+      .catch(() => { /* non-critical: counts and filter options stay as they were */ })
+  }, [schoolId, refreshKey, reloadTick])
+
+  useEffect(() => {
+    if (statusFilter === 'duplicates') return
+    const params = new URLSearchParams({
+      school_id: String(schoolId), limit: String(PAGE_SIZE), offset: String(page * PAGE_SIZE), status: statusFilter,
+    })
+    if (gradeFilter !== 'all') params.set('grade', gradeFilter)
+    if (sectionFilter !== 'all') params.set('section', sectionFilter)
+    if (debouncedSearch) params.set('q', debouncedSearch)
+    const timer = setTimeout(() => {
+      const id = ++requestId.current
+      setLoading(true)
+      fetch(`/api/students?${params}`).then(r => r.json()).then(res => {
+        if (id !== requestId.current) return   // a newer request superseded this one
+        if (!Array.isArray(res?.data)) throw new Error('bad response')
+        // Normalise section to uppercase so "a" and "A" are the same class
+        setStudents(res.data.map((s: Student) => ({ ...s, section: s.section?.toUpperCase() ?? s.section })))
+        setTotal(res.total ?? res.data.length)
+        setError('')
+      }).catch(() => { if (id === requestId.current) setError('Failed to load students') })
+        .finally(() => { if (id === requestId.current) { setLoading(false); setInitialLoading(false) } })
+    }, 0)
+    return () => clearTimeout(timer)
+  }, [schoolId, refreshKey, reloadTick, statusFilter, gradeFilter, sectionFilter, debouncedSearch, page])
+
+  function reloadStudents() { setReloadTick(t => t + 1) }
 
   const loadDuplicates = useCallback(async () => {
     setDupLoading(true); setDupError(''); setDupResult(null)
@@ -376,12 +407,21 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
     const phone = (editForm.phone ?? selected?.phone ?? '').trim()
     const parentPhone = (editForm.parent_phone ?? selected?.parent_phone ?? '').trim()
     const email = (editForm.email ?? selected?.email ?? '').trim()
+    const parentEmail = (editForm.parent_email ?? selected?.parent_email ?? '').trim()
+    const grade = (editForm.grade ?? selected?.grade ?? '').trim()
+    const section = (editForm.section ?? selected?.section ?? '').trim()
+    const roll = editForm.school_roll_number ?? selected?.school_roll_number
     if (!name) return 'Student name is required'
     if (!isValidName(name)) return `Student Name: ${NAME_INVALID_MESSAGE}`
-    if (parentName && !isValidName(parentName)) return `Parent Name: ${NAME_INVALID_MESSAGE}`
-    if (phone && !/^\+?[\d\s\-()\[\]]{7,15}$/.test(phone)) return 'Phone must be 7–15 digits'
-    if (parentPhone && !/^\+?[\d\s\-()\[\]]{7,15}$/.test(parentPhone)) return "Parent's phone must be 7–15 digits"
-    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return 'Enter a valid email address'
+    if (!grade) return 'Grade is required'
+    if (!section) return 'Section is required'
+    if (!parentName) return 'Parent name is required'
+    if (!isValidName(parentName)) return `Parent Name: ${NAME_INVALID_MESSAGE}`
+    if (phone && !INDIAN_MOBILE_RE.test(phone)) return 'Student phone must be a valid 10-digit Indian mobile number'
+    if (!INDIAN_MOBILE_RE.test(parentPhone)) return "Parent's phone must be a valid 10-digit Indian mobile number"
+    if (email && !EMAIL_RE.test(email)) return 'Enter a valid student email address'
+    if (parentEmail && !EMAIL_RE.test(parentEmail)) return 'Enter a valid parent email address'
+    if (parsePositiveInteger(roll) === null) return 'Roll No must be a positive integer'
     return null
   }
 
@@ -400,6 +440,8 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
       if (!res.ok) throw new Error(data.error)
       setStudents(prev => prev.map(s => s.id === selected.id ? { ...s, ...data } : s))
       setSelected({ ...selected, ...data })
+      setSearch('')
+      reloadStudents()   // grade/section edits change the counts and filter options
       setEditing(false)
       setEditForm({})
     } catch (err: unknown) {
@@ -441,38 +483,25 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
     }
   }
 
-  // Memoized — the whole roster gets re-filtered/re-grouped on every search
-  // keystroke and every grade/section/status filter click, so without this
-  // it re-scans the full student list on every render for no reason.
-  const activeStudents = useMemo(() => students.filter(s => s.status === 'active' || !s.status), [students])
-  const inactiveStudents = useMemo(() => students.filter(s => s.status === 'inactive'), [students])
+  const counts = summary?.counts ?? { total: 0, active: 0, inactive: 0 }
+  const classRows = useMemo(() => (summary?.classes ?? []).filter(c =>
+    statusFilter === 'inactive' ? c.status === 'inactive' : statusFilter === 'all' ? true : c.status !== 'inactive'
+  ), [summary, statusFilter])
 
-  const displayStudents = statusFilter === 'active' ? activeStudents
-    : statusFilter === 'inactive' ? inactiveStudents
-    : statusFilter === 'duplicates' ? activeStudents
-    : students
-
-  const grades = useMemo(() => ['all', ...Array.from(new Set(displayStudents.map(s => s.grade).filter(Boolean)))
-    .sort((a, b) => (parseInt(a) || 0) - (parseInt(b) || 0))], [displayStudents])
-  // Sections are already normalised to uppercase; show only sections for the selected grade
+  const grades = useMemo(() => ['all', ...Array.from(new Set(classRows.map(c => c.grade).filter((g): g is string => !!g)))
+    .sort((a, b) => (parseInt(a) || 0) - (parseInt(b) || 0))], [classRows])
   const sections = useMemo(() => ['all', ...Array.from(new Set(
-    displayStudents
-      .filter(s => gradeFilter === 'all' || s.grade === gradeFilter)
-      .map(s => (s.section ?? '').toUpperCase())
-      .filter(Boolean)
-  )).sort()], [displayStudents, gradeFilter])
+    classRows.filter(c => gradeFilter === 'all' || c.grade === gradeFilter).map(c => c.section ?? '').filter(Boolean)
+  )).sort()], [classRows, gradeFilter])
 
-  const filtered = useMemo(() => displayStudents.filter(s => {
-    const sec = (s.section ?? '').toUpperCase()
-    const matchesGrade   = gradeFilter === 'all' || s.grade === gradeFilter
-    const matchesSection = sectionFilter === 'all' || sec === sectionFilter.toUpperCase()
-    const matchesSearch  = !search || s.name.toLowerCase().includes(search.toLowerCase()) ||
-      (s.roll_number || '').toLowerCase().includes(search.toLowerCase()) ||
-      (s.school_roll_number != null && String(s.school_roll_number).includes(search))
-    return matchesGrade && matchesSection && matchesSearch
-  }), [displayStudents, gradeFilter, sectionFilter, search])
+  // Students in a class across all pages, for the group header (a class can span pages).
+  const classTotal = (grade: string, section: string) =>
+    classRows.filter(c => c.grade === grade && (c.section ?? '') === section).reduce((n, c) => n + c.count, 0)
 
-  // Group by grade-section, sort numerically by grade then alphabetically by section
+  const filtered = students
+  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE))
+
+  // Group the current page by grade-section; sorted numerically by grade then section
   const grouped: Record<string, Student[]> = useMemo(() => {
     const g: Record<string, Student[]> = {}
     filtered.forEach(s => {
@@ -493,18 +522,18 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
 
   const inputCls = 'w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-green-300'
 
-  if (loading) return <div className="py-12 text-center text-muted-foreground">Loading students...</div>
+  if (initialLoading) return <div className="py-12 text-center text-muted-foreground">Loading students...</div>
 
   return (
-    <div className="flex gap-6">
+    <div className="flex flex-col xl:flex-row gap-6">
       {ConfirmDialog}
       {profileId !== null && <StudentProfile studentId={profileId} onClose={() => setProfileId(null)} />}
       {/* Left: List */}
       <div className="flex-1 min-w-0">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-xl font-bold text-gray-900">Students</h2>
-          <div className="flex items-center gap-3">
-            <span className="text-sm text-muted-foreground">{students.length} total · {activeStudents.length} active · {inactiveStudents.length} removed</span>
+          <div className="flex items-center gap-3 flex-wrap justify-end">
+            <span className="text-sm text-muted-foreground">{counts.total} total · {counts.active} active · {counts.inactive} removed</span>
             <button onClick={reloadStudents} disabled={loading}
               title="Refresh student list"
               className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 text-gray-500 rounded-lg text-xs hover:bg-gray-50 transition-colors disabled:opacity-40">
@@ -521,11 +550,11 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
           {(['active', 'inactive', 'all'] as const).map(key => {
             const labels: Record<string, string> = { active: 'Active', inactive: 'Removed', all: 'All' }
             return (
-              <button key={key} onClick={() => { setStatusFilter(key); setGradeFilter('all'); setSectionFilter('all') }}
+              <button key={key} onClick={() => { setStatusFilter(key); setGradeFilter('all'); setSectionFilter('all'); setPage(0) }}
                 className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${statusFilter === key ? 'bg-white text-gray-900 ' : 'text-gray-500 hover:text-gray-700'}`}>
                 {labels[key]}
-                {key === 'inactive' && inactiveStudents.length > 0 && (
-                  <span className="ml-1.5 bg-red-100 text-red-600 text-xs px-1.5 py-0.5 rounded-full">{inactiveStudents.length}</span>
+                {key === 'inactive' && counts.inactive > 0 && (
+                  <span className="ml-1.5 bg-red-100 text-red-600 text-xs px-1.5 py-0.5 rounded-full">{counts.inactive}</span>
                 )}
               </button>
             )
@@ -542,7 +571,7 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
         </div>
 
         {error && (
-          <div className="mb-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex justify-between text-sm">
+          <div role="alert" aria-live="assertive" className="mb-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex justify-between text-sm">
             <span>{error}</span>
             <button onClick={() => setError('')} className="text-red-400 hover:text-red-600 ml-4">✕</button>
           </div>
@@ -581,15 +610,23 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
         <div className="flex gap-3 mb-4 flex-wrap">
           <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by name or ID..."
             className="flex-1 min-w-[160px] border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-green-300" />
-          <select value={gradeFilter} onChange={e => { setGradeFilter(e.target.value); setSectionFilter('all') }}
+          <select value={gradeFilter} onChange={e => { setGradeFilter(e.target.value); setSectionFilter('all'); setPage(0) }}
             className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-green-300">
             {grades.map(g => <option key={g} value={g}>{g === 'all' ? 'All Grades' : `Grade ${g}`}</option>)}
           </select>
-          <select value={sectionFilter} onChange={e => setSectionFilter(e.target.value)}
+          <select value={sectionFilter} onChange={e => { setSectionFilter(e.target.value); setPage(0) }}
             className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-green-300">
             {sections.map(s => <option key={s} value={s}>{s === 'all' ? 'All Sections' : `Section ${s}`}</option>)}
           </select>
         </div>
+
+        {filtered.length > 0 && (
+          <p className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-gray-500" data-testid="students-row-hint">
+            <span className="inline-flex items-center gap-1"><Eye className="h-3.5 w-3.5 text-violet-600" aria-hidden="true" /><b className="font-semibold text-violet-700">Profile</b> opens the full student profile</span>
+            <span className="inline-flex items-center gap-1"><Pencil className="h-3.5 w-3.5 text-green-700" aria-hidden="true" /><b className="font-semibold text-green-700">Edit</b> changes this student&apos;s details</span>
+            <span className="inline-flex items-center gap-1"><ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />Click anywhere on a row for a quick view</span>
+          </p>
+        )}
 
         {filtered.length === 0 ? (
           <EmptyState
@@ -604,7 +641,7 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
               <div key={group} className="bg-white rounded-md border border-gray-200 overflow-hidden">
                 <div className="px-5 py-3 bg-green-50 border-b border-green-100 flex items-center justify-between">
                   <span className="font-semibold text-green-800 text-sm">{group}</span>
-                  <span className="text-xs text-green-600 font-medium">{members.length} student{members.length !== 1 ? 's' : ''}</span>
+                  <span className="text-xs text-green-600 font-medium">{(() => { const n = Math.max(members.length, classTotal(members[0].grade, (members[0].section ?? '').toUpperCase())); return `${n} student${n !== 1 ? 's' : ''}` })()}</span>
                 </div>
                 <div className="overflow-x-auto">
                 <table className="w-full text-sm">
@@ -615,6 +652,7 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
                       <th className="text-left px-5 py-2.5 font-medium text-gray-500 text-xs">Parent</th>
                       <th className="text-left px-5 py-2.5 font-medium text-gray-500 text-xs">Contact</th>
                       <th className="text-left px-5 py-2.5 font-medium text-gray-500 text-xs">Status</th>
+                      <th className="text-right px-5 py-2.5 font-medium text-gray-500 text-xs">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
@@ -625,13 +663,15 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
                       return a.name.localeCompare(b.name)
                     }).map(s => (
                       <tr key={s.id} onClick={() => { setSelected(s); setEditing(false); setEditForm({}); }}
-                        className={`cursor-pointer transition-colors ${selected?.id === s.id ? 'bg-green-50' : 'hover:bg-gray-50'}`}>
+                        data-testid={`student-row-${s.id}`}
+                        title="Click for quick view"
+                        className={`group cursor-pointer transition-colors ${selected?.id === s.id ? 'bg-green-50 shadow-[inset_3px_0_0_#16a34a]' : 'hover:bg-gray-50'}`}>
                         <td className="px-3 py-3 text-center font-semibold text-sm text-amber-700 bg-amber-50/40">
                           {s.school_roll_number ?? <span className="text-gray-300 font-normal text-xs">—</span>}
                         </td>
                         <td className="px-5 py-3 font-medium text-gray-900">
                           <button type="button" data-testid={`student-name-${s.id}`} aria-label={`Open full profile of ${s.name}`}
-                            onClick={e => { e.stopPropagation(); setProfileId(s.id) }} className="text-left text-violet-700 hover:underline">{s.name}</button>
+                            title="Open full profile" onClick={e => { e.stopPropagation(); setProfileId(s.id) }} className="text-left text-violet-700 hover:underline">{s.name}</button>
                         </td>
                         <td className="px-5 py-3 text-gray-600 text-xs">{s.parent_name || '—'}</td>
                         <td className="px-5 py-3 text-gray-500 text-xs">{s.parent_phone || s.phone || '—'}</td>
@@ -639,6 +679,20 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
                           <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${s.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
                             {s.status}
                           </span>
+                        </td>
+                        <td className="px-5 py-3">
+                          <div className="flex items-center justify-end gap-2 whitespace-nowrap">
+                            <button type="button" data-testid={`student-profile-btn-${s.id}`} aria-label={`Open full profile of ${s.name}`}
+                              onClick={e => { e.stopPropagation(); setProfileId(s.id) }}
+                              className="inline-flex items-center gap-1 rounded-lg border border-violet-200 px-2.5 py-1 text-xs font-medium text-violet-700 hover:bg-violet-50">
+                              <Eye className="h-3.5 w-3.5" aria-hidden="true" />Profile
+                            </button>
+                            <button type="button" data-testid={`student-edit-btn-${s.id}`} aria-label={`Edit ${s.name}`}
+                              onClick={e => { e.stopPropagation(); setSelected(s); setEditForm({}); setEditing(true) }}
+                              className="inline-flex items-center gap-1 rounded-lg border border-green-200 px-2.5 py-1 text-xs font-medium text-green-700 hover:bg-green-50">
+                              <Pencil className="h-3.5 w-3.5" aria-hidden="true" />Edit
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -650,14 +704,26 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
           </div>
         )}
 
+        {total > PAGE_SIZE && (
+          <div className="mt-4 flex items-center justify-between text-sm text-gray-600" data-testid="students-pagination">
+            <span data-testid="students-page-range">Showing {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, total)} of {total}</span>
+            <div className="flex items-center gap-2">
+              <button type="button" data-testid="students-prev-page" disabled={page === 0 || loading} onClick={() => setPage(p => Math.max(0, p - 1))}
+                className="px-3 py-1.5 border border-gray-200 rounded-lg text-xs hover:bg-gray-50 disabled:opacity-40">Previous</button>
+              <span>Page {page + 1} of {pageCount}</span>
+              <button type="button" data-testid="students-next-page" disabled={page + 1 >= pageCount || loading} onClick={() => setPage(p => p + 1)}
+                className="px-3 py-1.5 border border-gray-200 rounded-lg text-xs hover:bg-gray-50 disabled:opacity-40">Next</button>
+            </div>
+          </div>
+        )}
+
         {/* Removed Classes section — shows class-groups from inactive students */}
-        {statusFilter === 'active' && inactiveStudents.length > 0 && (() => {
+        {statusFilter === 'active' && counts.inactive > 0 && (() => {
           const removedGroups: Record<string, number> = {}
-          inactiveStudents.forEach(s => {
-            const sec = (s.section ?? '').toUpperCase()
-            if (s.grade && sec) {
-              const key = `${s.grade}-${sec}`
-              removedGroups[key] = (removedGroups[key] || 0) + 1
+          ;(summary?.classes ?? []).filter(c => c.status === 'inactive').forEach(c => {
+            if (c.grade && c.section) {
+              const key = `${c.grade}-${c.section}`
+              removedGroups[key] = (removedGroups[key] || 0) + c.count
             }
           })
           const keys = Object.keys(removedGroups).sort((a, b) => {
@@ -669,7 +735,7 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
             <div className="mt-4 bg-white rounded-md border border-red-100 overflow-hidden">
               <div className="px-5 py-3 bg-red-50 border-b border-red-100 flex items-center justify-between">
                 <span className="font-semibold text-red-700 text-sm">Removed Classes</span>
-                <span className="text-xs text-red-500">{keys.length} class{keys.length !== 1 ? 'es' : ''} · {inactiveStudents.length} students deactivated</span>
+                <span className="text-xs text-red-500">{keys.length} class{keys.length !== 1 ? 'es' : ''} · {counts.inactive} students deactivated</span>
               </div>
               <div className="divide-y divide-gray-100">
                 {keys.map(k => (
@@ -688,10 +754,10 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
 
       {/* Right: Detail panel */}
       {selected && (
-        <div className="w-72 flex-shrink-0">
-          <div className="bg-white rounded-md border border-gray-200 sticky top-6 flex flex-col max-h-[calc(100vh-6rem)] overflow-hidden">
+        <div className="w-full xl:w-72 flex-shrink-0">
+          <div className="bg-white rounded-md border border-gray-200 xl:sticky xl:top-6 flex flex-col max-h-[calc(100vh-6rem)] overflow-hidden">
             <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
-              <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Student</span>
+              <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{editing ? 'Editing student' : 'Quick view'}</span>
               <button onClick={() => setSelected(null)} className="text-muted-foreground hover:text-gray-600 text-lg leading-none">×</button>
             </div>
 
@@ -730,12 +796,13 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
                 <div className="space-y-3">
                   {[
                     { field: 'name', label: 'Name *', type: 'text', placeholder: 'Full name' },
+                    { field: 'school_roll_number', label: 'Roll No *', type: 'number', placeholder: 'e.g. 12' },
                     { field: 'email', label: 'Email', type: 'email', placeholder: 'student@email.com' },
-                    { field: 'grade', label: 'Grade', type: 'text', placeholder: 'e.g. 8' },
-                    { field: 'section', label: 'Section', type: 'text', placeholder: 'e.g. A' },
+                    { field: 'grade', label: 'Grade *', type: 'text', placeholder: 'e.g. 8' },
+                    { field: 'section', label: 'Section *', type: 'text', placeholder: 'e.g. A' },
                     { field: 'phone', label: 'Phone', type: 'tel', placeholder: '10-digit number' },
-                    { field: 'parent_name', label: 'Parent Name', type: 'text', placeholder: 'Parent full name' },
-                    { field: 'parent_phone', label: 'Parent Phone', type: 'tel', placeholder: '10-digit number' },
+                    { field: 'parent_name', label: 'Parent Name *', type: 'text', placeholder: 'Parent full name' },
+                    { field: 'parent_phone', label: 'Parent Phone *', type: 'tel', placeholder: '10-digit number' },
                     { field: 'parent_email', label: 'Parent Email', type: 'email', placeholder: 'parent@email.com' },
                   ].map(({ field, label, type, placeholder }) => (
                     <div key={field}>
@@ -789,8 +856,6 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
     </div>
   )
 }
-
-
 
 
 

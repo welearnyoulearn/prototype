@@ -16,15 +16,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'school_id and master_subject_id are required' }, { status: 400 })
     }
     if (!await requireFeeAccess(school_id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    if (!academic_year) academic_year = await resolveAcademicYear(school_id)
 
     // Start a database transaction
     const client = await pool.connect()
     try {
       await client.query('BEGIN')
-
-      if (!academic_year) {
-        academic_year = await resolveAcademicYear(school_id)
-      }
 
       // 1. Fetch master subject details
       const masterSubRes = await client.query('SELECT * FROM master_subjects WHERE id = $1', [master_subject_id])
@@ -51,80 +48,49 @@ export async function POST(req: NextRequest) {
       )
       const schoolSubjectId = schoolSubRes.rows[0].id
 
-      // 4. Fetch and copy chapters
-      const masterChapsRes = await client.query(
-        'SELECT * FROM master_chapters WHERE subject_id = $1 ORDER BY chapter_order, id',
-        [master_subject_id]
+      // 4-6. Copy the complete hierarchy in four set-based statements. This
+      // keeps subscription time proportional to data volume without issuing
+      // one round trip per chapter/topic/resource/task.
+      await client.query(
+        `INSERT INTO school_chapters
+           (school_subject_id, master_chapter_id, chapter_name, chapter_order, is_custom, semester, book_type, audience, book_name)
+         SELECT $1, mc.id, mc.chapter_name, mc.chapter_order, FALSE,
+                mc.semester, mc.book_type, mc.audience, mc.book_name
+           FROM master_chapters mc
+          WHERE mc.subject_id = $2
+          ORDER BY mc.chapter_order, mc.id`,
+        [schoolSubjectId, master_subject_id],
       )
-
-      for (const masterChap of masterChapsRes.rows) {
-        const schoolChapRes = await client.query(
-          `INSERT INTO school_chapters (school_subject_id, master_chapter_id, chapter_name, chapter_order, is_custom, semester, book_type, audience, book_name)
-           VALUES ($1, $2, $3, $4, FALSE, $5, $6, $7, $8)
-           RETURNING id`,
-          [schoolSubjectId, masterChap.id, masterChap.chapter_name, masterChap.chapter_order, masterChap.semester, masterChap.book_type, masterChap.audience, masterChap.book_name]
-        )
-        const schoolChapterId = schoolChapRes.rows[0].id
-
-        // 5. Fetch and copy topics for this chapter
-        const masterTopicsRes = await client.query(
-          'SELECT * FROM master_topics WHERE chapter_id = $1 ORDER BY topic_order, id',
-          [masterChap.id]
-        )
-
-        // Store map of master_topic_id -> school_topic_id to map tasks properly
-        const topicIdMap: Record<number, number> = {}
-
-        for (const masterTopic of masterTopicsRes.rows) {
-          const schoolTopicRes = await client.query(
-            `INSERT INTO school_topics (school_chapter_id, master_topic_id, topic_name, topic_order, content_text, content_pdf_url, questions, subtopics, is_custom)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, FALSE)
-             RETURNING id`,
-            [schoolChapterId, masterTopic.id, masterTopic.topic_name, masterTopic.topic_order, masterTopic.content_text, masterTopic.content_pdf_url, JSON.stringify(masterTopic.questions || []), JSON.stringify(masterTopic.subtopics || [])]
-          )
-          const schoolTopicId = schoolTopicRes.rows[0].id
-          topicIdMap[masterTopic.id] = schoolTopicId
-
-          // Copy resources
-          const masterResRes = await client.query(
-            'SELECT * FROM master_resources WHERE topic_id = $1 ORDER BY id',
-            [masterTopic.id]
-          )
-
-          for (const masterRes of masterResRes.rows) {
-            await client.query(
-              `INSERT INTO school_resources (school_topic_id, master_resource_id, resource_type, title, url, is_custom)
-               VALUES ($1, $2, $3, $4, $5, FALSE)`,
-              [schoolTopicId, masterRes.id, masterRes.resource_type, masterRes.title, masterRes.url]
-            )
-          }
-        }
-
-        // 6. Fetch and copy tasks for this chapter
-        const masterTasksRes = await client.query(
-          'SELECT * FROM master_tasks WHERE chapter_id = $1 ORDER BY id',
-          [masterChap.id]
-        )
-
-        for (const masterTask of masterTasksRes.rows) {
-          const targetSchoolTopicId = masterTask.topic_id ? topicIdMap[masterTask.topic_id] : null
-
-          await client.query(
-            `INSERT INTO school_tasks (school_chapter_id, school_topic_id, master_task_id, title, instructions, task_type, max_marks, is_mandatory, is_active, is_custom)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, TRUE, FALSE)`,
-            [
-              schoolChapterId,
-              targetSchoolTopicId,
-              masterTask.id,
-              masterTask.title,
-              masterTask.instructions,
-              masterTask.task_type,
-              masterTask.max_marks,
-              masterTask.is_mandatory
-            ]
-          )
-        }
-      }
+      await client.query(
+        `INSERT INTO school_topics
+           (school_chapter_id, master_topic_id, topic_name, topic_order, content_text, content_pdf_url, questions, subtopics, is_custom)
+         SELECT sc.id, mt.id, mt.topic_name, mt.topic_order, mt.content_text,
+                mt.content_pdf_url, COALESCE(mt.questions, '[]'::jsonb),
+                COALESCE(mt.subtopics, '[]'::jsonb), FALSE
+           FROM master_topics mt
+           JOIN school_chapters sc ON sc.master_chapter_id = mt.chapter_id AND sc.school_subject_id = $1
+          ORDER BY mt.topic_order, mt.id`,
+        [schoolSubjectId],
+      )
+      await client.query(
+        `INSERT INTO school_resources
+           (school_topic_id, master_resource_id, resource_type, title, url, is_custom)
+         SELECT st.id, mr.id, mr.resource_type, mr.title, mr.url, FALSE
+           FROM master_resources mr
+           JOIN school_topics st ON st.master_topic_id = mr.topic_id
+           JOIN school_chapters sc ON sc.id = st.school_chapter_id AND sc.school_subject_id = $1`,
+        [schoolSubjectId],
+      )
+      await client.query(
+        `INSERT INTO school_tasks
+           (school_chapter_id, school_topic_id, master_task_id, title, instructions, task_type, max_marks, is_mandatory, is_active, is_custom)
+         SELECT sc.id, st.id, mt.id, mt.title, mt.instructions, mt.task_type,
+                mt.max_marks, mt.is_mandatory, TRUE, FALSE
+           FROM master_tasks mt
+           JOIN school_chapters sc ON sc.master_chapter_id = mt.chapter_id AND sc.school_subject_id = $1
+           LEFT JOIN school_topics st ON st.master_topic_id = mt.topic_id AND st.school_chapter_id = sc.id`,
+        [schoolSubjectId],
+      )
 
       // 7. Auto-assign this subject to EVERY existing class of this grade —
       // not just whatever the admin happened to check in the Subscribe
@@ -184,6 +150,7 @@ export async function POST(req: NextRequest) {
     }
   } catch (err: unknown) {
     console.error('School subscribe POST error:', err)
-    return NextResponse.json({ error: err instanceof Error ? err.message : 'Failed to subscribe to master subject' }, { status: 500 })
+    const message = err instanceof Error ? err.message : 'Failed to subscribe to master subject'
+    return NextResponse.json({ error: message }, { status: message.startsWith('School is already subscribed') ? 409 : 500 })
   }
 }

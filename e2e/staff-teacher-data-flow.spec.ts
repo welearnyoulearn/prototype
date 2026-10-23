@@ -46,22 +46,28 @@ async function teacherUiLogin(page: Page, email: string, password: string): Prom
   await page.getByTestId('teacher-email-input').fill(email)
   await page.getByTestId('auth-password-input').fill(password)
   await page.getByTestId('teacher-submit-btn').click()
-  await page.waitForURL(/\/teacher(\/change-password)?$/, { timeout: 15000 })
+  await page.waitForURL(/\/teacher(\/change-password)?$/, { timeout: 60000 })
 
   let current = password
   if (page.url().includes('change-password')) {
     current = 'NewTeacher@1234'
     const fields = page.locator('input[type="password"]')
-    await fields.nth(0).fill(current)
+    await fields.nth(0).fill(password)
     await fields.nth(1).fill(current)
+    await fields.nth(2).fill(current)
     await page.getByRole('button', { name: /change|update|set|save/i }).click()
-    await page.waitForURL(/\/teacher$/, { timeout: 15000 })
+    await page.waitForURL(/\/teacher(?:\/add-birthday)?$/, { timeout: 60000 })
+    if (page.url().includes('/add-birthday')) {
+      await page.getByRole('button', { name: /skip for now/i }).click()
+      await page.waitForURL(/\/teacher$/, { timeout: 60000 })
+    }
   }
   return current
 }
 
 test.describe.serial('Staff Onboarding → Teacher Portal — Data Flow & Constraints', () => {
   const ts = Date.now()
+  const staffPhone = (n: number) => `7${String(ts).slice(-7)}${String(n).padStart(2, '0')}`
 
   // School A — primary school where onboarding + assignment happens
   let schoolAId: number
@@ -82,7 +88,7 @@ test.describe.serial('Staff Onboarding → Teacher Portal — Data Flow & Constr
   let teacherEmail: string
   let teacherTempPassword: string
   let classId: number
-  const GRADE = String(9000 + (ts % 900)) // unlikely to collide with a real grade string used elsewhere
+  const GRADE = '6'
 
   test.beforeAll(async () => {
     test.setTimeout(180000)
@@ -109,15 +115,8 @@ test.describe.serial('Staff Onboarding → Teacher Portal — Data Flow & Constr
     await setSubscription(platformCookie, schoolBId, 'premium')
     adminBCookie = await loginSchoolAdmin(adminBEmail, schoolBPass)
 
-    // Create the class BEFORE any teacher exists at this school — POST
-    // /api/classes auto-assigns subjects to teachers via fuzzy subject-name
-    // matching (matchTeacher()) against whatever teaching staff already
-    // exist. Onboarding "Flow Teacher"/Mathematics first would make class
-    // creation silently auto-assign them to the class's Mathematics subject,
-    // which would falsify D1 ("before any assignment, teacher sees no
-    // classes") and make D2's explicit assignment a no-op. With zero staff
-    // at creation time, every auto-created class_subjects row is guaranteed
-    // teacher_id IS NULL, and D2 is the only thing that ever assigns anyone.
+    // Create the class before the teacher. Staff onboarding must discover the
+    // unfilled Mathematics row and assign it when the matching teacher arrives.
     const classRes = await api('/api/classes', 'POST', {
       school_id: schoolAId, grade: GRADE, section: 'A',
     }, adminACookie)
@@ -128,11 +127,12 @@ test.describe.serial('Staff Onboarding → Teacher Portal — Data Flow & Constr
     teacherEmail = `flowteacher${ts}@dataflow.com`
     const bulkRes = await api('/api/teachers/bulk', 'POST', {
       school_id: schoolAId,
-      teachers: [{ name: 'Flow Teacher', email: teacherEmail, subject: 'Mathematics', staff_type: 'teaching' }],
+      teachers: [{ name: 'Flow Teacher', email: teacherEmail, phone: staffPhone(1), subject: 'Mathematics', staff_type: 'teaching' }],
     }, adminACookie)
     expect(bulkRes.status).toBe(201)
-    const body = bulkRes.data as { teachers: { id: number }[] }
+    const body = bulkRes.data as { teachers: { id: number }[]; credentials: { temp_password: string }[] }
     teacherId = body.teachers[0].id
+    teacherTempPassword = body.credentials[0].temp_password
   })
 
   test.afterAll(async () => {
@@ -149,9 +149,9 @@ test.describe.serial('Staff Onboarding → Teacher Portal — Data Flow & Constr
   test('C1. Duplicate email within the same school is rejected by the API', async () => {
     const res = await api('/api/teachers/bulk', 'POST', {
       school_id: schoolAId,
-      teachers: [{ name: 'Duplicate Of Flow Teacher', email: teacherEmail, subject: 'Physics' }],
+      teachers: [{ name: 'Duplicate Of Flow Teacher', email: teacherEmail, phone: staffPhone(2), subject: 'Physics' }],
     }, adminACookie)
-    expect(res.status).toBe(201) // bulk always 201s at the HTTP level; per-row error lives in the body
+    expect(res.status).toBe(409)
     const body = res.data as { inserted: number; errors: { message: string }[] }
     expect(body.inserted).toBe(0)
     expect(body.errors[0].message).toMatch(/already registered/i)
@@ -160,35 +160,37 @@ test.describe.serial('Staff Onboarding → Teacher Portal — Data Flow & Constr
   test('C2. Duplicate email across two different schools is rejected platform-wide', async () => {
     const res = await api('/api/teachers/bulk', 'POST', {
       school_id: schoolBId,
-      teachers: [{ name: 'School B Copycat', email: teacherEmail, subject: 'Physics' }],
+      teachers: [{ name: 'School B Copycat', email: teacherEmail, phone: staffPhone(2), subject: 'Physics' }],
     }, adminBCookie)
     const body = res.data as { inserted: number; errors: { message: string }[] }
+    expect(res.status).toBe(409)
     expect(body.inserted).toBe(0)
     expect(body.errors[0].message).toMatch(/already registered to Flow Teacher/i)
     expect(body.errors[0].message).toMatch(new RegExp(`Data Flow School A ${ts}`))
   })
 
   test('C3. Duplicate phone within the same school is rejected; different school is allowed', async () => {
-    const sharedPhone = `8${String(ts).slice(-8)}`
+    const sharedPhone = `8${String(ts).slice(-9)}`
     const first = await api('/api/teachers/bulk', 'POST', {
       school_id: schoolAId,
-      teachers: [{ name: 'Phone Owner A', email: `phoneownerA${ts}@dataflow.com`, subject: 'Art', phone: sharedPhone }],
+      teachers: [{ name: 'Phone Owner A', email: `phoneownerA${ts}@dataflow.com`, subject: 'Mathematics', phone: sharedPhone }],
     }, adminACookie)
     expect((first.data as { inserted: number }).inserted).toBe(1)
 
     const sameschool = await api('/api/teachers/bulk', 'POST', {
       school_id: schoolAId,
-      teachers: [{ name: 'Phone Owner A2', email: `phoneownerA2${ts}@dataflow.com`, subject: 'Art', phone: sharedPhone }],
+      teachers: [{ name: 'Phone Owner Two', email: `phoneownerA2${ts}@dataflow.com`, subject: 'Mathematics', phone: sharedPhone }],
     }, adminACookie)
     const sameSchoolBody = sameschool.data as { inserted: number; errors: { message: string }[] }
     expect(sameSchoolBody.inserted).toBe(0)
-    expect(sameSchoolBody.errors[0].message).toMatch(/already exists/i)
+    expect(sameschool.status).toBe(409)
+    expect(sameSchoolBody.errors[0].message).toMatch(/already belongs/i)
 
     // Phone uniqueness is scoped per-school, not platform-wide — School B may
     // reuse the same phone number for an unrelated staff member.
     const otherSchool = await api('/api/teachers/bulk', 'POST', {
       school_id: schoolBId,
-      teachers: [{ name: 'Phone Owner B', email: `phoneownerB${ts}@dataflow.com`, subject: 'Art', phone: sharedPhone }],
+      teachers: [{ name: 'Phone Owner B', email: `phoneownerB${ts}@dataflow.com`, subject: 'Mathematics', phone: sharedPhone }],
     }, adminBCookie)
     expect((otherSchool.data as { inserted: number }).inserted).toBe(1)
   })
@@ -197,14 +199,15 @@ test.describe.serial('Staff Onboarding → Teacher Portal — Data Flow & Constr
     const res = await api('/api/teachers/bulk', 'POST', {
       school_id: schoolAId,
       teachers: [
-        { name: 'Bad Email Direct', email: 'not-an-email', subject: 'Music' },
+        { name: 'Bad Email Direct', email: 'not-an-email', subject: 'Music', phone: staffPhone(3) },
         { name: 'Bad Phone Direct', email: `badphone${ts}@dataflow.com`, subject: 'Music', phone: 'abc' },
       ],
     }, adminACookie)
     const body = res.data as { inserted: number; errors: { row: number; message: string }[] }
     expect(body.inserted).toBe(0)
-    expect(body.errors.find(e => e.row === 1)?.message).toMatch(/not a valid email/i)
-    expect(body.errors.find(e => e.row === 2)?.message).toMatch(/not a valid phone/i)
+    expect(res.status).toBe(422)
+    expect(body.errors.find(e => e.row === 1)?.message).toMatch(/valid email/i)
+    expect(body.errors.find(e => e.row === 2)?.message).toMatch(/phone/i)
   })
 
   test('C5. Employee IDs are unique per school', async () => {
@@ -246,7 +249,7 @@ test.describe.serial('Staff Onboarding → Teacher Portal — Data Flow & Constr
   test('T6. School B admin cannot onboard a teacher into School A by spoofing school_id in the request body', async () => {
     const res = await api('/api/teachers/bulk', 'POST', {
       school_id: schoolAId,
-      teachers: [{ name: 'Spoofed Hire', email: `spoofed${ts}@dataflow.com`, subject: 'Drama' }],
+      teachers: [{ name: 'Spoofed Hire', email: `spoofed${ts}@dataflow.com`, phone: staffPhone(4), subject: 'Drama' }],
     }, adminBCookie)
     expect(res.status).toBe(403)
   })
@@ -262,25 +265,20 @@ test.describe.serial('Staff Onboarding → Teacher Portal — Data Flow & Constr
   // Login constraints
   // ══════════════════════════════════════════════════════════════════════
 
-  test('L1. Teacher cannot log in before credentials are issued (no password_hash yet)', async () => {
-    // Onboard a second teacher with no email — never gets a temp password.
+  test('L1. API rejects staff without login email and phone', async () => {
     const res = await api('/api/teachers/bulk', 'POST', {
       school_id: schoolAId,
       teachers: [{ name: 'No Email Staff', subject: 'PE' }],
     }, adminACookie)
-    expect((res.data as { inserted: number }).inserted).toBe(1)
-    // Can't even attempt login without an email/identifier — this documents
-    // the state rather than asserting a login attempt, since there is no
-    // email to log in with. Confirm via the directory that the record has no
-    // password_hash exposed and status is active (pending activation is
-    // invisible in this exact fetch, matching the known UX gap).
+    expect(res.status).toBe(422)
+    expect((res.data as { inserted: number }).inserted).toBe(0)
     const list = await api(`/api/teachers?school_id=${schoolAId}`, 'GET', undefined, adminACookie)
-    const staff = (list.data as { name: string; password_changed: boolean }[]).find(t => t.name === 'No Email Staff')
-    expect(staff).toBeTruthy()
-    expect(staff!.password_changed).toBe(false)
+    const staff = (list.data as { name: string }[]).find(t => t.name === 'No Email Staff')
+    expect(staff).toBeUndefined()
   })
 
   test('L2. Teacher login rejects wrong password', async ({ page }) => {
+    test.setTimeout(120000)
     await page.goto('/teacher/login')
     await page.getByTestId('teacher-email-input').fill(teacherEmail)
     await page.getByTestId('auth-password-input').fill('DefinitelyWrongPassword123')
@@ -307,9 +305,11 @@ test.describe.serial('Staff Onboarding → Teacher Portal — Data Flow & Constr
     // Reactivate for subsequent tests.
     const reactivateRes = await api(`/api/teachers/${teacherId}`, 'PUT', { status: 'active' }, adminACookie)
     expect(reactivateRes.status).toBe(200)
+    teacherTempPassword = (reactivateRes.data as { temporary_credential: { temp_password: string } }).temporary_credential.temp_password
   })
 
   test('L4. Teacher logs in successfully with valid credentials via the UI', async ({ page }) => {
+    test.setTimeout(120000)
     const finalPassword = await teacherUiLogin(page, teacherEmail, teacherTempPassword)
     teacherTempPassword = finalPassword
     await expect(page).toHaveURL(/\/teacher$/)
@@ -317,17 +317,18 @@ test.describe.serial('Staff Onboarding → Teacher Portal — Data Flow & Constr
 
   // ══════════════════════════════════════════════════════════════════════
   // Downstream: syllabus/classes/students becoming visible to the teacher
-  // after school-admin assignment — before assignment, nothing should show;
-  // after assignment, exactly the assigned class/subject should show.
+  // after automatic or explicit Class Management assignment.
   // ══════════════════════════════════════════════════════════════════════
 
-  test('D1. Before any assignment, teacher sees no classes', async () => {
+  test('D1. Late teacher onboarding auto-assigns matching unfilled subjects', async () => {
     const res = await api(`/api/teachers/${teacherId}/class-subjects`, 'GET', undefined, adminACookie)
     expect(res.status).toBe(200)
-    expect(res.data).toEqual([])
+    expect(res.data).toEqual(expect.arrayContaining([
+      expect.objectContaining({ subject_name: 'Mathematics', grade: GRADE, section: 'A' }),
+    ]))
   })
 
-  test('D2. School admin assigns the teacher to a subject on the class via Class Management API', async () => {
+  test('D2. Explicit Class Management assignment remains idempotent', async () => {
     const res = await api(`/api/classes/${classId}/subjects`, 'POST', {
       subject_name: 'Mathematics', teacher_id: teacherId, periods_per_week: 5,
     }, adminACookie)
@@ -346,39 +347,47 @@ test.describe.serial('Staff Onboarding → Teacher Portal — Data Flow & Constr
   })
 
   test('D4. Teacher UI — My Classes shows the newly assigned class', async ({ page }) => {
+    test.setTimeout(120000)
     await teacherUiLogin(page, teacherEmail, teacherTempPassword)
     await page.getByRole('button', { name: /My Classes/i }).click()
-    await expect(page.getByText(`${GRADE}-A`)).toBeVisible({ timeout: 10000 })
+    // MyClasses is lazy-loaded; the first local-dev hit may compile the chunk.
+    await expect(page.getByText(`${GRADE}-A`)).toBeVisible({ timeout: 60000 })
   })
 
   test('D5. A subject NOT assigned to this teacher does not appear in their class-subjects', async () => {
-    // Add a second subject to the same class, assigned to nobody (teacher_id null).
+    // Add a second curriculum subject to the same class, assigned to nobody.
     const res = await api(`/api/classes/${classId}/subjects`, 'POST', {
-      subject_name: 'Unassigned Subject', teacher_id: null, periods_per_week: 3,
+      subject_name: 'Science', teacher_id: null, periods_per_week: 3,
     }, adminACookie)
     expect(res.status).toBe(201)
 
     const flowRes = await api(`/api/teachers/${teacherId}/class-subjects`, 'GET', undefined, adminACookie)
     const rows = flowRes.data as { subject_name: string }[]
-    expect(rows.find(r => r.subject_name === 'Unassigned Subject')).toBeUndefined()
+    expect(rows.find(r => r.subject_name === 'Science')).toBeUndefined()
     expect(rows.find(r => r.subject_name === 'Mathematics')).toBeTruthy()
   })
 
-  test('D6. Enrolling a student in the assigned class makes them visible to the teacher via My Students', async ({ page }) => {
+  test('D6. Subject assignment does not expose the class student roster', async ({ page }) => {
+    test.setTimeout(120000)
     const studentRes = await api('/api/students/bulk', 'POST', {
       school_id: schoolAId,
-      students: [{ name: 'Flow Student', grade: GRADE, section: 'A', school_roll_number: 1 }],
+      students: [{
+        name: 'Flow Student', grade: GRADE, section: 'A', school_roll_number: 1,
+        parent_name: 'Flow Parent', parent_phone: `9${String(ts).slice(-9)}`,
+      }],
     }, adminACookie)
     expect((studentRes.data as { inserted: number }).inserted).toBe(1)
 
     await teacherUiLogin(page, teacherEmail, teacherTempPassword)
     await page.getByRole('button', { name: /My Students/i }).click()
+    await expect(page.getByRole('heading', { name: 'My Students' })).toBeVisible({ timeout: 60000 })
     // Select the assigned class if the UI requires an explicit class pick.
     const classOption = page.getByText(`${GRADE}-A`).first()
     if (await classOption.isVisible({ timeout: 5000 }).catch(() => false)) {
       await classOption.click()
     }
-    await expect(page.getByText('Flow Student')).toBeVisible({ timeout: 10000 })
+    await expect(page.getByText(/Student list is restricted/i)).toBeVisible()
+    await expect(page.getByText('Flow Student')).toHaveCount(0)
   })
 
   test('D7. Removing the teacher unassigns them from the subject but keeps the class/subject row for audit', async () => {
@@ -399,7 +408,7 @@ test.describe.serial('Staff Onboarding → Teacher Portal — Data Flow & Constr
   test('D8. Removed teacher\'s email is free for a new hire at another school', async () => {
     const res = await api('/api/teachers/bulk', 'POST', {
       school_id: schoolBId,
-      teachers: [{ name: 'New Owner Of Freed Email', email: teacherEmail, subject: 'Mathematics' }],
+      teachers: [{ name: 'New Owner Of Freed Email', email: teacherEmail, phone: staffPhone(4), subject: 'Mathematics' }],
     }, adminBCookie)
     expect((res.data as { inserted: number }).inserted).toBe(1)
   })

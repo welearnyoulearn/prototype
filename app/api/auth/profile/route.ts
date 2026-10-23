@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import pool, { ensureDB } from '@/lib/db'
-import { getSession, signToken } from '@/lib/auth'
-import { cookies } from 'next/headers'
+import pool from '@/lib/db'
+import { getSession, setAuthCookie } from '@/lib/auth'
 
 export async function PUT(req: NextRequest) {
   try {
@@ -31,15 +30,7 @@ export async function PUT(req: NextRequest) {
 
       // Re-issue token with profileCompleted = true
       const newPayload = { ...session, profileCompleted: true }
-      const token = signToken(newPayload)
-      const cookieStore = await cookies()
-      cookieStore.set('wlyl-auth', token, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'lax',
-        maxAge: 60 * 60 * 24 * 7,
-        path: '/',
-      })
+      await setAuthCookie(newPayload)
 
       return NextResponse.json({ success: true })
     } catch (error) {

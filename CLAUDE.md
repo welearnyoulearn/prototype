@@ -103,7 +103,7 @@ Platform Admin is served on `admin.welearnyoulearn.com` subdomain only — block
 - Feature keys in `lib/features.ts` — `OVERRIDABLE_FEATURE_KEYS = ['student-portal', 'parent-portal', 'api-monitoring', 'online-payments']` (`'whatsapp'` is not a feature key — `sendWhatsappMessage()` in `lib/whatsapp.ts` is a logging-only scaffold called from onboarding, ungated, not wired to any real send)
 
 ### Fee Management
-- `app/school-admin/components/FeeManagement.tsx` — large single component (~4000 lines), tabs: overview/setup/ledger/collect/students/reports/yearend + optional online-payments/whatsapp
+- `app/school-admin/components/FeeManagement.tsx` — shell (~1400 lines) that hosts the fee tabs; each tab lives in `app/school-admin/components/fee-management/` (`FeeOverviewTab`, `FeeSetupTab`, `FeeCollectTab`, `FeePassbookTab`, `FeeReportsTab`, `FeeYearEndTab`, …) plus optional online-payments/whatsapp
 - `requireFeeAccess(school_id)` — tenant isolation guard used in all fee API routes
 - Ledger sorted by `grade, section, school_roll_number NULLS LAST, name`
 

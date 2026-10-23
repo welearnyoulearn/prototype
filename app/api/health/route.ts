@@ -2,22 +2,12 @@ import { NextResponse } from 'next/server'
 import pool from '@/lib/db'
 
 export async function GET() {
-  const env = {
-    pghost:     process.env.PGHOST     ?? 'MISSING',
-    pgport:     process.env.PGPORT     ?? 'MISSING',
-    pguser:     process.env.PGUSER     ?? 'MISSING',
-    pgpassword: process.env.PGPASSWORD ? `set(${process.env.PGPASSWORD.length} chars)` : 'MISSING',
-    pgdatabase: process.env.PGDATABASE ?? 'MISSING',
-    jwt:        process.env.JWT_SECRET ? 'set' : 'MISSING',
-    email_user: process.env.EMAIL_USER ?? 'MISSING',
-    email_pass: process.env.EMAIL_PASS ? `set(${process.env.EMAIL_PASS.length} chars)` : 'MISSING',
-    email_host: process.env.EMAIL_HOST ?? 'MISSING',
-  }
-
   try {
-    const { rows } = await pool.query('SELECT NOW() as time')
-    return NextResponse.json({ ok: true, db: 'connected', time: rows[0].time, env })
-  } catch (err: unknown) {
-    return NextResponse.json({ ok: false, db: 'FAILED', error: String(err), env }, { status: 500 })
+    await pool.query('SELECT 1')
+    return NextResponse.json({ ok: true, db: 'connected' })
+  } catch {
+    // Public health checks expose availability only. Infrastructure names,
+    // account identifiers and raw database errors belong in server logs.
+    return NextResponse.json({ ok: false, db: 'unavailable' }, { status: 503 })
   }
 }

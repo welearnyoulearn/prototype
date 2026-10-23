@@ -636,7 +636,7 @@ function ExpenseFormModal({ schoolId, categories, adminName, adminId, editing, o
 
     await fetch(`/api/expenses/${expenseId}/attachments`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ file_url: uploadData.secure_url, file_name: file.name }),
+      body: JSON.stringify({ file_url: uploadData.secure_url, file_name: file.name, bytes: uploadData.bytes }),
     })
   }
 

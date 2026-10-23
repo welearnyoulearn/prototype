@@ -1,10 +1,13 @@
 'use client'
 
+import { rollLabel, plural } from './format'
 import { useEffect, useState, Fragment, type Dispatch, type SetStateAction, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { GRADE_SEQUENCE } from '@/lib/grades'
+import AmendFeeDialog, { type AmendRequest } from './AmendFeeDialog'
 import type { FeeCategory, FeeStructure, StructureLock, Amendment, ApplStudent, ApplCategory, FeeStats } from './types'
 import { LoadErrorBanner } from './LoadErrorBanner'
 import { Skeleton } from '@/components/ui/skeleton'
+import { useFeeStore } from '@/lib/stores/feeStore'
 
 const GRADES = GRADE_SEQUENCE
 function gradeLabel(g: string): string { return /^\d+$/.test(g) ? `Grade ${g}` : g }
@@ -21,6 +24,11 @@ const FREQ_LABEL: Record<string, string> = {
 }
 const FREQ_HELP: Record<string, string> = {
   monthly: '12 bills/year (Apr–Mar)', quarterly: '4 bills/year', half_yearly: '2 bills/year (Apr & Oct)', annual: '1 bill/year, repeats', one_time: '1 bill ever, never repeats',
+}
+// What one entered amount covers, per billing frequency
+const FREQ_PERIOD: Record<string, { per: string; bills: number }> = {
+  monthly: { per: 'month', bills: 12 }, quarterly: { per: 'quarter', bills: 4 }, half_yearly: { per: 'half-year', bills: 2 },
+  annual: { per: 'year', bills: 1 }, one_time: { per: 'one-time', bills: 1 },
 }
 const FEE_ICONS: Record<string, string> = {
   tuition: '📘', transport: '🚌', exam: '📝', admission: '🎓', hostel: '🏠',
@@ -72,7 +80,7 @@ function blockNonNumericKeys(e: ReactKeyboardEvent<HTMLInputElement>) {
   if (['e', 'E', '+', '-'].includes(e.key)) e.preventDefault()
 }
 
-type VarGridStudent = { id: number; name: string; roll_number: string; section: string }
+type VarGridStudent = { id: number; name: string; roll_number: string; school_roll_number?: number | null; section: string }
 type VarGridCategory = { id: number; name: string; frequency: string }
 type StructureHistoryRow = { id: number; grade: string; old_amount: number | null; new_amount: number; old_due_day: number | null; new_due_day: number; change_type: string; changed_by: string; changed_at: string }
 type CategoryChangeRow = { id: number; field_changed: string; old_value: string | null; new_value: string | null; changed_by: string; changed_at: string }
@@ -132,11 +140,9 @@ export default function FeeSetupTab({
   const [lockingStructure, setLockingStructure] = useState(false)
   const [structureMsg, setStructureMsg] = useState('')
   const [showAmendLog, setShowAmendLog] = useState(false)
-  // Saving an amount here (unlike the dedicated Amend flow) never touches
-  // already-generated student_fee_ledger rows — it only updates fee_structures.
-  // Students already billed at the old amount silently keep owing it. This
-  // check warns before that happens instead of letting it pass silently.
+  // Preview the existing bills that a midyear amount change will update.
   const [checkingImpact, setCheckingImpact] = useState(false)
+  const [amendRequest, setAmendRequest] = useState<AmendRequest | null>(null)
   const [pendingAmountWarning, setPendingAmountWarning] = useState<{
     cat: FeeCategory
     structs: { fee_category_id: number; grade: string; amount: number }[]
@@ -291,27 +297,35 @@ export default function FeeSetupTab({
     })
     const d = await r.json()
     setStructureMsg(r.ok
-      ? d.created > 0
-        ? `✓ Generated ${d.created} new bill${d.created !== 1 ? 's' : ''}${d.skipped > 0 ? ` · ${d.skipped} already existed (not duplicated)` : ''}`
-        : `✓ All bills already exist — nothing new to generate (${d.skipped} existing)`
+      ? `✓ ${d.created} new bills · ${d.updated || 0} existing bills updated · ${d.skipped} unchanged`
       : d.error || 'Failed')
+    if (r.ok) {
+      const feeStore = useFeeStore.getState()
+      feeStore.bumpLedger(); feeStore.bumpReports(); feeStore.bumpYearEnd()
+    }
     setGeneratingLedger(false)
     onStatsChanged(); onSetupChanged()
   }
 
-  // Generate bills only for students who have no ledger rows yet (safe after lock)
+  // Create missing bills without changing existing student balances.
   async function generateForNew() {
     setGeneratingLedger(true); setStructureMsg('')
     const r = await fetch('/api/fees/generate', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ school_id: schoolId, academic_year: academicYear }),
+      body: JSON.stringify({ school_id: schoolId, academic_year: academicYear, only_missing: true }),
     })
     const d = await r.json()
     setStructureMsg(r.ok
       ? d.created > 0
-        ? `✓ Billed ${d.created} new student${d.created !== 1 ? 's' : ''}${d.skipped > 0 ? ` · ${d.skipped} already billed (not duplicated)` : ''}`
-        : '✓ All active students already billed — no new entries needed'
+        ? `✓ Created ${d.created} new bill${d.created !== 1 ? 's' : ''}${d.skipped > 0 ? ` · ${d.skipped} existing bills unchanged` : ''}`
+        : (stats?.unbilled_no_plan?.count ?? 0) > 0
+          ? `No new bills created — ${stats!.unbilled_no_plan!.count} student(s) are in grade(s) with no fee amount set (${stats!.unbilled_no_plan!.grades.join(', ')}). Set amounts for those grades first.`
+          : '✓ All active students already billed — no new entries needed'
       : d.error || 'Failed')
+    if (r.ok) {
+      const feeStore = useFeeStore.getState()
+      feeStore.bumpLedger(); feeStore.bumpReports(); feeStore.bumpYearEnd()
+    }
     setGeneratingLedger(false)
     onStatsChanged(); onSetupChanged()
   }
@@ -358,6 +372,19 @@ export default function FeeSetupTab({
       await doSaveFeeAmounts(cat, structs)
       return
     }
+    // A locked plan can't be edited directly — changes go through an amendment with a reason.
+    if (structureLock) {
+      setStructureMsg('')
+      setAmendRequest({
+        catName: cat.name,
+        changes: changedGrades.map(grade => ({
+          grade, label: gradeLabel(grade),
+          from: Number(structures.find(s => s.fee_category_id === cat.id && s.grade === grade)!.amount),
+          to: parseFloat(editAmounts[`${cat.id}_${grade}`]),
+        })),
+      })
+      return
+    }
     // Some of these grades already have a saved amount that's being changed —
     // check how many students are already billed under the old amount before
     // committing (reuses the same per-grade impact count the Amend flow computes).
@@ -366,7 +393,7 @@ export default function FeeSetupTab({
       const results = await Promise.all(changedGrades.map(async grade => {
         const r = await fetch(`/api/fees/structures/amend?school_id=${schoolId}&academic_year=${academicYear}&preview=1&fee_category_id=${cat.id}&grade=${grade}`)
         const d = r.ok ? await r.json() : { count: 0, partial_count: 0 }
-        return { grade, count: (d.count || 0) + (d.partial_count || 0) }
+        return { grade, count: (d.count || 0) + (d.partial_count || 0) + (d.paid_count || 0) + (d.waived_count || 0) }
       }))
       const totalAffected = results.reduce((s, r) => s + r.count, 0)
       if (totalAffected > 0) {
@@ -383,6 +410,33 @@ export default function FeeSetupTab({
     }
   }
 
+  // Applies a locked-plan amendment one grade at a time. Returns an error message (the dialog
+  // stays open to show it) or null once every grade has been amended.
+  async function confirmAmendment(cat: FeeCategory, reason: string): Promise<string | null> {
+    if (!amendRequest) return null
+    const done: string[] = []
+    for (const c of amendRequest.changes) {
+      const r = await fetch('/api/fees/structures/amend', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ school_id: schoolId, academic_year: academicYear, fee_category_id: cat.id, grade: c.grade, new_amount: c.to, reason }),
+      })
+      if (!r.ok) {
+        const d = await r.json().catch(() => null)
+        const partial = done.length ? ` (${done.join(', ')} already amended)` : ''
+        if (done.length) onSetupChanged()
+        return `${c.label}: ${d?.error || 'Failed to amend'}${partial}`
+      }
+      done.push(c.label)
+    }
+    setAmendRequest(null)
+    setStructureMsg(`✓ ${cat.name} amended for ${done.join(', ')}; existing bills updated`)
+    onStatsChanged()
+    const feeStore = useFeeStore.getState()
+    feeStore.bumpLedger(); feeStore.bumpReports(); feeStore.bumpYearEnd()
+    onSetupChanged()
+    return null
+  }
+
   async function doSaveFeeAmounts(cat: FeeCategory, structs: { fee_category_id: number; grade: string; amount: number }[]) {
     setSavingStructure(true); setStructureMsg('')
     const r = await fetch('/api/fees/structures', {
@@ -393,7 +447,10 @@ export default function FeeSetupTab({
       const d = await r.json().catch(() => null)
       setStructureMsg(d?.error || 'Failed to save')
     } else {
-      setStructureMsg(`✓ Amounts saved for ${cat.name}`)
+      setStructureMsg(`✓ Amounts saved for ${cat.name}; existing bills updated`)
+      onStatsChanged()
+      const feeStore = useFeeStore.getState()
+      feeStore.bumpLedger(); feeStore.bumpReports(); feeStore.bumpYearEnd()
     }
     setSavingStructure(false)
     setPendingAmountWarning(null)
@@ -466,7 +523,7 @@ export default function FeeSetupTab({
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ school_id: schoolId, academic_year: academicYear, action: 'lock', locked_by: adminName || 'Admin' }),
     })
-    if (r.ok) onSetupChanged()
+    if (r.ok) { setStructureMsg(''); onSetupChanged() }
     else { const d = await r.json().catch(() => ({})); setStructureMsg(d.error || 'Failed to lock fee plan') }
     setLockingStructure(false)
   }
@@ -478,7 +535,7 @@ export default function FeeSetupTab({
       body: JSON.stringify({ school_id: schoolId, academic_year: academicYear, action: 'unlock', locked_by: adminName || 'Admin' }),
     })
     if (!r.ok) { const d = await r.json().catch(() => ({})); setStructureMsg(d.error || 'Failed to unlock fee plan') }
-    else onSetupChanged()
+    else { setStructureMsg(''); onSetupChanged() }
     setLockingStructure(false)
   }
 
@@ -534,6 +591,8 @@ export default function FeeSetupTab({
       // Variable-fee assignments can change amount_due on existing bills (ledgerUpdated),
       // so the Overview tab's totals would otherwise stay stale until a tab switch.
       onStatsChanged()
+      const feeStore = useFeeStore.getState()
+      feeStore.bumpLedger(); feeStore.bumpReports(); feeStore.bumpYearEnd()
     } else {
       setApplMsg(d.error || 'Failed to save')
     }
@@ -586,6 +645,8 @@ export default function FeeSetupTab({
       setVgMsg(`✓ Saved — ${d.upserted} assignments${d.ledgerUpdated > 0 ? `, ${d.ledgerUpdated} ledger entries updated` : ''}`)
       setVgOriginal({ ...vgAmounts })   // reset change highlight baseline
       onStatsChanged()
+      const feeStore = useFeeStore.getState()
+      feeStore.bumpLedger(); feeStore.bumpReports(); feeStore.bumpYearEnd()
     } else {
       setVgMsg(d.error || 'Failed to save')
     }
@@ -796,7 +857,7 @@ export default function FeeSetupTab({
           {/* ── Lock banner ── */}
           {structureLock ? (
             <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="flex items-center gap-3">
                   <span className="text-amber-600 text-lg">🔒</span>
                   <div>
@@ -804,7 +865,7 @@ export default function FeeSetupTab({
                     <p className="text-xs text-amber-600">Locked by <strong>{structureLock.locked_by}</strong> on {fmtDate(structureLock.locked_at)} · Changes need an Amendment with a reason</p>
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   {/* Generate for new students — safe even when locked (ON CONFLICT DO NOTHING) */}
                   <button
                     onClick={generateForNew}
@@ -817,6 +878,11 @@ export default function FeeSetupTab({
                     className="text-xs bg-green-600 text-white px-3 py-1.5 rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed font-medium">
                     {generatingLedger ? 'Generating…' : `Generate for New${stats && (stats.unbilled_students ?? 0) > 0 ? ` (${stats.unbilled_students})` : ''}`}
                   </button>
+                  {(stats?.unbilled_no_plan?.count ?? 0) > 0 && (
+                    <span data-testid="unbilled-no-plan" className="text-xs text-amber-700">
+                      ⚠ {stats!.unbilled_no_plan!.count} student(s) can&apos;t be billed — no fee amount set for grade {stats!.unbilled_no_plan!.grades.join(', ')}
+                    </span>
+                  )}
                   <button onClick={() => setShowAmendLog(p => !p)} className="text-xs text-amber-700 border border-amber-300 px-3 py-1.5 rounded-lg hover:bg-amber-100">
                     {showAmendLog ? 'Hide' : 'View'} Amendments ({amendments.length})
                   </button>
@@ -946,7 +1012,7 @@ export default function FeeSetupTab({
                 {vgStudents.length > 0 && (
                   <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
                     <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-100 flex items-center justify-between">
-                      <p className="text-sm text-gray-600">{vgStudents.length} students · {varHeads.length} variable fees</p>
+                      <p className="text-sm text-gray-600">{plural(vgStudents.length, 'student')} · {plural(varHeads.length, 'variable fee')}</p>
                       {changedCount > 0 && <p className="text-xs text-amber-600 font-medium">{changedCount} unsaved change{changedCount !== 1 ? 's' : ''}</p>}
                     </div>
                     <div className="overflow-x-auto max-h-[540px]">
@@ -969,7 +1035,7 @@ export default function FeeSetupTab({
                               <tr key={s.id} className="border-b border-gray-50 hover:bg-gray-50/50">
                                 <td className="px-4 py-2 whitespace-nowrap">
                                   <p className="font-medium text-gray-800">{s.name}</p>
-                                  <p className="text-xs text-gray-400">{s.section ? `Sec ${s.section} · ` : ''}#{s.roll_number}</p>
+                                  <p className="text-xs text-gray-400">{[s.section ? `Sec ${s.section}` : '', rollLabel(s.school_roll_number)].filter(Boolean).join(' · ')}</p>
                                 </td>
                                 {varHeads.map(c => {
                                   const key = `${s.id}:${c.id}`
@@ -1069,6 +1135,8 @@ export default function FeeSetupTab({
                     <div className="flex items-center gap-4 mt-4 text-xs flex-wrap">
                       {cat.is_system ? (
                         <span className="text-gray-400">Billed directly to each student — no setup needed</span>
+                      ) : cat.category_type === 'variable' ? (
+                        <span className="text-gray-500">Amount set per student</span>
                       ) : (
                         <span className={amountsSet ? 'text-green-600' : 'text-amber-600'}>
                           {amountsSet ? '✅ Amounts set' : '⚠ Amounts not set'}
@@ -1206,7 +1274,7 @@ export default function FeeSetupTab({
                                           <tr key={s.id} className="hover:bg-gray-50/60">
                                             <td className="px-3 py-1.5">
                                               <p className="font-medium text-gray-800 text-sm">{s.name}</p>
-                                              <p className="text-[10px] text-gray-400">#{s.roll_number}</p>
+                                              <p className="text-[10px] text-gray-400">{rollLabel(s.school_roll_number)}</p>
                                             </td>
                                             <td className="px-3 py-1.5 text-xs text-gray-500">{s.section}</td>
                                             <td className="px-3 py-1.5 text-center">
@@ -1242,11 +1310,26 @@ export default function FeeSetupTab({
                           /* ── Fixed: grade-group amounts ── */
                           <div className="space-y-4">
                             <div className="flex items-center justify-between">
-                              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Set amounts by grade</p>
+                              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Set amounts by grade{FREQ_PERIOD[cat.frequency] && FREQ_PERIOD[cat.frequency].bills > 1 ? ` (per ${FREQ_PERIOD[cat.frequency].per})` : ''}</p>
                             </div>
+                            {(() => {
+                              const pd = FREQ_PERIOD[cat.frequency]
+                              const unit = !pd ? '' : pd.bills > 1 ? `per ${pd.per}` : pd.per === 'year' ? 'for the full year' : 'one time'
+                              return (
+                                <div data-testid={`notice-amount-for-${cat.id}`} role="note"
+                                  className="flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2.5">
+                                  <span className="text-lg" aria-hidden="true">{FEE_ICONS[cat.name.toLowerCase().split(' ')[0]] || '💰'}</span>
+                                  <div className="min-w-0 text-xs text-amber-900">
+                                    <p className="font-semibold">Setting amounts for: {cat.name}</p>
+                                    <p>{FREQ_LABEL[cat.frequency]} billing — type the amount <strong>{unit}</strong>
+                                      {pd && pd.bills > 1 ? <>; it is billed <strong>{pd.bills} times a year</strong>. The yearly total shows under each grade.</> : '.'}</p>
+                                  </div>
+                                </div>
+                              )
+                            })()}
 
                             {/* Grade group quick-fill */}
-                            <div className="grid grid-cols-2 gap-2">
+                            <div className="grid grid-cols-1 gap-2">
                               {GRADE_GROUPS.map(grp => (
                                 <div key={grp.key} className="flex items-center gap-2 bg-gray-50 rounded-lg px-3 py-2">
                                   <div className="flex-1">
@@ -1272,15 +1355,23 @@ export default function FeeSetupTab({
                             {/* Individual grades */}
                             <div>
                               <p className="text-[10px] text-gray-400 mb-1.5 uppercase tracking-wide">Individual grades (review &amp; adjust)</p>
-                              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                              <div className="grid grid-cols-2 gap-2">
                                 {GRADES.map(g => (
-                                  <div key={g} className="flex items-center gap-1">
+                                  <div key={g} className="flex items-center gap-1 min-w-0">
                                     <span className="text-[10px] text-gray-400 w-10 shrink-0">{/^\d+$/.test(g) ? `Gr.${g}` : g}</span>
+                                    <div className="w-full">
                                     <input type="number" min="0" placeholder="0"
                                       value={editAmounts[`${cat.id}_${g}`] || ''}
                                       onKeyDown={blockNonNumericKeys}
                                       onChange={e => setEditAmounts(p => ({ ...p, [`${cat.id}_${g}`]: sanitizeMoney(e.target.value) }))}
                                       className="w-full text-center border border-gray-200 rounded px-1 py-1 text-xs" />
+                                    {(() => {
+                                      const pd = FREQ_PERIOD[cat.frequency]
+                                      const amt = Number(editAmounts[`${cat.id}_${g}`] || 0)
+                                      if (!pd || pd.bills < 2 || !(amt > 0)) return null
+                                      return <p data-testid={`yearly-total-${cat.id}-${g}`} className="text-[10px] text-gray-400 text-center mt-0.5">× {pd.bills} = <span className="font-semibold text-gray-600">₹{(amt * pd.bills).toLocaleString('en-IN')}</span>/yr</p>
+                                    })()}
+                                    </div>
                                   </div>
                                 ))}
                               </div>
@@ -1321,27 +1412,32 @@ export default function FeeSetupTab({
             </div>
           )}
 
+          {amendRequest && (() => {
+            const cat = categories.find(c => c.name === amendRequest.catName)
+            return cat ? <AmendFeeDialog request={amendRequest} onCancel={() => setAmendRequest(null)} onConfirm={reason => confirmAmendment(cat, reason)} /> : null
+          })()}
+
           {/* ── Warn before changing an amount students are already billed at ── */}
           {pendingAmountWarning && (
             <div className="fixed inset-0 bg-black/40 z-[100] flex items-center justify-center p-4" onClick={() => setPendingAmountWarning(null)}>
               <div className="bg-white rounded-2xl w-full max-w-md shadow-xl" onClick={e => e.stopPropagation()}>
                 <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
-                  <p className="font-semibold text-amber-700">⚠ Students already billed at the old amount</p>
+                  <p className="font-semibold text-amber-700">⚠ Existing bills at the old amount</p>
                   <button onClick={() => setPendingAmountWarning(null)} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
                 </div>
                 <div className="p-5 space-y-3">
                   <p className="text-sm text-gray-600">
-                    <strong>{pendingAmountWarning.totalAffected}</strong> student{pendingAmountWarning.totalAffected === 1 ? '' : 's'} already {pendingAmountWarning.totalAffected === 1 ? 'has' : 'have'} a bill for{' '}
-                    <strong>{pendingAmountWarning.cat.name}</strong> at the current amount:
+                    <strong>{pendingAmountWarning.totalAffected}</strong> existing bill{pendingAmountWarning.totalAffected === 1 ? '' : 's'} for{' '}
+                    <strong>{pendingAmountWarning.cat.name}</strong> {pendingAmountWarning.totalAffected === 1 ? 'is' : 'are'} billed at the current amount:
                   </p>
                   <ul className="text-sm text-gray-700 bg-amber-50 border border-amber-100 rounded-lg px-4 py-2.5 space-y-1">
                     {pendingAmountWarning.byGrade.map(g => (
-                      <li key={g.grade}>{gradeLabel(g.grade)}: <strong>{g.count}</strong> student{g.count === 1 ? '' : 's'}</li>
+                      <li key={g.grade}>{gradeLabel(g.grade)}: <strong>{g.count}</strong> bill{g.count === 1 ? '' : 's'}</li>
                     ))}
                   </ul>
                   <p className="text-sm text-gray-500">
-                    Saving here only changes the fee plan going forward — it will <strong>not</strong> update these students&apos; existing bills.
-                    They&apos;ll keep owing the old amount while new bills use the new one, with no note on the ledger explaining the difference.
+                    Saving updates the fee plan and existing bills, including fully paid and waived bills, with an audit entry for each changed bill.
+                    Recorded payments and waiver amounts are retained, and the remaining balance is recalculated. A reduction below payments plus waivers already recorded will be rejected.
                   </p>
                 </div>
                 <div className="px-5 py-4 border-t border-gray-100 flex items-center justify-between">
@@ -1352,7 +1448,7 @@ export default function FeeSetupTab({
                   <button data-testid="btn-confirm-amount-change" onClick={() => doSaveFeeAmounts(pendingAmountWarning.cat, pendingAmountWarning.structs)}
                     disabled={savingStructure}
                     className="text-sm bg-amber-600 text-white px-6 py-2 rounded-lg font-medium hover:bg-amber-700 disabled:opacity-50">
-                    {savingStructure ? 'Saving…' : 'Save anyway'}
+                    {savingStructure ? 'Saving…' : 'Save and update bills'}
                   </button>
                 </div>
               </div>
@@ -1371,6 +1467,9 @@ export default function FeeSetupTab({
                   <p className="text-sm text-gray-500">
                     Bills will be generated for academic year <strong>{academicYear}</strong>. Every fee head, regardless of frequency,
                     becomes due on the academic year&apos;s end date.
+                  </p>
+                  <p className="text-sm text-gray-500">
+                    Existing bills, including paid and waived bills, will be updated to the current fee amounts. Recorded payments and waivers are retained; balances and payment status are recalculated.
                   </p>
                   <div className="border border-gray-100 rounded-xl overflow-hidden">
                     <table className="w-full text-sm">

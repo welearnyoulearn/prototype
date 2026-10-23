@@ -5,6 +5,11 @@ import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
 import { FullPageLoader } from '@/components/loaders'
 import { useConfirm } from '@/components/ui/use-confirm'
+import { overLimitMessage } from '@/lib/planChangeMessage'
+import { planStatus, nextTerm, daysBetween, addDays } from '@/lib/planExpiry'
+import { todayIST } from '@/lib/istDate'
+import type { PlanRow, PlanTerm } from '@/lib/billingTypes'
+import { PLAN_STATUS_STYLE, planStatusLabel } from '@/lib/planStatusUi'
 
 type SchoolDetail = {
   id: number
@@ -19,6 +24,8 @@ type SchoolDetail = {
   school_code?: string
   created_at: string
   tier?: string
+  plan_start_date?: string | null
+  plan_end_date?: string | null
   teacher_count?: number
   student_count?: number
   admin_email?: string
@@ -32,6 +39,30 @@ type EditForm = {
 
 type Feature = { key: string; label: string; category: string }
 type FeatureMatrix = Record<string, Record<string, boolean>>  // feature_key → { basic, standard, premium }
+
+// Cumulative: Standard includes Basic features, Premium includes all — same rule lib/auth.ts's
+// schoolHasFeature() enforces server-side. Kept in one place so the Portal Access toggles below
+// can't drift from what a login actually checks.
+const TIER_INCLUDES: Record<string, string[]> = {
+  basic: ['basic'], standard: ['basic', 'standard'], premium: ['basic', 'standard', 'premium'],
+}
+
+/**
+ * Whether `featureKey` is actually granted for `tier` by the plan matrix alone (no override) —
+ * mirrors schoolHasFeature()'s bool_or(enabled) over every tier the plan includes. Missing rows
+ * mean "not configured", which schoolHasFeature treats as disabled, not enabled — matching that
+ * default is what this function is for.
+ */
+function planGrantsFeature(matrix: FeatureMatrix, tier: string | undefined, featureKey: string): boolean {
+  if (!tier || tier === 'none') return false
+  const fMatrix = matrix[featureKey]
+  if (!fMatrix) return false
+  return (TIER_INCLUDES[tier] ?? [tier]).some(t => fMatrix[t] === true)
+}
+
+const TIER_RANK: Record<string, number> = { none: 0, basic: 1, standard: 2, premium: 3 }
+const inr = (n: number, decimals = 2) => '₹' + n.toLocaleString('en-IN', { minimumFractionDigits: decimals, maximumFractionDigits: decimals })
+const shortDate = (d: string) => new Date(d + 'T00:00:00Z').toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: 'UTC' })
 
 const TIER_META = [
   { key: 'none',     label: 'No Plan',  color: 'gray',   border: 'border-gray-200',   bg: 'bg-gray-50',   ring: 'ring-2 ring-gray-400',    dot: 'border-gray-500 bg-gray-500',     badge: 'bg-gray-100 text-gray-600',     bullet: 'bg-gray-400' },
@@ -59,7 +90,18 @@ export default function SchoolDetailPage() {
   const [selectedTier, setSelectedTier] = useState<string>('none')
   const [savingSub, setSavingSub]       = useState(false)
   const [savedSub, setSavedSub]         = useState(false)
+  const [endInput, setEndInput]         = useState('')      // plan end date being assigned ('' = default: 1 year from today)
+  const [noExpiry, setNoExpiry]         = useState(false)
+  const [savingTerm, setSavingTerm]     = useState(false)
+  const [termMsg, setTermMsg]           = useState('')
   const [tierPopup, setTierPopup]       = useState<{ tier: string; from: string } | null>(null)
+  // Plan price (#358): list prices, the agreed price in force today, and this save's choices (null = default).
+  const [plans, setPlans]               = useState<PlanRow[]>([])
+  const [term, setTerm]                 = useState<PlanTerm | null>(null)
+  const [periodInput, setPeriodInput]   = useState<'yearly' | 'monthly' | null>(null)
+  const [agreedInput, setAgreedInput]   = useState<string | null>(null)
+  const [reasonInput, setReasonInput]   = useState<string | null>(null)
+  const [planMsg, setPlanMsg]           = useState('')
 
   // Edit mode
   const [editing, setEditing]     = useState(false)
@@ -68,7 +110,7 @@ export default function SchoolDetailPage() {
 
   // Reset password
   const [resetting, setResetting]   = useState(false)
-  const [resetCreds, setResetCreds] = useState<{ email: string; pass: string } | null>(null)
+  const [resetCreds, setResetCreds] = useState<{ email: string } | null>(null)
 
   // Portal access overrides (student-portal / parent-portal)
   const [portalOverrides, setPortalOverrides] = useState<Record<string, boolean>>({})
@@ -113,11 +155,15 @@ export default function SchoolDetailPage() {
   useEffect(() => {
     async function load() {
       try {
-        const [schoolRes, featRes, overridesRes] = await Promise.all([
+        const [schoolRes, featRes, overridesRes, plansRes, subRes] = await Promise.all([
           fetch(`/api/schools/${schoolId}`),
           fetch('/api/platform/features'),
           fetch(`/api/platform/schools/${schoolId}/feature-overrides`),
+          fetch('/api/platform/plans'),
+          fetch(`/api/schools/${schoolId}/subscription`),
         ])
+        if (plansRes.ok) setPlans(await plansRes.json())
+        if (subRes.ok) setTerm(((await subRes.json()) as { term?: PlanTerm | null }).term ?? null)
         const schoolData = await schoolRes.json()
         const featData   = await featRes.json()
         const overridesData = await overridesRes.json().catch(() => ({ overrides: {} }))
@@ -126,6 +172,7 @@ export default function SchoolDetailPage() {
 
         setSchool(schoolData)
         setSelectedTier(schoolData.tier || 'none')
+        setEndInput(schoolData.tier && schoolData.tier !== 'none' ? (schoolData.plan_end_date ?? '') : '')
         setEditForm({
           name: schoolData.name || '', type: schoolData.type || 'Private',
           city: schoolData.city || '', country: schoolData.country || '',
@@ -150,23 +197,64 @@ export default function SchoolDetailPage() {
   }, [schoolId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function handleSaveSub() {
-    setSavingSub(true); setSavedSub(false); setError('')
+    setSavingSub(true); setSavedSub(false); setError(''); setPlanMsg('')
     const prevTier = school?.tier || 'none'
     try {
-      const res = await fetch(`/api/schools/${schoolId}/subscription`, {
+      const send = (confirmOverLimit: boolean) => fetch(`/api/schools/${schoolId}/subscription`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tier: selectedTier }),
+        body: JSON.stringify({
+          tier: selectedTier, confirm_over_limit: confirmOverLimit || undefined,
+          ...(selectedTier !== 'none' && noExpiry ? { no_expiry: true } : {}),
+          ...(selectedTier !== 'none' && !noExpiry && endInput && endInput !== (school?.plan_end_date ?? '') ? { plan_end_date: endInput } : {}),
+          ...(billed ? { billingPeriod, agreedPrice: agreedNum, ...(reason.trim() ? { discountReason: reason.trim() } : {}) } : {}),
+        }),
       })
-      const data = await res.json()
+      let res = await send(false)
+      let data = await res.json()
+      // A downgrade that leaves the school with more active staff than the new plan allows
+      // is refused until the admin has seen the numbers and confirmed.
+      if (res.status === 409 && data.code === 'OVER_SEAT_LIMIT') {
+        const ok = await confirm(overLimitMessage(data), { title: 'This leaves the school over its staff limit', confirmText: 'Apply anyway', destructive: true })
+        if (!ok) return
+        res = await send(true)
+        data = await res.json()
+      }
       if (!res.ok) throw new Error(data.error)
-      setSchool(s => s ? { ...s, tier: data.tier } : s)
-      setSavedSub(true)
-      setTierPopup({ tier: selectedTier, from: prevTier })
+      setSchool(s => s ? { ...s, tier: data.tier, plan_start_date: data.plan_start_date ?? s.plan_start_date, plan_end_date: data.plan_end_date ?? s.plan_end_date } : s)
+      setEndInput(data.plan_end_date ?? '')
+      setNoExpiry(data.no_expiry === true)
+      setSavedSub(data.tier === selectedTier)
+      // A mid-term downgrade is stored for renewal: the tier and today's term stay as they are.
+      if (data.term && data.term.startDate <= today) setTerm(data.term)
+      setPeriodInput(null); setAgreedInput(null); setReasonInput(null)
+      setPlanMsg(typeof data.message === 'string' ? data.message : '')
+      setSelectedTier(data.tier)
+      if (data.tier === selectedTier) setTierPopup({ tier: selectedTier, from: prevTier })
       setTimeout(() => setSavedSub(false), 3000)
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to save')
     } finally { setSavingSub(false) }
+  }
+
+  // Renew: one more year from the later of today / the current end. (An exact end date is chosen when the plan is assigned.)
+  // Only the plan's dates change — the tier is re-sent as-is, so no seat check is triggered.
+  async function handleTerm(body: { renew: true }) {
+    if (!school?.tier || school.tier === 'none') return
+    setSavingTerm(true); setTermMsg(''); setError('')
+    try {
+      const res = await fetch(`/api/schools/${schoolId}/subscription`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tier: school.tier, ...body }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      setSchool(s => s ? { ...s, plan_start_date: data.plan_start_date, plan_end_date: data.plan_end_date } : s)
+      setEndInput(data.plan_end_date ?? '')
+      setTermMsg(`Plan now runs until ${data.plan_end_date}`)
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to update plan dates')
+    } finally { setSavingTerm(false) }
   }
 
   async function handlePortalToggle(featureKey: string, enabled: boolean) {
@@ -213,7 +301,7 @@ export default function SchoolDetailPage() {
   }
 
   async function handleResetPassword() {
-    const ok = await confirm('Generate a new temporary password for this school admin?', { title: 'Reset password?', confirmText: 'Generate', destructive: true })
+    const ok = await confirm('Revoke active sessions and email a secure password reset link to this school admin?', { title: 'Reset password?', confirmText: 'Send reset link', destructive: true })
     if (!ok) return
     setResetting(true); setError('')
     try {
@@ -224,7 +312,7 @@ export default function SchoolDetailPage() {
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
-      setResetCreds({ email: data.email, pass: data.temp_password })
+      setResetCreds({ email: data.email })
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to reset password')
     } finally { setResetting(false) }
@@ -238,13 +326,6 @@ export default function SchoolDetailPage() {
       if (!res.ok) throw new Error()
       router.push('/platform-admin')
     } catch { setError('Failed to delete school') }
-  }
-
-  // Cumulative: Standard includes Basic features, Premium includes all
-  const TIER_INCLUDES: Record<string, string[]> = {
-    basic:    ['basic'],
-    standard: ['basic', 'standard'],
-    premium:  ['basic', 'standard', 'premium'],
   }
 
   function getFeaturesForTier(tierKey: string): string[] {
@@ -261,7 +342,42 @@ export default function SchoolDetailPage() {
   }
 
   const inputCls   = 'w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-purple-300'
-  const hasChanged = school?.tier !== selectedTier
+  const dateChanged = selectedTier !== 'none' && (noExpiry
+    ? !!school?.plan_end_date || school?.tier === 'none'
+    : !!endInput && endInput !== (school?.plan_end_date ?? ''))
+  // What this save does to the school's plan price — mirrors PUT /api/schools/[id]/subscription.
+  const today = todayIST()
+  const billingPeriod = periodInput ?? term?.billingPeriod ?? 'yearly'
+  const planRow = plans.find(p => p.tier === selectedTier)
+  const listPrice = planRow ? (billingPeriod === 'yearly' ? planRow.yearly : planRow.monthly) : null
+  const sameTerm = !!term && term.tier === selectedTier && term.billingPeriod === billingPeriod
+  const agreedValue = agreedInput ?? (sameTerm ? String(term.agreedPrice) : listPrice == null ? '' : String(listPrice))
+  const reason = reasonInput ?? (sameTerm ? term.discountReason ?? '' : '')
+  const agreedNum = agreedValue.trim() === '' ? NaN : Number(agreedValue)
+  const billed = selectedTier !== 'none' && !noExpiry && plans.length > 0
+  const needsReason = listPrice != null && Number.isFinite(agreedNum) && (agreedNum < listPrice || agreedNum === 0)
+  const priceError = !billed ? ''
+    : listPrice == null ? `Set a ${billingPeriod} price for ${planRow?.name ?? selectedTier} on Plans & Pricing first.`
+    : !Number.isFinite(agreedNum) || agreedNum < 0 ? 'Enter the agreed price.'
+    : needsReason && reason.trim().length < 3 ? 'Give a reason for a price below the list price.'
+    : reason.trim().length > 200 ? 'Reason is too long (200 characters at most).' : ''
+  const priceChanged = billed && (!sameTerm || term.agreedPrice !== agreedNum || (term.discountReason ?? '') !== reason.trim())
+  function billPreview(): string {
+    if (!billed || priceError) return ''
+    if (billingPeriod === 'monthly') return 'Billed monthly: the plan fee is added to each monthly bill.'
+    const cur = term?.billingPeriod === 'yearly' ? term : null
+    const started = nextTerm(school?.tier || 'none', { start: school?.plan_start_date ?? null, end: school?.plan_end_date ?? null }, selectedTier, null, today)?.started ?? true
+    if (cur && !started) {
+      if (TIER_RANK[selectedTier] < (TIER_RANK[cur.tier] ?? 0)) return `Downgrade: ${planRow?.name} starts on ${shortDate(addDays(cur.endDate, 1))}, when the current term ends. No bill now.`
+      const remaining = daysBetween(today, cur.endDate) + 1
+      const amount = Math.round((agreedNum - cur.agreedPrice) * remaining / (daysBetween(cur.startDate, cur.endDate) + 1) * 100) / 100
+      return amount > 0 ? `Upgrade: ${inr(amount)} + GST is billed now for the remaining ${remaining} days.` : 'No bill: this term is already billed.'
+    }
+    if (agreedNum === 0) return 'No bill: complimentary.'
+    const gst = Math.round(agreedNum * 18) / 100
+    return `Saving creates a plan bill for ${inr(agreedNum + gst)} (${inr(agreedNum, 0)} + ${inr(gst, 0)} GST), dated ${shortDate(today)}, and emails the school admin.`
+  }
+  const hasChanged = school?.tier !== selectedTier || dateChanged || priceChanged
   const currentBadge = TIER_META.find(t => t.key === (school?.tier || 'none'))
 
   if (loading) return <FullPageLoader portal="platform-admin" message="Loading school details" />
@@ -476,7 +592,7 @@ export default function SchoolDetailPage() {
                   return (
                     <div
                       key={tier.key}
-                      onClick={() => setSelectedTier(tier.key)}
+                      onClick={() => { setSelectedTier(tier.key); setAgreedInput(null); setReasonInput(null) }}
                       className={`relative rounded-xl border-2 p-5 cursor-pointer transition-all hover:shadow-md
                         ${tier.bg} ${tier.border}
                         ${isSelected ? tier.ring : ''}`}
@@ -522,14 +638,101 @@ export default function SchoolDetailPage() {
               </div>
             )}
 
+            {selectedTier !== 'none' && (
+              <div className="mt-5 rounded-lg border border-gray-200 p-4" data-testid="plan-end-field">
+                <label className="block text-sm font-semibold text-gray-800" htmlFor="plan-end-date">Plan end date</label>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  After this date (plus a 14-day grace period) the school is locked: teachers, students and parents can no longer log in,
+                  and the school administrator can only export data and request a renewal. Nothing is deleted, and renewing restores everything.
+                  Leave blank for one year from today.
+                </p>
+                <div className="flex flex-wrap items-center gap-3 mt-3">
+                  <input id="plan-end-date" data-testid="plan-end-date" type="date" value={endInput} disabled={noExpiry}
+                    onChange={e => setEndInput(e.target.value)}
+                    className="border border-gray-300 rounded-lg px-3 py-2 text-sm disabled:bg-gray-100 disabled:text-gray-400" />
+                  {[{ label: '6 months', m: 6 }, { label: '1 year', m: 12 }, { label: '2 years', m: 24 }].map(o => (
+                    <button key={o.m} type="button" disabled={noExpiry} data-testid={`plan-end-preset-${o.m}`}
+                      onClick={() => { const d = new Date(); d.setMonth(d.getMonth() + o.m); setEndInput(d.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' })) }}
+                      className="border border-gray-300 text-gray-700 hover:bg-gray-50 px-3 py-2 rounded-lg text-xs font-medium disabled:opacity-50">
+                      {o.label}
+                    </button>
+                  ))}
+                  <label className="flex items-center gap-2 text-sm text-gray-700">
+                    <input data-testid="plan-no-expiry" type="checkbox" checked={noExpiry} onChange={e => setNoExpiry(e.target.checked)} />
+                    No expiry
+                  </label>
+                </div>
+              </div>
+            )}
+
+            {billed && (
+              <div className="mt-5 rounded-lg border border-gray-200 p-4" data-testid="plan-price-field">
+                <p className="text-sm font-semibold text-gray-800">Plan price</p>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-3">
+                  <label className="text-xs text-gray-600">Billing
+                    <select data-testid="plan-billing-period" value={billingPeriod}
+                      onChange={e => { setPeriodInput(e.target.value as 'yearly' | 'monthly'); setAgreedInput(null); setReasonInput(null) }}
+                      className="mt-1 block w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white">
+                      <option value="yearly">Yearly</option>
+                      <option value="monthly">Monthly</option>
+                    </select>
+                  </label>
+                  <div className="text-xs text-gray-600">List price
+                    <p className="mt-1 py-2 text-sm text-gray-900" data-testid="plan-list-price">{listPrice == null ? 'Not set' : `${inr(listPrice, 0)} / ${billingPeriod === 'yearly' ? 'year' : 'month'}`}</p>
+                  </div>
+                  <label className="text-xs text-gray-600">Agreed price (₹)
+                    <input data-testid="plan-agreed-price" type="number" min={0} value={agreedValue} onChange={e => setAgreedInput(e.target.value)}
+                      className="mt-1 block w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                  </label>
+                  <label className="text-xs text-gray-600">Reason{needsReason ? '' : ' (if below list)'}
+                    <input data-testid="plan-discount-reason" type="text" maxLength={200} value={reason} onChange={e => setReasonInput(e.target.value)}
+                      placeholder={needsReason ? 'Required, e.g. Founding school' : ''} aria-invalid={needsReason && reason.trim().length < 3}
+                      className="mt-1 block w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                  </label>
+                </div>
+                {priceError
+                  ? <p className="mt-3 text-sm text-red-700" role="alert" data-testid="plan-price-error">{priceError}</p>
+                  : <p className="mt-3 text-sm text-gray-700" data-testid="plan-bill-preview">{billPreview()}</p>}
+              </div>
+            )}
+
             <div className="flex items-center gap-4 mt-5">
-              <button onClick={handleSaveSub} disabled={savingSub || !hasChanged}
+              <button onClick={handleSaveSub} disabled={savingSub || !hasChanged || !!priceError} data-testid="plan-assign-save"
                 className="bg-purple-600 hover:bg-purple-700 text-white px-6 py-2.5 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
                 {savingSub ? 'Saving…' : 'Assign Plan'}
               </button>
               {savedSub && <span className="text-green-600 text-sm font-medium">✓ Plan assigned — school admin sidebar updated</span>}
+              {planMsg && <span className="text-sm text-gray-700" data-testid="plan-save-message">{planMsg}</span>}
               {!hasChanged && !savedSub && <span className="text-gray-400 text-sm">No changes</span>}
             </div>
+
+            {school?.tier && school.tier !== 'none' && (() => {
+              const st = planStatus(school.tier, school.plan_end_date ?? null)
+              return (
+                <div className="mt-5 pt-5 border-t border-gray-100" data-testid="plan-term">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <span className="text-sm font-semibold text-gray-800">Plan term</span>
+                    <span data-testid="plan-term-status"
+                      className={`text-xs px-2 py-0.5 rounded-full border ${PLAN_STATUS_STYLE[st.status]}`}>
+                      {planStatusLabel(st.status, st.days_left, st.grace_ends, school.plan_end_date ?? null) || 'Active'}
+                    </span>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-1" data-testid="plan-term-dates">
+                    {school.plan_end_date
+                      ? `${school.plan_start_date ?? '—'} → ${school.plan_end_date}`
+                      : 'No end date set'}
+                    {' · '}Renews and end-date changes never touch staff or data.
+                  </p>
+                  <div className="flex flex-wrap items-center gap-3 mt-3">
+                    {school.plan_end_date ? <button data-testid="plan-renew" onClick={() => handleTerm({ renew: true })} disabled={savingTerm}
+                      className="border border-purple-300 text-purple-700 hover:bg-purple-50 px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50">
+                      {savingTerm ? 'Saving…' : 'Renew 1 year'}
+                    </button> : <span className="text-xs text-gray-500">This plan has no expiry.</span>}
+                    {termMsg && <span data-testid="plan-term-msg" className="text-green-600 text-sm font-medium">✓ {termMsg}</span>}
+                  </div>
+                </div>
+              )
+            })()}
           </div>
         </div>
 
@@ -547,7 +750,10 @@ export default function SchoolDetailPage() {
               { key: 'student-portal', label: 'Student Portal Access' },
               { key: 'parent-portal',  label: 'Parent Portal Access' },
             ].map(({ key, label }) => {
-              const enabled = portalOverrides[key] !== false // default true unless explicitly overridden off
+              // An explicit override wins; otherwise this must show what the plan itself grants —
+              // schoolHasFeature() denies student/parent login when the plan doesn't include the
+              // portal, so a toggle defaulting to "on" here was showing access that didn't exist.
+              const enabled = key in portalOverrides ? portalOverrides[key] : planGrantsFeature(matrix, school?.tier, key)
               return (
                 <div key={key} className="flex items-center justify-between">
                   <span className="text-sm text-gray-800">{label}</span>
@@ -583,7 +789,8 @@ export default function SchoolDetailPage() {
         </div>
 
         {/* ── AI Access ────────────────────────────────────────────────────── */}
-        <AiAccessCard schoolId={schoolId} portalOverrides={portalOverrides} />
+        <AiAccessCard schoolId={schoolId}
+          studentPortalEnabled={'student-portal' in portalOverrides ? portalOverrides['student-portal'] : planGrantsFeature(matrix, school?.tier, 'student-portal')} />
 
         {/* ── Watchline ────────────────────────────────────────────────────── */}
         <WatchlineCard schoolId={schoolId} schoolName={school?.name ?? ''} portalOverrides={portalOverrides} />
@@ -612,8 +819,8 @@ export default function SchoolDetailPage() {
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl">
             <div className="bg-amber-500 px-6 py-5 rounded-t-2xl">
-              <h3 className="text-white font-bold text-lg">New Credentials Generated</h3>
-              <p className="text-amber-100 text-sm mt-0.5">Share these with the school admin</p>
+              <h3 className="text-white font-bold text-lg">Reset Link Sent</h3>
+              <p className="text-amber-100 text-sm mt-0.5">Active sessions were revoked</p>
             </div>
             <div className="px-6 py-5">
               <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 space-y-3">
@@ -621,13 +828,9 @@ export default function SchoolDetailPage() {
                   <p className="text-xs text-amber-700 font-semibold uppercase tracking-wide mb-1">Admin Email (Login)</p>
                   <code className="text-sm font-mono text-amber-900 bg-white border border-amber-200 rounded px-3 py-2 block">{resetCreds.email}</code>
                 </div>
-                <div>
-                  <p className="text-xs text-amber-700 font-semibold uppercase tracking-wide mb-1">New Temporary Password</p>
-                  <code className="text-sm font-mono text-amber-900 bg-white border border-amber-200 rounded px-3 py-2 block">{resetCreds.pass}</code>
-                </div>
               </div>
               <p className="text-xs text-gray-400 mt-3 bg-gray-50 rounded-lg px-3 py-2">
-                ⚠️ School admin will be forced to set a new password on next login.
+                The one-time link expires in one hour and invalidates any older reset link.
               </p>
               <button onClick={() => setResetCreds(null)}
                 className="w-full mt-4 bg-gray-900 hover:bg-gray-800 text-white py-2.5 rounded-xl text-sm font-medium transition-colors">
@@ -787,18 +990,13 @@ const AI_TIER_META: { key: string; label: string; desc: string }[] = [
   { key: 'ai_pro',   label: 'AI Pro',   desc: 'Full doubt-clearing AI chatbot. Coming soon — not available yet.' },
 ]
 
-function AiAccessCard({ schoolId, portalOverrides }: { schoolId: string; portalOverrides: Record<string, boolean> }) {
+function AiAccessCard({ schoolId, studentPortalEnabled }: { schoolId: string; studentPortalEnabled: boolean }) {
   const [tier, setTier]             = useState('none')
   const [selectedTier, setSelectedTier] = useState('none')
   const [loading, setLoading]       = useState(true)
   const [saving, setSaving]         = useState(false)
   const [saved, setSaved]           = useState(false)
   const [error, setError]           = useState('')
-
-  // Same override map the parent page's Portal Access section reads —
-  // re-derived on every render, so flipping the Student Portal Access toggle
-  // unlocks this card immediately with no reload.
-  const studentPortalEnabled = portalOverrides['student-portal'] !== false
 
   useEffect(() => {
     fetch(`/api/schools/${schoolId}/ai-access`)

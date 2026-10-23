@@ -6,6 +6,40 @@ All finished features and bug fixes. Most recent first.
 
 <!-- Add new entries at the top -->
 
+### 2026-10-18 — Paginate Platform Admin Billing and Traffic tables (#400)
+**Type:** Enhancement
+**Portal:** Platform Admin
+**Summary:** Billing → Usage/Bills and Traffic → By school/School Health/school users show 50 rows per page with the shared pager; filters, search, month and period reset to page 1.
+
+### 2026-10-06 — School Admin sidebar UX (#353)
+**Type:** Enhancement
+**Portal:** School Admin
+**Summary:** Larger, higher-contrast sidebar; focus rings; collapsible sections; menu search; recently-visited chips; per-user arrangeable order (saved in browser); distinct lucide icons.
+
+### 2026-10-06 — Student List pagination (#352)
+**Type:** Feature (performance)
+**Portal:** School Admin
+**Summary:** Student List shows 50 students per page with server-side search and status/grade/section filters; counts and filter options come from `?summary=1`. Unpaginated reads are unchanged for fee screens. Staff directory pagination and deferring staff subject-options are follow-ups.
+**PR:** #352
+
+### 2026-10-06 — Faster Staff/Student onboarding tabs (#348)
+**Type:** Bug fix (performance)
+**Portal:** School Admin
+**Summary:** Onboarding panels mount lazily on first open of their sub-tab, and student onboarding fetches only roll numbers (`/api/students?rolls_only=1`) instead of the full roster.
+**PR:** #348
+
+### 2026-10-05 — Fee year-end process (#343)
+**Type:** Feature
+**Portal:** School Admin
+**Summary:** Makes year-end a repeatable process. Year-end owner and a write-off approver are chosen from the existing staff logins (a single-login school has no sign-off); write-offs above a limit need the approver's sign-off, enforced when applied; closing with dues still on Leave Open needs a reason and fills an open-dues register (owner, promised date, note, deadline); a live checklist heads the Year-End tab; a daily cron raises in-app reminders; and a year-end pack workbook (summary + reconciliation, carried dues, write-offs with approvals, passout moves, Leave Open list) downloads after closing.
+**PR:** #343
+
+### 2026-09-15 — Exam Management, Calendar & Notifications v3 (#TBD)
+**Type:** Feature / Bug Fix
+**Portal:** School Admin / Teacher / Student / Parent
+**Summary:** Extended the existing exam system with schedule detail (time/room/syllabus/instructions/invigilator/academic year), specific-student targeting, server-side conflict detection, a real cancel state with reschedule/cancel/venue-change notifications, a 7-day/1-day/exam-day reminder cron with per-school toggles, and cross-portal calendars (teacher's portal-wide schedule, student's countdown/completed view, parent's per-child calendar). Along the way fixed two real bugs: `GET /api/exams/calendar` (and the parent dashboard's `child-summary` API) excluded `status='scheduled'` exams by default — the status nearly every future exam sits in — so students and parents saw no upcoming exams at all until the day after each one happened; and `GET /api/exams` let any teacher session view another class's exam list by passing its `class_id`. See `wiki/features/exam-management.md`.
+**PR:** #TBD
+
 ## Format
 
 ```
@@ -17,6 +51,24 @@ All finished features and bug fixes. Most recent first.
 ```
 
 ---
+
+### 2026-09-28 — Backend authorization and tenant boundaries (#253)
+**Type:** Bug Fix (Security, Critical)
+**Portal:** All
+**Summary:** Closed the remaining unauthenticated and cross-role API operations (notifications, master tasks, platform catalog/stats, textbooks, change-password, heartbeat, academic year), blocked students and parents from the student/staff directories, restricted upload signing to server-chosen folders, removed the legacy parent lookup, and enforced plan features on the API centrally in `proxy.ts`. Also closes the feedback-management gap: a public feedback code now 404s (not just "closed") when the school's plan doesn't include the feature. Covered by `e2e/security-authz.spec.ts`.
+**PR:** fix/253-backend-authz
+
+### 2026-09-27 — Feedback: event & place QRs, poster sharing, folders, archive, dashboard redesign (#TBD)
+**Type:** Feature + Enhancement
+**Portal:** School Admin (+ public feedback form)
+**Summary:** QR poster with school name/quote + share; per-event/place QR codes with their own poster, fixed form/audience and close date; PTM and Teachers' Meeting forms; emoji-first Advanced Forms with live preview; Submissions as folders (delete, Clear folder → Excel + Archive/restore/purge); redesigned submission list/detail and Dashboard with corrected metrics.
+**PR:** feature/feedback-qr-poster-share (no issue number — gh unavailable when started)
+
+### 2026-09-24 — Student portal: sticker-book redesign of every screen (#229)
+**Type:** Enhancement (UI/UX)
+**Portal:** Student
+**Summary:** Neubrutalist + Y2K + scrapbook design system for the whole student portal (dashboard, syllabus, library, class circle, marks, attendance, calendar, profile, AI Hub, sign-in pages) with 3D stickers, per-screen colours and the school logo top-left. Student-scoped CSS; other portals unchanged.
+**PR:** feature/229-student-dashboard-stickers
 
 ### 2026-09-22 — Export Data: one tab for every download (#206)
 **Type:** Feature (rebuild)

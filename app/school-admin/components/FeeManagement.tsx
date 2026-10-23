@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback, Fragment } from 'react'
+import { useEffect, useRef, useState, useCallback, Fragment } from 'react'
 import { useFeature } from '@/lib/features-context'
 import type {
   FeeCategory, FeeStructure, StructureLock, Amendment,
@@ -8,8 +8,11 @@ import type {
   RecentPayment, GradeStat, PassoutData, PassoutStudent,
   ReceiptHeaderBlock,
 } from './fee-management/types'
+import { classForYear } from './fee-management/format'
+import { carriedBilled } from './fee-management/dues'
 import { escapeHtml, printDualCopyReceipt, writeAndPrint, renderHeaderBlocks } from './fee-management/receipts'
 import FeeArchiveTab from './fee-management/FeeArchiveTab'
+import { feeColorMap } from './fee-management/feeTypeColor'
 import FeeLeaversTab, { type RemovedStudent } from './fee-management/FeeLeaversTab'
 import FeeReportsTab from './fee-management/FeeReportsTab'
 import FeeYearEndTab from './fee-management/FeeYearEndTab'
@@ -60,6 +63,24 @@ export default function FeeManagement({
 }) {
   type Tab = 'overview' | 'setup' | 'applicability' | 'ledger' | 'collect' | 'students' | 'reports' | 'yearend' | 'leavers' | 'archive'
   const [activeTab, setActiveTab] = useState<Tab>('overview')
+  const [moreTabsOpen, setMoreTabsOpen] = useState(false)
+  // Tabs picked from More stay in the bar (like browser tabs) until closed with ×
+  const [openedTabs, setOpenedTabs] = useState<Tab[]>([])
+  const moreTabsRef = useRef<HTMLDivElement>(null)
+  // Any route into a More tab (e.g. Overview shortcuts) also pins it to the bar
+  useEffect(() => {
+    if (!['overview', 'collect'].includes(activeTab)) setOpenedTabs(o => o.includes(activeTab) ? o : [...o, activeTab])
+  }, [activeTab])
+  // Close the More menu on an outside click — without a full-screen backdrop, which would
+  // swallow the first click on Overview / Ledger instead of navigating.
+  useEffect(() => {
+    if (!moreTabsOpen) return
+    const onDown = (e: MouseEvent) => { if (!moreTabsRef.current?.contains(e.target as Node)) setMoreTabsOpen(false) }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setMoreTabsOpen(false) }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey) }
+  }, [moreTabsOpen])
 
   const hasOnlinePayments = useFeature('online-payments')
 
@@ -131,8 +152,8 @@ export default function FeeManagement({
   // Derived passbook data filtered to the selected academic year
   const pbYearGroup = pbData?.ledger_by_year.find(y => y.academic_year === academicYear) ?? null
   const pbSummary   = pbYearGroup
-    ? { total_billed: pbYearGroup.total_billed, total_paid: pbYearGroup.total_paid, total_waived: pbYearGroup.total_waived, discretionary_waived: pbYearGroup.discretionary_waived ?? pbYearGroup.total_waived, outstanding: pbYearGroup.outstanding }
-    : { total_billed: 0, total_paid: 0, total_waived: 0, discretionary_waived: 0, outstanding: 0 }
+    ? { total_billed: pbYearGroup.total_billed, total_paid: pbYearGroup.total_paid, total_waived: pbYearGroup.total_waived, discretionary_waived: pbYearGroup.discretionary_waived ?? pbYearGroup.total_waived, written_off: pbYearGroup.written_off ?? 0, carried_forward: pbYearGroup.carried_forward ?? 0, outstanding: pbYearGroup.outstanding }
+    : { total_billed: 0, total_paid: 0, total_waived: 0, discretionary_waived: 0, written_off: 0, carried_forward: 0, outstanding: 0 }
   const pbPayments  = pbData?.payments.filter(p => p.bill_year === academicYear) ?? []
   // One receipt_number can span several fee-category rows in pbPayments (one
   // payment covering multiple categories at once) — group them here so the
@@ -158,6 +179,7 @@ export default function FeeManagement({
   const pbWaivers   = pbData?.waivers.filter(w => w.bill_year === academicYear) ?? []
   const pbTimeline  = pbData?.timeline.filter(t => t.academic_year === academicYear) ?? []
   const pbYearOnly  = pbYearGroup ? [pbYearGroup] : []
+  const feeColors = feeColorMap(pbYearOnly.flatMap(y => y.entries.map(e => e.category_name)))
   // Revoked waivers — fetched lazily on first "Show Revoked" click, shared by the
   // Modal here and FeePassbookTab (which keeps its own local copy since it also
   // needs this outside the modal flow).
@@ -203,7 +225,7 @@ export default function FeeManagement({
       if (open.length === 0) throw new Error('No outstanding dues found for this student')
       const row: StudentRow = {
         student_id: s.student_id, student_name: s.student_name, roll_number: s.roll_number,
-        school_roll_number: null, grade: s.grade ?? '—', section: s.section ?? '',
+        school_roll_number: s.school_roll_number ?? null, grade: s.grade ?? '—', section: s.section ?? '',
         email: null, phone: null, parent_name: null, parent_phone: null, parent_email: null,
         student_status: s.student_status,
         total_billed: open.reduce((a, e) => a + Number(e.amount_due), 0),
@@ -353,7 +375,7 @@ export default function FeeManagement({
       // state (openStudent/collectChecked/payAmount/etc.) since the extraction.
       const row: StudentRow = {
         student_id: s.student_id, student_name: s.student_name, roll_number: s.roll_number,
-        school_roll_number: null, grade: s.grade, section: s.section,
+        school_roll_number: s.school_roll_number ?? null, grade: s.grade, section: s.section,
         email: null, phone: null, parent_name: null, parent_phone: null, parent_email: null,
         student_status: 'left',
         total_billed: open.reduce((a, e) => a + Number(e.amount_due), 0),
@@ -368,33 +390,63 @@ export default function FeeManagement({
     setPassoutCollectLoading(null)
   }
 
+  // The Overview opens on the headline figures only (/api/fees/stats?scope=summary). The heavier
+  // breakdowns — class-wise analysis, top defaulters, payment modes, recent payments, passout dues —
+  // are fetched when the user presses "View details", then kept fresh on later refreshes.
+  const [detailsLoaded, setDetailsLoaded]   = useState(false)
+  const [detailsLoading, setDetailsLoading] = useState(false)
+  const detailsLoadedRef = useRef(false)
+
+  const loadDetails = useCallback(async () => {
+    if (!academicYear) return
+    setDetailsLoading(true)
+    try {
+      const [detRes, pmtRes] = await Promise.all([
+        fetch(`/api/fees/stats?school_id=${schoolId}&academic_year=${academicYear}&scope=details`),
+        fetch(`/api/fees/payments?school_id=${schoolId}&academic_year=${encodeURIComponent(academicYear)}`),
+      ])
+      if (detRes.ok) {
+        const dd = await detRes.json()
+        setStats(prev => prev ? { ...prev, monthly_trend: dd.monthly_trend, top_defaulters: dd.top_defaulters, by_payment_mode: dd.by_payment_mode, by_class: dd.by_class } : prev)
+        setGradeStats(Array.isArray(dd.by_class) ? dd.by_class : [])
+        clearLoadError('stats')
+        detailsLoadedRef.current = true; setDetailsLoaded(true)
+      } else setLoadError('stats', 'Could not load the detailed breakdown — try again')
+      if (pmtRes.ok) {
+        const all = await pmtRes.json() as Array<RecentPayment & { payment_status?: string }>
+        setRecentPayments(all.filter(p => p.payment_status === 'completed' || !p.payment_status).slice(0, 6))
+      }
+    } catch { setLoadError('stats', 'Network error — the detailed breakdown could not be loaded') }
+    finally { setDetailsLoading(false) }
+    loadPassout()
+  }, [schoolId, academicYear, loadPassout])
+
   const loadStats = useCallback(async () => {
     if (!academicYear) return
     setStatsLoading(true)
     try {
-      const [statsRes, pmtRes] = await Promise.all([
-        fetch(`/api/fees/stats?school_id=${schoolId}&academic_year=${academicYear}`),
-        fetch(`/api/fees/payments?school_id=${schoolId}`),
-      ])
+      const statsRes = await fetch(`/api/fees/stats?school_id=${schoolId}&academic_year=${academicYear}&scope=summary`)
       if (statsRes.ok) {
         clearLoadError('stats')
         const sd = await statsRes.json()
-        setStats(sd)
-        setGradeStats(Array.isArray(sd.by_class) ? sd.by_class : [])
+        // keep any detail sections the user has already opened; otherwise start them empty
+        setStats(prev => ({
+          ...sd,
+          monthly_trend: prev?.monthly_trend ?? [], top_defaulters: prev?.top_defaulters ?? [],
+          by_payment_mode: prev?.by_payment_mode ?? [], by_class: prev?.by_class ?? [],
+        }))
       } else setLoadError('stats', 'Could not load fee summary — try refreshing the page')
-      if (pmtRes.ok) {
-        const all = await pmtRes.json() as Array<RecentPayment & { payment_status?: string }>
-        setRecentPayments(
-          all
-            .filter(p => p.payment_status === 'completed' || !p.payment_status)
-            .slice(0, 6)
-        )
-      }
     } catch { setLoadError('stats', 'Network error — fee summary could not be loaded') }
     finally { setStatsLoading(false) }
-  }, [schoolId, academicYear])
+    if (detailsLoadedRef.current) loadDetails()
+  }, [schoolId, academicYear, loadDetails])
 
-  useEffect(() => { if (academicYear) { loadStats(); loadPassout() } }, [loadStats, loadPassout, academicYear])
+  // A different year is a different set of figures: collapse the details back to the button.
+  useEffect(() => {
+    detailsLoadedRef.current = false; setDetailsLoaded(false)
+    setStats(null); setGradeStats([]); setRecentPayments([])
+  }, [schoolId, academicYear])
+  useEffect(() => { if (academicYear) loadStats() }, [loadStats, academicYear])
 
   // ── Setup: categories + structures + lock + amendments ───────────────────────
   const loadSetup = useCallback(async () => {
@@ -443,11 +495,13 @@ export default function FeeManagement({
     } catch { setSetupStatus(null) }
     finally { setSetupStatusLoading(false) }
   }, [schoolId, academicYear])
-  // Also refetch on every tab change (not just academicYear) — otherwise leaving
-  // the Setup tab after creating categories/amounts/bills/lock would show a stale
-  // banner on Overview until academicYear happened to change again. This endpoint
-  // is cheap enough that refetching on tab switches is a non-issue.
-  useEffect(() => { if (academicYear) loadSetupStatus() }, [academicYear, activeTab, loadSetupStatus])
+  // Refetched when the year changes, and (via the effect below) whenever the Fee Plan data changes
+  // — head added, amounts saved, bills generated, plan locked. Not on every tab switch: those are
+  // the only things that change it, and the Fee Plan tab reports each one.
+  useEffect(() => { if (academicYear) loadSetupStatus() }, [academicYear, loadSetupStatus])
+  // Fee Plan edits (head added, amounts saved, bills generated, plan locked) reload the plan data
+  // without changing tab; refresh the banner's status then too so it doesn't contradict the checklist.
+  useEffect(() => { if (academicYear && activeTab === 'setup') loadSetupStatus() }, [categories, structures, structureLock, academicYear, activeTab, loadSetupStatus])
 
   // ── Setup actions ────────────────────────────────────────────────────────────
   // Generate bills only for students who have no ledger rows yet (safe after lock)
@@ -594,9 +648,11 @@ export default function FeeManagement({
     if (rows.length === 0) return
     const s = pbData.student
     const first = rows[0] as PaymentRecord & { fee_head_name?: string; period_label?: string; category_name?: string }
+    // Class as of the year this payment was for, not today's (a reprint must match the original)
+    const cls = classForYear(s, pbData.class_by_year, first.bill_year)
     printDualCopyReceipt({
       school_name: branding.school_name || 'Fee Receipt', logo_url: branding.logo_url, logo_align: branding.logo_align, header_blocks: branding.receipt_header_blocks,
-      student_name: s.name, roll_number: s.roll_number, grade: s.grade, section: s.section || '',
+      student_name: s.name, roll_number: cls.school_roll_number ? String(cls.school_roll_number) : '', system_id: s.roll_number, grade: cls.grade, section: cls.section || '',
       parent_name: s.parent_name, receipt_number: receiptNumber,
       lines: rows.map(r => {
         const row = r as PaymentRecord & { fee_head_name?: string; period_label?: string; category_name?: string }
@@ -611,13 +667,21 @@ export default function FeeManagement({
   function printPassbookStatement() {
     if (!pbData) return
     const s = pbData.student
-    const rows = pbData.timeline.map(t => `<tr>
+    const cls = classForYear(s, pbData.class_by_year, academicYear)
+    // A statement is for the selected year: only that year's entries, with a running balance of its
+    // own. (The full timeline spans every year — it would list e.g. next year's "Previous Year
+    // Dues" bill as a charge in this one and carry the balance across years.)
+    let running = 0
+    const rows = pbData.timeline.filter(t => !t.academic_year || t.academic_year === academicYear).map(t => {
+      running += Number(t.debit) - Number(t.credit)
+      return `<tr>
       <td>${new Date(t.date).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' })}</td>
       <td>${t.description}</td>
       <td style="text-align:right">${t.debit > 0 ? '₹' + Number(t.debit).toLocaleString('en-IN') : ''}</td>
       <td style="text-align:right">${t.credit > 0 ? '₹' + Number(t.credit).toLocaleString('en-IN') : ''}</td>
-      <td style="text-align:right">₹${Number(t.balance).toLocaleString('en-IN')}</td>
-    </tr>`).join('')
+      <td style="text-align:right">₹${Math.max(0, running).toLocaleString('en-IN')}</td>
+    </tr>`
+    }).join('')
     const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Statement ${escapeHtml(s.name)}</title>
 <style>
   body{font-family:Arial,sans-serif;padding:32px;color:#222;max-width:820px;margin:0 auto}
@@ -644,7 +708,7 @@ export default function FeeManagement({
     <div class="school">${escapeHtml(branding.school_name || 'School')}</div>
     ${renderHeaderBlocks(branding.receipt_header_blocks)}
     <div class="title">Fee Statement (Passbook)</div>
-    <div class="sub">${escapeHtml(s.name)} · Grade ${escapeHtml(s.grade)}${escapeHtml(s.section || '')} · Roll #${escapeHtml(s.roll_number)} · ${escapeHtml(academicYear)}</div>
+    <div class="sub" style="overflow-wrap:anywhere">${escapeHtml(s.name)} · Grade ${escapeHtml(cls.grade)}${escapeHtml(cls.section || '')}${cls.school_roll_number ? ` · Roll ${escapeHtml(String(cls.school_roll_number))}` : ''} · System ID ${escapeHtml(s.roll_number)} · ${escapeHtml(academicYear)}</div>
     ${branding.logo_url && branding.logo_align === 'right' ? `<img class="hdr-logo right" src="${escapeHtml(branding.logo_url)}" style="height:64px;object-fit:contain" />` : ''}
   </div>
 </div>
@@ -653,11 +717,13 @@ export default function FeeManagement({
   <div>Phone: ${s.parent_phone || '—'}</div>
 </div>
 <div class="sumbox">
-  <div><div class="l">Total Billed</div><div class="v">₹${Number(pbData.summary.total_billed).toLocaleString('en-IN')}</div></div>
-  <div><div class="l">Paid</div><div class="v">₹${Number(pbData.summary.total_paid).toLocaleString('en-IN')}</div></div>
-  <div><div class="l">Waived</div><div class="v">₹${Number(pbData.summary.discretionary_waived ?? pbData.summary.total_waived).toLocaleString('en-IN')}</div></div>
-  <div><div class="l">Outstanding</div><div class="v">₹${Number(pbData.summary.outstanding).toLocaleString('en-IN')}</div></div>
+  <div><div class="l">Total Billed</div><div class="v">₹${Number(pbSummary.total_billed).toLocaleString('en-IN')}</div></div>
+  <div><div class="l">Paid</div><div class="v">₹${Number(pbSummary.total_paid).toLocaleString('en-IN')}</div></div>
+  <div><div class="l">Waived</div><div class="v">₹${Number(pbSummary.discretionary_waived ?? pbSummary.total_waived).toLocaleString('en-IN')}</div></div>
+  ${Number(pbSummary.written_off) > 0 ? `<div><div class="l">Written off</div><div class="v">₹${Number(pbSummary.written_off).toLocaleString('en-IN')}</div></div>` : ''}
+  <div><div class="l">Outstanding</div><div class="v">₹${Number(pbSummary.outstanding).toLocaleString('en-IN')}</div></div>
 </div>
+${Number(pbSummary.carried_forward) > 0 ? `<p style="font-size:11px;color:#92400e;margin:6px 0 10px">₹${Number(pbSummary.carried_forward).toLocaleString('en-IN')} of this year's bills was carried forward to the next year (listed below as "Carried forward" lines). It is not counted in Total Billed or Outstanding above.</p>` : ''}
 <table><thead><tr><th>Date</th><th>Description</th><th style="text-align:right">Charge</th><th style="text-align:right">Paid</th><th style="text-align:right">Balance</th></tr></thead>
 <tbody>${rows}</tbody></table>
 <div class="ftr">Generated ${new Date().toLocaleString('en-IN')} · Computer-generated statement.</div>
@@ -851,34 +917,84 @@ export default function FeeManagement({
         })()
       )}
 
-      {/* Tabs */}
-      <div className="flex gap-1 border-b border-gray-200 flex-wrap">
-        {([
-          { key: 'overview',         label: 'Overview' },
-          { key: 'setup',            label: 'Fee Plan' },
-          { key: 'collect',          label: pendingPayments.length > 0 ? `Ledger ● ${pendingPayments.length}` : 'Ledger' },
-          { key: 'students',         label: 'Student Passbook' },
-          { key: 'reports',          label: 'Reports' },
-          { key: 'yearend',          label: 'Year-End' },
-          { key: 'archive',          label: 'Past Records' },
-          { key: 'leavers',          label: 'Leavers & Dues' },
-        ] as const).map(t => (
-          <button
-            key={t.key}
-            data-testid={`tab-${t.key}`}
-            onClick={() => setActiveTab(t.key as Tab)}
-            className={`px-4 py-2.5 text-sm font-bold rounded-t-lg transition-colors ${
-              activeTab === t.key
-                ? 'text-blue-700 bg-blue-50 border-b-2 border-blue-600'
-                : t.key === 'collect' && pendingPayments.length > 0
-                  ? 'text-red-600 hover:bg-red-50'
-                  : 'text-gray-700 hover:text-gray-900 hover:bg-gray-50'
-            }`}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
+      {/* Tabs — daily use (Overview, Ledger) stay visible; the rest live under "More" */}
+      {(() => {
+        const mainTabs = [
+          { key: 'overview', label: 'Overview' },
+          { key: 'collect',  label: pendingPayments.length > 0 ? `Ledger ● ${pendingPayments.length}` : 'Ledger' },
+        ] as const
+        const moreTabs = [
+          { key: 'setup',    label: 'Fee Plan' },
+          { key: 'students', label: 'Student Passbook' },
+          { key: 'reports',  label: 'Reports' },
+          { key: 'yearend',  label: 'Year-End' },
+          { key: 'archive',  label: 'Past Records' },
+          { key: 'leavers',  label: 'Leavers & Dues' },
+        ] as const
+        return (
+          <div className="relative z-30 flex gap-1 border-b border-gray-200 items-center">
+            {mainTabs.map(t => (
+              <button
+                key={t.key}
+                data-testid={`tab-${t.key}`}
+                onClick={() => { setActiveTab(t.key as Tab); setMoreTabsOpen(false) }}
+                className={`px-4 py-2.5 text-sm font-bold rounded-t-lg transition-colors ${
+                  activeTab === t.key
+                    ? 'text-blue-700 bg-blue-50 border-b-2 border-blue-600'
+                    : t.key === 'collect' && pendingPayments.length > 0
+                      ? 'text-red-600 hover:bg-red-50'
+                      : 'text-gray-700 hover:text-gray-900 hover:bg-gray-50'
+                }`}
+              >
+                {t.label}
+              </button>
+            ))}
+            {openedTabs.map(k => {
+              const t = moreTabs.find(m => m.key === k)
+              if (!t) return null
+              return (
+                <div key={k} className={`flex items-center rounded-t-lg ${activeTab === k ? 'bg-blue-50 border-b-2 border-blue-600' : 'hover:bg-gray-50'}`}>
+                  <button data-testid={`tab-open-${k}`} onClick={() => { setActiveTab(k); setMoreTabsOpen(false) }}
+                    className={`pl-4 pr-2 py-2.5 text-sm font-bold ${activeTab === k ? 'text-blue-700' : 'text-gray-700'}`}>{t.label}</button>
+                  <button data-testid={`tab-close-${k}`} aria-label={`Close ${t.label}`} title="Close tab"
+                    onClick={() => { setOpenedTabs(o => o.filter(x => x !== k)); if (activeTab === k) setActiveTab('overview') }}
+                    className="pr-3 pl-1 py-2.5 text-gray-400 hover:text-gray-700 text-base leading-none">×</button>
+                </div>
+              )
+            })}
+            <div className="relative" ref={moreTabsRef}>
+              <button
+                data-testid="tab-more"
+                onClick={() => setMoreTabsOpen(o => !o)}
+                onKeyDown={e => { if (e.key === 'Escape') setMoreTabsOpen(false) }}
+                aria-haspopup="menu" aria-expanded={moreTabsOpen}
+                className={`px-4 py-2.5 text-sm font-bold rounded-t-lg transition-colors ${
+                  moreTabsOpen ? 'text-gray-900 bg-gray-100' : 'text-gray-500 hover:text-gray-900 hover:bg-gray-50'
+                }`}
+              >
+                More <span className="text-xs">▾</span>
+              </button>
+              {moreTabsOpen && (
+                <>
+                  <div role="menu" className="absolute left-0 top-full mt-1 z-50 w-52 bg-white border border-gray-200 rounded-xl shadow-lg py-1">
+                    {moreTabs.map(t => (
+                      <button
+                        key={t.key}
+                        role="menuitem"
+                        data-testid={`tab-${t.key}`}
+                        onClick={() => { setOpenedTabs(o => o.includes(t.key) ? o : [...o, t.key]); setActiveTab(t.key as Tab); setMoreTabsOpen(false) }}
+                        className={`w-full text-left px-4 py-2 text-sm hover:bg-gray-50 ${activeTab === t.key ? 'font-bold text-blue-700 bg-blue-50' : 'text-gray-700'}`}
+                      >
+                        {activeTab === t.key ? '✓ ' : ''}{t.label}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        )
+      })()}
 
       {/* ═══ OVERVIEW ═══════════════════════════════════════════════════════════ */}
       {activeTab === 'overview' && (
@@ -889,6 +1005,7 @@ export default function FeeManagement({
           gradeStats={gradeStats} recentPayments={recentPayments}
           passoutData={passoutData} passoutLoading={passoutLoading} passoutError={loadErrors.passout}
           passoutCollectLoading={passoutCollectLoading} passoutCollectError={passoutCollectError}
+          detailsLoaded={detailsLoaded} detailsLoading={detailsLoading} onLoadDetails={loadDetails}
           onRetryStats={loadStats} onRetryPassout={loadPassout}
           onCollectPassout={collectPassoutStudent}
           onGoToCollect={() => setActiveTab('collect' as Tab)}
@@ -994,7 +1111,8 @@ export default function FeeManagement({
       {/* ══ LEAVERS & DUES ════════════════════════════════════════════════════════ */}
       {leaversVisited && (
         <div hidden={activeTab !== 'leavers'}>
-          <FeeLeaversTab schoolId={schoolId} onCollect={collectRemovedStudent} />
+          <FeeLeaversTab schoolId={schoolId} onCollect={collectRemovedStudent}
+            onOpenPassbook={(studentId) => { loadPassbook(studentId); setShowPassbookModal(true); setPbSection('payments') }} />
         </div>
       )}
 
@@ -1011,9 +1129,9 @@ export default function FeeManagement({
                 {pbData ? (
                   <>
                     <p className="text-base font-bold text-gray-900">{pbData.student.name}</p>
-                    <p className="text-xs text-gray-400">
-                      Gr.{pbData.student.grade}{pbData.student.section}
-                      {pbData.student.roll_number ? ` · Roll #${pbData.student.roll_number}` : ''}
+                    <p className="text-xs text-gray-400 [overflow-wrap:anywhere]">
+                      Gr.{classForYear(pbData.student, pbData.class_by_year, academicYear).grade}{classForYear(pbData.student, pbData.class_by_year, academicYear).section}
+                      {classForYear(pbData.student, pbData.class_by_year, academicYear).school_roll_number ? ` · Roll ${classForYear(pbData.student, pbData.class_by_year, academicYear).school_roll_number}` : ''}{pbData.student.roll_number ? ` · System ID ${pbData.student.roll_number}` : ''}
                       {pbData.student.parent_name ? ` · Parent: ${pbData.student.parent_name}` : ''}
                     </p>
                   </>
@@ -1033,13 +1151,33 @@ export default function FeeManagement({
               </div>
             </div>
 
+            {/* Student personal details */}
+            {pbData && (
+              <div data-testid="passbook-student-details" className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-2 px-5 py-3 border-b border-gray-100 flex-shrink-0 text-xs">
+                {[
+                  { l: 'Status', v: pbData.student.status ? pbData.student.status.charAt(0).toUpperCase() + pbData.student.status.slice(1) : '' },
+                  { l: 'Parent / Guardian', v: pbData.student.parent_name },
+                  { l: 'Parent phone', v: pbData.student.parent_phone },
+                  { l: 'Parent email', v: pbData.student.parent_email },
+                  { l: 'Student phone', v: pbData.student.phone },
+                  { l: 'Student email', v: pbData.student.email },
+                ].map(d => (
+                  <div key={d.l} className="min-w-0">
+                    <p className="text-[10px] text-gray-400 uppercase tracking-wide">{d.l}</p>
+                    <p className="text-gray-800 font-medium [overflow-wrap:anywhere]">{d.v || '—'}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+
             {/* Summary bar */}
             {pbData && (
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 px-5 py-3 bg-gray-50 border-b border-gray-100 flex-shrink-0">
+              <div className={`grid grid-cols-2 ${pbSummary.written_off ? 'sm:grid-cols-5' : 'sm:grid-cols-4'} gap-3 px-5 py-3 bg-gray-50 border-b border-gray-100 flex-shrink-0`}>
                 {[
                   { l: 'Total Billed', v: pbSummary.total_billed, c: 'text-gray-800' },
                   { l: 'Paid',         v: pbSummary.total_paid,    c: 'text-green-700' },
                   { l: 'Waived',       v: pbSummary.discretionary_waived,  c: 'text-purple-700' },
+                  ...(pbSummary.written_off ? [{ l: 'Written off', v: pbSummary.written_off, c: 'text-amber-700' }] : []),
                   { l: 'Outstanding',  v: pbSummary.outstanding,   c: 'text-red-600' },
                 ].map(s => (
                   <div key={s.l} className="text-center">
@@ -1047,6 +1185,8 @@ export default function FeeManagement({
                     <p className={`text-base font-bold mt-0.5 ${s.c}`}>{fmt(s.v)}</p>
                   </div>
                 ))}
+                {pbSummary.carried_forward ? <p className="col-span-full text-center text-[11px] text-gray-400">{fmt(pbSummary.carried_forward)} moved to the next year's bills — not counted in Billed.</p> : null}
+                {(() => { const c = carriedBilled((pbYearGroup?.entries ?? [])); return c > 0 ? <p data-testid="passbook-carried-in" className="col-span-full text-center text-[11px] text-amber-700">Billed includes {fmt(c)} carried in from earlier years.</p> : null })()}
               </div>
             )}
 
@@ -1120,7 +1260,7 @@ export default function FeeManagement({
                                 {yearGroup.entries.map(e => (
                                   <tr key={e.id} className="hover:bg-gray-50">
                                     <td className="px-4 py-2.5 text-gray-700">
-                                      {e.category_name} · <span className="text-gray-400">{e.period_label}</span>
+                                      <span className={`inline-block w-2 h-2 rounded-full mr-1.5 ${feeColors(e.category_name).dot}`} aria-hidden="true" /><span className={`font-semibold ${feeColors(e.category_name).text}`}>{e.category_name}</span> · <span className="text-gray-400">{e.period_label}</span>
                                       {e.source_academic_year && (
                                         <span className="ml-2 text-xs bg-amber-50 text-amber-700 border border-amber-200 px-1.5 py-0.5 rounded font-medium" title={`Carried from ${e.source_academic_year}`}>↩ {e.source_academic_year}</span>
                                       )}

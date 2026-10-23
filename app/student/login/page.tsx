@@ -6,7 +6,7 @@ import Link from 'next/link'
 import AuthShell, { THEMES, AuthError, PasswordField, AuthInput } from '@/app/components/AuthShell'
 import { setUsageSessionId } from '@/lib/usageSession'
 import { ButtonLoader } from '@/components/loaders'
-import { BookOpenCheck } from 'lucide-react'
+import { Sticker } from '../components/stickers'
 
 function StudentLoginForm() {
   const router = useRouter()
@@ -48,7 +48,7 @@ function StudentLoginForm() {
     <AuthShell theme={theme} title="Student Login" subtitle="Enter your roll number and password to continue">
 
       <div className="auth-context">
-        <BookOpenCheck aria-hidden="true" />
+        <Sticker name="books" size="sm" tilt={-8} />
         <div><b>Pick up where you left off</b><p>Your lessons, attendance and results are ready in your workspace.</p></div>
       </div>
 

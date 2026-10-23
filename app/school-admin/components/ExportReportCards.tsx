@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { calcGrade } from '@/lib/examGrading'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -23,6 +22,7 @@ type SubjectStat = {
   subject_name: string
   teacher_name: string
   max_marks: number
+  pass_marks: number | null
   avg_marks: number | null
   pass_count: number
   fail_count: number
@@ -33,11 +33,10 @@ type StudentResult = {
   student_id: number
   name: string
   roll_number: string
-  subjects: { subject_name: string; marks_obtained: number | null; is_absent: boolean; max_marks: number }[]
+  subjects: { subject_name: string; marks_obtained: number | null; is_absent: boolean; max_marks: number; pass_marks: number | null }[]
   total_obtained: number
   total_max: number
   percentage: number
-  grade_label: string
   result: 'PASS' | 'FAIL' | 'ABSENT'
 }
 
@@ -52,14 +51,6 @@ type MarksData = {
 const EXAM_TYPE_LABELS: Record<string, string> = {
   unit_test: 'Unit Test', midterm: 'Midterm', final: 'Final Exam',
   quarterly: 'Quarterly', half_yearly: 'Half-Yearly', annual: 'Annual',
-}
-
-// Uses the same grading ladder as every other exam screen (lib/examGrading.ts)
-// — this file previously had its own third, different A+/A/B/C/D/F ladder,
-// so the same score could show a different grade letter here than on the
-// Results & Analysis tab or the student/parent portals.
-function gradeLabel(pct: number): string {
-  return calcGrade(pct)
 }
 
 // ── Main Component ─────────────────────────────────────────────────────────
@@ -131,10 +122,11 @@ export default function ExportReportCards({ schoolId }: { schoolId: number }) {
           grade:       exam.grade,
           section:     exam.section,
         },
-        subject_stats: (raw.subject_stats ?? []).map((s: { subject_name: string; teacher_name: string | null; max_marks: number; avg_marks: number | null; pass_count: number; fail_count: number; absent_count: number }) => ({
+        subject_stats: (raw.subject_stats ?? []).map((s: { subject_name: string; teacher_name: string | null; max_marks: number; pass_marks: number | null; avg_marks: number | null; pass_count: number; fail_count: number; absent_count: number }) => ({
           subject_name: s.subject_name,
           teacher_name: s.teacher_name ?? '—',
           max_marks: s.max_marks,
+          pass_marks: s.pass_marks,
           avg_marks: s.avg_marks,
           pass_count: s.pass_count,
           fail_count: s.fail_count,
@@ -148,7 +140,7 @@ export default function ExportReportCards({ schoolId }: { schoolId: number }) {
           const pct = s.percentage ?? 0
           const subjectsArr = Object.entries(s.subjects).map(([subject_name, m]) => {
             const subStat = (raw.subject_stats ?? []).find((ss: { subject_name: string }) => ss.subject_name === subject_name)
-            return { subject_name, marks_obtained: m.marks_obtained, is_absent: m.is_absent, max_marks: subStat?.max_marks ?? 0 }
+            return { subject_name, marks_obtained: m.marks_obtained, is_absent: m.is_absent, max_marks: subStat?.max_marks ?? 0, pass_marks: subStat?.pass_marks ?? null }
           })
           return {
             student_id: s.student_id,
@@ -158,7 +150,6 @@ export default function ExportReportCards({ schoolId }: { schoolId: number }) {
             total_obtained: s.total_obtained ?? 0,
             total_max: s.total_max,
             percentage: pct,
-            grade_label: s.percentage !== null ? gradeLabel(pct) : '—',
             result: s.any_absent ? 'ABSENT' : pct >= passingPct ? 'PASS' : 'FAIL',
           } satisfies StudentResult
         }),
@@ -277,7 +268,6 @@ export default function ExportReportCards({ schoolId }: { schoolId: number }) {
                         student.result === 'PASS' ? 'text-green-600' :
                         student.result === 'ABSENT' ? 'text-gray-500' : 'text-red-600'
                       }`}>{student.result}</p>
-                      <p className="text-sm font-bold text-gray-700">{student.grade_label}</p>
                     </div>
                   </div>
 
@@ -290,32 +280,31 @@ export default function ExportReportCards({ schoolId }: { schoolId: number }) {
                           <th className="text-center py-2 text-xs font-semibold text-gray-500 uppercase tracking-wide">Max Marks</th>
                           <th className="text-center py-2 text-xs font-semibold text-gray-500 uppercase tracking-wide">Obtained</th>
                           <th className="text-center py-2 text-xs font-semibold text-gray-500 uppercase tracking-wide">%</th>
-                          <th className="text-center py-2 text-xs font-semibold text-gray-500 uppercase tracking-wide">Grade</th>
                         </tr>
                       </thead>
                       <tbody>
                         {student.subjects.map(sub => {
                           const pct = sub.max_marks > 0 && !sub.is_absent && sub.marks_obtained != null
                             ? Math.round((sub.marks_obtained / sub.max_marks) * 100) : null
-                          const gl = pct != null ? gradeLabel(pct) : '—'
+                          // A subject with its own configured pass_marks is
+                          // judged against that directly, same as the class
+                          // teacher's review screen and admin analytics —
+                          // falls back to the exam-wide percentage only for a
+                          // subject nobody's configured yet.
+                          const subjectFailed = !sub.is_absent && sub.marks_obtained != null && (
+                            sub.pass_marks != null ? sub.marks_obtained < sub.pass_marks : pct != null && pct < rcData.exam.passing_pct
+                          )
                           return (
                             <tr key={sub.subject_name} className="border-b border-gray-100">
                               <td className="py-2.5 font-medium text-gray-800">{sub.subject_name}</td>
                               <td className="py-2.5 text-center text-gray-600">{sub.max_marks}</td>
                               <td className={`py-2.5 text-center font-semibold ${
                                 sub.is_absent ? 'text-gray-400' :
-                                pct != null && pct < rcData.exam.passing_pct ? 'text-red-500' : 'text-gray-800'
+                                subjectFailed ? 'text-red-500' : 'text-gray-800'
                               }`}>
                                 {sub.is_absent ? 'AB' : sub.marks_obtained ?? '—'}
                               </td>
                               <td className="py-2.5 text-center text-gray-500 text-xs">{pct != null ? `${pct}%` : '—'}</td>
-                              <td className="py-2.5 text-center">
-                                <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
-                                  gl === 'F' ? 'bg-red-100 text-red-600' :
-                                  gl === 'A+' || gl === 'A' ? 'bg-green-100 text-green-700' :
-                                  'bg-gray-100 text-gray-600'
-                                }`}>{gl}</span>
-                              </td>
                             </tr>
                           )
                         })}
@@ -326,13 +315,6 @@ export default function ExportReportCards({ schoolId }: { schoolId: number }) {
                           <td className="py-3 text-center font-bold text-gray-800">{student.total_max}</td>
                           <td className="py-3 text-center font-bold text-gray-800">{student.total_obtained}</td>
                           <td className="py-3 text-center font-bold text-[#245b46]">{student.percentage}%</td>
-                          <td className="py-3 text-center">
-                            <span className={`text-sm font-black px-3 py-1 rounded-full ${
-                              student.grade_label === 'F' ? 'bg-red-100 text-red-600' :
-                              ['A+','A'].includes(student.grade_label) ? 'bg-green-100 text-green-700' :
-                              'bg-amber-100 text-amber-700'
-                            }`}>{student.grade_label}</span>
-                          </td>
                         </tr>
                       </tfoot>
                     </table>

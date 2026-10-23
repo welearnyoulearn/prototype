@@ -21,7 +21,7 @@
 - "Integrated payment gateway" or "automatic payment confirmation".
 - "LEAP integration" (only an absentee export).
 - "Timetable", "leaderboard", "rewards", "homework", "doubts", "leave", "TV display", "learning hub" (removed from `dev`).
-- "Every endpoint is authenticated" (see architecture §12.1) until the fix lands.
+- "Every endpoint is authenticated" — true since #253, apart from the deliberately public routes listed in architecture §12.1.
 - Any customer count, revenue, price or market size that is not in your **[TBD – founder]** answers.
 
 ## 1. Investor / summit deck (15–18 slides, ~12 minutes + demo)

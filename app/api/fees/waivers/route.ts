@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { ledgerStatusSql } from '@/lib/feeLedgerStatus'
 import pool from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
 import { withWatchline } from '@/lib/logger'
 import { claimIdempotencyKey, saveIdempotentResponse } from '@/lib/idempotency'
-import { lockYearClose } from '@/lib/feeRollover'
+import { lockYearClose, isYearClosed } from '@/lib/feeRollover'
 
 // GET /api/fees/waivers?school_id=X&student_id=Y
 async function handleGET(req: NextRequest) {
@@ -48,10 +49,10 @@ export const GET = withWatchline(handleGET, { route: '/api/fees/waivers' })
 async function handlePOST(req: NextRequest) {
   try {
     // Validate before acquiring pool connection
-    const { school_id, student_id, ledger_id, waiver_type, waiver_value, reason, granted_by_name: clientActor, idempotency_key } = await req.json()
+    const { school_id, student_id, ledger_id, waiver_type, waiver_value, reason, idempotency_key } = await req.json()
     const access = await requireFeeAccess(school_id)
     if (!access) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-    const granted_by_name = clientActor || access.actor
+    const granted_by_name = access.actor
     if (!school_id || !student_id || !ledger_id || !waiver_type || !reason) {
       return NextResponse.json({ error: 'school_id, student_id, ledger_id, waiver_type, reason required' }, { status: 400 })
     }
@@ -111,11 +112,7 @@ async function handlePOST(req: NextRequest) {
       // Block waivers on a closed year (same guard as payments route) — re-checked
       // here, now that the lock above is held, so this can't read a stale
       // "not closed" state past a concurrent close that was waiting on it.
-      const { rows: [closedYear] } = await client.query(
-        `SELECT 1 FROM fee_year_close
-         WHERE school_id = $1 AND academic_year = $2 AND is_reopened = FALSE`,
-        [school_id, ledger.academic_year]
-      )
+      const closedYear = await isYearClosed(client, school_id, ledger.academic_year)
       if (closedYear) {
         await client.query('ROLLBACK')
         return NextResponse.json({ error: 'This academic year is closed. Reopen it to grant waivers.' }, { status: 409 })
@@ -167,11 +164,7 @@ async function handlePOST(req: NextRequest) {
       await client.query(
         `UPDATE student_fee_ledger
          SET waiver_amount = COALESCE(waiver_amount, 0) + $1,
-             status = CASE
-               WHEN (COALESCE(waiver_amount, 0) + $1 + amount_paid) >= amount_due THEN 'waived'
-               WHEN (COALESCE(waiver_amount, 0) + $1 + amount_paid) > 0           THEN 'partial'
-               ELSE status
-             END
+             status = ${ledgerStatusSql({ due: 'amount_due', paid: 'amount_paid', waiver: 'COALESCE(waiver_amount, 0) + $1' })}
          WHERE id = $2`,
         [waiver_amount, ledger_id]
       )
@@ -251,7 +244,7 @@ async function handlePATCH(req: NextRequest) {
       if (w0.waiver_type === 'carry_forward') {
         await client.query('ROLLBACK')
         return NextResponse.json({
-          error: 'This waiver was created automatically during year-end closure and cannot be corrected here. Reopen the academic year to undo the closure instead.',
+          error: 'This waiver was created automatically during year-end closure and cannot be corrected here. It is a year-end carry-forward record and is managed through year-end, not edited per bill.',
         }, { status: 409 })
       }
 
@@ -279,11 +272,7 @@ async function handlePATCH(req: NextRequest) {
 
       // Block correcting a waiver on a closed year — same guard as every other
       // mutating fee route.
-      const { rows: [closedYear] } = await client.query(
-        `SELECT 1 FROM fee_year_close
-         WHERE school_id = $1 AND academic_year = $2 AND is_reopened = FALSE`,
-        [w0.school_id, lgCheck.academic_year]
-      )
+      const closedYear = await isYearClosed(client, w0.school_id, lgCheck.academic_year)
       if (closedYear) {
         await client.query('ROLLBACK')
         return NextResponse.json({ error: 'This academic year is closed. Reopen it to correct waivers.' }, { status: 409 })
@@ -313,12 +302,7 @@ async function handlePATCH(req: NextRequest) {
       await client.query(
         `UPDATE student_fee_ledger
          SET waiver_amount = GREATEST(0, COALESCE(waiver_amount, 0) + $1),
-             status = CASE
-               WHEN (GREATEST(0, COALESCE(waiver_amount, 0) + $1) + amount_paid) >= amount_due THEN 'waived'
-               WHEN (GREATEST(0, COALESCE(waiver_amount, 0) + $1) + amount_paid) > 0           THEN 'partial'
-               WHEN EXISTS (SELECT 1 FROM academic_years ay WHERE ay.school_id = student_fee_ledger.school_id AND ay.label = student_fee_ledger.academic_year AND ay.end_date < CURRENT_DATE) THEN 'overdue'
-               ELSE 'pending'
-             END
+             status = ${ledgerStatusSql({ due: 'amount_due', paid: 'amount_paid', waiver: 'GREATEST(0, COALESCE(waiver_amount, 0) + $1)' })}
          WHERE id = $2`,
         [diff, w0.ledger_id]
       )
@@ -370,7 +354,7 @@ async function handleDELETE(req: NextRequest) {
       // This bookkeeping waiver can only be undone by reopening the year itself.
       if (w0.waiver_type === 'carry_forward') {
         return NextResponse.json({
-          error: 'This waiver was created automatically during year-end closure and cannot be revoked here. Reopen the academic year to undo the closure instead.',
+          error: 'This waiver was created automatically during year-end closure and cannot be revoked here. It is a year-end carry-forward record and is managed through year-end, not edited per bill.',
         }, { status: 409 })
       }
 
@@ -387,11 +371,7 @@ async function handleDELETE(req: NextRequest) {
       // mutating fee route (payments, waivers POST, structures/amend, etc.).
       // Re-checked here, now that the lock above is held, so this can't read a
       // stale "not closed" state past a concurrent close that was waiting on it.
-      const { rows: [closedYear] } = await client.query(
-        `SELECT 1 FROM fee_year_close
-         WHERE school_id = $1 AND academic_year = $2 AND is_reopened = FALSE`,
-        [w0.school_id, w0.academic_year]
-      )
+      const closedYear = await isYearClosed(client, w0.school_id, w0.academic_year)
       if (closedYear) {
         await client.query('ROLLBACK')
         return NextResponse.json({ error: 'This academic year is closed. Reopen it to revoke waivers.' }, { status: 409 })
@@ -441,12 +421,7 @@ async function handleDELETE(req: NextRequest) {
         `UPDATE student_fee_ledger
          SET waiver_amount = $1,
              amount_paid   = $2,
-             status = CASE
-               WHEN $1::numeric + $2::numeric >= amount_due THEN (CASE WHEN $1::numeric > 0 THEN 'waived' ELSE 'paid' END)
-               WHEN $2::numeric > 0 THEN 'partial'
-               WHEN EXISTS (SELECT 1 FROM academic_years ay WHERE ay.school_id = student_fee_ledger.school_id AND ay.label = student_fee_ledger.academic_year AND ay.end_date < CURRENT_DATE) THEN 'overdue'
-               ELSE 'pending'
-             END
+             status = ${ledgerStatusSql({ due: 'amount_due', paid: '$2::numeric', waiver: '$1::numeric' })}
          WHERE id = $3`,
         [residualWaiver, realPaid, waiver.ledger_id]
       )

@@ -1,36 +1,26 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
-import { getAnySession, getParentSession, schoolHasFeature } from '@/lib/auth'
+import { getParentSession, schoolHasFeature } from '@/lib/auth'
 import { resolveAcademicYear } from '@/lib/academicYear'
 import { claimIdempotencyKey, saveIdempotentResponse } from '@/lib/idempotency'
 
 // GET /api/parent/fees?school_id=X&student_id=Y&academic_year=2025-26
 export async function GET(req: NextRequest) {
   try {
-    const session = await getAnySession()
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    // Parent-only endpoint: resolve the parent login directly. getAnySession() prefers a school-admin
+    // cookie, so an admin signed in on the same browser would be rejected here as a non-parent.
+    const parent = await getParentSession()
+    if (!parent) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     const p = req.nextUrl.searchParams
     const school_id   = p.get('school_id')
     const student_id  = p.get('student_id')
     if (!school_id || !student_id) return NextResponse.json({ error: 'school_id, student_id required' }, { status: 400 })
-    // getAnySession() only confirms SOME valid login exists, for whichever role —
-    // this endpoint is parent-only (only app/parent/page.tsx calls it; there is
-    // no student/teacher/admin fees screen that does). Without this check, a
-    // logged-in student or teacher session — neither of which has any
-    // parent-link relationship to verify — could pass ANY same-school
-    // student_id and read that student's fee ledger, payment history, and
-    // transaction references; POST had the same gap for submitting a payment
-    // against another student's bill.
-    if (session.role !== 'parent') {
+    if (parent.schoolId !== parseInt(school_id)) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
-    if (session.schoolId !== parseInt(school_id)) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-    }
-    const parent = await getParentSession()
     const linkRes = await pool.query(
       'SELECT 1 FROM student_parents WHERE student_id = $1 AND parent_id = $2',
-      [student_id, parent?.parentId]
+      [student_id, parent.parentId]
     )
     if (linkRes.rowCount === 0) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
@@ -109,13 +99,34 @@ export async function GET(req: NextRequest) {
         [school_id, student_id, academic_year]
       ).catch(() => ({ rows: [] }))
 
+      // Bills from EARLIER years that are still unpaid (e.g. dues the school left open at year-end).
+      // The selected-year figures above don't include them, so a parent would never see them —
+      // return them separately, for display only (paying them is still done at the school office).
+      const { rows: priorRows } = await pool.query(
+        `SELECT l.id, l.academic_year, fc.name AS category_name, l.period_label, l.due_date,
+                GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0) AS balance
+         FROM student_fee_ledger l
+         JOIN fee_categories fc ON fc.id = l.fee_category_id
+         WHERE l.school_id = $1 AND l.student_id = $2
+           AND (l.academic_year = 'passout' OR (l.academic_year ~ '^[0-9]{4}-[0-9]{2}$' AND l.academic_year < $3))
+           AND GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0) > 0
+         ORDER BY l.academic_year, l.due_date`,
+        [school_id, student_id, academic_year]
+      ).catch(() => ({ rows: [] as Array<{ id: number; academic_year: string; category_name: string; period_label: string; due_date: string; balance: string }> }))
+      const prior_dues = {
+        total: priorRows.reduce((s, r) => s + Number(r.balance), 0),
+        items: priorRows,
+      }
+
       const total_due         = ledger.reduce((s, r) => s + Number(r.amount_due), 0)
       const total_paid        = ledger.reduce((s, r) => s + Number(r.amount_paid), 0)
       const total_outstanding = ledger.reduce((s, r) => s + Number(r.balance), 0)
+      // Part of this year's outstanding that was carried in from an earlier year
+      const carried_outstanding = ledger.filter(r => r.source_academic_year).reduce((s, r) => s + Number(r.balance), 0)
       const total_waived      = (waivers as Array<{waiver_amount: number}>).reduce((s, r) => s + Number(r.waiver_amount), 0)
       const overdue_count     = ledger.filter(r => r.status === 'overdue').length
 
-      return NextResponse.json({ ledger, payments, waivers, summary: { total_due, total_paid, total_outstanding, total_waived, overdue_count } })
+      return NextResponse.json({ ledger, payments, waivers, prior_dues, summary: { total_due, total_paid, total_outstanding, carried_outstanding, total_waived, overdue_count } })
     } catch (e) { console.error(e); return NextResponse.json({ error: 'Failed' }, { status: 500 }) }
 } catch (err: unknown) {
     console.error('[API]', err)
@@ -153,29 +164,21 @@ export async function GET(req: NextRequest) {
 //
 export async function POST(req: NextRequest) {
   try {
-    const session = await getAnySession()
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    // Parent-only endpoint: resolve the parent login directly. getAnySession() prefers a school-admin
+    // cookie, so an admin signed in on the same browser would be rejected here as a non-parent.
+    const parent = await getParentSession()
+    if (!parent) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     const { school_id, student_id, ledger_id, ledger_ids, amount, total_amount, transaction_ref, upi_id, idempotency_key } = await req.json()
     if (!school_id || !student_id) {
       return NextResponse.json({ error: 'school_id, student_id required' }, { status: 400 })
     }
-    // getAnySession() only confirms SOME valid login exists, for whichever role —
-    // this endpoint is parent-only (see the matching comment on GET above).
-    // Without this check, a logged-in student or teacher session could submit a
-    // fabricated payment against ANOTHER same-school student's ledger by
-    // supplying its IDs directly, since every query below trusts
-    // school_id/student_id/ledger_id straight from the request body.
-    if (session.role !== 'parent') {
+    if (parent.schoolId !== Number(school_id)) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
-    if (session.schoolId !== Number(school_id)) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-    }
-    const parent = await getParentSession()
     const linkRes = await pool.query(
       'SELECT 1 FROM student_parents WHERE student_id = $1 AND parent_id = $2',
-      [student_id, parent?.parentId]
+      [student_id, parent.parentId]
     )
     if (linkRes.rowCount === 0) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })

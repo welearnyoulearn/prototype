@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
+import { feedbackSourceFilter } from '@/lib/feedback-source'
 
 const MAX_LIMIT = 200
 
@@ -9,7 +10,8 @@ function parseCount(raw: string | null, fallback: number): number {
   return /^\d+$/.test(raw) ? Number(raw) : NaN
 }
 
-// GET /api/feedback/submissions?school_id=&role=&limit=&offset=
+// GET /api/feedback/submissions?school_id=&role=&source=&limit=&offset=
+// source: see lib/feedback-source.ts (all | general | <qr point id>).
 // Each row carries its ratings as a nested array (json_agg) so the admin
 // list can render "Transport 😭, Food 🤩" per submission without N+1 queries.
 export async function GET(req: NextRequest) {
@@ -28,6 +30,9 @@ export async function GET(req: NextRequest) {
       roleFilter = `AND s.role = $${params.length + 1}`
       params.push(role)
     }
+    const sourceFilter = feedbackSourceFilter(sp.get('source'), 's', params)
+    if (sourceFilter === null) return NextResponse.json({ error: 'Invalid source' }, { status: 400 })
+    roleFilter += sourceFilter
 
     const limit = Math.min(parseCount(sp.get('limit'), 50), MAX_LIMIT)
     const offset = parseCount(sp.get('offset'), 0)
@@ -42,18 +47,20 @@ export async function GET(req: NextRequest) {
       pool.query(`
         SELECT s.id, s.role, s.is_anonymous, s.submitter_name, s.submitter_phone,
                s.quick_pick_tags, s.free_text, (s.voice_object_key IS NOT NULL) AS has_voice, s.created_at,
-               s.advanced_form_type, s.advanced_form_data,
+               s.advanced_form_type, s.advanced_form_data, s.qr_point_id, p.title AS qr_point_title, s.archived_at,
                COALESCE(
                  json_agg(
                    json_build_object('category_key', r.category_key, 'category_label', r.category_label,
-                                      'rating', r.rating, 'priority', r.priority, 'status', r.status)
+                                      'icon', c.icon, 'rating', r.rating, 'priority', r.priority, 'status', r.status)
                    ORDER BY r.id
                  ) FILTER (WHERE r.id IS NOT NULL), '[]'
                ) AS ratings
         FROM feedback_submissions s
         LEFT JOIN feedback_submission_ratings r ON r.submission_id = s.id
+        LEFT JOIN feedback_categories c ON c.id = r.category_id
+        LEFT JOIN feedback_qr_points p ON p.id = s.qr_point_id
         WHERE s.school_id = $1 ${roleFilter}
-        GROUP BY s.id
+        GROUP BY s.id, p.id
         ORDER BY s.created_at DESC
         LIMIT $${params.length - 1} OFFSET $${params.length}
       `, params),
