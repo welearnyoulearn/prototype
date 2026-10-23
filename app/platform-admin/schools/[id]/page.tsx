@@ -1,5 +1,6 @@
 'use client'
 
+import SchoolDetailsPanel from '../../components/SchoolDetailsPanel'
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
@@ -735,6 +736,9 @@ export default function SchoolDetailPage() {
             })()}
           </div>
         </div>
+
+        {/* ── School details (onboarding info, setup checklist) ── */}
+        <SchoolDetailsPanel schoolId={Number(schoolId)} />
 
         {/* ── Portal Access ────────────────────────────────────────────────── */}
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">

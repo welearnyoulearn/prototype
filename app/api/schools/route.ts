@@ -3,6 +3,14 @@ import pool, { ensureDB } from '@/lib/db'
 import { hashPassword, generateTempPassword, generateSchoolCode, requirePlatformAdmin, generateResetToken, hashResetToken } from '@/lib/auth'
 import { sendPasswordResetEmail } from '@/lib/email'
 import { buildFeedbackCategorySeedQuery } from '@/lib/feedback-defaults'
+import { INDIAN_MOBILE_ERROR, normalizeIndianMobile } from '@/lib/phone'
+import { academicYearFor, saveSchoolDetails, seedClasses } from '@/lib/schoolProfile'
+import { schoolDetailsSchema, type SchoolDetails } from '@/lib/schoolDetails'
+
+// Academic year start for callers that send no school details (scripts, test seeds): April, as before.
+// The Add School wizard sends the school's own start month (default June → 1 June – 31 May).
+const LEGACY_ACADEMIC_START_MONTH = 4
+import { todayIST } from '@/lib/istDate'
 
 export async function GET(req: NextRequest) {
   const session = await requirePlatformAdmin()
@@ -65,11 +73,29 @@ export async function POST(req: NextRequest) {
 
   const client = await pool.connect()
   try {
-    const { name, type, city, country, phone, email, address, tier } = await req.json()
+    const body = await req.json()
+    const { name, type, city, country, phone, email, address, tier } = body
 
-    if (!name) return NextResponse.json({ error: 'School name is required' }, { status: 400 })
-    if (phone && !/^\d{7,15}$/.test(phone.replace(/[\s\-\+\(\)]/g, ''))) {
+    if (!name || typeof name !== 'string' || !name.trim()) return NextResponse.json({ error: 'School name is required' }, { status: 400 })
+    if (phone && !/^\d{7,15}$/.test(String(phone).replace(/[\s\-\+\(\)]/g, ''))) {
       return NextResponse.json({ error: 'Phone number must be 7–15 digits' }, { status: 400 })
+    }
+    // From the Add School wizard (DOCS/SCHOOL-ONBOARDING.md §1): the admin's name and mobile, and the school's
+    // details (legal entity, State/PIN, GST, profile, contacts, size, needs). All optional, so older callers
+    // (scripts, test seeds) that send only name / city / phone / email / address keep working.
+    const adminName = typeof body.admin_name === 'string' ? body.admin_name.trim().slice(0, 255) : ''
+    const adminMobile = typeof body.admin_mobile === 'string' && body.admin_mobile.trim() ? normalizeIndianMobile(body.admin_mobile) : null
+    if (typeof body.admin_mobile === 'string' && body.admin_mobile.trim() && !adminMobile) {
+      return NextResponse.json({ error: `Admin mobile: ${INDIAN_MOBILE_ERROR}` }, { status: 400 })
+    }
+    let details: SchoolDetails | null = null
+    if (body.details != null) {
+      const det = schoolDetailsSchema.safeParse(body.details)
+      if (!det.success) return NextResponse.json({ error: det.error.issues[0]?.message ?? 'Check the school details' }, { status: 400 })
+      details = det.data
+    }
+    if (tier !== undefined && !['none', 'basic', 'standard', 'premium'].includes(tier)) {
+      return NextResponse.json({ error: 'Invalid plan' }, { status: 400 })
     }
     // Required: the school's first admin logs in with this email (the School ID is not a login).
     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
@@ -81,9 +107,10 @@ export async function POST(req: NextRequest) {
     const schoolRes = await client.query(
       `INSERT INTO schools (name, type, city, country, phone, email, address)
        VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
-      [name, type || 'Public', city || null, country || null, phone || null, email || null, address || null]
+      [name.trim(), type || 'Public', details?.city ?? city ?? null, details ? 'India' : country || null, details?.phone ?? adminMobile ?? phone ?? null, email, details?.address ?? address ?? null]
     )
     const school = schoolRes.rows[0]
+    if (details) await saveSchoolDetails(school.id, { ...details, phone: details.phone ?? adminMobile }, client)
 
     const schoolCode = generateSchoolCode(school.name, school.id)
     await client.query('UPDATE schools SET school_code = $1 WHERE id = $2', [schoolCode, school.id])
@@ -92,28 +119,32 @@ export async function POST(req: NextRequest) {
     const passwordHash = await hashPassword(generateTempPassword(32))
 
     const ownerRes = await client.query(
-      `INSERT INTO users (email, school_code, password_hash, role, school_id, first_login, is_primary_admin)
-       VALUES ($1, $2, $3, 'school_admin', $4, TRUE, TRUE)
+      `INSERT INTO users (email, school_code, password_hash, role, school_id, first_login, is_primary_admin, full_name)
+       VALUES ($1, $2, $3, 'school_admin', $4, TRUE, TRUE, $5)
        ON CONFLICT (school_code) DO NOTHING RETURNING id`,
-      [email.trim().toLowerCase(), schoolCode, passwordHash, school.id]
+      [email.trim().toLowerCase(), schoolCode, passwordHash, school.id, adminName || null]
     )
     if (!ownerRes.rows[0]?.id) throw new Error('School owner account could not be created')
+    if (adminName || adminMobile) await client.query(
+      `INSERT INTO user_profiles (user_id, full_name, phone, designation, updated_at) VALUES ($1, $2, $3, 'School admin', NOW())
+       ON CONFLICT (user_id) DO UPDATE SET full_name = COALESCE($2, user_profiles.full_name), phone = COALESCE($3, user_profiles.phone), updated_at = NOW()`,
+      [ownerRes.rows[0].id, adminName || null, adminMobile])
 
     await client.query(
       `INSERT INTO school_subscriptions (school_id, tier) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
       [school.id, tier || 'none']
     )
 
-    // Auto-create current academic year based on today's date
-    const now = new Date()
-    const yearStart = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1  // April = new year
-    const yearLabel = `${yearStart}-${String(yearStart + 1).slice(2)}`
+    // The current academic year from the school's start month.
+    const ay = academicYearFor(details?.academicStartMonth ?? LEGACY_ACADEMIC_START_MONTH, todayIST())
     await client.query(
       `INSERT INTO academic_years (school_id, label, start_date, end_date, is_current)
        VALUES ($1, $2, $3, $4, TRUE)
        ON CONFLICT DO NOTHING`,
-      [school.id, yearLabel, `${yearStart}-04-01`, `${yearStart + 1}-03-31`]
+      [school.id, ay.label, ay.start, ay.end]
     )
+    // The classes it runs, section A each — ready on first login, editable.
+    if (details) await seedClasses(school.id, details.classesFrom, details.classesTo, client)
 
     // Seed default Feedback Management categories for this school — the
     // same list existing schools were backfilled with in lib/db.ts.

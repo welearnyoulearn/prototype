@@ -1501,7 +1501,7 @@ function MyBills() {
                   ))}
                   <div className="border-t border-gray-200 pt-2 space-y-1 tabular-nums">
                     <div className="flex justify-between"><span className="text-muted-foreground">Subtotal</span><span>{inr(open.subtotal)}</span></div>
-                    <div className="flex justify-between"><span className="text-muted-foreground">GST 18%</span><span>{inr(open.gst)}</span></div>
+                    {open.gstLines.map(g => <div key={g.label} className="flex justify-between"><span className="text-muted-foreground">{g.label}</span><span>{inr(g.amount)}</span></div>)}
                     <div className="flex justify-between font-semibold"><span>Total</span><span>{inr(open.total)}</span></div>
                   </div>
                 </div>

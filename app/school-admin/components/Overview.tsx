@@ -1,5 +1,6 @@
 'use client'
 
+import SetupChecklist from './SetupChecklist'
 import { useEffect, useState, useCallback } from 'react'
 import { useFeature } from '@/lib/features-context'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -172,6 +173,9 @@ export default function Overview({ schoolId, onNavigate }: Props) {
           <RefreshCw size={15} aria-hidden="true" /><span className="hidden sm:inline">Refresh</span>
         </button>
       </div>
+
+      {/* ── First-login setup checklist (until done) ── */}
+      <SetupChecklist onNavigate={onNavigate} />
 
       {/* ── Alert strip (feature-gated) ── */}
       {!loading && (
