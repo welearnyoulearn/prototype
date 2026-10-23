@@ -34,7 +34,7 @@ export default function RefundPolicyPage() {
       </p>
 
       <h2>4. Contact</h2>
-      <p>{info.legalName}, {info.address}. Email <a href={`mailto:${info.email}`}>{info.email}</a>, phone {info.phone}.</p>
+      <p>{info.legalName}{info.address && `, ${info.address}`}. Email <a href={`mailto:${info.email}`}>{info.email}</a>, phone {info.phone}.</p>
     </LegalPage>
   )
 }

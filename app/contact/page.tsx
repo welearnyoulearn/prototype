@@ -10,8 +10,8 @@ export default function ContactPage() {
     <LegalPage title="Contact Us" current="/contact">
       <table>
         <tbody>
-          <tr><td className="w-48 font-medium">Company</td><td data-testid="contact-company">{info.legalName}</td></tr>
-          <tr><td className="font-medium">Registered address</td><td>{info.address}</td></tr>
+          <tr><td className="w-48 font-medium">Company</td><td data-testid="contact-company">{info.brand} (operated by {info.legalName})</td></tr>
+          {info.address && <tr><td className="font-medium">Registered address</td><td>{info.address}</td></tr>}
           {info.hasGstin && <tr><td className="font-medium">GSTIN</td><td>{info.gstin}</td></tr>}
           <tr><td className="font-medium">Email</td><td><a href={`mailto:${info.email}`}>{info.email}</a></td></tr>
           <tr><td className="font-medium">Phone</td><td>{info.phone}</td></tr>

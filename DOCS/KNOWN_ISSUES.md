@@ -9,7 +9,7 @@ Current bugs and workarounds for the WLYL School prototype.
 - **Severity:** Low
 - **Detail:**
   - **GST needs WLYL's state.** The CGST/SGST vs IGST split needs `BILLING_GSTIN` (or `BILLING_STATE_CODE`) and the school's State. Older schools show one "GST 18%" line until Platform Admin fills in School details.
-  - **Policy pages need real company details.** They show [placeholders] until the `BILLING_*` and `LEGAL_*` values are set, and the text needs legal review.
+  - **Policy pages need real company details.** The legal name, email and phone are built in; the registered address and jurisdiction city are left out until `BILLING_ADDRESS` / `LEGAL_JURISDICTION_CITY` are set. The text needs legal review.
   - **No classes 11–12.** "Classes run" goes up to class 10, the app-wide grade list.
 - **Status:** See DOCS/SCHOOL-ONBOARDING.md.
 

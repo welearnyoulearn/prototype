@@ -665,7 +665,7 @@ input, select, textarea {
 .pl-switch kbd, .pl-help kbd { display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 5px; border: 1px solid var(--pl-line); border-bottom-width: 2px; border-radius: 6px; background: white; color: var(--pl-muted); font-family: var(--font-mono, ui-monospace, monospace); font-size: 10px; font-weight: 600; }
 
 .pl-help { margin-top: 20px; color: var(--pl-muted); font-size: 13px; text-align: center; }
-.pl-footer { min-height: 60px; border-top: 1px solid var(--pl-line); color: var(--pl-muted); font-size: 12px; }
+.pl-footer { min-height: 60px; flex-wrap: wrap; padding: 8px 0; border-top: 1px solid var(--pl-line); color: var(--pl-muted); font-size: 12px; }
 .pl-footer a { display: inline-flex; align-items: center; min-height: 44px; transition: color 150ms ease; }
 .pl-footer a:hover { color: var(--pl-brand); }
 

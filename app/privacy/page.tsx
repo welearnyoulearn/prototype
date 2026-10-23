@@ -68,7 +68,7 @@ export default function PrivacyPage() {
 
       <h2>10. Grievance Officer</h2>
       <p>
-        {info.grievanceOfficer}, {info.legalName}, {info.address}. Email <a href={`mailto:${info.grievanceEmail}`}>{info.grievanceEmail}</a>.
+        {info.grievanceOfficer}, {info.legalName}{info.address && `, ${info.address}`}. Email <a href={`mailto:${info.grievanceEmail}`}>{info.grievanceEmail}</a>.
         We acknowledge complaints within 24 hours and resolve them within 15 days.
       </p>
 

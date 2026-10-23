@@ -58,11 +58,11 @@ export default function TermsPage() {
       <p>We may update these terms. We will show the date of the latest version on this page and tell Schools about important changes in advance.</p>
 
       <h2>9. Law and disputes</h2>
-      <p>These terms are governed by the laws of India. Courts in {info.jurisdictionCity} have jurisdiction.</p>
+      <p>These terms are governed by the laws of India. {info.jurisdictionCity ? `Courts in ${info.jurisdictionCity} have jurisdiction.` : `Courts at the place of ${info.brand}'s registered office have jurisdiction.`}</p>
 
       <h2>10. Contact and grievances</h2>
       <p>
-        {info.legalName}, {info.address}. Email <a href={`mailto:${info.email}`}>{info.email}</a>, phone {info.phone}.
+        {info.legalName}{info.address && `, ${info.address}`}. Email <a href={`mailto:${info.email}`}>{info.email}</a>, phone {info.phone}.
         Grievance Officer: {info.grievanceOfficer}, <a href={`mailto:${info.grievanceEmail}`}>{info.grievanceEmail}</a>.
       </p>
     </LegalPage>

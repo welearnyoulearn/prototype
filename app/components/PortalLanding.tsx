@@ -130,7 +130,10 @@ function SignInForm({ portal, onBack }: { portal: (typeof portals)[number]; onBa
   )
 }
 
-export default function PortalLanding() {
+// Who runs WLYL, shown in the footer (the payment gateway checks the site names its KYC holder)
+type Operator = { legalName: string; email: string; phone: string }
+
+export default function PortalLanding({ operator }: { operator: Operator }) {
   const reduceMotion = useReducedMotion()
   const lastPortal = useSyncExternalStore(subscribeToStorage, readLastPortal, () => null)
   const dayPart = useSyncExternalStore(noopSubscribe, readDayPart, () => null)
@@ -382,7 +385,10 @@ export default function PortalLanding() {
       </main>
 
       <footer className="pl-footer">
-        <span>© {new Date().getFullYear()} WeLearnYouLearn</span>
+        <span data-testid="footer-operator">
+          © {new Date().getFullYear()} WeLearnYouLearn · operated by {operator.legalName} ·{' '}
+          <a href={`mailto:${operator.email}`}>{operator.email}</a> · {operator.phone}
+        </span>
         <nav aria-label="Policies" className="pl-footer-links">
           <Link href="/pricing" data-testid="footer-pricing">Pricing</Link>
           <Link href="/terms" data-testid="footer-terms">Terms</Link>

@@ -175,5 +175,12 @@ test('Policy pages and footer links', async ({ page }) => {
     await page.goto(path)
     await expect(page.getByRole('heading', { level: 1 })).toHaveText(title)
     await expect(page.getByText(/WhatsApp|Cashfree/)).toHaveCount(0)
+    // The payment gateway approves the site only if it names the KYC holder; no [placeholder] may show
+    await expect(page.locator('body')).toContainText('MANIKANTA KOWSIK PEDDAVARAPU')
+    await expect(page.locator('body')).not.toContainText(/\[[A-Z][^\]]{2,40}\]/)
   }
+  await page.goto('/')
+  await expect(page.getByTestId('footer-operator')).toContainText('operated by MANIKANTA KOWSIK PEDDAVARAPU')
+  await expect(page.getByTestId('footer-operator')).toContainText('welearnyoulearn.in@gmail.com')
+  await expect(page.getByTestId('footer-contact')).toBeVisible()
 })

@@ -67,7 +67,7 @@ The browser checks each step with the same rules as the server (`lib/schoolDetai
 
 - **Pages:** `/terms`, `/privacy`, `/refund-policy`, `/contact` and `/pricing` (plans read live), linked from the home page footer.
 - **Company details come from settings:** `BILLING_LEGAL_NAME`, `BILLING_ADDRESS`, `BILLING_GSTIN`, `LEGAL_CONTACT_EMAIL`, `LEGAL_CONTACT_PHONE`, `LEGAL_GRIEVANCE_OFFICER`, `LEGAL_GRIEVANCE_EMAIL`, `LEGAL_JURISDICTION_CITY`, `LEGAL_EFFECTIVE_DATE`.
-- **Until they are set**, each shows a visible [placeholder]. The GSTIN line is simply left out until WLYL has one.
+- **Defaults are built in** (`lib/legalInfo.ts`): the legal name, email and phone registered with Cashfree, so every deployment shows them with no setup. The env vars override them. The address, GSTIN and jurisdiction city are left out until set.
 - **Draft text:** it needs legal review before going live.
 
 ## 6. As built

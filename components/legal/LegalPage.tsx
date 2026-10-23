@@ -35,7 +35,7 @@ export default function LegalPage({ title, current, children }: { title: string;
       </main>
       <footer className="border-t border-[#dce2db] bg-white">
         <div className="mx-auto max-w-4xl px-4 py-6 text-sm text-[#626e66]">
-          <p>{info.legalName} · {info.address}{info.hasGstin ? ` · GSTIN ${info.gstin}` : ''}</p>
+          <p>{info.brand} is operated by {info.legalName}{info.address && ` · ${info.address}`}{info.hasGstin ? ` · GSTIN ${info.gstin}` : ''}</p>
           <p className="mt-1">Questions: <a className="underline" href={`mailto:${info.email}`}>{info.email}</a> · {info.phone}</p>
         </div>
       </footer>
