@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
-import { requireExamsAccess } from '@/lib/examsAuth'
-import { calcGrade, isPassing } from '@/lib/examGrading'
+import { requireExamsAccess, isTeacherLinkedToClass, parentOwnsStudent } from '@/lib/examsAuth'
+import { isPassing } from '@/lib/examGrading'
 
 // GET /api/students/[id]/exams?school_id=&class_id=
 // Returns all released exams with this student's marks.
@@ -29,11 +29,9 @@ export async function GET(
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
     if (actor.kind === 'parent') {
-      const { rows: link } = await pool.query(
-        'SELECT 1 FROM student_parents WHERE parent_id = $1 AND student_id = $2',
-        [actor.parentId, student_id]
-      )
-      if (link.length === 0) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      if (!await parentOwnsStudent(actor.parentId, Number(student_id))) {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      }
     }
 
     if (!class_id) {
@@ -46,6 +44,15 @@ export async function GET(
     )
     if (!student) return NextResponse.json({ error: 'Student not found' }, { status: 404 })
 
+    const { rows: [requestedClass] } = await pool.query(
+      `SELECT id FROM classes WHERE id = $1 AND school_id = $2 AND grade = $3 AND section = $4`,
+      [class_id, actor.schoolId, student.grade, student.section],
+    )
+    if (!requestedClass) return NextResponse.json({ error: 'class_id does not match this student' }, { status: 400 })
+    if (actor.kind === 'teacher' && !await isTeacherLinkedToClass(actor.teacherId, Number(class_id))) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
+
     const { rows: exams } = await pool.query(`
       SELECT e.id, e.exam_name, e.exam_type, TO_CHAR(e.exam_date, 'YYYY-MM-DD') AS exam_date,
         e.passing_pct, e.released_at, e.class_id
@@ -53,22 +60,33 @@ export async function GET(
       JOIN classes c ON c.id = e.class_id
       WHERE e.class_id = $1 AND e.school_id = $2 AND e.status = 'released'
         AND c.grade = $3 AND c.section = $4
+        AND (e.student_scope = 'all' OR EXISTS (
+          SELECT 1 FROM exam_applicable_students eas WHERE eas.exam_id = e.id AND eas.student_id = $5
+        ))
       ORDER BY e.released_at DESC
-    `, [class_id, actor.schoolId, student.grade, student.section])
+    `, [class_id, actor.schoolId, student.grade, student.section, student_id])
 
+    const examIds = exams.map(exam => Number(exam.id))
+    const { rows: allSubjects } = examIds.length === 0 ? { rows: [] } : await pool.query(
+      `SELECT exam_id, subject_name, max_marks, pass_marks
+       FROM exam_subjects WHERE exam_id = ANY($1::int[]) ORDER BY subject_name`,
+      [examIds],
+    )
+    const { rows: allMarks } = examIds.length === 0 ? { rows: [] } : await pool.query(
+      `SELECT exam_id, subject_name, marks_obtained, is_absent
+       FROM exam_marks WHERE exam_id = ANY($1::int[]) AND student_id = $2`,
+      [examIds, student_id],
+    )
+    const { rows: allAcknowledgements } = examIds.length === 0 ? { rows: [] } : await pool.query(
+      `SELECT exam_id, parent_name, acknowledged_at FROM parent_mark_acks
+       WHERE exam_id = ANY($1::int[]) AND student_id = $2`,
+      [examIds, student_id],
+    )
     const results = []
 
     for (const exam of exams) {
-      const { rows: subjects } = await pool.query(
-        `SELECT subject_name, max_marks FROM exam_subjects WHERE exam_id = $1 ORDER BY subject_name`,
-        [exam.id]
-      )
-
-      const { rows: marks } = await pool.query(
-        `SELECT subject_name, marks_obtained, is_absent
-         FROM exam_marks WHERE exam_id = $1 AND student_id = $2`,
-        [exam.id, student_id]
-      )
+      const subjects = allSubjects.filter(subject => Number(subject.exam_id) === Number(exam.id))
+      const marks = allMarks.filter(mark => Number(mark.exam_id) === Number(exam.id))
 
       const marksMap: Record<string, { marks_obtained: number | null; is_absent: boolean }> = {}
       marks.forEach(m => {
@@ -91,18 +109,16 @@ export async function GET(
           marks_obtained: obtained,
           is_absent: m?.is_absent ?? false,
           percentage: subPct !== null ? Math.round(subPct * 10) / 10 : null,
-          grade: subPct !== null ? calcGrade(subPct) : null,
-          pass: subPct !== null ? isPassing(subPct, exam.passing_pct) : null,
+          pass: obtained !== null
+            ? (s.pass_marks != null ? obtained >= Number(s.pass_marks) : isPassing(subPct!, exam.passing_pct))
+            : null,
         }
       })
 
       const allEntered = marks.length === subjects.length
       const totalPct = allEntered && totalMax > 0 ? Math.round((totalObtained / totalMax) * 1000) / 10 : null
 
-      const { rows: [ack] } = await pool.query(
-        `SELECT parent_name, acknowledged_at FROM parent_mark_acks WHERE exam_id = $1 AND student_id = $2`,
-        [exam.id, student_id]
-      )
+      const ack = allAcknowledgements.find(item => Number(item.exam_id) === Number(exam.id))
 
       results.push({
         exam_id: exam.id,
@@ -115,7 +131,6 @@ export async function GET(
         total_obtained: allEntered ? totalObtained : null,
         total_max: totalMax,
         percentage: totalPct,
-        grade: totalPct !== null ? calcGrade(totalPct) : null,
         pass: totalPct !== null ? isPassing(totalPct, exam.passing_pct) : null,
         parent_acknowledged: !!ack,
         parent_ack_name: ack?.parent_name ?? null,

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
-import { requireSyllabusWriteAccess } from '@/lib/auth'
+import { canWriteSyllabusClass, requireSyllabusWriteAccess } from '@/lib/auth'
 
 // PATCH /api/syllabus/chapters/:id — rename a chapter.
 // Body: { school_id, chapter_name }
@@ -18,15 +18,16 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     await ensureDB()
     const { id } = await params
     const body = await req.json()
-    const { school_id, chapter_name } = body
+    const { school_id, class_id, chapter_name } = body
 
-    if (!school_id || !chapter_name || !String(chapter_name).trim()) {
-      return NextResponse.json({ error: 'school_id, chapter_name required' }, { status: 400 })
+    if (!school_id || !class_id || !chapter_name || !String(chapter_name).trim()) {
+      return NextResponse.json({ error: 'school_id, class_id, chapter_name required' }, { status: 400 })
     }
-    if (!await requireSyllabusWriteAccess(school_id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    const writeSession = await requireSyllabusWriteAccess(school_id)
+    if (!writeSession) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
     const { rows } = await pool.query(
-      `SELECT sc.id, sc.school_subject_id
+      `SELECT sc.id, sc.school_subject_id, ss.subject_name, ss.grade
        FROM school_chapters sc
        JOIN school_subjects ss ON ss.id = sc.school_subject_id
        WHERE sc.id = $1 AND ss.school_id = $2`,
@@ -34,6 +35,14 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     )
     if (rows.length === 0) {
       return NextResponse.json({ error: 'Chapter not found' }, { status: 404 })
+    }
+    const { rows: [classRow] } = await pool.query(
+      `SELECT grade FROM classes WHERE id = $1 AND school_id = $2 AND deleted_at IS NULL`,
+      [class_id, school_id],
+    )
+    if (!classRow || classRow.grade !== rows[0].grade ||
+        !await canWriteSyllabusClass(writeSession, class_id, rows[0].subject_name)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
     const name = String(chapter_name).trim()

@@ -4,12 +4,15 @@ import { getAnySession, requirePlatformAdmin } from '@/lib/auth'
 
 // GET /api/platform/subjects?board=&grade=&category=&include_details=
 // Read-only master catalog shared across every school — not tenant-scoped
-// data, so any authenticated portal session (platform-admin or school-admin)
-// may read it, unlike the writes below which are platform-admin only.
+// data. School management staff need the names for curriculum customization;
+// student and parent sessions must not receive the administrative catalog.
 export async function GET(req: NextRequest) {
   const platformSession = await requirePlatformAdmin()
   const anySession = platformSession ? null : await getAnySession()
-  if (!platformSession && !anySession) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const allowedSchoolRoles = ['school_admin', 'principal', 'vice_principal']
+  if (!platformSession && (!anySession || !allowedSchoolRoles.includes(anySession.role))) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
 
   const board = req.nextUrl.searchParams.get('board')
   const grade = req.nextUrl.searchParams.get('grade')
@@ -18,7 +21,7 @@ export async function GET(req: NextRequest) {
 
   try {
     let query = 'SELECT * FROM master_subjects WHERE 1=1'
-    const args: any[] = []
+    const args: string[] = []
 
     if (board) {
       query += ' AND board = $' + (args.length + 1)

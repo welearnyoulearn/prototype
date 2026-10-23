@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import pool, { ensureDB } from '@/lib/db'
+import pool from '@/lib/db'
 import { getTeacherSession } from '@/lib/auth'
 
 export async function GET() {
@@ -25,7 +25,8 @@ export async function GET() {
     if (!teacher) return NextResponse.json({ error: 'Teacher not found' }, { status: 404 })
 
     // Never expose password_hash to client
-    const { password_hash: _, ...safeTeacher } = teacher
+    const safeTeacher = { ...teacher }
+    delete safeTeacher.password_hash
     return NextResponse.json({ ...safeTeacher, passwordChanged: session.passwordChanged })
 } catch (err: unknown) {
     console.error('[API]', err)

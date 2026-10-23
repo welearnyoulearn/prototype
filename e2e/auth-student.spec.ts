@@ -12,7 +12,7 @@ test.describe('Student Login', () => {
   test('shows welcome banner', async ({ page }) => {
     const login = new StudentLoginPage(page)
     await login.goto()
-    await expect(page.getByText('Ready to learn something new today?')).toBeVisible()
+    await expect(page.getByText('Pick up where you left off')).toBeVisible()
   })
 
   test('shows error on invalid credentials', async ({ page }) => {

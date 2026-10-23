@@ -1,17 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
-import { getParentSession, verifyPassword, hashPassword, setParentAuthCookie, ParentJWTPayload } from '@/lib/auth'
+import { getParentSession, verifyPassword, hashPassword, setParentAuthCookie, ParentJWTPayload, validateNewPassword, revokePortalSessions } from '@/lib/auth'
 
 export async function POST(req: NextRequest) {
   try {
-    const session = await getParentSession()
+    const session = await getParentSession({ allowFirstLogin: true })
     if (!session) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 })
 
     try {
       const { currentPassword, newPassword } = await req.json()
-      if (!newPassword || newPassword.length < 8) {
-        return NextResponse.json({ error: 'New password must be at least 8 characters' }, { status: 400 })
-      }
+      const policyError = validateNewPassword(newPassword, session.email)
+      if (policyError) return NextResponse.json({ error: policyError }, { status: 400 })
 
       const result = await pool.query('SELECT password_hash, password_changed FROM parents WHERE id = $1', [session.parentId])
       if (result.rows.length === 0) return NextResponse.json({ error: 'Not found' }, { status: 404 })
@@ -29,6 +28,7 @@ export async function POST(req: NextRequest) {
       await pool.query('UPDATE parents SET password_hash = $1, password_changed = TRUE WHERE id = $2', [newHash, session.parentId])
 
       const newPayload: ParentJWTPayload = { ...session, passwordChanged: true }
+      await revokePortalSessions('parent', session.parentId, session.sid)
       await setParentAuthCookie(newPayload)
 
       return NextResponse.json({ success: true })

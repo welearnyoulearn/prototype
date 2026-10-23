@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
+import { requirePlatformAdmin } from '@/lib/auth'
 
 // POST /api/platform/tasks
 export async function POST(req: NextRequest) {
+  if (!await requirePlatformAdmin()) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   try {
     const { id, chapter_id, topic_id = null, title, instructions = '', task_type = 'homework', max_marks = 10, is_mandatory = false } = await req.json()
     if (!chapter_id || !title) {
@@ -40,6 +42,7 @@ export async function POST(req: NextRequest) {
 
 // DELETE /api/platform/tasks?id=
 export async function DELETE(req: NextRequest) {
+  if (!await requirePlatformAdmin()) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   const id = req.nextUrl.searchParams.get('id')
   if (!id) {
     return NextResponse.json({ error: 'id required' }, { status: 400 })

@@ -13,7 +13,7 @@ test.describe('Parent Login', () => {
     const login = new ParentLoginPage(page)
     await login.goto()
     await expect(page.getByText('Exam results')).toBeVisible()
-    await expect(page.getByText('Attendance')).toBeVisible()
+    await expect(page.getByText('Attendance', { exact: true })).toBeVisible()
     await expect(page.getByText('Fee status')).toBeVisible()
   })
 

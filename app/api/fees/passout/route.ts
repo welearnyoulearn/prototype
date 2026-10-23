@@ -35,6 +35,7 @@ export async function GET(req: NextRequest) {
            l.student_id,
            s.name AS student_name,
            s.roll_number,
+           s.school_roll_number,
            s.grade,
            s.section,
            ps.passout_year,
@@ -47,7 +48,7 @@ export async function GET(req: NextRequest) {
          LEFT JOIN passout_students ps ON ps.student_id = l.student_id AND ps.school_id = l.school_id
          WHERE l.school_id = $1 AND l.academic_year = 'passout'
            AND l.status IN ('pending', 'partial', 'overdue')
-         GROUP BY l.student_id, s.name, s.roll_number, s.grade, s.section, ps.passout_year, ps.moved_at
+         GROUP BY l.student_id, s.name, s.roll_number, s.school_roll_number, s.grade, s.section, ps.passout_year, ps.moved_at
          ORDER BY outstanding DESC`,
         [school_id]
       )

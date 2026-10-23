@@ -1,18 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
-import { getTeacherSession, verifyPassword, hashPassword, setTeacherAuthCookie, TeacherJWTPayload } from '@/lib/auth'
+import { getTeacherSession, verifyPassword, hashPassword, setTeacherAuthCookie, TeacherJWTPayload, validateNewPassword, revokePortalSessions } from '@/lib/auth'
 
 export async function POST(req: NextRequest) {
   try {
-    const session = await getTeacherSession()
+    const session = await getTeacherSession({ allowFirstLogin: true })
     if (!session) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 })
 
     try {
       const { currentPassword, newPassword } = await req.json()
 
-      if (!newPassword || newPassword.length < 8) {
-        return NextResponse.json({ error: 'New password must be at least 8 characters' }, { status: 400 })
-      }
+      const policyError = validateNewPassword(newPassword, session.email)
+      if (policyError) return NextResponse.json({ error: policyError }, { status: 400 })
 
       const result = await pool.query(
         'SELECT password_hash, password_changed FROM teachers WHERE id = $1',
@@ -36,6 +35,7 @@ export async function POST(req: NextRequest) {
       )
 
       const newPayload: TeacherJWTPayload = { ...session, passwordChanged: true }
+      await revokePortalSessions('teacher', session.teacherId, session.sid)
       await setTeacherAuthCookie(newPayload)
 
       return NextResponse.json({ success: true })

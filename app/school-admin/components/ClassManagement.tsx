@@ -23,6 +23,28 @@ function canTeachGrade(teachesGrades: string | null | undefined, grade: string):
   return teachesGrades.split(',').map(g => g.trim()).includes(grade.trim())
 }
 
+function canTeachSubject(teacherSubject: string | null | undefined, subjectName: string): boolean {
+  if (!teacherSubject?.trim()) return false
+  const subject = subjectName.trim().toLowerCase()
+  const teacher = teacherSubject.trim().toLowerCase()
+  if (subject === teacher || subject.includes(teacher) || teacher.includes(subject)) return true
+  const subjectWords = subject.split(/[\s/,&]+/).filter(word => word.length > 2)
+  const teacherWords = teacher.split(/[\s/,&]+/)
+  return subjectWords.some(sw => teacherWords.some(tw => tw.includes(sw) || sw.includes(tw)))
+}
+
+async function fetchJson<T>(input: RequestInfo | URL, init?: RequestInit): Promise<T> {
+  const response = await fetch(input, init)
+  let data: unknown = null
+  try { data = await response.json() } catch { /* handled below */ }
+  if (!response.ok) {
+    const message = data && typeof data === 'object' && 'error' in data ? String(data.error) : `Request failed (${response.status})`
+    if (response.status === 401) throw new Error('Your session expired. Sign in again and retry.')
+    throw new Error(message)
+  }
+  return data as T
+}
+
 export default function ClassManagement({ schoolId, onNavigate }: Props) {
   const [classes, setClasses] = useState<ClassRow[]>([])
   const [removedClasses, setRemovedClasses] = useState<{ id: number; grade: string; section: string; student_count: number; deleted_at: string }[]>([])
@@ -30,6 +52,7 @@ export default function ClassManagement({ schoolId, onNavigate }: Props) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [showRemoved, setShowRemoved] = useState(false)
+  const [restoringId, setRestoringId] = useState<number | null>(null)
 
   // Selected class
   const [selectedId, setSelectedId] = useState<number | null>(null)
@@ -70,9 +93,9 @@ export default function ClassManagement({ schoolId, onNavigate }: Props) {
     setLoading(true)
     try {
       const [cls, tch, removed] = await Promise.all([
-        fetch(`/api/classes?school_id=${schoolId}`).then(r => r.json()),
-        fetch(`/api/teachers?school_id=${schoolId}`).then(r => r.json()),
-        fetch(`/api/classes?school_id=${schoolId}&removed=true`).then(r => r.json()),
+        fetchJson<unknown>(`/api/classes?school_id=${schoolId}`),
+        fetchJson<unknown>(`/api/teachers?school_id=${schoolId}&view=class-assignment-options`),
+        fetchJson<unknown>(`/api/classes?school_id=${schoolId}&removed=true`),
       ])
       setClasses(Array.isArray(cls) ? cls : [])
       setRemovedClasses(Array.isArray(removed) ? removed : [])
@@ -80,7 +103,7 @@ export default function ClassManagement({ schoolId, onNavigate }: Props) {
         const seen = new Set<number>()
         setTeachers(tch.filter((t: Teacher) => { if (seen.has(t.id)) return false; seen.add(t.id); return true }))
       } else { setTeachers([]) }
-    } catch { setError('Failed to load') }
+    } catch (loadError) { setError(loadError instanceof Error ? loadError.message : 'Failed to load') }
     finally { setLoading(false) }
   }
 
@@ -89,8 +112,7 @@ export default function ClassManagement({ schoolId, onNavigate }: Props) {
     const grade = newClass.grade.trim()
     const section = newClass.section.trim().toUpperCase()
     if (!grade || !section) { setError('Grade and Section required'); return }
-    const maxNumericGrade = Math.max(...GRADE_SEQUENCE.filter(g => /^\d+$/.test(g)).map(Number))
-    if (!/^[0-9]+$/.test(grade) || parseInt(grade) < 1 || parseInt(grade) > maxNumericGrade) { setError(`Grade must be 1–${maxNumericGrade}`); return }
+    if (!GRADE_SEQUENCE.includes(grade as (typeof GRADE_SEQUENCE)[number])) { setError('Choose a valid grade'); return }
     if (!/^[A-Z]$/.test(section)) { setError('Section must be a single letter A–Z'); return }
     setAddingClass(true)
     setSetupMsg('Creating class...')
@@ -121,6 +143,18 @@ export default function ClassManagement({ schoolId, onNavigate }: Props) {
       setSetupMsg(null)
     }
     finally { setAddingClass(false) }
+  }
+
+  async function restoreClass(id: number) {
+    setRestoringId(id)
+    setError('')
+    try {
+      const restored = await fetchJson<ClassRow>(`/api/classes/${id}/restore`, { method: 'POST' })
+      await loadData()
+      setSelectedId(restored.id)
+    } catch (restoreError) {
+      setError(restoreError instanceof Error ? restoreError.message : 'Failed to restore class')
+    } finally { setRestoringId(null) }
   }
 
   function openDeleteModal(e: React.MouseEvent, cls: ClassRow) {
@@ -178,8 +212,9 @@ export default function ClassManagement({ schoolId, onNavigate }: Props) {
     byGrade[c.grade].push(c)
   }
   const sortedGrades = Object.keys(byGrade).sort((a, b) => {
-    const na = parseInt(a), nb = parseInt(b)
-    return isNaN(na) || isNaN(nb) ? a.localeCompare(b) : na - nb
+    const ai = GRADE_SEQUENCE.indexOf(a as (typeof GRADE_SEQUENCE)[number])
+    const bi = GRADE_SEQUENCE.indexOf(b as (typeof GRADE_SEQUENCE)[number])
+    return (ai < 0 ? Number.MAX_SAFE_INTEGER : ai) - (bi < 0 ? Number.MAX_SAFE_INTEGER : bi) || a.localeCompare(b)
   })
 
   if (loading) return (
@@ -189,13 +224,14 @@ export default function ClassManagement({ schoolId, onNavigate }: Props) {
   )
 
   return (
-    <div className="flex gap-0 h-[calc(100vh-140px)] min-h-[600px]">
+    <div className="flex flex-col gap-0 min-h-[600px] md:h-[calc(100vh-140px)] md:flex-row">
       {/* ── Left sidebar: class list ── */}
-      <div className="w-56 flex-shrink-0 border-r border-gray-200 flex flex-col bg-white rounded-l-xl overflow-hidden">
+      <div className="w-full max-h-80 flex-shrink-0 border-b border-gray-200 flex flex-col bg-white rounded-t-xl overflow-hidden md:max-h-none md:w-56 md:border-b-0 md:border-r md:rounded-l-xl md:rounded-tr-none">
         <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
           <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Classes</span>
           <div className="flex items-center gap-1">
             <button onClick={() => setShowAdd(v => !v)}
+              aria-label={showAdd ? 'Close add class form' : 'Add class'}
               className="w-6 h-6 flex items-center justify-center bg-violet-600 hover:bg-violet-700 text-white rounded-md text-sm font-bold transition-colors">+</button>
           </div>
         </div>
@@ -211,13 +247,16 @@ export default function ClassManagement({ schoolId, onNavigate }: Props) {
           <form onSubmit={addClass} className="mx-3 mt-3 bg-violet-50 border border-violet-200 rounded-md p-3 space-y-2">
             <div className="flex gap-2">
               <div className="flex-1">
-                <label className="block text-xs font-medium text-gray-500 mb-0.5">Grade*</label>
-                <input required value={newClass.grade} onChange={e => setNewClass(f => ({ ...f, grade: e.target.value }))}
-                  className="border border-gray-200 rounded-lg px-2 py-1.5 text-xs text-gray-900 bg-white focus:outline-none focus:ring-1 focus:ring-violet-300 w-full" placeholder="10" />
+                <label htmlFor="new-class-grade" className="block text-xs font-medium text-gray-500 mb-0.5">Grade <span aria-hidden="true">*</span></label>
+                <select id="new-class-grade" required value={newClass.grade} onChange={e => setNewClass(f => ({ ...f, grade: e.target.value }))}
+                  className="border border-gray-200 rounded-lg px-2 py-1.5 text-xs text-gray-900 bg-white focus:outline-none focus:ring-1 focus:ring-violet-300 w-full">
+                  <option value="">Select</option>
+                  {GRADE_SEQUENCE.map(grade => <option key={grade} value={grade}>{grade}</option>)}
+                </select>
               </div>
               <div className="w-14">
-                <label className="block text-xs font-medium text-gray-500 mb-0.5">Sec*</label>
-                <input required value={newClass.section} onChange={e => setNewClass(f => ({ ...f, section: e.target.value }))}
+                <label htmlFor="new-class-section" className="block text-xs font-medium text-gray-500 mb-0.5">Sec <span aria-hidden="true">*</span></label>
+                <input id="new-class-section" required maxLength={1} value={newClass.section} onChange={e => setNewClass(f => ({ ...f, section: e.target.value.toUpperCase() }))}
                   className="border border-gray-200 rounded-lg px-2 py-1.5 text-xs text-gray-900 bg-white focus:outline-none focus:ring-1 focus:ring-violet-300 w-full" placeholder="A" />
               </div>
             </div>
@@ -291,7 +330,10 @@ export default function ClassManagement({ schoolId, onNavigate }: Props) {
                       <p className="text-xs font-medium text-gray-500 line-through">{rc.grade}-{rc.section}</p>
                       <p className="text-xs text-muted-foreground">{rc.student_count} student{Number(rc.student_count) !== 1 ? 's' : ''} deactivated</p>
                     </div>
-                    <span className="text-xs text-red-300 bg-red-50 px-1.5 py-0.5 rounded-full">Removed</span>
+                    <button type="button" onClick={() => restoreClass(rc.id)} disabled={restoringId === rc.id}
+                      className="text-xs text-violet-700 bg-violet-50 border border-violet-200 px-2 py-1 rounded-md disabled:opacity-50">
+                      {restoringId === rc.id ? 'Restoring…' : 'Restore'}
+                    </button>
                   </div>
                 ))}
               </div>
@@ -301,14 +343,17 @@ export default function ClassManagement({ schoolId, onNavigate }: Props) {
       </div>
 
       {/* ── Right panel: class detail ── */}
-      <div ref={rightPanelRef} className="flex-1 min-w-0 bg-white rounded-r-xl overflow-hidden overflow-y-auto">
+      <div ref={rightPanelRef} className="flex-1 min-w-0 bg-white rounded-b-xl overflow-hidden overflow-y-auto md:rounded-r-xl md:rounded-bl-none">
         {selectedClass ? (
           <ClassDetail
+            key={selectedClass.id}
             cls={selectedClass}
             schoolId={schoolId}
             teachers={teachers}
             allClasses={classes}
             onClassUpdated={(updates) => setClasses(prev => prev.map(c => c.id === updates.id ? { ...c, ...updates } : c))}
+            onTeacherGradesUpdated={(teacherId, teachesGrades) => setTeachers(prev => prev.map(t => t.id === teacherId ? { ...t, teaches_grades: teachesGrades } : t))}
+            onTeacherSubjectUpdated={(teacherId, subject) => setTeachers(prev => prev.map(t => t.id === teacherId ? { ...t, subject } : t))}
             onNavigate={onNavigate}
           />
         ) : (
@@ -328,7 +373,7 @@ export default function ClassManagement({ schoolId, onNavigate }: Props) {
       {deleteTarget && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
           onClick={() => !deletingClass && setDeleteTarget(null)}>
-          <div className="bg-white rounded-lg shadow-2xl p-6 max-w-md w-full" onClick={e => e.stopPropagation()}>
+          <div role="dialog" aria-modal="true" aria-labelledby="remove-class-title" className="bg-white rounded-lg shadow-2xl p-6 max-w-md w-full" onClick={e => e.stopPropagation()}>
             <div className="flex items-start gap-3 mb-4">
               <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center flex-shrink-0">
                 <svg className="w-5 h-5 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -336,7 +381,7 @@ export default function ClassManagement({ schoolId, onNavigate }: Props) {
                 </svg>
               </div>
               <div>
-                <h3 className="font-bold text-gray-900 text-sm">Remove Grade {deleteTarget.grade} – {deleteTarget.section}</h3>
+                <h3 id="remove-class-title" className="font-bold text-gray-900 text-sm">Remove Grade {deleteTarget.grade} – {deleteTarget.section}</h3>
                 <p className="text-xs text-gray-500 mt-1">
                   Its subject-teacher assignments will be permanently removed.
                   {deleteTarget.student_count > 0 && (
@@ -415,13 +460,15 @@ export default function ClassManagement({ schoolId, onNavigate }: Props) {
 
 // ─── Class Detail (right panel) ────────────────────────────────────────────────
 function ClassDetail({
-  cls, schoolId, teachers, allClasses, onClassUpdated, onNavigate
+  cls, schoolId, teachers, allClasses, onClassUpdated, onTeacherGradesUpdated, onTeacherSubjectUpdated, onNavigate
 }: {
   cls: ClassRow
   schoolId: number
   teachers: Teacher[]
   allClasses: ClassRow[]
   onClassUpdated: (updates: Partial<ClassRow> & { id: number }) => void
+  onTeacherGradesUpdated: (teacherId: number, teachesGrades: string) => void
+  onTeacherSubjectUpdated: (teacherId: number, subject: string) => void
   onNavigate?: (tab: string, subTab?: string) => void
 }) {
   const hasAttendance = useFeature('attendance')
@@ -441,6 +488,7 @@ function ClassDetail({
   const [studLoading, setStudLoading] = useState(false)
   const [profileId, setProfileId] = useState<number | null>(null)
   const [assigningTeacherId, setAssigningTeacherId] = useState<number | null>(null) // subject id being inline-assigned
+  const [savingSubjectTeacher, setSavingSubjectTeacher] = useState(false)
   const [inlineTeacher, setInlineTeacher] = useState('')
   // Subjects the school has subscribed to via Syllabus Customizer for this
   // class's grade — the only source of subjects offered here now, so
@@ -452,14 +500,17 @@ function ClassDetail({
   const loadSubjects = useCallback(async () => {
     setSubLoading(true)
     try {
-      const data = await fetch(`/api/classes/${cls.id}/subjects`).then(r => r.json())
+      const data = await fetchJson<unknown>(`/api/classes/${cls.id}/subjects`)
       setSubjects(Array.isArray(data) ? data : [])
+    } catch (loadError) {
+      setSubjects([])
+      setSubjectMsg({ text: loadError instanceof Error ? loadError.message : 'Could not load subjects', ok: false })
     } finally { setSubLoading(false) }
   }, [cls.id])
 
   const loadSubscribedSubjects = useCallback(async () => {
     try {
-      const data = await fetch(`/api/school/subjects?school_id=${schoolId}`).then(r => r.json())
+      const data = await fetchJson<{ subjects?: { grade: string; subject_name: string }[] }>(`/api/school/subjects?school_id=${schoolId}`)
       const rows: { grade: string; subject_name: string }[] = Array.isArray(data.subjects) ? data.subjects : []
       const forGrade = rows.filter(s => s.grade === cls.grade).map(s => s.subject_name)
       setSubscribedSubjects(forGrade.length > 0 ? forGrade : null)
@@ -471,56 +522,47 @@ function ClassDetail({
   async function loadAttendanceSummary() {
     setAttLoading(true)
     try {
-      const rows: { date: string; present: number; absent: number; late: number }[] = []
-      const today = new Date()
-      const promises = Array.from({ length: 7 }, (_, i) => {
-        const d = new Date(today)
-        d.setDate(today.getDate() - i)
-        const dateStr = d.toISOString().split('T')[0]
-        return fetch(`/api/attendance?class_id=${cls.id}&school_id=${schoolId}&date=${dateStr}&summary=true`)
-          .then(r => r.json())
-          .then(data => {
-            const m = data.morning
-            if (m && m.total > 0) rows.push({ date: dateStr, present: m.present, absent: m.absent, late: m.late || 0 })
-          })
-          .catch(() => {})
-      })
-      await Promise.all(promises)
-      rows.sort((a, b) => a.date.localeCompare(b.date))
-      setAttSummary(rows)
+      const data = await fetchJson<{ days: { date: string; present: number; absent: number; late: number }[] }>(
+        `/api/attendance?class_id=${cls.id}&school_id=${schoolId}&view=recent-summary&days=7`,
+      )
+      setAttSummary(Array.isArray(data.days) ? data.days : [])
+    } catch (loadError) {
+      setAttSummary([])
+      setSubjectMsg({ text: loadError instanceof Error ? loadError.message : 'Could not load attendance', ok: false })
     } finally { setAttLoading(false) }
   }
 
   // Reset state when class changes
   useEffect(() => {
-    setTab('overview')
-    setSubjectMsg(null)
-    setEditingClassTeacher(false)
-    setCtId(String(cls.class_teacher_id || ''))
-    loadSubjects()
-    loadSubscribedSubjects()
-    if (hasAttendance) loadAttendanceSummary()
+    const load = window.setTimeout(() => {
+      void loadSubjects()
+      void loadSubscribedSubjects()
+      if (hasAttendance) void loadAttendanceSummary()
+    }, 0)
+    return () => window.clearTimeout(load)
   }, [cls.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function loadStudents() {
     setStudLoading(true)
     try {
-      const data = await fetch(`/api/students?school_id=${schoolId}&grade=${cls.grade}&section=${cls.section}`).then(r => r.json())
+      const data = await fetchJson<unknown>(`/api/students?school_id=${schoolId}&grade=${encodeURIComponent(cls.grade)}&section=${encodeURIComponent(cls.section)}`)
       setStudents(Array.isArray(data) ? data : [])
+    } catch (loadError) {
+      setStudents([])
+      setSubjectMsg({ text: loadError instanceof Error ? loadError.message : 'Could not load students', ok: false })
     } finally { setStudLoading(false) }
   }
-
-  useEffect(() => {
-    if (tab === 'students') loadStudents()
-  }, [tab]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function removeSubject(subjectId: number, name: string) {
     const ok = await confirm(`Remove "${name}"?`, { title: 'Remove subject?', confirmText: 'Remove', destructive: true })
     if (!ok) return
     setRemovingId(subjectId)
     try {
-      await fetch(`/api/classes/${cls.id}/subjects?subject_id=${subjectId}`, { method: 'DELETE' })
+      await fetchJson(`/api/classes/${cls.id}/subjects?subject_id=${subjectId}`, { method: 'DELETE' })
       await loadSubjects()
+      setSubjectMsg({ text: `${name} removed`, ok: true })
+    } catch (removeError) {
+      setSubjectMsg({ text: removeError instanceof Error ? removeError.message : 'Could not remove subject', ok: false })
     } finally { setRemovingId(null) }
   }
 
@@ -539,27 +581,55 @@ function ClassDetail({
     try {
       const res = await fetch(`/api/classes/${cls.id}`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ class_teacher_id: ctId || null }),
+        // Any teaching staff member can be picked; one who doesn't teach this grade yet gets it added.
+        body: JSON.stringify({
+          class_teacher_id: ctId || null,
+          ...(ctId && !canTeachGrade(teachers.find(t => t.id === parseInt(ctId))?.teaches_grades, cls.grade) ? { add_grade_to_teacher: true } : {}),
+        }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
       const t = teachers.find(t => t.id === parseInt(ctId)) || null
+      if (data.teacher_grades_updated) onTeacherGradesUpdated(data.teacher_grades_updated.teacher_id, data.teacher_grades_updated.teaches_grades)
       onClassUpdated({ id: cls.id, class_teacher_id: data.class_teacher_id, class_teacher_name: t?.name || null })
+      if (data.teacher_grades_updated) setSubjectMsg({ text: `Class teacher assigned — Grade ${cls.grade} added to their details`, ok: true })
       setEditingClassTeacher(false)
       setCtConflict(null)
+    } catch (saveError) {
+      setSubjectMsg({ text: saveError instanceof Error ? saveError.message : 'Could not assign class teacher', ok: false })
     } finally { setSavingCT(false) }
   }
 
   async function assignTeacherInline(subjectId: number) {
     if (!inlineTeacher) return
+    setSavingSubjectTeacher(true)
     try {
-      await fetch(`/api/classes/${cls.id}/subjects`, {
+      // Any teaching staff member can be picked. One whose subject doesn't cover this subject gets it
+      // added to their details (the server only does so when this flag is sent).
+      const subjectName = subjects.find(s => s.id === subjectId)?.subject_name ?? ''
+      const picked = teachers.find(t => t.id === parseInt(inlineTeacher))
+      const needsSubject = !!picked && !!subjectName && !canTeachSubject(picked.subject, subjectName)
+      const data = await fetchJson<{
+        teacher_grades_updated?: { teacher_id: number; teaches_grades: string } | null
+        teacher_subject_updated?: { teacher_id: number; subject: string } | null
+        exams_updated?: number
+      }>(`/api/classes/${cls.id}/subjects`, {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ subject_id: subjectId, teacher_id: parseInt(inlineTeacher) }),
+        body: JSON.stringify({ subject_id: subjectId, teacher_id: parseInt(inlineTeacher), ...(needsSubject ? { add_subject_to_teacher: true } : {}) }),
       })
+      if (data?.teacher_grades_updated) onTeacherGradesUpdated(data.teacher_grades_updated.teacher_id, data.teacher_grades_updated.teaches_grades)
+      if (data?.teacher_subject_updated) onTeacherSubjectUpdated(data.teacher_subject_updated.teacher_id, data.teacher_subject_updated.subject)
       await loadSubjects()
       setAssigningTeacherId(null); setInlineTeacher('')
-    } catch { /* silent */ }
+      const added = [
+        data?.teacher_subject_updated ? subjectName : null,
+        data?.teacher_grades_updated ? `Grade ${cls.grade}` : null,
+      ].filter(Boolean).join(' and ')
+      const examsNote = data?.exams_updated ? ` · ${data.exams_updated} upcoming exam${data.exams_updated === 1 ? '' : 's'} updated with this teacher` : ''
+      setSubjectMsg({ text: (added ? `Subject teacher assigned — ${added} added to their details` : 'Subject teacher assigned') + examsNote, ok: true })
+    } catch (assignError) {
+      setSubjectMsg({ text: assignError instanceof Error ? assignError.message : 'Could not assign subject teacher', ok: false })
+    } finally { setSavingSubjectTeacher(false) }
   }
 
   const totalPPW = subjects.reduce((a, s) => a + s.periods_per_week, 0)
@@ -580,16 +650,17 @@ function ClassDetail({
                     className="border border-violet-300 rounded-lg px-3 py-1.5 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-violet-300 min-w-[200px]">
                     <option value="">— No class teacher —</option>
                     {(() => {
+                      // Every teaching staff member is listed; one outside this grade gets it added on save.
                       const teaching   = teachers.filter(t => t.staff_type !== 'non_teaching')
                       const eligible   = teaching.filter(t => canTeachGrade(t.teaches_grades, cls.grade))
-                      const ineligible = teaching.filter(t => !canTeachGrade(t.teaches_grades, cls.grade))
+                      const otherGrade = teaching.filter(t => !canTeachGrade(t.teaches_grades, cls.grade))
                       return (
                         <>
-                          {eligible.length > 0 && <optgroup label={`Grade ${cls.grade} teachers`}>
+                          {eligible.length > 0 && <optgroup label={`Teaches Grade ${cls.grade}`}>
                             {eligible.map(t => <option key={t.id} value={t.id}>{t.name}{t.subject ? ` · ${t.subject}` : ''}</option>)}
                           </optgroup>}
-                          {ineligible.length > 0 && <optgroup label="Other grades">
-                            {ineligible.map(t => <option key={t.id} value={t.id}>{t.name}{t.subject ? ` · ${t.subject}` : ''}</option>)}
+                          {otherGrade.length > 0 && <optgroup label={`Other staff — Grade ${cls.grade} will be added to their details`}>
+                            {otherGrade.map(t => <option key={t.id} value={t.id}>{t.name}{t.subject ? ` · ${t.subject}` : ''} (Gr {t.teaches_grades})</option>)}
                           </optgroup>}
                         </>
                       )
@@ -629,7 +700,7 @@ function ClassDetail({
         {/* Class teacher conflict modal */}
         {ctConflict && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setCtConflict(null)}>
-            <div className="bg-white rounded-lg shadow-2xl p-6 max-w-sm w-full" onClick={e => e.stopPropagation()}>
+            <div role="dialog" aria-modal="true" aria-labelledby="teacher-conflict-title" className="bg-white rounded-lg shadow-2xl p-6 max-w-sm w-full" onClick={e => e.stopPropagation()}>
               <div className="flex items-start gap-3 mb-4">
                 <div className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center flex-shrink-0">
                   <svg className="w-5 h-5 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -637,7 +708,7 @@ function ClassDetail({
                   </svg>
                 </div>
                 <div>
-                  <h3 className="font-bold text-gray-900 text-sm">Teacher Already Assigned</h3>
+                  <h3 id="teacher-conflict-title" className="font-bold text-gray-900 text-sm">Teacher Already Assigned</h3>
                   <p className="text-xs text-gray-500 mt-1">
                     <strong>{ctConflict.teacherName}</strong> is already the Class Teacher of{' '}
                     <span className="font-semibold text-violet-700">Grade {ctConflict.existingClass.grade} – {ctConflict.existingClass.section}</span>.
@@ -662,10 +733,13 @@ function ClassDetail({
         )}
 
         {/* Tabs */}
-        <div className="flex gap-0 mt-3 -mb-4">
+        <div role="tablist" aria-label="Class details" className="flex gap-0 mt-3 -mb-4 overflow-x-auto">
           {(['overview', 'subjects', 'students', 'syllabus'] as const)
             .map(t => (
-            <button key={t} onClick={() => setTab(t)}
+            <button key={t} role="tab" aria-selected={tab === t} onClick={() => {
+              setTab(t)
+              if (t === 'students') void loadStudents()
+            }}
               className={`px-4 py-2 text-xs font-medium border-b-2 transition-colors ${
                 tab === t ? 'border-violet-600 text-violet-700' : 'border-transparent text-gray-500 hover:text-gray-800'
               }`}>
@@ -839,22 +913,30 @@ function ClassDetail({
                               className="border border-violet-300 rounded-lg px-2 py-1 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-violet-400 max-w-[180px]">
                               <option value="">Select teacher...</option>
                               {(() => {
-                                const eligible   = teachers.filter(t => t.staff_type !== 'non_teaching' && canTeachGrade(t.teaches_grades, cls.grade))
-                                const ineligible = teachers.filter(t => t.staff_type !== 'non_teaching' && !canTeachGrade(t.teaches_grades, cls.grade))
+                                // Every teaching staff member is listed with their subject. A subject
+                                // match is required; a missing grade is added to their details on assign.
+                                const teaching = teachers.filter(t => t.staff_type !== 'non_teaching')
+                                const matching = teaching.filter(t => canTeachSubject(t.subject, s.subject_name))
+                                const inGrade = matching.filter(t => canTeachGrade(t.teaches_grades, cls.grade))
+                                const otherGrade = matching.filter(t => !canTeachGrade(t.teaches_grades, cls.grade))
+                                const otherSubject = teaching.filter(t => !canTeachSubject(t.subject, s.subject_name))
                                 return (
                                   <>
-                                    {eligible.length > 0 && <optgroup label={`Grade ${cls.grade} teachers`}>
-                                      {eligible.map(t => <option key={t.id} value={t.id}>{t.name}{t.subject ? ` · ${t.subject}` : ''}</option>)}
+                                    {inGrade.length > 0 && <optgroup label={`Grade ${cls.grade} · ${s.subject_name}`}>
+                                      {inGrade.map(t => <option key={t.id} value={t.id}>{t.name}{t.subject ? ` · ${t.subject}` : ''}</option>)}
                                     </optgroup>}
-                                    {ineligible.length > 0 && <optgroup label="Other grades (not assigned)">
-                                      {ineligible.map(t => <option key={t.id} value={t.id}>{t.name}{t.subject ? ` · ${t.subject}` : ''}</option>)}
+                                    {otherGrade.length > 0 && <optgroup label={`Grade ${cls.grade} will be added to their details`}>
+                                      {otherGrade.map(t => <option key={t.id} value={t.id}>{t.name}{t.subject ? ` · ${t.subject}` : ''} (Gr {t.teaches_grades})</option>)}
+                                    </optgroup>}
+                                    {otherSubject.length > 0 && <optgroup label={`Other teachers — ${s.subject_name} will be added to their details`}>
+                                      {otherSubject.map(t => <option key={t.id} value={t.id}>{t.name}{t.subject ? ` · ${t.subject}` : ''}{!canTeachGrade(t.teaches_grades, cls.grade) ? ` (Gr ${t.teaches_grades})` : ''}</option>)}
                                     </optgroup>}
                                   </>
                                 )
                               })()}
                             </select>
-                            <button onClick={() => assignTeacherInline(s.id)} disabled={!inlineTeacher}
-                              className="text-xs px-2 py-1 bg-violet-600 text-white rounded-lg hover:bg-violet-700 disabled:opacity-50">✓</button>
+                            <button aria-label={`Save teacher for ${s.subject_name}`} onClick={() => assignTeacherInline(s.id)} disabled={!inlineTeacher || savingSubjectTeacher}
+                              className="text-xs px-2 py-1 bg-violet-600 text-white rounded-lg hover:bg-violet-700 disabled:opacity-50">{savingSubjectTeacher ? '…' : '✓'}</button>
                             <button onClick={() => { setAssigningTeacherId(null); setInlineTeacher('') }}
                               className="text-xs text-muted-foreground hover:text-gray-600">✕</button>
                           </div>
@@ -870,7 +952,7 @@ function ClassDetail({
                             Assign Teacher
                           </button>
                         )}
-                        <button onClick={() => removeSubject(s.id, s.subject_name)} disabled={removingId === s.id}
+                        <button aria-label={`Remove ${s.subject_name}`} onClick={() => removeSubject(s.id, s.subject_name)} disabled={removingId === s.id}
                           className="text-red-300 hover:text-red-500 text-xs p-1 transition-colors disabled:opacity-40">✕</button>
                       </div>
                     </div>

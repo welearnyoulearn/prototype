@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
 import { lockYearClose } from '@/lib/feeRollover'
+import { syncGeneratedBill } from '@/lib/feeStructureSync'
 
 // student_fee_category_assignments / student_fee_assignment_history table
 // creation lives in lib/db.ts's ensureDB() now (single source of truth); this
@@ -57,10 +58,10 @@ export async function GET(req: NextRequest) {
 
       const [studentsRes, categoriesRes, amountsRes] = await Promise.all([
         pool.query(
-          `SELECT id, name, roll_number, section FROM students
+          `SELECT id, name, roll_number, school_roll_number, section FROM students
            WHERE school_id = $1 AND grade = $2 AND status = 'active'
            ${useSection ? 'AND section = $3' : ''}
-           ORDER BY section, (NULLIF(regexp_replace(roll_number,'[^0-9]','','g'),''))::int NULLS LAST, name`,
+           ORDER BY section, school_roll_number NULLS LAST, name`,
           useSection ? [school_id, grade, section] : [school_id, grade]
         ),
         pool.query(
@@ -104,12 +105,12 @@ export async function POST(req: NextRequest) {
     await ensureDB()
     const client = await pool.connect()
     try {
-      const { school_id, academic_year, assignments, changed_by: clientActor } = await req.json()
+      const { school_id, academic_year, assignments } = await req.json()
       // Pass `client` — already held via pool.connect() above; the default
       // `pool` here would deadlock requesting a second connection on Vercel's max:1 pool.
       const access = await requireFeeAccess(school_id, client)
-      if (!access) { client.release(); return NextResponse.json({ error: 'Forbidden' }, { status: 403 }) }
-      const changed_by = clientActor || access.actor
+      if (!access) { return NextResponse.json({ error: 'Forbidden' }, { status: 403 }) }
+      const changed_by = access.actor
       if (!school_id || !academic_year || !Array.isArray(assignments)) {
         return NextResponse.json({ error: 'school_id, academic_year, assignments required' }, { status: 400 })
       }
@@ -135,14 +136,12 @@ export async function POST(req: NextRequest) {
         `SELECT id FROM students WHERE id = ANY($1) AND school_id = $2`, [studentIds, school_id]
       )
       if (ownedStudents.length !== studentIds.length) {
-        client.release()
         return NextResponse.json({ error: 'One or more students do not belong to this school' }, { status: 403 })
       }
       const { rows: ownedCategories } = await client.query(
         `SELECT id FROM fee_categories WHERE id = ANY($1) AND school_id = $2`, [categoryIds, school_id]
       )
       if (ownedCategories.length !== categoryIds.length) {
-        client.release()
         return NextResponse.json({ error: 'One or more fee categories do not belong to this school' }, { status: 403 })
       }
 
@@ -258,24 +257,26 @@ export async function POST(req: NextRequest) {
         }, { status: 409 })
       }
 
-      // Sync existing ledger entries for saved amounts
+      // Use the same billed-amount, balance and audit rules as generation.
       let ledgerUpdated = 0
       for (const { student_id, fee_category_id, amount } of toSave) {
-        const amt = parseFloat(amount)
-        const { rowCount } = await client.query(
-          `UPDATE student_fee_ledger
-           SET amount_due = $1,
-               status = CASE
-                 WHEN COALESCE(waiver_amount,0) + amount_paid >= $1  THEN 'paid'
-                 WHEN amount_paid > 0 AND amount_paid < $1           THEN 'partial'
-                 WHEN $1 > 0 AND EXISTS (SELECT 1 FROM academic_years ay WHERE ay.school_id = student_fee_ledger.school_id AND ay.label = student_fee_ledger.academic_year AND ay.end_date < CURRENT_DATE) THEN 'overdue'
-                 ELSE 'pending'
-               END
-           WHERE school_id = $2 AND student_id = $3 AND fee_category_id = $4
-             AND academic_year = $5 AND amount_due != $1`,
-          [amt, school_id, student_id, fee_category_id, academic_year]
+        const { rows: periods } = await client.query(
+          `SELECT period_label FROM student_fee_ledger
+           WHERE school_id = $1 AND academic_year = $2 AND student_id = $3 AND fee_category_id = $4`,
+          [school_id, academic_year, student_id, fee_category_id]
         )
-        ledgerUpdated += rowCount ?? 0
+        for (const period of periods) {
+          const synced = await syncGeneratedBill(client, {
+            schoolId: school_id, academicYear: academic_year, studentId: student_id,
+            categoryId: fee_category_id, periodLabel: period.period_label, structureId: null,
+            amount, reason: 'Variable fee assignment amount updated', actor: changed_by,
+          })
+          if (synced.blocked > 0) {
+            await client.query('ROLLBACK')
+            return NextResponse.json({ error: 'The new amount is below recorded payments plus waivers. Correct payments or waivers first.' }, { status: 409 })
+          }
+          ledgerUpdated += synced.updated
+        }
       }
 
       // Log removals in history

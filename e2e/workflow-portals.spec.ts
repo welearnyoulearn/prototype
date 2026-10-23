@@ -89,16 +89,17 @@ test.describe('Portal Access Verification', () => {
       await page.goto('/')
       await expect(page.getByTestId('portal-selection')).toBeVisible()
 
-      // Verify all 4 cards are clickable and lead to correct URLs
-      for (const [card, expectedUrl] of [
-        ['school-admin', '/login?role=school'],
-        ['teacher', '/teacher/login'],
-        ['student', '/student/login'],
-        ['parent', '/parent/login'],
+      // Choosing a portal opens its sign-in form inside the same card, on the same page
+      for (const [card, formId] of [
+        ['school-admin', 'school-admin-login-form'],
+        ['teacher', 'teacher-login-form'],
+        ['student', 'student-login-form'],
+        ['parent', 'parent-login-form'],
       ] as const) {
         await page.goto('/')
         await page.getByTestId(`portal-card-${card}`).click()
-        await expect(page).toHaveURL(new RegExp(expectedUrl.replace(/[?]/g, '\\?')))
+        await expect(page).toHaveURL(/\/$/)
+        await expect(page.getByTestId(formId)).toBeVisible()
       }
     })
 
@@ -139,8 +140,15 @@ test.describe('Portal Access Verification', () => {
       expect(Array.isArray(schools)).toBe(true)
     })
 
-    test('platform stats API returns data', async ({ request }) => {
+    test('platform stats API refuses a request with no platform-admin session', async ({ request }) => {
       const res = await request.get('/api/platform/stats')
+      expect(res.status()).toBe(403)
+    })
+
+    test('platform stats API returns data for a platform admin', async ({ request }) => {
+      const res = await request.get('/api/platform/stats', {
+        headers: { Cookie: await platformAdminCookie() },
+      })
       expect(res.ok()).toBeTruthy()
       const stats = await res.json()
       expect(stats).toHaveProperty('schools')

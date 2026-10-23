@@ -38,8 +38,16 @@ export async function GET(
 
     const { rows } = await pool.query(`
       SELECT
-        s.id AS student_id, s.name AS student_name, s.roll_number,
-        pma.acknowledged_at, pma.parent_name,
+        s.id AS student_id, s.name AS student_name, s.roll_number, s.school_roll_number,
+        pma.acknowledged_at,
+        -- Whoever acknowledged, else the parent(s) linked to the student, else the name on the student record.
+        COALESCE(
+          pma.parent_name,
+          (SELECT string_agg(p.name, ', ' ORDER BY p.name)
+             FROM student_parents sp JOIN parents p ON p.id = sp.parent_id
+            WHERE sp.student_id = s.id),
+          s.parent_name
+        ) AS parent_name,
         nudge.last_nudged_at
       FROM students s
       LEFT JOIN parent_mark_acks pma ON pma.exam_id = $1 AND pma.student_id = s.id
@@ -49,8 +57,11 @@ export async function GET(
         WHERE exam_id = $1 AND student_id = s.id
       ) nudge ON TRUE
       WHERE s.school_id = $2 AND s.grade = $3 AND s.section = $4 AND s.status = 'active'
-      ORDER BY s.roll_number NULLS LAST, s.name
-    `, [exam_id, actor.schoolId, exam.grade, exam.section])
+        AND ($5 = 'all' OR EXISTS (
+          SELECT 1 FROM exam_applicable_students eas WHERE eas.exam_id = $1 AND eas.student_id = s.id
+        ))
+      ORDER BY s.school_roll_number NULLS LAST, s.name
+    `, [exam_id, actor.schoolId, exam.grade, exam.section, exam.student_scope])
 
     const acknowledged = rows.filter(r => r.acknowledged_at).length
 

@@ -1,18 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
-import { hashPassword } from '@/lib/auth'
+import { hashPassword, validateNewPassword } from '@/lib/auth'
 import { ensureDB } from '@/lib/db'
+import { checkAuthRateLimit, LOGIN_LIMIT } from '@/lib/authRateLimit'
 
 // POST /api/auth/setup-admin
 // Creates the first platform admin if none exists.
 // Protected by SETUP_SECRET env var.
 export async function POST(req: NextRequest) {
   try {
+    await ensureDB()
 
     const { email, password, secret } = await req.json()
 
     if (!process.env.SETUP_SECRET) {
       return NextResponse.json({ error: 'Setup endpoint is disabled — SETUP_SECRET not configured' }, { status: 503 })
+    }
+    if (!await checkAuthRateLimit(req, 'bootstrap-admin', 'setup', LOGIN_LIMIT)) {
+      return NextResponse.json({ error: 'Too many attempts. Please try again later.' }, { status: 429, headers: { 'Retry-After': '900' } })
     }
     if (secret !== process.env.SETUP_SECRET) {
       return NextResponse.json({ error: 'Invalid setup secret' }, { status: 403 })
@@ -21,6 +26,8 @@ export async function POST(req: NextRequest) {
     if (!email || !password) {
       return NextResponse.json({ error: 'Email and password required' }, { status: 400 })
     }
+    const policyError = validateNewPassword(password, email)
+    if (policyError) return NextResponse.json({ error: policyError }, { status: 400 })
 
     const existing = await pool.query(
       `SELECT id FROM users WHERE role = 'platform_admin' LIMIT 1`

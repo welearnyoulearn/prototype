@@ -1,7 +1,9 @@
 import { NextResponse } from 'next/server'
 import { ensureDB } from '@/lib/db'
+import { requirePlatformAdmin } from '@/lib/auth'
 
 export async function GET() {
+  if (!await requirePlatformAdmin()) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   try {
     await ensureDB()
     return NextResponse.json({ message: 'Database initialized successfully' })

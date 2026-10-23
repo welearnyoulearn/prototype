@@ -1,8 +1,10 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
-import { Bell, CalendarDays, Check, ClipboardList, Clock, RefreshCw, UserRound, type LucideIcon } from 'lucide-react'
+import { Bell, CalendarDays, Check, ChevronLeft, ChevronRight, ClipboardList, Clock, Megaphone, RefreshCw, UserRound, XCircle, type LucideIcon } from 'lucide-react'
+import { buildGroups, groupOf, NOTIFICATION_GROUP_LABELS, NOTIFICATIONS_CHANGED_EVENT, type NotificationGroupId } from './notificationGroups'
+import { enablePush, getPushState, isPushPromptSnoozed, snoozePushPrompt, syncPushRegistration, type PushState } from '@/lib/pushClient'
 
 type Notification = {
   id: number
@@ -17,17 +19,22 @@ type Notification = {
 
 type NavPayload = { examId?: number; classId?: number; tab?: string; subjectName?: string }
 
-type Props =
-  | { teacherId: number; schoolId?: never; studentId?: never; parentId?: never; onNavigate?: (key: string, payload?: NavPayload) => void }
-  | { schoolId: number; teacherId?: never; studentId?: never; parentId?: never; onNavigate?: (key: string, payload?: NavPayload) => void }
-  | { studentId: number; teacherId?: never; schoolId?: never; parentId?: never; onNavigate?: (key: string, payload?: NavPayload) => void }
-  | { parentId: number; teacherId?: never; schoolId?: never; studentId?: never; onNavigate?: (key: string, payload?: NavPayload) => void }
+// `group` turns the bell into a feature bell: it only shows (and counts) that feature's
+// notifications, so a page like Exam Schedule can drop one in its header.
+type Common = { onNavigate?: (key: string, payload?: NavPayload) => void; group?: NotificationGroupId }
+type Props = Common & (
+  | { teacherId: number; schoolId?: never; studentId?: never; parentId?: never }
+  | { schoolId: number; teacherId?: never; studentId?: never; parentId?: never }
+  | { studentId: number; teacherId?: never; schoolId?: never; parentId?: never }
+  | { parentId: number; teacherId?: never; schoolId?: never; studentId?: never }
+)
 
 const TYPE_ICONS: Record<string, LucideIcon> = {
   period_delay: Clock,
   substitute_needed: RefreshCw,
   substitute_assigned: UserRound,
   marks_entry_required: ClipboardList,
+  marks_entry_nudge: Bell,
   marks_submitted: Check,
   marks_published: ClipboardList,
   exam_scheduled: CalendarDays,
@@ -36,6 +43,12 @@ const TYPE_ICONS: Record<string, LucideIcon> = {
   marks_released: ClipboardList,
   ack_nudge: Bell,
   ack_completed: Check,
+  exam_updated: RefreshCw,
+  exam_cancelled: XCircle,
+  exam_reminder_7day: CalendarDays,
+  exam_reminder_1day: Bell,
+  exam_reminder_today: Clock,
+  teacher_broadcast: Megaphone,
 }
 
 function NotificationTypeIcon({ type }: { type: string }) {
@@ -48,6 +61,7 @@ const TYPE_COLORS: Record<string, string> = {
   substitute_needed: 'text-orange-600 bg-orange-50',
   substitute_assigned: 'text-teal-600 bg-teal-50',
   marks_entry_required: 'text-orange-700 bg-orange-50',
+  marks_entry_nudge: 'text-amber-700 bg-amber-50',
   marks_submitted: 'text-green-700 bg-green-50',
   marks_published: 'text-blue-700 bg-blue-50',
   exam_scheduled: 'text-indigo-700 bg-indigo-50',
@@ -56,18 +70,49 @@ const TYPE_COLORS: Record<string, string> = {
   marks_released: 'text-blue-700 bg-blue-50',
   ack_nudge: 'text-amber-700 bg-amber-50',
   ack_completed: 'text-green-700 bg-green-50',
+  exam_updated: 'text-amber-700 bg-amber-50',
+  exam_cancelled: 'text-red-700 bg-red-50',
+  exam_reminder_7day: 'text-indigo-700 bg-indigo-50',
+  exam_reminder_1day: 'text-amber-700 bg-amber-50',
+  exam_reminder_today: 'text-red-700 bg-red-50',
+  teacher_broadcast: 'text-teal-700 bg-teal-50',
 }
 
 const TYPE_NAV: Record<string, string> = {
   marks_entry_required: 'class-view',  // teacher: open class's marks tab
+  marks_entry_nudge: 'class-view',      // subject teacher: reminded to enter marks
   marks_submitted: 'class-view',        // class teacher: see marks submission
   marks_published: 'my-marks',          // student: go to marks page
-  exam_scheduled: 'weekly-test',        // student: go to test calendar
+  exam_scheduled: 'my-marks',           // student: go to Upcoming Exams tab (was 'weekly-test', a dead nav key)
   exam_entry_open: 'class-view',        // subject teacher: marks entry now open
   exam_reviewed: 'exam-schedule',       // school admin: exam awaiting release
   marks_released: 'my-marks',           // student: results are visible
   ack_nudge: 'results',                 // parent: acknowledge a result
   ack_completed: 'class-view',          // class teacher: a parent signed off
+  exam_updated: 'my-marks',             // student: see the updated schedule (parent/teacher use their own exam-calendar nav keys, 'exams'/'exam-schedule', not this shared map)
+  exam_cancelled: 'my-marks',
+  exam_reminder_7day: 'my-marks',
+  exam_reminder_1day: 'my-marks',
+  exam_reminder_today: 'my-marks',
+  fee_year_end_reminder: 'fee-management', // school admin: open Fee Management (Year-End tab)
+  fee_writeoff_request: 'fee-management',
+  fee_writeoff_decided: 'fee-management',
+}
+
+export type NotificationPortal = 'teacher' | 'admin' | 'student' | 'parent'
+
+export function notificationDestination(
+  type: string,
+  portal: NotificationPortal,
+): string | undefined {
+  const scheduleTypes = new Set(['exam_scheduled', 'exam_updated', 'exam_cancelled', 'exam_reminder_7day', 'exam_reminder_1day', 'exam_reminder_today'])
+  if (scheduleTypes.has(type)) {
+    if (portal === 'parent') return 'exams'
+    if (portal === 'teacher' || portal === 'admin') return 'exam-schedule'
+    return 'my-marks'
+  }
+  if (type === 'marks_released') return portal === 'parent' ? 'results' : 'my-marks'
+  return TYPE_NAV[type]
 }
 
 function timeAgo(dateStr: string) {
@@ -80,35 +125,91 @@ function timeAgo(dateStr: string) {
   return `${Math.floor(hrs / 24)}d ago`
 }
 
-export default function NotificationBell({ teacherId, schoolId, studentId, parentId, onNavigate }: Props) {
+export default function NotificationBell({ teacherId, schoolId, studentId, parentId, onNavigate, group }: Props) {
   const [notifications, setNotifications] = useState<Notification[]>([])
   const [open, setOpen] = useState(false)
+  // Which feature group is expanded (null = the grouped overview).
+  const [activeGroup, setActiveGroup] = useState<NotificationGroupId | null>(null)
+  // Push on this device. Only the main bell (not a feature-scoped one) offers it, so a page with
+  // several bells shows one prompt.
+  const [pushState, setPushState] = useState<PushState>('unconfigured')
+  const [pushBusy, setPushBusy] = useState(false)
+  const [pushError, setPushError] = useState<string | null>(null)
+  // The one-time "turn on notifications?" card shown after sign-in (a click is needed before the browser
+  // will show its own permission dialog, so we ask in-app first).
+  const [promptOpen, setPromptOpen] = useState(false)
 
   // These query params are not actually consulted server-side — GET
   // /api/notifications derives the recipient purely from the session cookie
   // (see that route's own comment). Kept here only so the URL documents
   // intent per-portal; the value has no effect on which rows come back.
+  // unread_only: once a notification is read it leaves the bell — otherwise it
+  // would reappear on the next 30s poll even after "Mark all read".
   const apiUrl = teacherId
-    ? `/api/notifications?teacher_id=${teacherId}`
+    ? `/api/notifications?teacher_id=${teacherId}&unread_only=true`
     : studentId
-      ? `/api/notifications?student_id=${studentId}`
+      ? `/api/notifications?student_id=${studentId}&unread_only=true`
       : parentId
-        ? `/api/notifications?parent_id=${parentId}`
-        : `/api/notifications?recipient_school_id=${schoolId}`
+        ? `/api/notifications?parent_id=${parentId}&unread_only=true`
+        : `/api/notifications?recipient_school_id=${schoolId}&unread_only=true`
 
-  async function fetchNotifications() {
+  const fetchNotifications = useCallback(async () => {
     try {
       const res = await fetch(apiUrl)
+      if (!res.ok) throw new Error(`Notifications request failed (${res.status})`)
       const data = await res.json()
       setNotifications(Array.isArray(data) ? data : [])
-    } catch { /* silent */ }
-  }
+    } catch (error) { console.error(error) }
+  }, [apiUrl])
 
   useEffect(() => {
-    fetchNotifications()
+    const initial = setTimeout(() => { void fetchNotifications() }, 0)
     const timer = setInterval(fetchNotifications, 30000)
-    return () => clearInterval(timer)
-  }, [teacherId, schoolId, studentId, parentId])
+    return () => { clearTimeout(initial); clearInterval(timer) }
+  }, [fetchNotifications])
+
+  // A push that arrives while this tab is open is handed over by the service worker: refresh now
+  // instead of waiting for the next 30s poll.
+  useEffect(() => {
+    if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return
+    const onMessage = (event: MessageEvent) => {
+      if ((event.data as { type?: string } | null)?.type === 'wlyl-push') void fetchNotifications()
+    }
+    navigator.serviceWorker.addEventListener('message', onMessage)
+    return () => navigator.serviceWorker.removeEventListener('message', onMessage)
+  }, [fetchNotifications])
+
+  useEffect(() => {
+    if (group) return
+    const timer = setTimeout(() => {
+      const state = getPushState()
+      setPushState(state)
+      void syncPushRegistration()
+      if (state === 'off' && !isPushPromptSnoozed()) setPromptOpen(true)
+    }, 0)
+    return () => clearTimeout(timer)
+  }, [group])
+
+  async function turnOnPush() {
+    setPushBusy(true)
+    setPushError(null)
+    const result = await enablePush()
+    setPushBusy(false)
+    setPushState(getPushState())
+    if (result.ok) { setPromptOpen(false); return }
+    if (result.reason === 'failed') setPushError('Could not turn on notifications. Please try again.')
+    if (result.reason === 'blocked') { setPushError('Notifications are blocked for this site in your browser settings.'); snoozePushPrompt(30) }
+    if (result.reason === 'dismissed') { snoozePushPrompt(7); setPromptOpen(false) }
+    if (result.reason === 'push_service') {
+      setPushError("This browser can't connect to its push service, so alerts can't be turned on here. Open the app in Chrome or Edge to get them.")
+      snoozePushPrompt(30)
+    }
+  }
+
+  function notNow() {
+    snoozePushPrompt(7)
+    setPromptOpen(false)
+  }
 
 
   async function markAllRead() {
@@ -123,7 +224,22 @@ export default function NotificationBell({ teacherId, schoolId, studentId, paren
           : { school_id: schoolId }
         ),
       })
-      setNotifications(prev => prev.map(n => ({ ...n, is_read: true })))
+      setNotifications([])
+      window.dispatchEvent(new Event(NOTIFICATIONS_CHANGED_EVENT))
+    } catch { /* silent */ }
+  }
+
+  async function markIdsRead(ids: number[]) {
+    if (ids.length === 0) return
+    try {
+      await fetch('/api/notifications', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ notification_ids: ids.slice(0, 200) }),
+      })
+      const done = new Set(ids)
+      setNotifications(prev => prev.filter(n => !done.has(n.id)))
+      window.dispatchEvent(new Event(NOTIFICATIONS_CHANGED_EVENT))
     } catch { /* silent */ }
   }
 
@@ -134,14 +250,16 @@ export default function NotificationBell({ teacherId, schoolId, studentId, paren
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ notification_id: id }),
       })
-      setNotifications(prev => prev.map(n => n.id === id ? { ...n, is_read: true } : n))
+      setNotifications(prev => prev.filter(n => n.id !== id))
+      window.dispatchEvent(new Event(NOTIFICATIONS_CHANGED_EVENT))
     } catch { /* silent */ }
   }
 
 
   function handleClick(n: Notification) {
     markOneRead(n.id)
-    const navKey = TYPE_NAV[n.type]
+    const portal = parentId ? 'parent' : teacherId ? 'teacher' : studentId ? 'student' : 'admin'
+    const navKey = notificationDestination(n.type, portal)
     if (navKey && onNavigate) {
       let payload: NavPayload | undefined
       if (n.data) {
@@ -151,7 +269,7 @@ export default function NotificationBell({ teacherId, schoolId, studentId, paren
             examId: parsed.exam_id,
             classId: parsed.class_id,
             subjectName: parsed.subject_name,
-            tab: (n.type === 'marks_entry_required' || n.type === 'marks_submitted') ? 'Marks & Results' : undefined,
+            tab: (n.type === 'marks_entry_required' || n.type === 'marks_entry_nudge' || n.type === 'marks_submitted') ? 'Marks & Results' : undefined,
           }
         } catch { /* malformed data */ }
       }
@@ -160,10 +278,24 @@ export default function NotificationBell({ teacherId, schoolId, studentId, paren
     }
   }
 
-  const unread = notifications.filter(n => !n.is_read).length
+  // A feature bell only ever sees its own feature's notifications.
+  const scoped = group ? notifications.filter(n => groupOf(n.type) === group) : notifications
+  const unread = scoped.filter(n => !n.is_read).length
+  const groups = buildGroups(scoped)
+  // The overview only helps when there is more than one feature to choose between.
+  const current = !group && activeGroup && groups.some(g => g.id === activeGroup) ? activeGroup : null
+  const showGroups = !group && !current && groups.length > 1
+  const visible = current ? scoped.filter(n => groupOf(n.type) === current) : scoped
+  const scopedBell = !!group || !!current
+
+  function handleOpenChange(next: boolean) {
+    setOpen(next)
+    if (!next) setActiveGroup(null)
+  }
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <>
+    <Popover open={open} onOpenChange={handleOpenChange}>
       <PopoverTrigger asChild>
       <button
         className="portal-icon-button relative"
@@ -185,19 +317,62 @@ export default function NotificationBell({ teacherId, schoolId, studentId, paren
       {open && (
         <PopoverContent align="end" collisionPadding={12} aria-label="Notifications" className="w-80 max-w-[calc(100vw-24px)] overflow-hidden p-0">
           <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
-            <span className="font-semibold text-gray-900 text-sm">Notifications</span>
+            {current ? (
+              <button onClick={() => setActiveGroup(null)} className="min-h-10 -ml-1 flex items-center gap-1 font-semibold text-gray-900 text-sm" aria-label="Back to all notifications">
+                <ChevronLeft size={16} aria-hidden="true" />{NOTIFICATION_GROUP_LABELS[current]}
+              </button>
+            ) : (
+              <span className="font-semibold text-gray-900 text-sm">{group ? NOTIFICATION_GROUP_LABELS[group] : 'Notifications'}</span>
+            )}
             {unread > 0 && (
-              <button onClick={markAllRead} className="min-h-10 text-xs text-primary hover:underline font-medium">
-                Mark all read
+              <button
+                onClick={() => (scopedBell ? markIdsRead(visible.map(n => n.id)) : markAllRead())}
+                className="min-h-10 text-xs text-primary hover:underline font-medium"
+              >
+                Mark {scopedBell ? 'these' : 'all'} read
               </button>
             )}
           </div>
 
+          {!group && pushState === 'off' && (
+            <div className="px-4 py-2.5 border-b border-gray-100 bg-blue-50/50 flex items-center justify-between gap-3">
+              <p className="text-xs text-gray-600">Get alerts on this device, even when the app is closed.</p>
+              <button
+                onClick={turnOnPush}
+                disabled={pushBusy}
+                data-testid="push-enable-btn"
+                className="min-h-10 shrink-0 text-xs text-primary hover:underline font-medium disabled:opacity-60"
+              >
+                {pushBusy ? 'Turning on…' : 'Turn on'}
+              </button>
+            </div>
+          )}
+          {!group && pushError && (
+            <p role="alert" data-testid="push-error" className="px-4 py-2 border-b border-gray-100 text-xs text-red-600">{pushError}</p>
+          )}
+
           <div className="max-h-80 overflow-y-auto">
-            {notifications.length === 0 ? (
-              <div className="py-10 text-center text-muted-foreground text-sm">No notifications</div>
+            {showGroups ? (
+              groups.map(g => (
+                <button
+                  key={g.id}
+                  onClick={() => setActiveGroup(g.id)}
+                  className="w-full text-left px-4 py-3 border-b border-gray-50 hover:bg-gray-50 transition-colors flex gap-3 items-center"
+                >
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-semibold text-gray-900">{g.label}</p>
+                      <span className="text-xs font-bold bg-red-500 text-white rounded-full px-1.5 min-w-5 text-center leading-5">{g.unread}</span>
+                    </div>
+                    <p className="text-xs text-gray-500 mt-0.5 line-clamp-1">{g.summary}</p>
+                  </div>
+                  <ChevronRight size={16} className="text-gray-400 flex-shrink-0" aria-hidden="true" />
+                </button>
+              ))
+            ) : visible.length === 0 ? (
+              <div className="py-10 text-center text-muted-foreground text-sm">{group ? 'Nothing new here' : 'No notifications'}</div>
             ) : (
-              notifications.map(n => (
+              visible.map(n => (
                 <button
                   key={n.id}
                   onClick={() => handleClick(n)}
@@ -228,13 +403,36 @@ export default function NotificationBell({ teacherId, schoolId, studentId, paren
             )}
           </div>
 
-          {notifications.length > 0 && (
+          {visible.length > 0 && (
             <div className="px-4 py-2 border-t border-gray-100 text-center">
-              <span className="text-xs text-muted-foreground">{notifications.length} notification{notifications.length !== 1 ? 's' : ''}</span>
+              <span className="text-xs text-muted-foreground">{visible.length} notification{visible.length !== 1 ? 's' : ''}</span>
             </div>
           )}
         </PopoverContent>
       )}
     </Popover>
+    {!group && promptOpen && pushState === 'off' && (
+      <div
+        role="dialog"
+        aria-label="Turn on notifications"
+        data-testid="push-prompt"
+        className="fixed bottom-4 left-4 right-4 sm:left-auto sm:right-4 sm:w-80 z-50 rounded-xl border border-gray-200 bg-white p-4 shadow-lg"
+      >
+        <p className="text-sm font-semibold text-gray-900">Turn on notifications?</p>
+        <p className="mt-1 text-xs text-gray-600">Get alerts about exams, results and messages on this device, even when the app is closed.</p>
+        {pushError && <p role="alert" data-testid="push-prompt-error" className="mt-2 text-xs text-red-600">{pushError}</p>}
+        <div className="mt-3 flex justify-end gap-2">
+          <button onClick={notNow} data-testid="push-prompt-later" className="min-h-10 rounded-md px-3 text-xs font-medium text-gray-600 hover:bg-gray-100">
+            {pushError ? 'Close' : 'Not now'}
+          </button>
+          {!pushError && (
+            <button onClick={turnOnPush} disabled={pushBusy} data-testid="push-prompt-allow" className="min-h-10 rounded-md bg-primary px-3 text-xs font-semibold text-white disabled:opacity-60">
+              {pushBusy ? 'Turning on…' : 'Allow'}
+            </button>
+          )}
+        </div>
+      </div>
+    )}
+    </>
   )
 }

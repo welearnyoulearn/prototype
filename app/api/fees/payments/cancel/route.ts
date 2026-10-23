@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { ledgerStatusSql } from '@/lib/feeLedgerStatus'
+import { todayIST } from '@/lib/istDate'
 import pool, { ensureDB } from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
 import { withWatchline } from '@/lib/logger'
-import { lockYearClose } from '@/lib/feeRollover'
+import { lockYearClose, isYearClosed } from '@/lib/feeRollover'
 
 // POST /api/fees/payments/cancel
 // Cancel (reverse) a completed payment, OR correct it (cancel + re-record with new values).
@@ -46,10 +48,7 @@ async function handlePOST(req: NextRequest) {
       // guaranteed to exist (see lib/db.ts), so a query error here is a real
       // failure, not a missing table; let it propagate to the outer catch
       // rather than silently failing this guard open.
-      const { rows: [locked] } = await client.query(
-        `SELECT 1 FROM fee_year_close WHERE school_id = $1 AND academic_year = $2 AND is_reopened = FALSE LIMIT 1`,
-        [pmtPreview.school_id, pmtPreview.academic_year]
-      )
+      const locked = await isYearClosed(client, pmtPreview.school_id, pmtPreview.academic_year)
       if (locked) {
         return NextResponse.json({ error: 'This academic year is closed. Reopen it to cancel/correct payments.' }, { status: 409 })
       }
@@ -98,10 +97,7 @@ async function handlePOST(req: NextRequest) {
       // ours) sees it — the earlier pre-BEGIN check above could be stale by
       // exactly this race, since it ran before either transaction touched the
       // ledger row and gave no ordering guarantee against a concurrent year-end.
-      const { rows: [lockedNow] } = await client.query(
-        `SELECT 1 FROM fee_year_close WHERE school_id = $1 AND academic_year = $2 AND is_reopened = FALSE LIMIT 1`,
-        [pmtPreview.school_id, pmt.academic_year]
-      )
+      const lockedNow = await isYearClosed(client, pmtPreview.school_id, pmt.academic_year)
       if (lockedNow) {
         await client.query('ROLLBACK')
         return NextResponse.json({ error: 'This academic year was closed by a year-end run while this request was in progress. Reopen it to cancel/correct payments.' }, { status: 409 })
@@ -123,12 +119,7 @@ async function handlePOST(req: NextRequest) {
         await client.query(
           `UPDATE student_fee_ledger
            SET amount_paid = GREATEST(0, amount_paid - $1),
-               status = CASE
-                 WHEN COALESCE(waiver_amount,0) + GREATEST(0, amount_paid - $1) >= amount_due THEN 'waived'
-                 WHEN GREATEST(0, amount_paid - $1) > 0 THEN 'partial'
-                 WHEN EXISTS (SELECT 1 FROM academic_years ay WHERE ay.school_id = student_fee_ledger.school_id AND ay.label = student_fee_ledger.academic_year AND ay.end_date < CURRENT_DATE) THEN 'overdue'
-                 ELSE 'pending'
-               END
+               status = ${ledgerStatusSql({ due: 'amount_due', paid: 'GREATEST(0, amount_paid - $1)', waiver: 'waiver_amount' })}
            WHERE id = $2`,
           [origAmount, pmt.ledger_id]
         )
@@ -144,6 +135,12 @@ async function handlePOST(req: NextRequest) {
         const newMode = body.new_payment_mode || pmt.payment_mode
         const newRef  = body.new_transaction_ref ?? pmt.transaction_ref
         const newDate = body.new_paid_date || pmt.paid_date
+        // Same date rules as payments POST — an unvalidated date either 500s on a bad
+        // string or books a payment into a future day-close.
+        if (body.new_paid_date != null && !(/^d{4}-d{2}-d{2}$/.test(String(body.new_paid_date)) && !isNaN(new Date(body.new_paid_date).getTime()) && body.new_paid_date <= todayIST() && body.new_paid_date >= '2000-01-01')) {
+          await client.query('ROLLBACK')
+          return NextResponse.json({ error: 'new_paid_date must be a valid past date (YYYY-MM-DD)' }, { status: 400 })
+        }
         if (!(newAmount > 0)) {
           await client.query('ROLLBACK')
           return NextResponse.json({ error: 'Corrected amount must be greater than 0' }, { status: 400 })
@@ -175,7 +172,7 @@ async function handlePOST(req: NextRequest) {
 
         const { rows: [seq] } = await client.query(`SELECT nextval('receipt_number_seq') AS n`)
         const schoolCode = String(pmt.school_id).padStart(3, '0')
-        newReceipt = `RCP-${schoolCode}-${new Date().getFullYear()}-${String(seq.n).padStart(6, '0')}`
+        newReceipt = `RCP-${schoolCode}-${new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata", year: "numeric" })}-${String(seq.n).padStart(6, '0')}`
 
         const { rows: [created] } = await client.query(
           `INSERT INTO fee_payments
@@ -184,8 +181,8 @@ async function handlePOST(req: NextRequest) {
            VALUES ($1,$2,$3,$4,$5,'completed',$6,$7,$8,$9,$10)
            RETURNING id`,
           [pmt.school_id, pmt.student_id, pmt.ledger_id, newAmount, newMode,
-           newReceipt, newRef || null, newDate, done_by,
-           `Correction of ${pmt.receipt_number}: ${reason}`]
+           newReceipt, newRef || null, newDate, pmt.collected_by_name || done_by,
+           `Correction of ${pmt.receipt_number} by ${done_by}: ${reason}`]
         )
         newPaymentId = created.id
 
@@ -193,12 +190,7 @@ async function handlePOST(req: NextRequest) {
         await client.query(
           `UPDATE student_fee_ledger
            SET amount_paid = LEAST(amount_due - COALESCE(waiver_amount,0), amount_paid + $1),
-               status = CASE
-                 WHEN COALESCE(waiver_amount,0) + LEAST(amount_due - COALESCE(waiver_amount,0), amount_paid + $1) >= amount_due THEN 'paid'
-                 WHEN LEAST(amount_due - COALESCE(waiver_amount,0), amount_paid + $1) > 0 THEN 'partial'
-                 WHEN EXISTS (SELECT 1 FROM academic_years ay WHERE ay.school_id = student_fee_ledger.school_id AND ay.label = student_fee_ledger.academic_year AND ay.end_date < CURRENT_DATE) THEN 'overdue'
-                 ELSE 'pending'
-               END
+               status = ${ledgerStatusSql({ due: 'amount_due', paid: 'LEAST(amount_due - COALESCE(waiver_amount,0), amount_paid + $1)', waiver: 'waiver_amount' })}
            WHERE id = $2`,
           [newAmount, pmt.ledger_id]
         )

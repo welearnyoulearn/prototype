@@ -3,6 +3,8 @@
 import { INK, TEAL, SURFACE } from '@/app/components/ulearn/theme'
 import { FeedbackCategory } from '../types'
 import MascotHeader, { moodForRating } from './MascotHeader'
+import MoodFace from '../MoodFace'
+import CategoryIcon from '../CategoryIcon'
 import { PrimaryButton, SecondaryButton } from './WizardButtons'
 
 const FACES: { value: number; emoji: string; label: string }[] = [
@@ -32,14 +34,14 @@ export default function RatingStep({
   index: number
   total: number
 }) {
-  const mascot = value ? moodForRating(value) : { emoji: '😊', mood: 'bob' as const }
+  const mascot = value ? moodForRating(value) : { emoji: '😊', mood: 'bob' as const, rating: 4 }
 
   return (
     <div>
-      <MascotHeader emoji={mascot.emoji} mood={mascot.mood} />
+      <MascotHeader emoji={mascot.emoji} mood={mascot.mood} rating={mascot.rating} />
       <div className="mb-3 flex justify-center">
         <div className="inline-flex items-center gap-2 rounded-full px-4 py-2 text-base font-bold text-white" style={{ background: TEAL }}>
-          <span className="text-lg">{category.icon}</span>
+          <CategoryIcon icon={category.icon} size={30} />
           <span>{category.label}</span>
         </div>
       </div>
@@ -55,10 +57,14 @@ export default function RatingStep({
               type="button"
               data-testid={`feedback-rating-${category.key}-${f.value}-btn`}
               onClick={() => onRate(f.value)}
-              className={`flex flex-1 flex-col items-center gap-1 rounded-2xl border py-3 transition hover:-translate-y-0.5 ${isSelected ? 'scale-110' : ''}`}
+              aria-pressed={isSelected}
+              aria-label={f.label}
+              className={`group flex flex-1 flex-col items-center gap-1 rounded-2xl border py-3 transition hover:-translate-y-1 ${isSelected ? 'scale-110 shadow-md' : 'hover:shadow-sm'}`}
               style={{ borderColor: isSelected ? TEAL : 'transparent', background: isSelected ? `${TEAL}14` : SURFACE }}
             >
-              <span className={`text-2xl ${isSelected ? (f.value <= 2 ? 'anim-feedback-emoji-shake' : 'anim-feedback-emoji-pop') : ''}`}>{f.emoji}</span>
+              <span className={`inline-flex transition-transform group-hover:scale-110 ${isSelected ? (f.value <= 2 ? 'anim-feedback-emoji-shake' : 'anim-feedback-emoji-pop') : ''}`}>
+                <MoodFace rating={f.value} size={36} animated={isSelected} />
+              </span>
               <span className="text-[9px] font-semibold" style={{ color: '#6B7280' }}>{f.label}</span>
             </button>
           )

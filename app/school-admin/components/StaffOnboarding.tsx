@@ -1,10 +1,13 @@
 'use client'
 
 import { useRef, useState, useEffect, useCallback } from 'react'
-import { isValidName, NAME_INVALID_MESSAGE } from '@/lib/nameValidation'
+import { isValidName } from '@/lib/nameValidation'
 import { GradesMultiSelect } from '@/components/ui/grades-multiselect'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { normalizeStaffInput } from '@/lib/staffValidation'
 
 type Props = { schoolId: number; onRefresh?: () => void }
+type SubjectOption = { name: string; source: 'master' | 'custom' }
 
 type TeacherRow = {
   name: string
@@ -23,16 +26,17 @@ const EMPTY_ROW: TeacherRow = {
   department: '', qualification: '', date_of_joining: '', staff_type: 'teaching',
   teaches_grades: ''
 }
+const DRAFT_TTL_MS = 2 * 60 * 60 * 1000
+const hasAnyValue = (row: TeacherRow) => Object.values(row).some(value => value.trim() && value !== 'teaching')
 
 function normalizeStaffType(raw: string): string {
   const v = raw.toLowerCase().replace(/[\s\-]/g, '_')
-  return v.includes('non') ? 'non_teaching' : 'teaching'
+  if (v === 'nonteaching' || v === 'non_teaching') return 'non_teaching'
+  return v || 'teaching'
 }
 
-// Excel template with a real in-cell Subject dropdown (limited to the
-// school's subscribed subjects) — the plain-CSV template above can't carry a
-// dropdown at all, so a school that wants that protection downloads this
-// instead, fills it in Excel, and uploads the same .xlsx file back.
+// Excel is intentional: its dropdown uses the same canonical master +
+// school-custom subject catalog as this screen and the bulk API.
 function downloadExcelTemplate(schoolId: number) {
   const a = document.createElement('a')
   a.href = `/api/teachers/template?school_id=${schoolId}`
@@ -41,36 +45,25 @@ function downloadExcelTemplate(schoolId: number) {
 }
 
 function rowErrors(row: TeacherRow): string[] {
-  const errs: string[] = []
-  if (!row.name.trim()) errs.push('Name required')
-  else if (!isValidName(row.name)) errs.push(`Name: ${NAME_INVALID_MESSAGE}`)
-  if (!row.email.trim()) errs.push('Email required — login credentials will be sent here')
-  if (row.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(row.email.trim())) errs.push('Invalid email')
-  if (row.staff_type === 'teaching' && !row.subject.trim()) errs.push('Subject required for teaching staff')
-  if (!row.phone.trim()) errs.push('Phone required')
-  if (row.phone.trim() && !/^\+?[\d\s\-()\[\]]{7,15}$/.test(row.phone.trim())) errs.push('Invalid phone')
-  return errs
+  return normalizeStaffInput(row).errors
 }
 
 export default function StaffOnboarding({ schoolId, onRefresh }: Props) {
   const [rows, setRows] = useState<TeacherRow[]>([{ ...EMPTY_ROW }])
   const [submitting, setSubmitting] = useState(false)
-  const [result, setResult] = useState<{ inserted: number; teachers: { employee_id: string }[]; errors: { row: number; message: string }[] } | null>(null)
+  const [result, setResult] = useState<{
+    inserted: number
+    teachers: { employee_id: string }[]
+    credentials: { employee_id: string; email: string; temp_password: string }[]
+    errors: { row: number; message: string }[]
+  } | null>(null)
   const [error, setError] = useState('')
   const [csvWarn, setCsvWarn] = useState('')
   const [staffCount, setStaffCount] = useState<number | null>(null)
   const [showErrors, setShowErrors] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
 
-  // Subject names to offer in the dropdown — prefer what the school has
-  // actually subscribed to (Syllabus Customizer), so a teacher's subject can
-  // never drift from what class_subjects/the syllabus system expects (same
-  // guard already applied to Class Management). If the school hasn't
-  // subscribed to anything (no Syllabus feature, or feature present but
-  // unused), fall back to the full platform master catalog — still a clean
-  // typo-proof list, just not narrowed to this school yet.
-  const [subscribedSubjectNames, setSubscribedSubjectNames] = useState<string[]>([])
-  const [subjectInputMode, setSubjectInputMode] = useState<Record<number, 'dropdown' | 'manual'>>({})
+  const [subjectOptions, setSubjectOptions] = useState<SubjectOption[]>([])
 
   const fetchStaffCount = useCallback(async () => {
     try {
@@ -82,34 +75,46 @@ export default function StaffOnboarding({ schoolId, onRefresh }: Props) {
     } catch { /* non-critical */ }
   }, [schoolId])
 
-  const fetchSubscribedSubjects = useCallback(async () => {
+  const fetchSubjectOptions = useCallback(async () => {
     try {
-      const res = await fetch(`/api/school/subjects?school_id=${schoolId}`)
-      if (res.ok) {
-        const d = await res.json()
-        const rows: { subject_name: string }[] = Array.isArray(d.subjects) ? d.subjects : []
-        const names = Array.from(new Set(rows.map(r => r.subject_name))).sort()
-        if (names.length > 0) {
-          setSubscribedSubjectNames(names)
-          return
-        }
-      }
-      // No subscribed subjects — either the school hasn't adopted the
-      // Syllabus feature at all, or it has the feature but hasn't subscribed
-      // to anything yet. Either way there's no per-school list to narrow to,
-      // so fall back to the full platform master catalog rather than forcing
-      // free text — still gives a clean, typo-proof list to pick from.
-      const masterRes = await fetch('/api/platform/subjects')
-      if (masterRes.ok) {
-        const d = await masterRes.json()
-        const rows: { subject_name: string }[] = Array.isArray(d.subjects) ? d.subjects : []
-        const names = Array.from(new Set(rows.map(r => r.subject_name))).sort()
-        setSubscribedSubjectNames(names)
-      }
-    } catch { /* non-critical — falls back to free text */ }
+      const res = await fetch(`/api/teachers/subject-options?school_id=${schoolId}`)
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Failed to load subjects')
+      setSubjectOptions(Array.isArray(data.subjects) ? data.subjects : [])
+    } catch (err) {
+      setSubjectOptions([])
+      setError(err instanceof Error ? err.message : 'Failed to load subjects')
+    }
   }, [schoolId])
 
-  useEffect(() => { fetchStaffCount(); fetchSubscribedSubjects() }, [fetchStaffCount, fetchSubscribedSubjects])
+  useEffect(() => {
+    const timer = window.setTimeout(() => { void fetchStaffCount(); void fetchSubjectOptions() }, 0)
+    return () => window.clearTimeout(timer)
+  }, [fetchStaffCount, fetchSubjectOptions])
+
+  useEffect(() => {
+    const key = `staff-onboarding-draft:${schoolId}`
+    const timer = window.setTimeout(() => {
+      try {
+        const raw = sessionStorage.getItem(key)
+        if (raw) {
+          const saved = JSON.parse(raw) as { savedAt: number; rows: TeacherRow[] }
+          if (Date.now() - saved.savedAt < DRAFT_TTL_MS && Array.isArray(saved.rows) && saved.rows.length) setRows(saved.rows)
+          else sessionStorage.removeItem(key)
+        }
+      } catch { sessionStorage.removeItem(key) }
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [schoolId])
+
+  useEffect(() => {
+    const key = `staff-onboarding-draft:${schoolId}`
+    const timer = window.setTimeout(() => {
+      if (rows.some(hasAnyValue)) sessionStorage.setItem(key, JSON.stringify({ savedAt: Date.now(), rows }))
+      else sessionStorage.removeItem(key)
+    }, 250)
+    return () => window.clearTimeout(timer)
+  }, [rows, schoolId])
 
   function updateRow(index: number, field: keyof TeacherRow, value: string) {
     setRows(prev => prev.map((r, i) => i === index ? { ...r, [field]: value } : r))
@@ -120,19 +125,6 @@ export default function StaffOnboarding({ schoolId, onRefresh }: Props) {
   function removeRow(index: number) {
     if (rows.length === 1) return
     setRows(prev => prev.filter((_, i) => i !== index))
-    // subjectInputMode is keyed by row index, so deleting a row must shift
-    // every later row's entry down to match — otherwise row 3's recorded
-    // mode silently reattaches to what is now row 2 after the delete.
-    setSubjectInputMode(prev => {
-      const next: Record<number, 'dropdown' | 'manual'> = {}
-      for (const [key, value] of Object.entries(prev)) {
-        const i = Number(key)
-        if (i < index) next[i] = value
-        else if (i > index) next[i - 1] = value
-        // i === index is dropped — that row no longer exists
-      }
-      return next
-    })
   }
 
   async function parseExcelFile(file: File) {
@@ -170,11 +162,10 @@ export default function StaffOnboarding({ schoolId, onRefresh }: Props) {
 
   async function handleSubmit() {
     setShowErrors(true)
-    const valid = rows.filter(r => r.name.trim())
-    if (valid.length === 0) { setError('At least one staff member with a name is required'); return }
+    const populated = rows.map((row, index) => ({ row, index })).filter(({ row }) => hasAnyValue(row))
+    if (populated.length === 0) { setError('Add at least one staff member before submitting'); return }
 
-    // Check for row errors
-    const allErrs = valid.flatMap((r, i) => rowErrors(r).map(e => `Row ${i + 1}: ${e}`))
+    const allErrs = populated.flatMap(({ row, index }) => rowErrors(row).map(e => `Row ${index + 1}: ${e}`))
     if (allErrs.length > 0) { setError(allErrs.join(' · ')); return }
 
     setSubmitting(true); setError(''); setResult(null); setCsvWarn('')
@@ -182,19 +173,19 @@ export default function StaffOnboarding({ schoolId, onRefresh }: Props) {
       const res = await fetch('/api/teachers/bulk', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ school_id: schoolId, teachers: valid }),
+        body: JSON.stringify({ school_id: schoolId, teachers: populated.map(item => item.row) }),
       })
       const data = await res.json()
-      if (!res.ok) throw new Error(data.error)
+      if (!res.ok) {
+        const rowDetails = Array.isArray(data.errors) ? data.errors.map((e: { row: number; message: string }) => `Row ${e.row}: ${e.message}`).join(' · ') : ''
+        const message = [data.error, rowDetails].filter(Boolean).join(' — ')
+        if (res.status === 401) throw new Error('Your session expired. Your draft is saved — sign in again and return to Staff Onboarding.')
+        throw new Error(message || 'Failed to onboard staff')
+      }
       setResult(data)
-      // Keep failed rows in the grid for correction instead of clearing
-      // everything — a partial-success import (some rows duplicate/invalid)
-      // used to wipe the whole form, forcing a full re-type/re-paste of the
-      // rows that just failed.
-      const failedRowNumbers = new Set(data.errors.map((e: { row: number }) => e.row))
-      const retained = valid.filter((_, i) => failedRowNumbers.has(i + 1))
-      setRows(retained.length > 0 ? retained : [{ ...EMPTY_ROW }])
-      setShowErrors(retained.length > 0)
+      setRows([{ ...EMPTY_ROW }])
+      setShowErrors(false)
+      sessionStorage.removeItem(`staff-onboarding-draft:${schoolId}`)
       fetchStaffCount()
       // onRefresh (which also switches the visible tab back to the
       // directory, per page.tsx) is deferred to the result banner's Dismiss
@@ -225,8 +216,8 @@ export default function StaffOnboarding({ schoolId, onRefresh }: Props) {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-4">
+      <div className="flex flex-col gap-4 mb-6 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex flex-wrap items-center gap-4">
           <div>
             <h2 className="text-xl font-bold text-gray-900">Staff Onboarding</h2>
             <p className="text-sm text-gray-500 mt-0.5">Assign class teachers from Class Management after onboarding</p>
@@ -241,7 +232,7 @@ export default function StaffOnboarding({ schoolId, onRefresh }: Props) {
             </div>
           )}
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <input ref={fileRef} type="file" accept=".xlsx" onChange={handleFileImport} className="hidden" data-testid="staff-import-file-input" />
           <button onClick={() => downloadExcelTemplate(schoolId)}
             title="Download Excel template with Subject, Staff Type and Teaches Grades dropdowns"
@@ -265,41 +256,49 @@ export default function StaffOnboarding({ schoolId, onRefresh }: Props) {
       </div>
 
       {csvWarn && (
-        <div className="mb-4 bg-amber-50 border border-amber-300 text-amber-800 px-4 py-3 rounded-lg flex justify-between text-sm">
+        <div role="status" aria-live="polite" className="mb-4 bg-amber-50 border border-amber-300 text-amber-800 px-4 py-3 rounded-lg flex justify-between text-sm">
           <span>⚠ {csvWarn}</span>
           <button onClick={() => setCsvWarn('')} className="text-amber-400 hover:text-amber-600 ml-4">✕</button>
         </div>
       )}
 
       {error && (
-        <div className="mb-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex justify-between text-sm">
-          <span>{error}</span>
+        <div role="alert" aria-live="assertive" className="mb-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex justify-between text-sm">
+          <span>{error}{error.includes('session expired') && <> <a href="/login?role=school" className="font-semibold underline">Sign in again</a></>}</span>
           <button onClick={() => setError('')} className="text-red-400 hover:text-red-600 ml-4">✕</button>
         </div>
       )}
 
-      {result && (
-        <div className="mb-4 bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg text-sm">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <p className="font-medium">✓ {result.inserted} staff member{result.inserted !== 1 ? 's' : ''} onboarded</p>
-              {result.teachers[0]?.employee_id && (
-                <p className="text-xs text-green-500 mt-0.5">First ID: {result.teachers[0].employee_id}</p>
-              )}
-              {result.errors.length > 0 && (
-                <div className="mt-2 space-y-0.5">
-                  {result.errors.map((e, i) => <p key={i} className="text-orange-600 text-xs">Row {e.row}: {e.message}</p>)}
-                </div>
-              )}
-            </div>
-            <button onClick={() => { setResult(null); onRefresh?.() }}
-              data-testid="staff-onboard-dismiss-result"
-              className="text-green-400 hover:text-green-600 text-xs border border-green-200 px-2 py-1 rounded flex-shrink-0">
-              Dismiss
-            </button>
+      <Dialog open={Boolean(result)} onOpenChange={open => { if (!open) { setResult(null); onRefresh?.() } }}>
+        <DialogContent className="sm:max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>{result?.inserted} staff member{result?.inserted === 1 ? '' : 's'} onboarded</DialogTitle>
+            <DialogDescription>
+              Email delivery is attempted automatically. Save these one-time passwords now so you can securely help anyone whose email is delayed.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="max-h-[50vh] overflow-auto rounded-md border">
+            <table className="w-full min-w-[560px] text-sm">
+              <thead className="bg-muted/50"><tr><th className="p-2 text-left">Employee ID</th><th className="p-2 text-left">Login email</th><th className="p-2 text-left">Temporary password</th></tr></thead>
+              <tbody>
+                {result?.credentials.map(credential => (
+                  <tr key={credential.employee_id} className="border-t">
+                    <td className="p-2 font-mono">{credential.employee_id}</td>
+                    <td className="p-2">{credential.email}</td>
+                    <td className="p-2 font-mono">{credential.temp_password}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
-        </div>
-      )}
+          <DialogFooter>
+            <button type="button" onClick={() => navigator.clipboard.writeText((result?.credentials ?? []).map(c => `${c.employee_id}\t${c.email}\t${c.temp_password}`).join('\n'))}
+              className="border border-gray-200 px-4 py-2 rounded-md text-sm">Copy credentials</button>
+            <button type="button" data-testid="staff-onboard-dismiss-result" onClick={() => { setResult(null); onRefresh?.() }}
+              className="bg-primary text-white px-4 py-2 rounded-md text-sm">Done</button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
         <div className="bg-white rounded-md border border-gray-200 overflow-hidden">
           <div className="overflow-x-auto">
@@ -310,7 +309,7 @@ export default function StaffOnboarding({ schoolId, onRefresh }: Props) {
                   <th className="text-left px-3 py-2.5 font-medium text-gray-500 min-w-[130px]">Name <span className="text-red-400">*</span></th>
                   <th className="text-left px-3 py-2.5 font-medium text-gray-700 min-w-[140px] bg-blue-50">Email <span className="text-red-400">*</span></th>
                   <th className="text-left px-3 py-2.5 font-medium text-gray-500 min-w-[110px]">Subject <span className="text-red-400">*</span> <span className="text-muted-foreground text-xs">(teaching only)</span></th>
-                  <th className="text-left px-3 py-2.5 font-medium text-gray-500 min-w-[100px]">Phone</th>
+                  <th className="text-left px-3 py-2.5 font-medium text-gray-500 min-w-[100px]">Phone <span className="text-red-400">*</span></th>
                   <th className="text-left px-3 py-2.5 font-medium text-gray-500 min-w-[110px]">Department</th>
                   <th className="text-left px-3 py-2.5 font-medium text-gray-500 min-w-[120px]">Qualification</th>
                   <th className="text-left px-3 py-2.5 font-medium text-gray-500 min-w-[110px]">Joining Date</th>
@@ -328,45 +327,46 @@ export default function StaffOnboarding({ schoolId, onRefresh }: Props) {
                     <tr key={i} className={`hover:bg-gray-50 ${errs.length > 0 ? 'bg-red-50/30' : ''}`}>
                       <td className="px-3 py-2 text-muted-foreground">{i + 1}</td>
                       <td className="px-3 py-2">
-                        <input data-testid={`staff-row-name-${i}`} className={cellCls(row, 'name')} placeholder="Full name *" value={row.name} onChange={e => updateRow(i, 'name', e.target.value)} />
+                        <input required aria-required="true" aria-label={`Row ${i + 1} staff name`} data-testid={`staff-row-name-${i}`} className={cellCls(row, 'name')} placeholder="Full name *" value={row.name} onChange={e => updateRow(i, 'name', e.target.value)} />
                       </td>
-                      <td className="px-3 py-2"><input data-testid={`staff-row-email-${i}`} className={cellCls(row, 'email')} placeholder="Email *" type="email" value={row.email} onChange={e => updateRow(i, 'email', e.target.value)} /></td>
+                      <td className="px-3 py-2"><input required aria-required="true" aria-label={`Row ${i + 1} login email`} data-testid={`staff-row-email-${i}`} className={cellCls(row, 'email')} placeholder="Email *" type="email" value={row.email} onChange={e => updateRow(i, 'email', e.target.value)} /></td>
                       <td className="px-3 py-2">
-                        {subscribedSubjectNames.length > 0 && subjectInputMode[i] !== 'manual' ? (
-                          <select
-                            className={cellCls(row, 'subject')}
-                            value={subscribedSubjectNames.includes(row.subject) ? row.subject : ''}
-                            onChange={e => {
-                              if (e.target.value === '__other__') {
-                                setSubjectInputMode(prev => ({ ...prev, [i]: 'manual' }))
-                                updateRow(i, 'subject', '')
-                              } else {
-                                updateRow(i, 'subject', e.target.value)
-                              }
-                            }}>
-                            <option value="">{row.staff_type === 'teaching' ? 'Select subject *' : 'N/A'}</option>
-                            {subscribedSubjectNames.map(name => (
-                              <option key={name} value={name}>{name}</option>
-                            ))}
-                            <option value="__other__">Other (type manually)…</option>
-                          </select>
-                        ) : (
-                          <div className="flex items-center gap-1">
-                            <input className={cellCls(row, 'subject')} placeholder={row.staff_type === 'teaching' ? 'Required *' : 'N/A'} value={row.subject} onChange={e => updateRow(i, 'subject', e.target.value)} />
-                            {subscribedSubjectNames.length > 0 && (
-                              <button type="button" title="Pick from the subject list"
-                                onClick={() => setSubjectInputMode(prev => ({ ...prev, [i]: 'dropdown' }))}
-                                className="text-xs text-blue-500 hover:text-blue-700 flex-shrink-0">↺</button>
-                            )}
-                          </div>
-                        )}
+                        <select
+                          required={row.staff_type === 'teaching'}
+                          aria-required={row.staff_type === 'teaching'}
+                          aria-label={`Row ${i + 1} subject`}
+                          disabled={row.staff_type !== 'teaching'}
+                          className={cellCls(row, 'subject')}
+                          value={row.subject}
+                          onChange={e => updateRow(i, 'subject', e.target.value)}>
+                          <option value="">{row.staff_type === 'teaching' ? 'Select subject *' : 'N/A'}</option>
+                          {subjectOptions.some(option => option.source === 'master') && (
+                            <optgroup label="Master syllabus">
+                              {subjectOptions.filter(option => option.source === 'master').map(option => (
+                                <option key={`master-${option.name}`} value={option.name}>{option.name}</option>
+                              ))}
+                            </optgroup>
+                          )}
+                          {subjectOptions.some(option => option.source === 'custom') && (
+                            <optgroup label="This school’s custom subjects">
+                              {subjectOptions.filter(option => option.source === 'custom').map(option => (
+                                <option key={`custom-${option.name}`} value={option.name}>{option.name}</option>
+                              ))}
+                            </optgroup>
+                          )}
+                        </select>
                       </td>
-                      <td className="px-3 py-2"><input data-testid={`staff-row-phone-${i}`} className={cellCls(row, 'phone')} placeholder="Phone *" value={row.phone} onChange={e => updateRow(i, 'phone', e.target.value)} /></td>
-                      <td className="px-3 py-2"><input className={inputCls} placeholder="Department" value={row.department} onChange={e => updateRow(i, 'department', e.target.value)} /></td>
-                      <td className="px-3 py-2"><input className={inputCls} placeholder="B.Ed, M.Sc..." value={row.qualification} onChange={e => updateRow(i, 'qualification', e.target.value)} /></td>
-                      <td className="px-3 py-2"><input className={inputCls} type="date" value={row.date_of_joining} onChange={e => updateRow(i, 'date_of_joining', e.target.value)} /></td>
+                      <td className="px-3 py-2"><input required aria-required="true" aria-label={`Row ${i + 1} phone`} data-testid={`staff-row-phone-${i}`} className={cellCls(row, 'phone')} placeholder="Phone *" value={row.phone} onChange={e => updateRow(i, 'phone', e.target.value)} /></td>
+                      <td className="px-3 py-2"><input aria-label={`Row ${i + 1} department`} className={inputCls} placeholder="Department" value={row.department} onChange={e => updateRow(i, 'department', e.target.value)} /></td>
+                      <td className="px-3 py-2"><input aria-label={`Row ${i + 1} qualification`} className={inputCls} placeholder="B.Ed, M.Sc..." value={row.qualification} onChange={e => updateRow(i, 'qualification', e.target.value)} /></td>
+                      <td className="px-3 py-2"><input aria-label={`Row ${i + 1} date of joining`} className={inputCls} type="date" value={row.date_of_joining} onChange={e => updateRow(i, 'date_of_joining', e.target.value)} /></td>
                       <td className="px-3 py-2">
-                        <select value={row.staff_type} onChange={e => updateRow(i, 'staff_type', e.target.value)}
+                        <select aria-label={`Row ${i + 1} staff type`} value={row.staff_type} onChange={e => {
+                          const staffType = e.target.value
+                          setRows(prev => prev.map((item, index) => index === i
+                            ? { ...item, staff_type: staffType, ...(staffType === 'non_teaching' ? { subject: '', teaches_grades: '' } : {}) }
+                            : item))
+                        }}
                           className="w-full border border-gray-200 rounded px-1.5 py-1.5 text-xs text-gray-900 bg-white focus:outline-none focus:ring-1 focus:ring-blue-300">
                           <option value="teaching">Teaching</option>
                           <option value="non_teaching">Non-Teaching</option>
@@ -378,7 +378,7 @@ export default function StaffOnboarding({ schoolId, onRefresh }: Props) {
                             <GradesMultiSelect
                               value={row.teaches_grades}
                               onChange={v => updateRow(i, 'teaches_grades', v)}
-                              testIdBase="teaches-grade"
+                              testIdBase={`teaches-grade-${i}`}
                               size="sm"
                               align="end"
                               panelWidth={240}
@@ -394,7 +394,7 @@ export default function StaffOnboarding({ schoolId, onRefresh }: Props) {
                         )}
                       </td>
                       <td className="px-3 py-2">
-                        <button data-testid={`staff-row-remove-${i}`} onClick={() => removeRow(i)} className="text-red-400 hover:text-red-600 text-base leading-none">×</button>
+                        <button type="button" aria-label={`Remove staff row ${i + 1}`} data-testid={`staff-row-remove-${i}`} onClick={() => removeRow(i)} className="text-red-400 hover:text-red-600 text-base leading-none">×</button>
                       </td>
                     </tr>
                   )
@@ -416,11 +416,11 @@ export default function StaffOnboarding({ schoolId, onRefresh }: Props) {
               <strong className="text-gray-500">Teaches Grades</strong> — use the dropdown to select grades, or leave blank to teach all grades.
             </p>
           </div>
-          <div className="px-4 py-3 border-t border-gray-100 flex items-center justify-between bg-gray-50">
+          <div className="px-4 py-3 border-t border-gray-100 flex flex-col gap-3 bg-gray-50 sm:flex-row sm:items-center sm:justify-between">
             <button onClick={addRow} data-testid="staff-add-row" className="text-sm text-blue-600 hover:text-blue-800 font-medium">+ Add Row</button>
             <div className="flex items-center gap-3">
               <span className="text-xs text-muted-foreground">{rows.filter(r => r.name.trim()).length} of {rows.length} rows ready</span>
-              <button onClick={handleSubmit} disabled={submitting || rows.every(r => !r.name.trim())}
+              <button onClick={handleSubmit} disabled={submitting}
                 data-testid="staff-onboard-submit"
                 className="bg-primary hover:bg-primary/90 text-white px-5 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50">
                 {submitting ? 'Onboarding...' : 'Onboard Staff'}
