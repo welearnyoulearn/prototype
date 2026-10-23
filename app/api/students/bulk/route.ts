@@ -1,11 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 import { invalidateCache } from '@/lib/responseCache'
-import { hashPassword, generateTempPassword, requireSchoolAdmin, schoolHasFeature } from '@/lib/auth'
+import { hashPortalPassword, generateTempPassword, requireSchoolAdmin, schoolHasFeature } from '@/lib/auth'
 import { sendStudentWelcomeEmail, sendParentWelcomeEmail, sendChildCredentialsToParentEmail } from '@/lib/email'
 import { sendWhatsappMessage } from '@/lib/whatsapp'
-import { findOrCreateParent, linkStudentParent, generateStudentId } from '@/lib/studentOnboarding'
-import { isValidName, NAME_INVALID_MESSAGE } from '@/lib/nameValidation'
+import { linkParentsBulk, generateUniqueStudentIds } from '@/lib/studentOnboarding'
+import { normalizeStudentInput, type NormalizedStudentInput } from '@/lib/studentValidation'
+import { ClassWorkflowError, ensureClassWithSetup } from '@/lib/classManagement'
+
+const MAX_BULK_STUDENTS = 500
+const SAFE_RETURNING_COLUMNS = `id, school_id, name, email, grade, section, roll_number,
+  school_roll_number, parent_name, parent_phone, parent_email, phone, status,
+  password_changed, created_at`
 
 export async function POST(req: NextRequest) {
   await ensureDB()
@@ -16,8 +22,14 @@ export async function POST(req: NextRequest) {
     if (!school_id || !Array.isArray(students) || students.length === 0) {
       return NextResponse.json({ error: 'school_id and students array required' }, { status: 400 })
     }
+    if (students.length > MAX_BULK_STUDENTS) {
+      return NextResponse.json({ error: `A maximum of ${MAX_BULK_STUDENTS} students can be imported at once` }, { status: 413 })
+    }
     if (admin.schoolId !== school_id) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
+    if (!await schoolHasFeature(school_id, 'students')) {
+      return NextResponse.json({ error: 'Feature not enabled' }, { status: 403 })
     }
 
     const schoolRes = await pool.query('SELECT name FROM schools WHERE id = $1', [school_id])
@@ -32,40 +44,30 @@ export async function POST(req: NextRequest) {
 
     const errors: { row: number; message: string }[] = []
     const skipped: { row: number; name: string; reason: string }[] = []
-    const validStudents: typeof students = []
+    const validStudents: Array<NormalizedStudentInput & { _school_roll_number: number; _row: number }> = []
     const seenRolls = new Set<string>()
 
     for (let i = 0; i < students.length; i++) {
       const s = students[i]
-      if (!s.name?.trim()) { errors.push({ row: i + 1, message: 'Name is required' }); continue }
-      if (!isValidName(s.name)) { errors.push({ row: i + 1, message: `Name: ${NAME_INVALID_MESSAGE}` }); continue }
-      if (!s.section?.trim()) { errors.push({ row: i + 1, message: 'Section is required' }); continue }
-      if (!s.parent_name?.trim()) { errors.push({ row: i + 1, message: 'Parent name is required' }); continue }
-      if (!isValidName(s.parent_name)) { errors.push({ row: i + 1, message: `Parent Name: ${NAME_INVALID_MESSAGE}` }); continue }
-      if (!s.parent_phone?.trim()) { errors.push({ row: i + 1, message: 'Parent phone is required' }); continue }
-
-      const schoolRollRaw = s.school_roll_number ?? s.roll_no
-      if (schoolRollRaw === undefined || schoolRollRaw === null || String(schoolRollRaw).trim() === '') {
-        errors.push({ row: i + 1, message: 'Roll No is required' })
+      const validated = normalizeStudentInput(s)
+      if (!validated.data) {
+        for (const message of validated.errors) errors.push({ row: i + 1, message })
         continue
       }
-      const parsed = parseInt(String(schoolRollRaw).trim(), 10)
-      if (isNaN(parsed) || parsed <= 0) {
-        errors.push({ row: i + 1, message: `Roll No must be a positive integer (got: ${schoolRollRaw})` })
-        continue
-      }
-      const school_roll_number: number = parsed
-      const key = `${s.grade?.trim()?.toLowerCase()}|${s.section?.trim()?.toLowerCase()}|${school_roll_number}`
+      const normalized = validated.data
+      const school_roll_number = normalized.school_roll_number
+      const key = `${normalized.grade.toLowerCase()}|${normalized.section.toLowerCase()}|${school_roll_number}`
       if (seenRolls.has(key)) {
-        errors.push({ row: i + 1, message: `Roll No ${school_roll_number} is duplicated in this upload (Grade ${s.grade} Section ${s.section})` })
+        errors.push({ row: i + 1, message: `Roll No ${school_roll_number} is duplicated in this upload (Grade ${normalized.grade} Section ${normalized.section})` })
         continue
       }
       seenRolls.add(key)
-      validStudents.push({ ...s, _school_roll_number: school_roll_number, _row: i + 1 })
+      validStudents.push({ ...normalized, _school_roll_number: school_roll_number, _row: i + 1 })
     }
 
-    if (validStudents.length === 0) {
-      return NextResponse.json({ inserted: 0, skipped, students: [], errors, credentials: { students: [], parents: [] }, studentPortalEnabled, parentPortalEnabled }, { status: 201 })
+    // Validation is all-or-nothing: never create only the valid subset of a file.
+    if (errors.length > 0) {
+      return NextResponse.json({ inserted: 0, skipped, students: [], errors, credentials: { students: [], parents: [] }, studentPortalEnabled, parentPortalEnabled }, { status: 422 })
     }
 
     const phones    = validStudents.map(s => s.phone?.trim()).filter(Boolean) as string[]
@@ -129,11 +131,16 @@ export async function POST(req: NextRequest) {
       toInsert.push(s)
     }
 
-    if (toInsert.length === 0) {
-      return NextResponse.json({ inserted: 0, skipped, students: [], errors, credentials: { students: [], parents: [] }, studentPortalEnabled, parentPortalEnabled }, { status: 201 })
+    if (skipped.length > 0) {
+      return NextResponse.json({
+        error: 'Resolve duplicate students before importing. No rows were inserted.',
+        inserted: 0, skipped, students: [], errors, credentials: { students: [], parents: [] },
+        studentPortalEnabled, parentPortalEnabled,
+      }, { status: 409 })
     }
 
     const studentTempPasswords = toInsert.map(() => studentPortalEnabled ? generateTempPassword(8) : '')
+    const pendingParentKeys = new Set<string>()
     const needsNewParent = toInsert.map(s => {
       if (!parentPortalEnabled) return false
       const pe = s.parent_email?.trim()
@@ -141,13 +148,17 @@ export async function POST(req: NextRequest) {
       if (!pe && !pp) return false
       const existsByEmail = pe && parentByEmail.has(pe.toLowerCase())
       const existsByPhone = pp && parentByPhone.has(pp)
-      return !existsByEmail && !existsByPhone
+      if (existsByEmail || existsByPhone) return false
+      const key = pe ? `email:${pe.toLowerCase()}` : `phone:${pp}`
+      if (pendingParentKeys.has(key)) return false
+      pendingParentKeys.add(key)
+      return true
     })
     const parentTempPasswords = needsNewParent.map(needs => needs ? generateTempPassword(10) : '')
 
     const [studentHashes, parentHashes] = await Promise.all([
-      Promise.all(studentTempPasswords.map(p => p ? hashPassword(p) : Promise.resolve(null))),
-      Promise.all(parentTempPasswords.map(p => p ? hashPassword(p) : Promise.resolve(null))),
+      Promise.all(studentTempPasswords.map(p => p ? hashPortalPassword(p) : Promise.resolve(null))),
+      Promise.all(parentTempPasswords.map(p => p ? hashPortalPassword(p) : Promise.resolve(null))),
     ])
 
     const client = await pool.connect()
@@ -158,13 +169,13 @@ export async function POST(req: NextRequest) {
         toInsert.filter(s => s.grade?.trim() && s.section?.trim()).map(s => `${s.grade.trim()}|${s.section.trim()}`)
       )].map(k => k.split('|'))
 
-      if (uniqueClasses.length > 0) {
-        const classValues = uniqueClasses.map((_, i) => `($1,$${i * 2 + 2},$${i * 2 + 3})`).join(',')
-        await client.query(
-          `INSERT INTO classes (school_id, grade, section) VALUES ${classValues} ON CONFLICT (school_id, grade, section) DO NOTHING`,
-          [school_id, ...uniqueClasses.flat()]
-        )
+      for (const [grade, section] of uniqueClasses) {
+        await ensureClassWithSetup(client, {
+          schoolId: Number(school_id), grade, section, restoreDeleted: false,
+        })
       }
+
+      const systemIds = await generateUniqueStudentIds(client, toInsert.length)
 
       const studentValues = toInsert.map((s, i) => {
         const base = i * 12
@@ -177,7 +188,7 @@ export async function POST(req: NextRequest) {
         s.email?.trim() || null,
         s.grade?.trim() || null,
         s.section?.trim() || null,
-        generateStudentId(schoolName),
+        systemIds[i],
         s._school_roll_number,
         s.parent_name?.trim() || null,
         s.parent_phone?.trim() || null,
@@ -188,47 +199,29 @@ export async function POST(req: NextRequest) {
 
       const insertedRes = await client.query(
         `INSERT INTO students (school_id, name, email, grade, section, roll_number, school_roll_number, parent_name, parent_phone, parent_email, phone, status, password_hash, password_changed)
-         VALUES ${studentValues} RETURNING *`,
+         VALUES ${studentValues} RETURNING ${SAFE_RETURNING_COLUMNS}`,
         studentParams
       )
       const insertedStudents = insertedRes.rows
 
-      const processedParentIds = new Map<string, number>()
       // Resolved parent contact per row (index-aligned with toInsert), so the
       // "send child's credentials to parent" step below can mail the parent's
       // real account address rather than assuming it equals this row's
       // parent_email — an existing parent's actual email can differ (typo on
       // this row, or the parent's email was set on an earlier sibling's row).
-      const resolvedParentContact: ({ email: string | null; phone: string | null; name: string | null } | null)[] = []
-
-      for (let i = 0; i < toInsert.length; i++) {
-        const s = toInsert[i]
-        const student = insertedStudents[i]
-        const pe = s.parent_email?.trim() || null
-        const pp = s.parent_phone?.trim() || null
-        const pn = s.parent_name?.trim() || null
-        if (!pe && !pp) { resolvedParentContact.push(null); continue }
-
-        // Even when parent-portal is disabled, still link to an existing parent
-        // (e.g. a sibling onboarded earlier while the flag was on) — only suppress
-        // creating a brand-new parents row while the flag is off.
-        const match = await findOrCreateParent(
-          client, school_id, { name: pn, email: pe, phone: pp },
-          parentHashes[i], processedParentIds, needsNewParent[i]
-        )
-
-        if (match) {
-          await linkStudentParent(client, student.id, match.parentId)
-          const parentRow = await client.query('SELECT email, phone, name FROM parents WHERE id = $1', [match.parentId])
-          resolvedParentContact.push({
-            email: parentRow.rows[0]?.email || null,
-            phone: parentRow.rows[0]?.phone || null,
-            name: parentRow.rows[0]?.name || null,
-          })
-        } else {
-          resolvedParentContact.push(null)
-        }
-      }
+      // Even when parent-portal is disabled, still link to an existing parent
+      // (e.g. a sibling onboarded earlier while the flag was on) — only suppress
+      // creating a brand-new parents row while the flag is off. Set-based: see
+      // linkParentsBulk (one lookup, one bulk create, one bulk link).
+      const resolvedParentContact = await linkParentsBulk(
+        client, school_id,
+        toInsert.map((s, i) => ({
+          studentId: insertedStudents[i].id,
+          parent: { name: s.parent_name?.trim() || null, email: s.parent_email?.trim() || null, phone: s.parent_phone?.trim() || null },
+          hash: parentHashes[i],
+          createIfMissing: needsNewParent[i],
+        }))
+      )
 
       await client.query('COMMIT')
 
@@ -263,23 +256,16 @@ export async function POST(req: NextRequest) {
         })
       }
 
-      // needsNewParent[i] is true independently for every row that doesn't
-      // match an EXISTING (pre-batch) parent — it does not dedupe siblings
-      // within this same batch, since findOrCreateParent's own
-      // processedParentIds cache is what does that dedup, one level down.
-      // Two siblings sharing a parent therefore both have needsNewParent
-      // true, but only the first one processed actually gets its
-      // parentTempPasswords[i] hashed and persisted (findOrCreateParent only
-      // creates the row once) — sending the welcome email again per sibling
-      // would hand out a second, never-saved password that doesn't work.
-      // Dedupe the same way parentCredentials already does below.
+      // needsNewParent is true only for the first row for a new parent in this
+      // batch. Siblings reuse the processed-parent cache, so only one password
+      // is hashed, persisted and delivered for that parent account.
       const parentWelcomeSent = new Set<string>()
       for (let i = 0; i < toInsert.length; i++) {
         const s = toInsert[i]
         const student = insertedStudents[i]
         if (studentPortalEnabled && s.email?.trim()) {
           sendStudentWelcomeEmail({
-            to: s.email.trim(), name: s.name.trim(), schoolName,
+            schoolId: school_id, to: s.email.trim(), name: s.name.trim(), schoolName,
             rollNumber: student.roll_number, tempPassword: studentTempPasswords[i],
             loginUrl: `${appUrl}/student/login`,
           }).catch(console.error)
@@ -302,7 +288,7 @@ export async function POST(req: NextRequest) {
             const displayName = s.parent_name?.trim() || pe || pp || 'there'
             if (pe) {
               sendParentWelcomeEmail({
-                to: pe, parentName: displayName,
+                schoolId: school_id, to: pe, parentName: displayName,
                 studentName: s.name.trim(), schoolName,
                 tempPassword: parentTempPasswords[i], loginUrl: `${appUrl}/parent/login`,
               }).catch(console.error)
@@ -326,7 +312,7 @@ export async function POST(req: NextRequest) {
           const parentDisplayName = parentContact.name || s.parent_name?.trim() || parentContact.email || parentContact.phone || 'there'
           if (parentContact.email) {
             sendChildCredentialsToParentEmail({
-              to: parentContact.email,
+              schoolId: school_id, to: parentContact.email,
               parentName: parentDisplayName,
               studentName: s.name.trim(),
               schoolName,
@@ -366,7 +352,12 @@ export async function POST(req: NextRequest) {
     }
   } catch (error) {
     console.error('[bulk]', error)
-    const msg = error instanceof Error ? error.message : String(error)
-    return NextResponse.json({ error: 'Bulk insert failed', detail: msg }, { status: 500 })
+    if (error instanceof ClassWorkflowError) {
+      return NextResponse.json({ error: error.message, inserted: 0 }, { status: error.status })
+    }
+    if ((error as { code?: string }).code === '23505') {
+      return NextResponse.json({ error: 'A duplicate student was created by another request. Refresh and try again.' }, { status: 409 })
+    }
+    return NextResponse.json({ error: 'Bulk insert failed' }, { status: 500 })
   }
 }

@@ -29,12 +29,21 @@ export async function GET(req: NextRequest) {
 }
 
 // POST /api/fees/categories
+const FREQUENCIES = ['monthly', 'quarterly', 'half_yearly', 'annual', 'one_time']
+const CATEGORY_TYPES = ['fixed', 'variable']
+const badChoice = (frequency: unknown, category_type: unknown) =>
+  (frequency != null && !FREQUENCIES.includes(String(frequency))) ? `frequency must be one of: ${FREQUENCIES.join(', ')}`
+  : (category_type != null && !CATEGORY_TYPES.includes(String(category_type))) ? `category_type must be one of: ${CATEGORY_TYPES.join(', ')}`
+  : null
+
 export async function POST(req: NextRequest) {
   try {
     try {
       const { school_id, name, description, frequency, category_type } = await req.json()
       if (!school_id || !name) return NextResponse.json({ error: 'school_id and name required' }, { status: 400 })
       if (!await requireFeeAccess(school_id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      const invalid = badChoice(frequency, category_type)
+      if (invalid) return NextResponse.json({ error: invalid }, { status: 400 })
       const { rows: [row] } = await pool.query(
         `INSERT INTO fee_categories (school_id, name, description, frequency, category_type)
          VALUES ($1, $2, $3, $4, $5) RETURNING *`,
@@ -65,7 +74,9 @@ export async function PUT(req: NextRequest) {
     await ensureDB()
     const client = await pool.connect()
     try {
-      const { name, description, frequency, is_active, category_type, changed_by: clientActor } = await req.json()
+      const { name, description, frequency, is_active, category_type } = await req.json()
+      const invalid = badChoice(frequency, category_type)
+      if (invalid) return NextResponse.json({ error: invalid }, { status: 400 })
 
       // Fetch current values before update
       const { rows: [current] } = await client.query(
@@ -76,7 +87,7 @@ export async function PUT(req: NextRequest) {
       // `pool` here would deadlock requesting a second connection on Vercel's max:1 pool.
       const access = await requireFeeAccess(current.school_id, client)
       if (!access) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-      const changed_by = clientActor || access.actor
+      const changed_by = access.actor
 
       // Switching fixed<->variable or changing frequency after bills already exist for this
       // category silently desyncs billing: generate/route.ts filters fixed structures by

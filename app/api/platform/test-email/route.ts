@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getSession } from '@/lib/auth'
+import { requirePlatformAdmin } from '@/lib/auth'
 import { sendMail } from '@/lib/email'
 
 export async function POST(req: NextRequest) {
-  const session = await getSession()
-  if (!session || session.role !== 'platform_admin') {
+  const session = await requirePlatformAdmin()
+  if (!session) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 

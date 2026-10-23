@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { ledgerStatusSql } from '@/lib/feeLedgerStatus'
 import pool from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
 import { withWatchline } from '@/lib/logger'
 import { todayIST } from '@/lib/istDate'
 import { claimIdempotencyKey, saveIdempotentResponse } from '@/lib/idempotency'
-import { lockYearClose } from '@/lib/feeRollover'
+import { lockLedgerYearsAndIsClosed } from '@/lib/feeRollover'
 
 // Hard ceiling on rows per request so a payment history can never come back unbounded.
 const MAX_LIMIT = 500
@@ -23,6 +24,7 @@ async function handleGET(req: NextRequest) {
     const school_id  = p.get('school_id')
     const student_id = p.get('student_id')
     const ledger_id  = p.get('ledger_id')
+    const bill_year  = p.get('academic_year')   // optional: only payments against this year's bills
 
     if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
     if (!await requireFeeAccess(school_id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
@@ -31,6 +33,7 @@ async function handleGET(req: NextRequest) {
     const values: (string | number)[] = [school_id]
     if (student_id) { values.push(student_id); conditions.push(`fp.student_id = $${values.length}`) }
     if (ledger_id)  { values.push(ledger_id);  conditions.push(`fp.ledger_id = $${values.length}`) }
+    if (bill_year)  { values.push(bill_year);  conditions.push(`l.academic_year = $${values.length}`) }
 
     const where = `WHERE ${conditions.join(' AND ')}`
     // Every JOIN is on a primary key (students.id, student_fee_ledger.id,
@@ -63,8 +66,8 @@ async function handleGET(req: NextRequest) {
       // inserts several rows inside a single transaction and they share a
       // timestamp, so paging over it would drop/duplicate rows. fp.id breaks ties.
       const { rows } = await pool.query(
-        `SELECT fp.*, s.name AS student_name, s.roll_number, s.grade, s.section,
-                fc.name AS category_name, l.period_label
+        `SELECT fp.*, s.name AS student_name, s.roll_number, s.school_roll_number, s.grade, s.section,
+                fc.name AS category_name, l.period_label, l.academic_year AS bill_year
          ${from}
          ${where}
          ORDER BY fp.created_at DESC, fp.id DESC
@@ -183,34 +186,11 @@ async function handlePOST(req: NextRequest) {
       // Taking the lock(s) BEFORE the check (not after, like a row lock would need)
       // is required here because there's no specific ledger row a close action
       // itself locks — the year-end route's own comment on lockYearClose explains why.
-      if (guardIds.length > 0) {
-        const { rows: yearsRows } = await client.query(
-          `SELECT DISTINCT school_id, academic_year FROM student_fee_ledger WHERE id = ANY($1)`,
-          [guardIds]
-        )
-        for (const y of yearsRows) {
-          await lockYearClose(client, y.school_id, y.academic_year)
-        }
-      }
-
-      // Guard: block payments against a closed academic year — fee_year_close is
-      // guaranteed to exist (see lib/db.ts), so a query error here is a real failure,
-      // not a missing table; let it propagate rather than silently failing this open.
-      // Re-checked here, now that the lock(s) above are held, so this can't read a
-      // stale "not closed" state past a concurrent close that was waiting on the
-      // same lock.
-      if (guardIds.length > 0) {
-        const { rows: [locked] } = await client.query(
-          `SELECT 1
-           FROM student_fee_ledger l
-           JOIN fee_year_close yc ON yc.school_id = l.school_id AND yc.academic_year = l.academic_year AND yc.is_reopened = FALSE
-           WHERE l.id = ANY($1) LIMIT 1`,
-          [guardIds]
-        )
-        if (locked) {
-          await client.query('ROLLBACK')
-          return NextResponse.json({ error: 'This academic year is closed. Reopen it to record payments.' }, { status: 409 })
-        }
+      // lockLedgerYearsAndIsClosed takes the year lock(s) first, then checks closed — the
+      // lock must precede the check so a concurrent year-end close can't slip in between.
+      if (await lockLedgerYearsAndIsClosed(client, guardIds)) {
+        await client.query('ROLLBACK')
+        return NextResponse.json({ error: 'This academic year is closed. Reopen it to record payments.' }, { status: 409 })
       }
 
       // Duplicate-submission guard — see lib/idempotency.ts. A network timeout +
@@ -227,7 +207,7 @@ async function handlePOST(req: NextRequest) {
       // Generate one receipt number shared across all allocations
       const { rows: [seq] } = await client.query(`SELECT nextval('receipt_number_seq') AS n`)
       const schoolCode = String(school_id).padStart(3, '0')
-      const receipt_number = `RCP-${schoolCode}-${new Date().getFullYear()}-${String(seq.n).padStart(6, '0')}`
+      const receipt_number = `RCP-${schoolCode}-${new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata", year: "numeric" })}-${String(seq.n).padStart(6, '0')}`
       const payDate = paid_date || todayIST()
 
       const createdPayments = []
@@ -271,11 +251,7 @@ async function handlePOST(req: NextRequest) {
           await client.query(
             `UPDATE student_fee_ledger
              SET amount_paid = LEAST(amount_due - COALESCE(waiver_amount,0), amount_paid + $1),
-                 status = CASE
-                   WHEN COALESCE(waiver_amount,0) + LEAST(amount_due - COALESCE(waiver_amount,0), amount_paid + $1) >= amount_due THEN 'paid'
-                   WHEN amount_paid + $1 > 0 THEN 'partial'
-                   ELSE status
-                 END
+                 status = ${ledgerStatusSql({ due: 'amount_due', paid: 'LEAST(amount_due - COALESCE(waiver_amount,0), amount_paid + $1)', waiver: 'waiver_amount' })}
              WHERE id = $2`,
             [amount, ledger_id]
           )
@@ -339,11 +315,7 @@ async function handlePOST(req: NextRequest) {
             await client.query(
               `UPDATE student_fee_ledger
                SET amount_paid = LEAST(amount_due - COALESCE(waiver_amount,0), amount_paid + $1),
-                   status = CASE
-                     WHEN COALESCE(waiver_amount,0) + LEAST(amount_due - COALESCE(waiver_amount,0), amount_paid + $1) >= amount_due THEN 'paid'
-                     WHEN amount_paid + $1 > 0 THEN 'partial'
-                     ELSE status
-                   END
+                   status = ${ledgerStatusSql({ due: 'amount_due', paid: 'LEAST(amount_due - COALESCE(waiver_amount,0), amount_paid + $1)', waiver: 'waiver_amount' })}
                WHERE id = $2`,
               [allocate, entry.id]
             )
@@ -364,7 +336,7 @@ async function handlePOST(req: NextRequest) {
       // re-deriving it (and, more importantly, instead of re-running the payment
       // logic above).
       const { rows: [full] } = await client.query(
-        `SELECT fp.*, s.name AS student_name, s.roll_number, s.grade, s.section, s.parent_name,
+        `SELECT fp.*, s.name AS student_name, s.roll_number, s.school_roll_number, s.grade, s.section, s.parent_name,
                 fc.name AS category_name, l.period_label, l.amount_due,
                 sc.name AS school_name
          FROM fee_payments fp

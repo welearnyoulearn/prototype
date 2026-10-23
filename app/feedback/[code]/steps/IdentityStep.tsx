@@ -28,6 +28,7 @@ export default function IdentityStep({
           id="feedback-name-input"
           data-testid="feedback-name-input"
           type="text"
+          autoComplete="name"
           value={name}
           onChange={e => onNameChange(e.target.value)}
           placeholder="Enter your name"
@@ -39,6 +40,8 @@ export default function IdentityStep({
           id="feedback-phone-input"
           data-testid="feedback-phone-input"
           type="tel"
+          inputMode="tel"
+          autoComplete="tel"
           value={phone}
           onChange={e => onPhoneChange(e.target.value)}
           placeholder="e.g. 98765 43210"
@@ -48,13 +51,13 @@ export default function IdentityStep({
         <p className="mt-2 text-[10.5px] leading-relaxed" style={{ color: '#9CA3AF' }}>Used only for feedback follow-up when you choose to provide it.</p>
       </fieldset>
 
-      <label className="mt-3.5 flex items-center gap-2 text-xs font-semibold" style={{ color: '#6B7280' }}>
+      <label className="mt-3.5 flex min-h-[44px] cursor-pointer items-center gap-2.5 text-sm font-semibold" style={{ color: '#6B7280' }}>
         <input
           type="checkbox"
           data-testid="feedback-anonymous-checkbox"
           checked={isAnonymous}
           onChange={e => onAnonymousChange(e.target.checked)}
-          className="h-4 w-4"
+          className="h-5 w-5 shrink-0"
           style={{ accentColor: TEAL }}
         />
         🔒 Keep this feedback anonymous

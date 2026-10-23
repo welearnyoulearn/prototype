@@ -7,7 +7,9 @@ import {
   type AttendanceBand, type CalendarDay, type DayStatus,
 } from '@/lib/attendanceRules'
 import { Skeleton } from '@/components/ui/skeleton'
-import { CalendarCheck2, Clock3, Flame } from 'lucide-react'
+import { CalendarCheck2, ChevronLeft, ChevronRight, Clock3, Flame } from 'lucide-react'
+import { StudentAlert, StudentPageIntro } from '@/app/student/components/StudentExperience'
+import { Sticker, type StickerName, type Tone } from '@/app/student/components/stickers'
 
 // One student's attendance: month calendar, percentages, six-month trend, upcoming holidays.
 // Used by the PARENT app (one of their children) and the STUDENT app (themselves) — the same
@@ -69,6 +71,9 @@ function shortDate(date: string): string {
   return new Date(`${date}T00:00:00Z`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: 'UTC' })
 }
 
+const BAND_TONE: Record<AttendanceBand, Tone> = { good: 'mint', watch: 'yellow', low: 'coral', none: 'paper' }
+const BAND_STICKER: Record<AttendanceBand, StickerName> = { good: 'glowing-star', watch: 'warning', low: 'warning', none: 'hourglass' }
+
 const sessionLabel = (s: string | null) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : 'Not marked')
 
 export default function AttendanceCalendar({ endpoint, who }: {
@@ -121,18 +126,132 @@ export default function AttendanceCalendar({ endpoint, who }: {
   // Leading blanks so the 1st lands on the right weekday.
   const lead = weekdayOf(monthBounds(month).from)
 
+  const dayDetail = (d: CalendarDay) =>
+    d.status === 'holiday' || d.status === 'weekly_off'
+      ? <><strong>{longDate(d.date)}</strong> — {d.status === 'holiday' ? `Holiday: ${d.title}` : 'Weekly off'}. No attendance is taken.</>
+      : d.status === 'future' ? <><strong>{longDate(d.date)}</strong> — upcoming.</>
+      : d.status === 'before_joining' ? <><strong>{longDate(d.date)}</strong> — before joining the school.</>
+      : d.status === 'not_marked' ? <><strong>{longDate(d.date)}</strong> — attendance was not recorded.</>
+      : <><strong>{longDate(d.date)}</strong> — Morning: <b>{sessionLabel(d.morning)}</b>{d.afternoon ? <> · Afternoon: <b>{sessionLabel(d.afternoon)}</b></> : null}</>
+
+  if (who === 'student') {
+    return (
+      <div data-testid="attendance-calendar" className="space-y-8">
+        <StudentPageIntro eyebrow="Your consistency" title="My attendance" sticker="clipboard" tone="mint"
+          description="Your daily record, this month’s pattern, and the days ahead."
+          aside={<span className="sb-chip" data-size="lg" data-tone="paper"><CalendarCheck2 size={15} aria-hidden="true" />School record</span>} />
+
+        <div className="sb-month-bar">
+          <button type="button" onClick={() => go(-1)} aria-label="Previous month" data-testid="att-cal-prev" className="sb-icon-btn"><ChevronLeft size={20} aria-hidden="true" /></button>
+          <div className="min-w-0 text-center">
+            <p data-testid="att-cal-month-label" className="sb-month">{MONTH_NAMES[mm - 1]} {yy}</p>
+            {view && <p className="truncate text-xs font-semibold text-[#6b604f]">{view.student.name}{view.student.grade ? ` · Class ${view.student.grade}${view.student.section ? '-' + view.student.section : ''}` : ''}</p>}
+          </div>
+          <button type="button" onClick={() => go(1)} disabled={month >= currentMonth} aria-label="Next month" data-testid="att-cal-next" className="sb-icon-btn"><ChevronRight size={20} aria-hidden="true" /></button>
+        </div>
+
+        {error && <StudentAlert testId="att-cal-error" onRetry={() => setAttempt(a => a + 1)}>{error}</StudentAlert>}
+
+        {loading && !error && (
+          <div className="space-y-5" role="status" aria-live="polite" aria-busy="true" data-testid="att-cal-loading">
+            <span className="sr-only">Loading attendance calendar</span>
+            <div className="sb-stats">{[1, 2, 3, 4].map(i => <Skeleton key={i} className="h-28 rounded-[6px_6px_20px_6px]" />)}</div>
+            <Skeleton className="h-96 rounded-[22px]" />
+          </div>
+        )}
+
+        {view && (
+          <>
+            <div className="sb-stats">
+              <div className="sb-stat" data-tone={BAND_TONE[view.month.summary.band]} style={{ '--tilt': '-1.5deg' } as React.CSSProperties}>
+                <strong data-testid="att-summary-month-pct">{view.month.summary.pct === null ? '—' : `${view.month.summary.pct}%`}</strong>
+                <p>This month</p>
+                <small>{view.month.summary.attended} of {view.month.summary.marked} attended</small>
+              </div>
+              <div className="sb-stat" data-tone="blue" style={{ '--tilt': '1deg' } as React.CSSProperties}>
+                <strong data-testid="att-summary-year-pct">{view.yearToDate.summary.pct === null ? '—' : `${view.yearToDate.summary.pct}%`}</strong>
+                <p>This year</p>
+                <small>since {shortDate(view.yearToDate.from)}</small>
+              </div>
+              <div className="sb-stat" data-tone={view.month.absentDays > 0 ? 'pink' : 'paper'} style={{ '--tilt': '-1deg' } as React.CSSProperties}>
+                <strong data-testid="att-summary-absent-days">{view.month.absentDays}</strong>
+                <p>Days absent</p>
+                <small>{view.month.halfDays > 0 ? `+ ${view.month.halfDays} half day${view.month.halfDays > 1 ? 's' : ''}` : 'this month'}</small>
+              </div>
+              <div className="sb-stat" data-tone="orange" style={{ '--tilt': '1.5deg' } as React.CSSProperties}>
+                <strong data-testid="att-summary-streak">{streak >= 5 && <Sticker name="fire" size="sm" />}{streak}</strong>
+                <p>Full days in a row</p>
+                <small>{view.month.summary.late > 0 ? `${view.month.summary.late} late this month` : 'no late arrivals'}</small>
+              </div>
+            </div>
+
+            <div data-testid="att-summary-message" className="sb-card-soft flex items-center gap-3 px-4 py-3 text-sm font-bold" data-tone={BAND_TONE[view.month.summary.band]}>
+              <Sticker name={BAND_STICKER[view.month.summary.band]} size="md" tilt={-8} />
+              <span>{bandMessage(view.month.summary.pct, who)}</span>
+            </div>
+
+            <section className="sb-planner" aria-label="Attendance calendar">
+              <div className="sb-weekdays" aria-hidden>{WEEKDAYS.map(d => <div key={d}>{d}</div>)}</div>
+              <div className="sb-days">
+                {Array.from({ length: lead }).map((_, i) => <div key={`b${i}`} />)}
+                {view.month.days.map(d => {
+                  const st = DAY_STYLE[d.status]
+                  const isSelected = selected === d.date
+                  return (
+                    <button key={d.date} type="button" onClick={() => setSelected(isSelected ? null : d.date)}
+                      data-testid={`att-cal-day-${d.date}`} data-status={d.status} data-today={d.date === view.today}
+                      aria-label={`${longDate(d.date)}: ${d.title ?? st.label}`} aria-pressed={isSelected}
+                      className="sb-day">
+                      <span>{Number(d.date.slice(8))}</span>
+                      {d.status === 'late' && <Clock3 className="sb-day-late h-3.5 w-3.5" aria-hidden="true" />}
+                      {d.status === 'holiday' && <Sticker name="beach" size="xs" className="hidden sm:inline-block" />}
+                    </button>
+                  )
+                })}
+              </div>
+
+              <div data-testid="att-cal-detail" className="sb-say mt-6">
+                {selectedDay ? dayDetail(selectedDay) : <span className="sb-hand text-lg">tap a day to see what happened</span>}
+              </div>
+
+              <div className="mt-4 flex flex-wrap gap-2" aria-label="Legend">
+                {(['present', 'late', 'absent', 'half', 'holiday', 'weekly_off', 'not_marked'] as DayStatus[]).map(st => (
+                  <span key={st} className="sb-chip" data-tone="paper"><span className="sb-swatch" data-status={st} />{DAY_STYLE[st].label}</span>
+                ))}
+              </div>
+            </section>
+
+            {view.trend.length > 1 && (
+              <section className="sb-card p-5" data-tone="paper" data-testid="att-trend">
+                <div className="flex items-center gap-3"><Sticker name="chart-increasing" size="md" /><h2 className="sb-display text-2xl">Last few months</h2></div>
+                <p className="mb-3 mt-1 text-sm font-semibold text-[#6b604f]">Attendance % each month — green line is 90%, red is 75%.</p>
+                <TrendChart bucket="month" points={view.trend.map(t => ({ key: t.month, ...t.summary }))} />
+              </section>
+            )}
+
+            {view.upcomingHolidays.length > 0 && (
+              <section className="sb-card p-5 pt-6" data-tone="paper" data-testid="att-upcoming-holidays">
+                <Sticker name="beach" size="xl" tilt={8} className="sb-peek -top-8 right-6" />
+                <h2 className="sb-display text-2xl">Upcoming holidays</h2>
+                <ul className="mt-4 space-y-3">
+                  {view.upcomingHolidays.slice(0, 5).map(h => (
+                    <li key={`${h.title}-${h.event_date}`} className="flex items-center gap-4">
+                      <span className="sb-leaf" data-tone="violet"><span>{MONTH_NAMES[Number(h.event_date.slice(5, 7)) - 1].slice(0, 3)}</span><strong>{Number(h.event_date.slice(8))}</strong></span>
+                      <span className="min-w-0 flex-1 truncate text-[15px] font-extrabold">{h.title}</span>
+                      <span className="sb-chip" data-tone="paper">{shortDate(h.event_date)}{h.end_date ? ` – ${shortDate(h.end_date)}` : ''}</span>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
+          </>
+        )}
+      </div>
+    )
+  }
+
   return (
     <div data-testid="attendance-calendar" className="space-y-5">
-      {who === 'student' && (
-        <header className="student-page-intro">
-          <div>
-            <p className="student-eyebrow">Your consistency</p>
-            <h1>My attendance</h1>
-            <p className="student-page-description">See your daily record, understand this month’s pattern, and keep track of the days ahead.</p>
-          </div>
-          <div className="student-page-aside flex items-center gap-2 text-xs font-medium text-[#68736b]"><CalendarCheck2 size={17} className="text-[#a85f16]" aria-hidden="true" />School record</div>
-        </header>
-      )}
       {/* Month switcher */}
       <div className="flex items-center justify-between border-y border-gray-200 bg-white/65 px-3 py-2">
         <button type="button" onClick={() => go(-1)} aria-label="Previous month" data-testid="att-cal-prev"
@@ -228,14 +347,7 @@ export default function AttendanceCalendar({ endpoint, who }: {
 
             {/* What was tapped */}
             <div data-testid="att-cal-detail" className="mt-3 min-h-10 rounded-md bg-gray-50 border border-gray-100 px-3 py-2 text-sm text-gray-600">
-              {selectedDay ? (
-                selectedDay.status === 'holiday' || selectedDay.status === 'weekly_off'
-                  ? <><strong>{longDate(selectedDay.date)}</strong> — {selectedDay.status === 'holiday' ? `Holiday: ${selectedDay.title}` : 'Weekly off'}. No attendance is taken.</>
-                  : selectedDay.status === 'future' ? <><strong>{longDate(selectedDay.date)}</strong> — upcoming.</>
-                  : selectedDay.status === 'before_joining' ? <><strong>{longDate(selectedDay.date)}</strong> — before joining the school.</>
-                  : selectedDay.status === 'not_marked' ? <><strong>{longDate(selectedDay.date)}</strong> — attendance was not recorded.</>
-                  : <><strong>{longDate(selectedDay.date)}</strong> — Morning: <b>{sessionLabel(selectedDay.morning)}</b>{selectedDay.afternoon ? <> · Afternoon: <b>{sessionLabel(selectedDay.afternoon)}</b></> : null}</>
-              ) : <span className="text-muted-foreground">Tap a day to see the details.</span>}
+              {selectedDay ? dayDetail(selectedDay) : <span className="text-muted-foreground">Tap a day to see the details.</span>}
             </div>
 
             {/* Legend */}

@@ -1,4 +1,6 @@
 import pool from './db'
+import type { Pool, PoolClient } from 'pg'
+import { headers } from 'next/headers'
 import {
   getPlatformSession, getSession, getTeacherSession, getStudentSession, getParentSession,
 } from './auth'
@@ -24,33 +26,17 @@ export type ExamActor =
 
 const SCHOOL_STAFF_ROLES = ['school_admin', 'principal', 'vice_principal']
 
-// Read-only access: any school-scoped role (admin staff, teacher, student,
-// parent) whose own session's school matches the requested one. Platform
-// admin may access any school.
-export async function requireExamsAccess(requestedSchoolId: string | number | null | undefined): Promise<ExamActor | null> {
+// Each role-specific guard resolves only its own portal's cookie. A browser can
+// hold several portal logins at once (cookies are shared per host, e.g. every
+// tab on localhost), so an admin-only or teacher-only check must not be decided
+// by whichever other portal's cookie happens to be inspected first.
+async function resolveAdminActor(requestedSchoolId: string | number | null | undefined):
+  Promise<Extract<ExamActor, { kind: 'admin' }> | null> {
   const platform = await getPlatformSession()
   if (platform?.role === 'platform_admin') {
     const sid = requestedSchoolId != null ? Number(requestedSchoolId) : (platform.schoolId ?? 0)
     if (!sid) return null
     return { kind: 'admin', schoolId: sid, userId: platform.userId, role: 'platform_admin', actorName: 'Platform Admin' }
-  }
-
-  const teacher = await getTeacherSession()
-  if (teacher) {
-    if (requestedSchoolId != null && Number(requestedSchoolId) !== Number(teacher.schoolId)) return null
-    return { kind: 'teacher', schoolId: teacher.schoolId, teacherId: teacher.teacherId, actorName: teacher.name }
-  }
-
-  const student = await getStudentSession()
-  if (student) {
-    if (requestedSchoolId != null && Number(requestedSchoolId) !== Number(student.schoolId)) return null
-    return { kind: 'student', schoolId: student.schoolId, studentId: student.studentId, actorName: student.name }
-  }
-
-  const parent = await getParentSession()
-  if (parent) {
-    if (requestedSchoolId != null && Number(requestedSchoolId) !== Number(parent.schoolId)) return null
-    return { kind: 'parent', schoolId: parent.schoolId, parentId: parent.parentId, actorName: parent.name }
   }
 
   const admin = await getSession()
@@ -62,21 +48,92 @@ export async function requireExamsAccess(requestedSchoolId: string | number | nu
   return null
 }
 
+async function resolveTeacherActor(requestedSchoolId: string | number | null | undefined):
+  Promise<Extract<ExamActor, { kind: 'teacher' }> | null> {
+  const teacher = await getTeacherSession()
+  if (!teacher) return null
+  if (requestedSchoolId != null && Number(requestedSchoolId) !== Number(teacher.schoolId)) return null
+  return { kind: 'teacher', schoolId: teacher.schoolId, teacherId: teacher.teacherId, actorName: teacher.name }
+}
+
+async function resolveStudentActor(requestedSchoolId: string | number | null | undefined):
+  Promise<Extract<ExamActor, { kind: 'student' }> | null> {
+  const student = await getStudentSession()
+  if (!student) return null
+  if (requestedSchoolId != null && Number(requestedSchoolId) !== Number(student.schoolId)) return null
+  return { kind: 'student', schoolId: student.schoolId, studentId: student.studentId, actorName: student.name }
+}
+
+async function resolveParentActor(requestedSchoolId: string | number | null | undefined):
+  Promise<Extract<ExamActor, { kind: 'parent' }> | null> {
+  const parent = await getParentSession()
+  if (!parent) return null
+  if (requestedSchoolId != null && Number(requestedSchoolId) !== Number(parent.schoolId)) return null
+  return { kind: 'parent', schoolId: parent.schoolId, parentId: parent.parentId, actorName: parent.name }
+}
+
+type ActorKind = ExamActor['kind']
+
+// Which portal a request came from, read from the page that issued the fetch
+// (Referer path). Only used to choose between logins the browser really holds,
+// so it can never grant a role the caller doesn't already have a valid session for.
+async function portalHint(): Promise<ActorKind | null> {
+  try {
+    const referer = (await headers()).get('referer')
+    if (!referer) return null
+    const path = new URL(referer).pathname
+    if (path.startsWith('/parent')) return 'parent'
+    if (path.startsWith('/student')) return 'student'
+    if (path.startsWith('/teacher')) return 'teacher'
+    if (path.startsWith('/school-admin') || path.startsWith('/platform-admin')) return 'admin'
+  } catch { /* no usable referer — fall back to the default order */ }
+  return null
+}
+
+// Read-only access: any school-scoped role (admin staff, teacher, student,
+// parent) whose own session's school matches the requested one. Platform
+// admin may access any school.
+//
+// A browser can hold several portal logins at once (cookies are shared per
+// host), so when more than one is valid the portal the request came from wins;
+// without a usable Referer the order is admin, teacher, student, parent. Routes
+// that only make sense for one role should use requireExamsAdmin/Teacher/Parent
+// instead, which ignore the other cookies entirely.
+export async function requireExamsAccess(requestedSchoolId: string | number | null | undefined): Promise<ExamActor | null> {
+  const resolvers: Record<ActorKind, () => Promise<ExamActor | null>> = {
+    admin:   () => resolveAdminActor(requestedSchoolId),
+    teacher: () => resolveTeacherActor(requestedSchoolId),
+    student: () => resolveStudentActor(requestedSchoolId),
+    parent:  () => resolveParentActor(requestedSchoolId),
+  }
+  const defaultOrder: ActorKind[] = ['admin', 'teacher', 'student', 'parent']
+  const hint = await portalHint()
+  const order = hint ? [hint, ...defaultOrder.filter(kind => kind !== hint)] : defaultOrder
+
+  for (const kind of order) {
+    const actor = await resolvers[kind]()
+    if (actor) return actor
+  }
+  return null
+}
+
+// Parent-only — child summary, result acknowledgement.
+export async function requireExamsParent(requestedSchoolId: string | number | null | undefined):
+  Promise<Extract<ExamActor, { kind: 'parent' }> | null> {
+  return resolveParentActor(requestedSchoolId)
+}
+
 // Admin-only (school staff or platform admin) — exam creation, scheduling,
 // and the final release step are admin actions in the v2 flow.
 export async function requireExamsAdmin(requestedSchoolId: string | number | null | undefined):
   Promise<Extract<ExamActor, { kind: 'admin' }> | null> {
-  const actor = await requireExamsAccess(requestedSchoolId)
-  if (!actor || actor.kind !== 'admin') return null
-  return actor
+  return resolveAdminActor(requestedSchoolId)
 }
 
 // Teacher-only — marks entry, subject submission, class-teacher review.
 export async function requireExamsTeacher(requestedSchoolId: string | number | null | undefined):
   Promise<Extract<ExamActor, { kind: 'teacher' }> | null> {
-  const actor = await requireExamsAccess(requestedSchoolId)
-  if (!actor || actor.kind !== 'teacher') return null
-  return actor
+  return resolveTeacherActor(requestedSchoolId)
 }
 
 // True if this teacher is the official class teacher of classId (checked
@@ -101,6 +158,111 @@ export async function isSubjectTeacherOf(teacherId: number, examSubjectId: numbe
     [examSubjectId, teacherId]
   )
   return rows.length > 0
+}
+
+// Reads one exam_notification_settings toggle for a school (spec section 11),
+// defaulting to enabled when the school has no row yet — matches the
+// settings API's own seed default so "never configured" behaves identically
+// to "explicitly on".
+export async function examNotificationEnabled(schoolId: number, column: 'notify_schedule_change' | 'notify_cancelled' | 'notify_marks_published'): Promise<boolean> {
+  const { rows } = await pool.query(
+    `SELECT ${column} AS enabled FROM exam_notification_settings WHERE school_id = $1`,
+    [schoolId]
+  )
+  return rows.length === 0 || rows[0].enabled
+}
+
+// True if this teacher has any real relationship to classId — class teacher,
+// OR teaches at least one of its class_subjects, OR is assigned to at least
+// one of its exam_subjects. Used to scope GET /api/exams and
+// GET /api/exams/calendar so a teacher session can't enumerate another
+// class's exam schedule just by passing its class_id — those routes
+// previously only checked "some teacher session exists in this school".
+export async function isTeacherLinkedToClass(teacherId: number, classId: number): Promise<boolean> {
+  const { rows } = await pool.query(`
+    SELECT 1 FROM classes WHERE id = $1 AND class_teacher_id = $2
+    UNION ALL
+    SELECT 1 FROM class_subjects WHERE class_id = $1 AND teacher_id = $2
+    LIMIT 1
+  `, [classId, teacherId])
+  return rows.length > 0
+}
+
+type ExamQueryClient = Pick<Pool | PoolClient, 'query'>
+
+// A teacher may open an exam only when they are the class teacher or are
+// assigned to at least one subject in that exam. This is intentionally tied
+// to the exam, rather than merely to another subject in the same class.
+export async function isTeacherLinkedToExam(
+  teacherId: number,
+  examId: number,
+  db: ExamQueryClient = pool,
+): Promise<boolean> {
+  const { rows } = await db.query(`
+    SELECT 1
+    FROM exam_records e
+    JOIN classes c ON c.id = e.class_id
+    WHERE e.id = $1
+      AND (
+        c.class_teacher_id = $2
+        OR EXISTS (
+          SELECT 1 FROM exam_subjects es
+          WHERE es.exam_id = e.id AND es.teacher_id = $2
+        )
+      )
+    LIMIT 1
+  `, [examId, teacherId])
+  return rows.length > 0
+}
+
+// Server-side source of truth for targeted exams. All result, entry,
+// acknowledgement and notification flows use this same predicate so a
+// "specific students" exam can never silently expand to the whole class.
+export async function examAppliesToStudent(
+  examId: number,
+  studentId: number,
+  schoolId: number,
+  db: ExamQueryClient = pool,
+): Promise<boolean> {
+  const { rows } = await db.query(`
+    SELECT 1
+    FROM exam_records e
+    JOIN classes c ON c.id = e.class_id
+    JOIN students s ON s.id = $2 AND s.school_id = e.school_id AND s.status = 'active'
+    WHERE e.id = $1 AND e.school_id = $3
+      AND (
+        (e.student_scope = 'all' AND s.grade = c.grade AND s.section = c.section)
+        OR (e.student_scope = 'specific' AND EXISTS (
+          SELECT 1 FROM exam_applicable_students eas
+          WHERE eas.exam_id = e.id AND eas.student_id = s.id
+        ))
+      )
+    LIMIT 1
+  `, [examId, studentId, schoolId])
+  return rows.length > 0
+}
+
+export async function getApplicableExamStudentIds(
+  examId: number,
+  schoolId: number,
+  db: ExamQueryClient = pool,
+): Promise<number[]> {
+  const { rows } = await db.query(`
+    SELECT s.id
+    FROM exam_records e
+    JOIN classes c ON c.id = e.class_id
+    JOIN students s ON s.school_id = e.school_id AND s.status = 'active'
+      AND (
+        (e.student_scope = 'all' AND s.grade = c.grade AND s.section = c.section)
+        OR (e.student_scope = 'specific' AND EXISTS (
+          SELECT 1 FROM exam_applicable_students eas
+          WHERE eas.exam_id = e.id AND eas.student_id = s.id
+        ))
+      )
+    WHERE e.id = $1 AND e.school_id = $2
+    ORDER BY s.id
+  `, [examId, schoolId])
+  return rows.map(row => Number(row.id))
 }
 
 // Resolves whether a parent session actually has a claim to this student —

@@ -3,6 +3,7 @@ import pool, { ensureDB } from '@/lib/db'
 import path from 'path'
 import fs from 'fs/promises'
 import { gradeOrderSql } from '@/lib/grades'
+import { requireSchoolAdmin, getTeacherSession } from '@/lib/auth'
 
 const UPLOAD_DIR = path.join(process.cwd(), 'textbook_uploads')
 const CHUNK_SIZE = 1500   // chars per chunk
@@ -18,13 +19,27 @@ function chunkText(text: string): string[] {
   return chunks.filter(c => c.trim().length > 50)
 }
 
-// GET /api/textbooks?school_id=
+// `grade` becomes a directory name on disk, so it must never carry a path separator or `..`.
+const SAFE_GRADE = /^[A-Za-z0-9][A-Za-z0-9 _-]{0,19}$/
+
+// The school always comes from the session. A school_id param/field from older clients is
+// accepted only when it matches (anything else is refused, not silently retargeted).
+function schoolMismatch(raw: FormDataEntryValue | string | null, schoolId: number): boolean {
+  return raw !== null && raw !== '' && Number(raw) !== schoolId
+}
+
+// GET /api/textbooks?grade= — school admins and teachers, own school only
 export async function GET(req: NextRequest) {
   try {
+    const admin   = await requireSchoolAdmin()
+    const teacher = admin ? null : await getTeacherSession()
+    const school_id = admin?.schoolId ?? teacher?.schoolId
+    if (!school_id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    if (schoolMismatch(req.nextUrl.searchParams.get('school_id'), school_id)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
     await ensureDB()
-    const school_id = req.nextUrl.searchParams.get('school_id')
     const grade     = req.nextUrl.searchParams.get('grade')
-    if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
     try {
       let q = `SELECT id, school_id, grade, subject, book_title, file_name,
                       total_chunks, total_chars, uploaded_by_name, uploaded_at
@@ -44,22 +59,30 @@ export async function GET(req: NextRequest) {
   }
 }
 
-// POST /api/textbooks  — multipart/form-data
-// Fields: school_id, grade, subject, book_title?, uploaded_by_name?, file (PDF)
+// POST /api/textbooks  — multipart/form-data, school admins only
+// Fields: grade, subject, book_title?, uploaded_by_name?, file (PDF)
 export async function POST(req: NextRequest) {
   try {
+    const admin = await requireSchoolAdmin()
+    if (!admin?.schoolId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const school_id = String(admin.schoolId)
     await ensureDB()
     try {
       const formData   = await req.formData()
-      const school_id  = formData.get('school_id') as string
-      const grade      = formData.get('grade') as string
+      if (schoolMismatch(formData.get('school_id'), admin.schoolId)) {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      }
+      const grade      = String(formData.get('grade') ?? '').trim()
       const subject    = formData.get('subject') as string
       const book_title = (formData.get('book_title') as string) || null
       const uploader   = (formData.get('uploaded_by_name') as string) || null
       const file       = formData.get('file') as File | null
 
-      if (!school_id || !grade || !subject || !file)
-        return NextResponse.json({ error: 'school_id, grade, subject, file required' }, { status: 400 })
+      if (!grade || !subject || !file)
+        return NextResponse.json({ error: 'grade, subject, file required' }, { status: 400 })
+
+      if (!SAFE_GRADE.test(grade))
+        return NextResponse.json({ error: 'Invalid grade' }, { status: 400 })
 
       if (!file.name.toLowerCase().endsWith('.pdf'))
         return NextResponse.json({ error: 'Only PDF files are accepted' }, { status: 400 })
@@ -124,7 +147,7 @@ export async function POST(req: NextRequest) {
       })
     } catch (err) {
       console.error('textbooks POST error:', err)
-      return NextResponse.json({ error: 'Upload failed: ' + String(err) }, { status: 500 })
+      return NextResponse.json({ error: 'Upload failed' }, { status: 500 })
     }
 } catch (err: unknown) {
     console.error('[API]', err)

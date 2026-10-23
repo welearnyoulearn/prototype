@@ -1,11 +1,14 @@
 'use client'
 
+import { rollLabel, plural } from './format'
+import PriorDuesBanner from './PriorDuesBanner'
 import { useCallback, useEffect, useState } from 'react'
 import { GRADE_SEQUENCE } from '@/lib/grades'
 import type { ReportData } from './types'
 import { useFeeStore } from '@/lib/stores/feeStore'
 import { LoadErrorBanner } from './LoadErrorBanner'
 import { Skeleton } from '@/components/ui/skeleton'
+import { buildFeeReportMonths } from '@/lib/feeReportMonths'
 
 const GRADES = GRADE_SEQUENCE
 function gradeLabel(g: string): string { return /^\d+$/.test(g) ? `Grade ${g}` : g }
@@ -54,17 +57,28 @@ function buildAuditPdfHtml(rep: Record<string, unknown>): string {
   const moneyHead = `<tr><th>Billed</th><th class="r">Waived</th><th class="r">Net Demand</th><th class="r">Paid</th><th class="r">Balance</th></tr>`
 
   if (rep.kind === 'student') {
-    const s = rep.student as { name: string; roll_number: string; grade: string; section: string; parent_name: string | null; parent_phone: string | null }
+    const s = rep.student as { name: string; roll_number: string; school_roll_number: number | null; grade: string; section: string; parent_name: string | null; parent_phone: string | null }
     const bal = rep.balance as { billed: number; waived: number; net_demand: number; paid: number; balance: number }
     const bills = rep.bills as Array<{ fee_type: string; period_label: string; billed: number; waived: number; paid: number; balance: number; status: string }>
     const pays = rep.payments as Array<{ receipt_number: string; paid_date: string; fee_type: string; period_label: string; amount: number; payment_mode: string; payment_status: string }>
     const wvs = rep.waivers as Array<{ fee_type: string; period_label: string; waiver_amount: number; reason: string; granted_by_name: string | null; is_revoked: boolean; revoked_by: string | null; revoked_at: string | null; revoke_reason: string | null }>
+    const swb = rep.waiver_breakdown as { discretionary: number; carried_forward: number; written_off: number }
     return `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Student Fee Report</title>${style}</head><body>${head}
       <h3>Student Profile</h3>
-      <table><tr><td><b>Name</b></td><td>${esc(s.name)}</td><td><b>Roll No</b></td><td>${esc(s.roll_number)}</td><td><b>Class</b></td><td>${esc(s.grade)}${esc(s.section || '')}</td></tr>
-      <tr><td><b>Parent</b></td><td>${esc(s.parent_name) || '—'}</td><td><b>Phone</b></td><td colspan="3">${esc(s.parent_phone) || '—'}</td></tr></table>
+      <table><tr><td><b>Name</b></td><td>${esc(s.name)}</td><td><b>Roll No</b></td><td>${esc(s.school_roll_number ?? '')}</td><td><b>Class</b></td><td>${esc(s.grade)}${esc(s.section || '')}</td></tr>
+      <tr><td><b>Parent</b></td><td>${esc(s.parent_name) || '—'}</td><td><b>Phone</b></td><td>${esc(s.parent_phone) || '—'}</td><td><b>System ID</b></td><td>${esc(s.roll_number)}</td></tr></table>
       <h3>Fee Balance</h3>
       <table><thead>${moneyHead}</thead><tbody><tr class="tot"><td class="r">${RUPEE(bal.billed)}</td><td class="r">${RUPEE(bal.waived)}</td><td class="r">${RUPEE(bal.net_demand)}</td><td class="r">${RUPEE(bal.paid)}</td><td class="r">${RUPEE(bal.balance)}</td></tr></tbody></table>
+      <h3>Reconciliation</h3>
+      <table><thead><tr><th>Step</th><th class="r">Amount</th></tr></thead><tbody>
+        <tr><td>Billed</td><td class="r">${RUPEE(bal.billed)}</td></tr>
+        <tr><td>Less: discretionary waivers</td><td class="r">− ${RUPEE(swb.discretionary)}</td></tr>
+        <tr><td>Less: carried forward to a new year</td><td class="r">− ${RUPEE(swb.carried_forward)}</td></tr>
+        <tr><td>Less: written off</td><td class="r">− ${RUPEE(swb.written_off)}</td></tr>
+        <tr><td>Less: paid</td><td class="r">− ${RUPEE(bal.paid)}</td></tr>
+        <tr class="tot"><td>= Balance (calculated)</td><td class="r">${RUPEE(bal.billed - swb.discretionary - swb.carried_forward - swb.written_off - bal.paid)}</td></tr>
+        <tr><td>Balance per report</td><td class="r">${RUPEE(bal.balance)}</td></tr>
+      </tbody></table>
       <h3>Fee Structure</h3>
       <table><thead><tr><th>Fee Type</th><th>Period</th><th class="r">Billed</th><th class="r">Waived</th><th class="r">Paid</th><th class="r">Balance</th><th>Status</th></tr></thead>
       <tbody>${bills.map(b => `<tr><td>${esc(b.fee_type)}</td><td>${esc(b.period_label)}</td><td class="r">${RUPEE(b.billed)}</td><td class="r">${RUPEE(b.waived)}</td><td class="r">${RUPEE(b.paid)}</td><td class="r">${RUPEE(b.balance)}</td><td>${esc(b.status)}</td></tr>`).join('')}</tbody></table>
@@ -92,13 +106,24 @@ function buildAuditPdfHtml(rep: Record<string, unknown>): string {
     <h3>1. Fee Summary <span style="font-weight:normal;color:#888">(${sm.students} students)</span></h3>
     <table><thead>${moneyHead}</thead><tbody><tr class="tot">${mrow(sm)}</tr></tbody></table>
 
-    <h3>2. Waiver Breakdown <span style="font-weight:normal;color:#888">("Waived" above is discretionary only — see below for the rest</span></h3>
+    <h3>2. Waiver Breakdown <span style="font-weight:normal;color:#888">("Waived" above is discretionary only — see below for the rest)</span></h3>
     <table><thead><tr><th>Type</th><th class="r">Amount</th><th>Note</th></tr></thead>
     <tbody>
       <tr><td>Discretionary Waivers (fee reductions actually granted to a student)</td><td class="r">${RUPEE(wvb.discretionary)}</td><td></td></tr>
       <tr><td>Carried Forward (bill moved to a new year)</td><td class="r">${RUPEE(wvb.carried_forward)}</td><td style="color:#888">not forgiven — excluded from "Waived"</td></tr>
       <tr><td>Written Off (admin gave up collecting)</td><td class="r">${RUPEE(wvb.written_off)}</td><td style="color:#888">not a concession — excluded from "Waived"</td></tr>
       <tr class="tot"><td>Total reduction across all three types</td><td class="r">${RUPEE(wvb.total)}</td><td></td></tr>
+    </tbody></table>
+    <h3>Reconciliation</h3>
+    <table><thead><tr><th>Step</th><th class="r">Amount</th></tr></thead>
+    <tbody>
+      <tr><td>Billed</td><td class="r">${RUPEE(sm.billed)}</td></tr>
+      <tr><td>Less: discretionary waivers</td><td class="r">− ${RUPEE(wvb.discretionary)}</td></tr>
+      <tr><td>Less: carried forward to a new year</td><td class="r">− ${RUPEE(wvb.carried_forward)}</td></tr>
+      <tr><td>Less: written off</td><td class="r">− ${RUPEE(wvb.written_off)}</td></tr>
+      <tr><td>Less: paid</td><td class="r">− ${RUPEE(sm.paid)}</td></tr>
+      <tr class="tot"><td>= Balance (calculated)</td><td class="r">${RUPEE(sm.billed - wvb.discretionary - wvb.carried_forward - wvb.written_off - sm.paid)}</td></tr>
+      <tr><td>Balance per report</td><td class="r">${RUPEE(sm.balance)}</td></tr>
     </tbody></table>
     <p style="font-size:10px;color:#888;line-height:1.5">
       <b>How to read this report:</b> Billed = total due in scope. Net Demand = Billed − Waived (discretionary only).
@@ -158,7 +183,10 @@ export default function FeeReportsTab({
     finally { setReportLoading(false) }
   }, [schoolId, academicYear])
 
-  useEffect(() => { loadReports() }, [loadReports, reportsVersion])
+  useEffect(() => {
+    const refresh = window.setTimeout(() => { void loadReports() }, 0)
+    return () => window.clearTimeout(refresh)
+  }, [loadReports, reportsVersion])
 
   const [auditLog, setAuditLog]           = useState<AuditRow[]>([])
   const [auditLoading, setAuditLoading]   = useState(false)
@@ -182,7 +210,7 @@ export default function FeeReportsTab({
   const [arGrade, setArGrade]                   = useState('')
   const [arSection, setArSection]               = useState('all')
   const [arStudentSearch, setArStudentSearch]   = useState('')
-  const [arStudentResults, setArStudentResults] = useState<{ id: number; name: string; grade: string; section: string; roll_number: string }[]>([])
+  const [arStudentResults, setArStudentResults] = useState<{ id: number; name: string; grade: string; section: string; school_roll_number?: number | null; roll_number: string }[]>([])
   const [arBusy, setArBusy]                     = useState(false)
   const [arMsg, setArMsg]                       = useState('')
 
@@ -291,7 +319,7 @@ export default function FeeReportsTab({
               <div className="absolute z-20 mt-1 left-0 right-0 bg-white border border-gray-200 rounded-lg shadow-lg max-h-64 overflow-y-auto">
                 {arStudentResults.map(s => (
                   <div key={s.id} className="px-3 py-2 hover:bg-gray-50 flex items-center justify-between gap-2 border-b border-gray-50 last:border-0">
-                    <span className="text-sm text-gray-800">{s.name} <span className="text-xs text-gray-400">Gr.{s.grade}{s.section} · #{s.roll_number}</span></span>
+                    <span className="text-sm text-gray-800">{s.name} <span className="text-xs text-gray-400">Gr.{s.grade}{s.section}{rollLabel(s.school_roll_number) ? ` · ${rollLabel(s.school_roll_number)}` : ''}</span></span>
                     <span className="flex gap-1.5 flex-shrink-0">
                       <button data-testid={`btn-audit-student-excel-${s.id}`} onClick={() => { downloadAuditExcel({ student_id: String(s.id) }); setArStudentResults([]); setArStudentSearch('') }}
                         className="text-xs bg-green-600 text-white px-2 py-0.5 rounded hover:bg-green-700">Excel</button>
@@ -324,10 +352,32 @@ export default function FeeReportsTab({
               <div key={s.label} className={`${s.bg} rounded-xl border border-gray-100 p-4`}>
                 <p className="text-xs text-gray-400 font-medium uppercase tracking-wide">{s.label}</p>
                 <p className={`text-2xl font-bold mt-1 ${s.color}`}>{fmt(s.val)}</p>
-                <p className="text-xs text-gray-400 mt-1">{reportData.balance.total_students} students</p>
+                <p className="text-xs text-gray-400 mt-1">
+                  {s.label === 'Total Billed' && Number(reportData.balance.carried_in_due) > 0
+                    ? `${fmt(Number(reportData.balance.total_billed) - Number(reportData.balance.carried_in_due))} this year + ${fmt(reportData.balance.carried_in_due!)} carried`
+                    : s.label === 'Total Outstanding' && Number(reportData.balance.carried_in_outstanding) > 0
+                    ? `incl. ${fmt(reportData.balance.carried_in_outstanding!)} from earlier years`
+                    : plural(reportData.balance.total_students, 'student')}
+                </p>
               </div>
             ))}
           </div>
+
+          <PriorDuesBanner year={academicYear} current={reportData.balance.total_outstanding} prior={reportData.balance.prior_unresolved_outstanding} priorStudents={reportData.balance.prior_unresolved_students} priorFrom={reportData.balance.prior_unresolved_from} priorByYear={reportData.balance.prior_unresolved_by_year} passout={reportData.balance.passout_outstanding} passoutStudents={reportData.balance.passout_students} />
+
+          {/* Dues carried in from earlier years are billed here AND were counted as billed in the year
+              they came from — say so, so nobody adds the two years' Billed together. */}
+          {(() => {
+            const carriedIn = reportData.byCategory
+              .filter(c => ['Previous Year Dues', 'Passout Dues'].includes(c.category_name))
+              .reduce((sum, c) => sum + Number(c.total_due), 0)
+            return carriedIn > 0 ? (
+              <p data-testid="note-carried-in" className="text-xs text-gray-500 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
+                Total Billed includes <strong>{fmt(carriedIn)}</strong> of dues carried in from earlier years. Those amounts were also counted as billed
+                in the year they came from, so don't add this year's Billed to an earlier year's.
+              </p>
+            ) : null
+          })()}
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
             {/* Class-wise collection */}
@@ -342,7 +392,7 @@ export default function FeeReportsTab({
                   return (
                     <div key={cls}>
                       <div className="flex justify-between text-xs mb-1">
-                        <span className="font-medium text-gray-700">{cls} <span className="text-gray-400">({g.students} students)</span></span>
+                        <span className="font-medium text-gray-700">{cls} <span className="text-gray-400">({plural(g.students, 'student')})</span></span>
                         <span className="text-gray-500">{fmt(g.total_collected)} / {fmt(g.total_due)} <span className="font-bold text-blue-600">{gradePct}%</span></span>
                       </div>
                       <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
@@ -361,6 +411,7 @@ export default function FeeReportsTab({
             <div className="bg-white rounded-xl border border-gray-100 p-5">
               <h3 className="text-sm font-semibold text-gray-700 mb-4">Collection by Payment Mode</h3>
               <div className="space-y-3">
+                {reportData.byMode.length === 0 && <p className="text-sm text-gray-400">No payments recorded for {academicYear}.</p>}
                 {reportData.byMode.map(m => (
                   <div key={m.payment_mode} className="flex items-center justify-between">
                     <span className="text-sm text-gray-600 capitalize">{m.payment_mode}</span>
@@ -375,20 +426,19 @@ export default function FeeReportsTab({
           </div>
 
           {/* Month-wise billed vs collected */}
-          {reportData.monthly.length > 0 && (
+          {(reportData.monthly.length > 0 || reportData.monthlyDue.length > 0) && (
             <div className="bg-white rounded-xl border border-gray-100 p-5">
               <h3 className="text-sm font-semibold text-gray-700 mb-4">Month-wise Billed vs Collected</h3>
               <div className="space-y-2">
                 {(() => {
-                  const dueMap = new Map(reportData.monthlyDue.map(d => [d.month, d.billed]))
-                  const allMonths = Array.from(new Set([...reportData.monthly.map(m => m.month), ...reportData.monthlyDue.map(d => d.month)])).sort()
-                  const maxVal = Math.max(...allMonths.map(m => Math.max(dueMap.get(m) ?? 0, reportData.monthly.find(x => x.month === m)?.collected ?? 0)), 1)
-                  return allMonths.map(month => {
-                    const billed    = dueMap.get(month) ?? 0
-                    const collected = reportData.monthly.find(x => x.month === month)?.collected ?? 0
+                  const months = buildFeeReportMonths(reportData.monthly, reportData.monthlyDue)
+                  const maxVal = Math.max(...months.map(m => Math.max(m.billed, m.collected)), 1)
+                  return months.map(({ month, month_start, billed, collected }) => {
                     const billedPct    = Math.round((billed    / maxVal) * 100)
                     const collectedPct = Math.round((collected / maxVal) * 100)
-                    const label = new Date(month + '-01').toLocaleDateString('en-IN', { month: 'short', year: '2-digit' })
+                    const label = month_start
+                      ? new Date(month_start).toLocaleDateString('en-IN', { month: 'short', year: '2-digit', timeZone: 'Asia/Kolkata' })
+                      : 'No due date'
                     return (
                       <div key={month}>
                         <div className="flex justify-between text-xs mb-1">
@@ -436,7 +486,7 @@ export default function FeeReportsTab({
                     <tr key={c.category_name} className="border-b border-gray-50 hover:bg-gray-50">
                       <td className="px-4 py-2.5">
                         <p className="font-medium text-gray-800">{c.category_name}</p>
-                        <p className="text-xs text-gray-400 capitalize">{c.frequency} · {c.students} students</p>
+                        <p className="text-xs text-gray-400 capitalize">{c.frequency.replace('_', ' ')} · {plural(c.students, 'student')}</p>
                       </td>
                       <td className="px-4 py-2.5 text-right text-gray-700">{fmt(c.total_due)}</td>
                       <td className="px-4 py-2.5 text-right text-green-600 font-medium">{fmt(c.total_collected)}</td>
@@ -444,6 +494,8 @@ export default function FeeReportsTab({
                       <td className="px-4 py-2.5 text-right text-red-600 font-medium">{fmt(c.outstanding)}</td>
                       <td className="px-4 py-2.5 text-center text-xs">
                         <span className="text-green-600">{c.paid_count} paid</span>
+                        {Number(c.partial_count) > 0 && <><span className="text-gray-300 mx-1">·</span><span className="text-yellow-600">{c.partial_count} partial</span></>}
+                        {Number(c.waived_count) > 0 && <><span className="text-gray-300 mx-1">·</span><span className="text-purple-600">{c.waived_count} waived</span></>}
                         <span className="text-gray-300 mx-1">·</span>
                         <span className="text-red-500">{c.unpaid_count} unpaid</span>
                       </td>
@@ -458,7 +510,7 @@ export default function FeeReportsTab({
           {reportData.defaulters.length > 0 && (
             <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
               <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
-                <p className="text-sm font-semibold text-gray-700">Pending Payments — {reportData.defaulters.length} students</p>
+                <p className="text-sm font-semibold text-gray-700">Pending Payments — {plural(reportData.defaulters.length, 'student')}</p>
                 <a href={`/api/fees/export?school_id=${schoolId}&academic_year=${academicYear}&type=ledger&outstanding=1`} download
                   className="text-xs text-red-600 border border-red-200 px-2.5 py-1 rounded-lg hover:bg-red-50">
                   Export Pending Payments
@@ -480,11 +532,14 @@ export default function FeeReportsTab({
                       <tr key={i} className="border-b border-gray-50 hover:bg-gray-50">
                         <td className="px-4 py-2">
                           <p className="font-medium text-gray-800">{d.student_name}</p>
-                          <p className="text-xs text-gray-400">#{d.roll_number}</p>
+                          {d.school_roll_number ? <p className="text-xs text-gray-400">{rollLabel(d.school_roll_number)}</p> : null}
                         </td>
                         <td className="px-4 py-2 text-gray-600">Gr.{d.grade}{d.section}</td>
                         <td className="px-4 py-2 text-xs text-gray-500">{d.parent_name || '—'}{d.parent_phone ? ` · ${d.parent_phone}` : ''}</td>
-                        <td className="px-4 py-2 text-right font-bold text-red-600">{fmt(d.outstanding)}</td>
+                        <td className="px-4 py-2 text-right font-bold text-red-600">
+                          {fmt(d.outstanding)}
+                          {Number(d.carried_outstanding) > 0 && <span className="block text-[10px] font-normal text-amber-700">{fmt(Number(d.carried_outstanding))} from earlier years</span>}
+                        </td>
                         <td className="px-4 py-2 text-center">
                           <span className="text-xs bg-red-100 text-red-600 px-1.5 py-0.5 rounded font-medium">{d.overdue_entries}</span>
                         </td>

@@ -22,6 +22,7 @@ async function uiLogin(page: Page, identifier: string, password: string): Promis
 }
 
 async function goToOnboarding(page: Page) {
+  await expect(page.getByRole('button', { name: /Student Management/i })).toBeVisible({ timeout: 60000 })
   await page.getByRole('button', { name: /Student Management/i }).click()
   await expect(page.getByText('Student List')).toBeVisible({ timeout: 10000 })
   await page.getByRole('button', { name: /Onboard Students/i }).click()
@@ -71,7 +72,7 @@ test.describe.serial('Student Onboarding — Full Lifecycle (UI)', () => {
   // ─── Setup ──────────────────────────────────────────────────────────────────
   test.beforeAll(async () => {
     test.setTimeout(120000)
-    ctx = await playwrightRequest.newContext({ baseURL: BASE })
+    ctx = await playwrightRequest.newContext({ baseURL: BASE, timeout: 60_000 })
 
     // Provisioning a school requires a platform admin session.
     const platformCookie = await platformAdminCookie()
@@ -126,8 +127,8 @@ test.describe.serial('Student Onboarding — Full Lifecycle (UI)', () => {
 
     await expect(page.getByText('Enrollment Complete — Credentials')).toBeVisible({ timeout: 30000 })
     await expect(page.getByText('Student Credentials')).toBeVisible()
-    // No email → login column shows the "no email" placeholder
-    await expect(page.getByText(/no email/i)).toBeVisible()
+    // Email is optional; the generated globally unique WLYL student id is the login.
+    await expect(page.getByText(/wlyl-/i).first()).toBeVisible()
 
     const found = await studentIdsByNames(['Mehta Arjun'])
     found.forEach((s: { id: number }) => createdStudentIds.push(s.id))
@@ -152,7 +153,10 @@ test.describe.serial('Student Onboarding — Full Lifecycle (UI)', () => {
     await page.getByTestId('enroll-students-btn').click()
 
     await expect(page.getByText('Enrollment Complete — Credentials')).toBeVisible({ timeout: 30000 })
-    await expect(page.getByText(`priya${ts}@student.com`)).toBeVisible()
+    // The panel shows the roll-number login + temp password for the student; the student's
+    // email is only where the credentials are delivered, so it is no longer listed.
+    await expect(page.getByText('Student Credentials')).toBeVisible()
+    await expect(page.getByText('Patel Priya')).toBeVisible()
     await expect(page.getByText('Parent Credentials')).toBeVisible()
     await expect(page.getByText(`ramesh${ts}@parent.com`)).toBeVisible()
 
@@ -281,7 +285,7 @@ test.describe.serial('Student Onboarding — Full Lifecycle (UI)', () => {
 
     await fillRow(page, {
       rollNo: '1', lastName: 'Das', firstName: 'Bina',
-      grade: '11', section: 'A', parentName: 'Dina Das', parentPhone: phone(8),
+      grade: '5', section: 'A', parentName: 'Dina Das', parentPhone: phone(8),
     })
     await page.getByTestId('enroll-students-btn').click()
 
@@ -358,7 +362,7 @@ test.describe.serial('Student Onboarding — Full Lifecycle (UI)', () => {
     await fillRow(page, {
       rollNo: '1', lastName: 'Cred', firstName: 'Test',
       email: `credtest${ts}@student.com`,
-      grade: '10', section: 'A',
+      grade: '10', section: 'D',
       parentName: 'Cred Parent', parentPhone: phone(12),
       parentEmail: `credparent${ts}@parent.com`,
     })
@@ -367,7 +371,7 @@ test.describe.serial('Student Onboarding — Full Lifecycle (UI)', () => {
     await expect(page.getByText('Enrollment Complete — Credentials')).toBeVisible({ timeout: 30000 })
     await expect(page.getByText('Student Credentials')).toBeVisible()
     await expect(page.getByText('Parent Credentials')).toBeVisible()
-    await expect(page.getByText(`credtest${ts}@student.com`)).toBeVisible()
+    await expect(page.getByText('Cred Test')).toBeVisible()
     await expect(page.getByText(`credparent${ts}@parent.com`)).toBeVisible()
 
     const found = await studentIdsByNames(['Cred Test'])
@@ -416,7 +420,7 @@ test.describe.serial('Student Onboarding — Full Lifecycle (UI)', () => {
     await uiLogin(page, adminEmail, uiPass)
 
     await page.getByRole('button', { name: /Student Management/i }).click()
-    await expect(page.getByText('Student List')).toBeVisible({ timeout: 10000 })
+    await page.getByRole('button', { name: 'Student List', exact: true }).click()   // Onboard Students is the default sub-tab
 
     // 10-A: roll 1 = Mehta Arjun, roll 2 = Patel Priya — Arjun should be above Priya
     const arjun = page.getByText(/Mehta Arjun|Arjun Mehta/).first()
@@ -455,7 +459,7 @@ test.describe.serial('Student Onboarding — Full Lifecycle (UI)', () => {
 
     await fillRow(page, {
       rollNo: '1', lastName: 'UITest', firstName: 'Student',
-      grade: String(ts).slice(-2), section: 'Z',
+      grade: '4', section: 'Z',
       parentName: 'UI Parent', parentPhone: phone(50),
     })
     await page.getByTestId('enroll-students-btn').click()

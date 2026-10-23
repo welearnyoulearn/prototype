@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
-import pool from '@/lib/db'
+import pool, { ensureDB } from '@/lib/db'
 import { requirePlatformAdmin, getAnySession } from '@/lib/auth'
 import { ALL_FEATURES } from '@/lib/features'
+import { schoolsOverLimit, notifySeatOverage, type OverLimitSchool } from '@/lib/staffAccounts'
+
+const PLAN_TIERS = ['none', 'basic', 'standard', 'premium']
+const MAX_STAFF_LIMIT = 1000
 
 // student-portal/parent-portal are no longer editable from the global
 // tier matrix — their tier default (basic=off, standard/premium=on) is
@@ -96,11 +100,67 @@ export async function GET(req: NextRequest) {
 // POST /api/platform/features
 // Body: { assignments: { feature_key, tier, enabled }[], staffLimits?: { basic, standard, premium, none } }
 export async function POST(req: NextRequest) {
-  if (!(await requirePlatformAdmin())) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const session = await requirePlatformAdmin()
+  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   try {
-    const { assignments, staffLimits } = await req.json()
+    const { assignments, staffLimits, confirmOverLimit } = await req.json()
     if (!Array.isArray(assignments)) {
       return NextResponse.json({ error: 'assignments array required' }, { status: 400 })
+    }
+
+    // Validate the staff limits BEFORE writing anything. Blank means unlimited; anything
+    // else must be a whole number from 1 to MAX_STAFF_LIMIT. This used to run
+    // parseInt and turn anything unreadable (a typo, "abc", "2.5x") into NULL — which
+    // means UNLIMITED — and accepted 0 and negatives, which mean nobody can ever be added.
+    const limitRows: Array<[string, number | null]> = []
+    if (staffLimits !== undefined && staffLimits !== null) {
+      if (typeof staffLimits !== 'object' || Array.isArray(staffLimits)) {
+        return NextResponse.json({ error: 'staffLimits must be an object' }, { status: 400 })
+      }
+      for (const [tier, raw] of Object.entries(staffLimits)) {
+        if (!PLAN_TIERS.includes(tier)) {
+          return NextResponse.json({ error: `Unknown plan "${tier}"` }, { status: 400 })
+        }
+        if (raw === '' || raw === null || raw === undefined) { limitRows.push([tier, null]); continue }
+        const text = String(raw).trim()
+        if (!/^\d+$/.test(text) || Number(text) < 1 || Number(text) > MAX_STAFF_LIMIT) {
+          return NextResponse.json(
+            { error: `Staff limit for ${tier} must be a whole number from 1 to ${MAX_STAFF_LIMIT}, or blank for unlimited` },
+            { status: 400 }
+          )
+        }
+        limitRows.push([tier, Number(text)])
+      }
+    }
+
+    // Keep this before pool.connect() — ensureDB() queries the shared pool, which on
+    // Vercel's max:1 pool would wait on the connection this handler is about to hold.
+    await ensureDB()
+
+    // Lowering a plan's limit applies to EVERY school on that plan. Any school that already
+    // has more active staff than the new limit ends up over it — allowed (nobody is switched
+    // off), but the admin must see how many schools that is and confirm first.
+    const affected: Array<{ tier: string; limit: number; count: number; schools: OverLimitSchool[] }> = []
+    const changedLimits: Array<[string, number | null]> = []   // the page re-sends every limit on each Save
+    if (limitRows.length > 0) {
+      const { rows: currentRows } = await pool.query<{ tier: string; staff_limit: number | null }>(
+        `SELECT tier, staff_limit FROM plan_pricing`
+      )
+      const current = new Map(currentRows.map(r => [r.tier, r.staff_limit ?? null]))
+      for (const [tier, limit] of limitRows) {
+        const before = current.get(tier) ?? null
+        if (before !== limit) changedLimits.push([tier, limit])
+        const lowered = limit !== null && (before === null || limit < before)
+        if (!lowered) continue
+        const schools = await schoolsOverLimit(tier, limit)
+        if (schools.length > 0) affected.push({ tier, limit, count: schools.length, schools: schools.slice(0, 10) })
+      }
+    }
+    if (affected.length > 0 && confirmOverLimit !== true) {
+      return NextResponse.json({
+        error: 'This would leave some schools over their staff limit.',
+        code: 'OVER_SEAT_LIMIT', affected,
+      }, { status: 409 })
     }
 
     const client = await pool.connect()
@@ -116,6 +176,14 @@ export async function POST(req: NextRequest) {
           [feature_key, tier, !!enabled]
         )
       }
+      // In the same transaction as the features: previously a failure here was swallowed
+      // and the admin was told "saved" while the limits had not changed at all.
+      for (const [tier, limit] of limitRows) {
+        await client.query(
+          `UPDATE plan_pricing SET staff_limit = $1, updated_at = NOW() WHERE tier = $2`,
+          [limit, tier]
+        )
+      }
       await client.query('COMMIT')
     } catch (e) {
       await client.query('ROLLBACK')
@@ -124,20 +192,23 @@ export async function POST(req: NextRequest) {
       client.release()
     }
 
-    // Save staff limits outside the main transaction — column may not exist yet
-    if (staffLimits && typeof staffLimits === 'object') {
-      try {
-        for (const [tier, limit] of Object.entries(staffLimits)) {
-          const limitVal = limit === '' || limit === null || limit === undefined ? null : parseInt(String(limit))
-          await pool.query(
-            `UPDATE plan_pricing SET staff_limit = $1, updated_at = NOW() WHERE tier = $2`,
-            [isNaN(limitVal as number) ? null : limitVal, tier]
-          )
-        }
-      } catch { /* column not yet migrated — skip silently, features already saved */ }
+    // Record the limit change, and tell the administrators of every school it pushed over.
+    if (changedLimits.length > 0) {
+      await pool.query(
+        `INSERT INTO platform_audit_log (actor_id, actor_email, action, entity_type, entity_id, entity_name, details)
+         VALUES ($1, (SELECT email FROM users WHERE id = $1), 'update_staff_limits', 'plan', NULL, 'Plan staff limits', $2)`,
+        [session.userId, JSON.stringify({
+          limits: Object.fromEntries(changedLimits),
+          schools_over_limit: affected.reduce((n, a) => n + a.count, 0),
+        })]
+      ).catch(err => console.error('[audit/staff-limits]', err))
+    }
+    for (const a of affected) {
+      const all = await schoolsOverLimit(a.tier, a.limit)
+      for (const s of all) void notifySeatOverage(s.id, { schoolName: s.name, tier: a.tier, limit: a.limit, active: s.active })
     }
 
-    return NextResponse.json({ success: true })
+    return NextResponse.json({ success: true, schoolsOverLimit: affected.reduce((n, a) => n + a.count, 0) })
   } catch (error) {
     console.error('[platform/features POST]', error)
     return NextResponse.json({ error: 'Failed to save features' }, { status: 500 })

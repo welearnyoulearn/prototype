@@ -72,7 +72,7 @@ export default function AuthShell({
   } as CSSProperties
 
   return (
-    <div className="auth-surface" data-auth-portal={theme.identity} style={authStyle}>
+    <div className="auth-surface" data-auth-portal={theme.identity} data-student-ui={theme.identity === 'student' ? '' : undefined} style={authStyle}>
       <header className="auth-header">
         <Link href="/" className="auth-brand focus-visible:outline-2 focus-visible:outline-offset-4">
           <span aria-hidden="true">W</span>

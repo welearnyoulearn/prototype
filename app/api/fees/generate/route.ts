@@ -2,18 +2,29 @@ import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
 import { lockYearClose } from '@/lib/feeRollover'
+import type { BlockedBill } from '@/lib/feeStructureSync'
+import {
+  countActiveStudents, insertFixedBills, insertVariableBills, resyncFixedBills, resyncVariableBills,
+  type FixedStructure,
+} from '@/lib/feeGenerate'
+
+function blockedMessage(bills: BlockedBill[], total: number): string {
+  const list = bills.map(b => `${b.student} (${b.period}, ₹${b.covered} already paid/waived)`).join('; ')
+  return `Cannot regenerate: ${total} bill(s) already have more paid + waived than the new amount — ${list}${total > bills.length ? '; …' : ''}. Cancel/correct those payments or waivers, then try again.`
+}
 
 // POST /api/fees/generate
 // Generates ledger entries for all students in a grade/all grades for an academic year
-// Idempotent — skips students who already have entries for this category+year+period
+// Creates missing periods and resynchronizes existing eligible bills without duplicates.
 export async function POST(req: NextRequest) {
   try {
     try {
-      const { school_id, academic_year, grade } = await req.json()
+      const { school_id, academic_year, grade, only_missing = false } = await req.json()
       if (!school_id || !academic_year) {
         return NextResponse.json({ error: 'school_id and academic_year required' }, { status: 400 })
       }
-      if (!await requireFeeAccess(school_id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      const access = await requireFeeAccess(school_id)
+      if (!access) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
       // Every bill's due_date is the academic year's own end_date — not a per-category
       // due-day. All bills for a year (monthly, quarterly, or annual) become due at once,
@@ -43,7 +54,7 @@ export async function POST(req: NextRequest) {
       }
 
       const client = await pool.connect()
-      let created = 0; let skipped = 0; let totalStudents = 0
+      let created = 0; let updated = 0; let skipped = 0; let totalStudents = 0
       try {
         await client.query('BEGIN')
 
@@ -118,79 +129,40 @@ export async function POST(req: NextRequest) {
           return NextResponse.json({ error: 'No fee structures found for this year. Set up fee structure first.' }, { status: 400 })
         }
 
-        // Get students (for fixed categories) — also via `client`, after the lock.
-        const { rows: students } = await client.query(
-          `SELECT id, grade FROM students
-           WHERE school_id = $1 AND status = 'active'
-           ${grade ? 'AND grade = $2' : ''}`,
-          grade ? [school_id, grade] : [school_id]
-        )
-        totalStudents = students.length
+        // Set-based generation (lib/feeGenerate.ts): one statement per grade / per variable fee
+        // instead of one per bill, so the year lock is held for seconds, not minutes.
+        const scope = { schoolId: school_id, academicYear: academic_year, dueDate, grade }
+        const fixedStructures = structures.filter(s => s.category_type !== 'variable') as FixedStructure[]
+        const students = await countActiveStudents(client, school_id, grade)
+        totalStudents = students.total
 
-        // Fixed categories → all students at fee_structures.amount
-        for (const student of students) {
-          const studentStructures = structures.filter(s => s.grade === student.grade && s.category_type !== 'variable')
-          for (const s of studentStructures) {
-            const periods = buildPeriods(s.frequency, academic_year, dueDate)
-            for (const period of periods) {
-              const { rowCount } = await client.query(
-                `INSERT INTO student_fee_ledger
-                  (school_id, student_id, fee_category_id, fee_structure_id, academic_year, period_label, amount_due, due_date, status)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending')
-                 ON CONFLICT (student_id, fee_category_id, academic_year, period_label) DO NOTHING`,
-                [school_id, student.id, s.fee_category_id, s.id, academic_year, period.label, s.amount, period.due_date]
-              )
-              if (rowCount && rowCount > 0) {
-                created++
-              } else {
-                skipped++
-                // A bill for this exact period already exists — but if the student has since
-                // moved to a different grade (e.g. promoted/transferred outside year-rollover),
-                // the existing row's fee_structure_id may now point at the WRONG grade's amount.
-                // Re-sync unpaid/overdue/partial bills to the current grade's structure, exactly
-                // like amending a structure does, so the student is billed at their actual grade.
-                // GREATEST(...) guards against amount_due ending up below what's already
-                // covered by payments + waivers COMBINED (not amount_paid alone — floored
-                // only against amount_paid let a heavily-waived bill's amount_due end up
-                // below amount_paid + waiver_amount, an impossible over-credited state, the
-                // exact same class of bug the ledger PATCH route's own coveredAmount check
-                // guards against).
-                await client.query(
-                  `UPDATE student_fee_ledger
-                   SET fee_structure_id = $1,
-                       amount_due = GREATEST($2, amount_paid + COALESCE(waiver_amount,0)),
-                       status = CASE
-                         WHEN COALESCE(waiver_amount,0) + amount_paid >= GREATEST($2, amount_paid + COALESCE(waiver_amount,0)) THEN 'paid'
-                         WHEN amount_paid > 0 THEN 'partial'
-                         ELSE status
-                       END
-                   WHERE school_id = $3 AND student_id = $4 AND fee_category_id = $5
-                     AND academic_year = $6 AND period_label = $7
-                     AND status IN ('pending', 'overdue', 'partial')
-                     AND fee_structure_id IS DISTINCT FROM $1`,
-                  [s.id, s.amount, school_id, student.id, s.fee_category_id, academic_year, period.label]
-                )
-              }
+        const insFixed = await insertFixedBills(client, scope, fixedStructures, students.byGrade)
+        const insVar = await insertVariableBills(client, scope, variableAssignments)
+        created = insFixed.created + insVar.created
+        const planned = insFixed.planned + insVar.planned
+
+        if (only_missing !== true) {
+          for (const resync of [
+            () => resyncFixedBills(client, scope, fixedStructures, access.actor),
+            () => resyncVariableBills(client, scope, variableAssignments, access.actor),
+          ]) {
+            const synced = await resync()
+            if (synced.blocked > 0) {
+              await client.query('ROLLBACK')
+              return NextResponse.json({ error: blockedMessage(synced.blockedBills, synced.blocked), blocked_bills: synced.blockedBills }, { status: 409 })
             }
+            updated += synced.updated
           }
         }
+        skipped = planned - created - updated
 
-        // Variable categories → only assigned students at per-student amount
-        for (const a of variableAssignments) {
-          const periods = buildPeriods(a.frequency, academic_year, dueDate)
-          for (const period of periods) {
-            const { rowCount } = await client.query(
-              `INSERT INTO student_fee_ledger
-                (school_id, student_id, fee_category_id, fee_structure_id, academic_year, period_label, amount_due, due_date, status)
-               VALUES ($1, $2, $3, NULL, $4, $5, $6, $7, 'pending')
-               ON CONFLICT (student_id, fee_category_id, academic_year, period_label) DO NOTHING`,
-              [school_id, a.student_id, a.fee_category_id, academic_year, period.label, a.amount, period.due_date]
-            )
-            if (rowCount && rowCount > 0) created++
-            else skipped++
-          }
-        }
-
+        // Commit bills and their plan lock together while holding the year lock.
+        await client.query(
+          `INSERT INTO fee_structure_locks (school_id, academic_year, locked_by, locked_at)
+           VALUES ($1, $2, $3, NOW())
+           ON CONFLICT (school_id, academic_year) DO NOTHING`,
+          [school_id, academic_year, access.actor]
+        )
         await client.query('COMMIT')
       } catch (e) { await client.query('ROLLBACK'); throw e }
       finally { client.release() }
@@ -207,61 +179,10 @@ export async function POST(req: NextRequest) {
         [school_id, academic_year]
       )
 
-      // Auto-lock the fee structure after bills are generated so amounts can't be
-      // changed directly (amendments still work via the audit-trail route).
-      // ON CONFLICT DO NOTHING: if already locked, silently skip — idempotent.
-      const access = await requireFeeAccess(school_id)
-      const lockedBy = access ? access.actor : 'system'
-      await pool.query(
-        `INSERT INTO fee_structure_locks (school_id, academic_year, locked_by, locked_at)
-         VALUES ($1, $2, $3, NOW())
-         ON CONFLICT (school_id, academic_year) DO NOTHING`,
-        [school_id, academic_year, lockedBy]
-      ).catch(() => {/* lock table may not exist yet — non-fatal */})
-
-      return NextResponse.json({ created, skipped, total_students: totalStudents, auto_locked: true })
+      return NextResponse.json({ created, updated, skipped, total_students: totalStudents, auto_locked: true })
     } catch (e) { console.error(e); return NextResponse.json({ error: 'Failed to generate ledger' }, { status: 500 }) }
 } catch (err: unknown) {
     console.error('[API]', err)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
-}
-
-// Builds the set of billing periods for a frequency — period_label still differs per
-// period (so monthly/quarterly bills remain separate, trackable ledger rows), but every
-// period shares the same due_date: the academic year's own end_date. There is no more
-// per-category due-day — every bill becomes due at year-end, all at once.
-function buildPeriods(frequency: string, academicYear: string, dueDate: string): { label: string; due_date: string }[] {
-  const [startYStr] = academicYear.split('-')
-  const startYear = parseInt(startYStr)
-  const endYear = startYear + 1
-
-  const months = [
-    { m: 4, y: startYear }, { m: 5, y: startYear }, { m: 6, y: startYear },
-    { m: 7, y: startYear }, { m: 8, y: startYear }, { m: 9, y: startYear },
-    { m: 10, y: startYear }, { m: 11, y: startYear }, { m: 12, y: startYear },
-    { m: 1, y: endYear }, { m: 2, y: endYear }, { m: 3, y: endYear },
-  ]
-
-  const MONTH_NAMES = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-
-  if (frequency === 'monthly') {
-    return months.map(({ m, y }) => ({ label: `${MONTH_NAMES[m]} ${y}`, due_date: dueDate }))
-  }
-  if (frequency === 'quarterly') {
-    return [
-      { label: `Q1 ${academicYear}`, due_date: dueDate },
-      { label: `Q2 ${academicYear}`, due_date: dueDate },
-      { label: `Q3 ${academicYear}`, due_date: dueDate },
-      { label: `Q4 ${academicYear}`, due_date: dueDate },
-    ]
-  }
-  if (frequency === 'half_yearly') {
-    return [
-      { label: `H1 ${academicYear}`, due_date: dueDate },
-      { label: `H2 ${academicYear}`, due_date: dueDate },
-    ]
-  }
-  // annual or one_time
-  return [{ label: academicYear, due_date: dueDate }]
 }

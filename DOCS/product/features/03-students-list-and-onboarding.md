@@ -19,8 +19,8 @@
 
 | Capability | Detail |
 |---|---|
-| Add one / bulk | Form or CSV/Excel template; bulk runs through duplicate detection first |
-| System id | `wlyl-stu-<school>-<5 digits>` — the student's login id |
+| Add one / bulk | Form, CSV, or Excel template; bulk runs through duplicate detection first |
+| System id | `wlyl-stu-<school>-<12 random hex characters>` — the student's login id |
 | Class roll number | `school_roll_number`, **unique per grade + section** (separate from the system id) |
 | Parents | Found by email, then phone **within the school**, else created and linked; siblings share one parent |
 | Credentials | Student and parent logins issued; welcome / credential emails sent; **reset** on demand |
@@ -55,7 +55,7 @@ flowchart TD
 **Step by step (admin)**
 1. **Students → Add** (or *Bulk upload*). Grade, section and a valid **10-digit Indian mobile** for the parent are required.
 2. For a file, the system checks every row against existing students and within the file, and shows the conflicts.
-3. On confirm the student row, parent row and link are created **in one transaction**. If the parent-portal feature is off for this school, existing parents are still linked but **no new parent account is created**.
+3. On confirm, every row must validate before the batch starts. The student rows, parent rows and links are then created **in one transaction**; validation or duplicate conflicts insert nothing. If the parent-portal feature is off for this school, existing parents are still linked but **no new parent account is created**.
 4. Emails go out fire-and-forget: student welcome, parent welcome and the child's credentials to the parent.
 5. Later, **click a name** anywhere (Students, Class Management) to open **Student 360**.
 6. **Reset credentials** re-issues a password if a family loses it.
@@ -99,7 +99,7 @@ flowchart TD
 
 **Libraries:** `lib/studentOnboarding.ts` (`generateStudentId`, `findOrCreateParent`, credential emails), `lib/studentProfile.ts`, `lib/nameValidation.ts`, `lib/parseCSV.ts`, `lib/academicYear.ts`, `lib/attendance*`, `lib/email.ts`.
 
-**Validation:** Zod on the create/bulk bodies. **Auth:** `requireSchoolAdmin` / `requireFeeAccess`; family portals read through `student_parents`.
+**Validation:** Shared server-side student validation on both create and bulk bodies; browser validation is only an early UX check. **Auth:** `requireSchoolAdmin` / `requireFeeAccess`; family portals read through `student_parents`.
 
 **Design notes**
 - `roll_number` (system id, `VARCHAR`) vs `school_roll_number` (`INTEGER`, class roll) are deliberately separate.

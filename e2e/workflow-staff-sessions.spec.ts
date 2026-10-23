@@ -63,7 +63,7 @@ test.describe.serial('School staff login — per-person accounts & sessions', ()
     owner = await newClient()
     const first = await login(owner, ownerEmail, ownerTempPass)
     expect(first.status()).toBe(200)
-    expect((await owner.post('/api/auth/change-password', { data: { newPassword: OWNER_PASS } })).status()).toBe(200)
+    expect((await owner.post('/api/auth/change-password', { data: { currentPassword: ownerTempPass, newPassword: OWNER_PASS } })).status()).toBe(200)
     expect((await owner.put('/api/auth/profile', { data: { full_name: ownerName, phone: '9000000011' } })).status()).toBe(200)
   })
 
@@ -234,7 +234,9 @@ test.describe.serial('School staff login — per-person accounts & sessions', ()
     expect(del.status()).toBe(200)
 
     expect(await meStatus(principalPc)).toBe(401)                                        // live session is gone
-    expect((await login(principalPc, principalEmail, STAFF_PASS)).status()).toBe(403)    // and can't sign back in
+    // and can't sign back in: login answers the same generic 401 as a wrong password, so a
+    // deactivated account can't be told apart from one that never existed
+    expect((await login(principalPc, principalEmail, STAFF_PASS)).status()).toBe(401)
     await principalPc.dispose()
   })
 

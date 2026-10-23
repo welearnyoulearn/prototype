@@ -1,5 +1,8 @@
 'use client'
 
+import { feeColorMap } from './feeTypeColor'
+import { rollLabel, classForYear } from './format'
+import { carriedBilled } from './dues'
 import { useCallback, useEffect, useState, Fragment, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { GRADE_SEQUENCE } from '@/lib/grades'
 import type {
@@ -70,7 +73,7 @@ export default function FeePassbookTab({
     err: string
     section: 'timeline' | 'bills' | 'payments' | 'waivers' | 'receipts'
     setSection: (s: 'timeline' | 'bills' | 'payments' | 'waivers' | 'receipts') => void
-    summary: { total_billed: number; total_paid: number; total_waived: number; discretionary_waived: number; outstanding: number }
+    summary: { total_billed: number; total_paid: number; total_waived: number; discretionary_waived: number; written_off?: number; carried_forward?: number; outstanding: number }
     yearOnly: PassbookYearGroup[]
     payments: PaymentRecord[]
     receipts: PassbookReceipt[]
@@ -87,6 +90,7 @@ export default function FeePassbookTab({
   const { data: pbData, loading: pbLoading, err: pbErr, section: pbSection, setSection: setPbSection,
     summary: pbSummary, yearOnly: pbYearOnly, payments: pbPayments, receipts: pbReceipts,
     waivers: pbWaivers, timeline: pbTimeline } = passbook
+  const feeColors = feeColorMap(pbYearOnly.flatMap(y => y.entries.map(e => e.category_name)))
 
   // Full student directory (browse + filter) — exclusive to this tab, the modal
   // always already knows which student it's showing.
@@ -94,6 +98,8 @@ export default function FeePassbookTab({
   const [pbAllStudents, setPbAllStudents] = useState<PassbookSearchResult[]>([])
   const [pbAllLoading, setPbAllLoading]   = useState(false)
   const [pbGrade, setPbGrade]             = useState('')
+  const [pbPage, setPbPage]               = useState(1)
+  const PB_PAGE_SIZE = 25
 
   const loadPbAllStudents = useCallback(async () => {
     setPbAllLoading(true)
@@ -102,8 +108,8 @@ export default function FeePassbookTab({
       if (r.ok) {
         const data = await r.json()
         const arr = Array.isArray(data) ? data : (data.students || [])
-        setPbAllStudents(arr.map((s: { id: number; name: string; roll_number: string; grade: string; section: string; status: string }) => ({
-          id: s.id, name: s.name, roll_number: s.roll_number, grade: s.grade, section: s.section, status: s.status || 'active',
+        setPbAllStudents(arr.map((s: { id: number; name: string; roll_number: string; school_roll_number?: number | null; grade: string; section: string; status: string }) => ({
+          id: s.id, name: s.name, roll_number: s.roll_number, school_roll_number: s.school_roll_number ?? null, grade: s.grade, section: s.section, status: s.status || 'active',
         })))
       }
     } catch { /* silent */ }
@@ -133,13 +139,13 @@ export default function FeePassbookTab({
             <button onClick={loadPbAllStudents} className="text-xs border border-gray-200 text-gray-500 px-3 py-1.5 rounded-lg hover:bg-gray-50">Refresh</button>
           </div>
           <div className="flex items-center gap-3 mb-3">
-            <select value={pbGrade} onChange={e => setPbGrade(e.target.value)}
+            <select value={pbGrade} onChange={e => { setPbGrade(e.target.value); setPbPage(1) }}
               className="text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white">
               <option value="">All Grades</option>
               {GRADES.map(g => <option key={g} value={g}>{gradeLabel(g)}</option>)}
             </select>
             <input type="text" placeholder="Search name or roll number…" value={pbSearch}
-              onChange={e => setPbSearch(e.target.value)}
+              onChange={e => { setPbSearch(e.target.value); setPbPage(1) }}
               className="flex-1 text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500" />
           </div>
 
@@ -149,15 +155,19 @@ export default function FeePassbookTab({
             const q = pbSearch.trim().toLowerCase()
             const list = pbAllStudents.filter(s =>
               (!pbGrade || String(s.grade) === pbGrade) &&
-              (!q || s.name.toLowerCase().includes(q) || (s.roll_number || '').toLowerCase().includes(q))
+              (!q || s.name.toLowerCase().includes(q) || (s.roll_number || '').toLowerCase().includes(q) || String(s.school_roll_number ?? '') === q)
             )
             if (pbAllStudents.length === 0) return <p className="text-sm text-gray-400 py-8 text-center">No students found for this school.</p>
             if (list.length === 0) return <p className="text-sm text-gray-400 py-8 text-center">No students match your filter.</p>
+            const totalPages = Math.max(1, Math.ceil(list.length / PB_PAGE_SIZE))
+            const page = Math.min(pbPage, totalPages)
+            const start = (page - 1) * PB_PAGE_SIZE
+            const pageRows = list.slice(start, start + PB_PAGE_SIZE)
             return (
               <div className="border border-gray-100 rounded-lg overflow-hidden">
                 <div className="px-3 py-2 bg-gray-50 border-b border-gray-100 text-xs text-gray-500">{list.length} student{list.length !== 1 ? 's' : ''}</div>
-                <div className="divide-y divide-gray-50 max-h-[480px] overflow-y-auto">
-                  {list.map(s => (
+                <div className="divide-y divide-gray-50">
+                  {pageRows.map(s => (
                     <button key={s.id} data-testid={`student-row-${s.id}`} onClick={() => onLoad(s.id)}
                       className="w-full text-left px-4 py-2.5 hover:bg-blue-50 flex items-center justify-between group">
                       <span className="flex items-center gap-2">
@@ -165,12 +175,24 @@ export default function FeePassbookTab({
                         {s.status === 'inactive' && <span className="text-xs bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded font-medium">Inactive</span>}
                       </span>
                       <span className="flex items-center gap-3">
-                        <span className="text-xs text-gray-400">Gr.{s.grade}{s.section} · #{s.roll_number}</span>
+                        <span className="text-xs text-gray-400">Gr.{s.grade}{s.section}{rollLabel(s.school_roll_number) ? ` · ${rollLabel(s.school_roll_number)}` : ''}</span>
                         <span className="text-xs text-blue-600 opacity-0 group-hover:opacity-100">Open →</span>
                       </span>
                     </button>
                   ))}
                 </div>
+                {totalPages > 1 && (
+                  <div data-testid="passbook-pagination" className="flex items-center justify-between gap-2 flex-wrap px-3 py-2 bg-gray-50 border-t border-gray-100 text-xs text-gray-500">
+                    <span>Showing {start + 1}–{Math.min(start + PB_PAGE_SIZE, list.length)} of {list.length}</span>
+                    <div className="flex items-center gap-2">
+                      <button data-testid="btn-passbook-prev" disabled={page <= 1} onClick={() => setPbPage(page - 1)}
+                        className="px-3 py-1 border border-gray-200 bg-white rounded-lg text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed">← Prev</button>
+                      <span>Page {page} of {totalPages}</span>
+                      <button data-testid="btn-passbook-next" disabled={page >= totalPages} onClick={() => setPbPage(page + 1)}
+                        className="px-3 py-1 border border-gray-200 bg-white rounded-lg text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed">Next →</button>
+                    </div>
+                  </div>
+                )}
               </div>
             )
           })()}
@@ -190,24 +212,60 @@ export default function FeePassbookTab({
 
           {/* Header card */}
           <div className="bg-white rounded-xl border border-gray-100 p-5">
-            <div className="flex items-start justify-between">
-              <div>
-                <h3 className="text-lg font-bold text-gray-900">{pbData.student.name}</h3>
-                <p className="text-sm text-gray-500">Grade {pbData.student.grade}{pbData.student.section} · Roll #{pbData.student.roll_number}</p>
-                {(pbData.student.parent_name || pbData.student.parent_phone) && (
-                  <p className="text-xs text-gray-400 mt-1">
-                    Parent: {pbData.student.parent_name || '—'}{pbData.student.parent_phone ? ` · 📞 ${pbData.student.parent_phone}` : ''}
-                  </p>
-                )}
-              </div>
-              <button onClick={onPrintStatement}
-                className="text-sm border border-gray-200 text-gray-600 px-3 py-1.5 rounded-lg hover:bg-gray-50">🖨 Print Statement</button>
-            </div>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4">
+            {(() => {
+              const st = pbData.student
+              const cls = classForYear(st, pbData.class_by_year, academicYear)
+              const chips = [
+                `Grade ${cls.grade}${cls.section}`,
+                rollLabel(cls.school_roll_number),
+                st.roll_number ? `System ID ${st.roll_number}` : '',
+              ].filter(Boolean)
+              const fields: { l: string; v: string | null | undefined; href?: string }[] = [
+                { l: 'Parent / Guardian', v: st.parent_name },
+                { l: 'Parent phone', v: st.parent_phone, href: st.parent_phone ? `tel:${st.parent_phone}` : undefined },
+                { l: 'Parent email', v: st.parent_email, href: st.parent_email ? `mailto:${st.parent_email}` : undefined },
+                { l: 'Student phone', v: st.phone, href: st.phone ? `tel:${st.phone}` : undefined },
+                { l: 'Student email', v: st.email, href: st.email ? `mailto:${st.email}` : undefined },
+              ]
+              return (
+                <>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h3 className="text-lg font-bold text-gray-900">{st.name}</h3>
+                        {st.status && st.status !== 'active' && (
+                          <span data-testid="passbook-student-status" className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-medium capitalize">{st.status}</span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1.5 flex-wrap mt-1.5">
+                        {chips.map(c => <span key={c} className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full [overflow-wrap:anywhere]">{c}</span>)}
+                      </div>
+                    </div>
+                    <button onClick={onPrintStatement}
+                      className="text-sm border border-gray-200 text-gray-600 px-3 py-1.5 rounded-lg hover:bg-gray-50 flex-shrink-0">🖨 Print Statement</button>
+                  </div>
+                  <div data-testid="passbook-personal-details" className="mt-4 rounded-lg border border-gray-100 p-3">
+                    <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wide mb-2">Personal details</p>
+                    <dl className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-2.5">
+                      {fields.map(f => (
+                        <div key={f.l} className="min-w-0">
+                          <dt className="text-xs text-gray-400">{f.l}</dt>
+                          <dd className="text-sm font-medium text-gray-800 [overflow-wrap:anywhere]">
+                            {f.v ? (f.href ? <a href={f.href} className="text-indigo-700 hover:underline">{f.v}</a> : f.v) : <span className="text-gray-300 font-normal">Not provided</span>}
+                          </dd>
+                        </div>
+                      ))}
+                    </dl>
+                  </div>
+                </>
+              )
+            })()}
+            <div className={`grid grid-cols-2 ${pbSummary.written_off ? 'sm:grid-cols-5' : 'sm:grid-cols-4'} gap-3 mt-4`}>
               {[
                 { l: 'Total Billed', v: pbSummary.total_billed, c: 'text-gray-900' },
                 { l: 'Paid',         v: pbSummary.total_paid,    c: 'text-green-700' },
                 { l: 'Waived',       v: pbSummary.discretionary_waived,  c: 'text-purple-700' },
+                ...(pbSummary.written_off ? [{ l: 'Written off', v: pbSummary.written_off, c: 'text-amber-700' }] : []),
                 { l: 'Outstanding',  v: pbSummary.outstanding,   c: 'text-red-600' },
               ].map(s => (
                 <div key={s.l} className="bg-gray-50 rounded-lg px-3 py-2.5 text-center">
@@ -215,6 +273,8 @@ export default function FeePassbookTab({
                   <p className={`text-lg font-bold mt-0.5 ${s.c}`}>{fmt(s.v)}</p>
                 </div>
               ))}
+              {pbSummary.carried_forward ? <p className="col-span-full text-center text-[11px] text-gray-400">{fmt(pbSummary.carried_forward)} moved to the next year's bills — not counted in Billed.</p> : null}
+              {(() => { const c = carriedBilled(pbYearOnly.flatMap(y => y.entries)); return c > 0 ? <p data-testid="passbook-carried-in" className="col-span-full text-center text-[11px] text-amber-700">Billed includes {fmt(c)} carried in from earlier years.</p> : null })()}
             </div>
           </div>
 
@@ -296,7 +356,7 @@ export default function FeePassbookTab({
                       {yearGroup.entries.map(e => (
                         <tr key={e.id} className="border-b border-gray-50 hover:bg-gray-50">
                           <td className="px-4 py-2.5 text-gray-700">
-                            {e.category_name} · <span className="text-gray-400">{e.period_label}</span>
+                            <span className={`inline-block w-2 h-2 rounded-full mr-1.5 ${feeColors(e.category_name).dot}`} aria-hidden="true" /><span className={`font-semibold ${feeColors(e.category_name).text}`}>{e.category_name}</span> · <span className="text-gray-400">{e.period_label}</span>
                             {e.source_academic_year && (
                               <span className="ml-2 text-xs bg-amber-50 text-amber-700 border border-amber-200 px-1.5 py-0.5 rounded font-medium" title={`Carried from ${e.source_academic_year}`}>↩ {e.source_academic_year}</span>
                             )}

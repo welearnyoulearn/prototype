@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { clearParentAuthCookie } from '@/lib/auth'
+import { clearParentAuthCookie, getPortalSessionIdFromCookie, revokePortalSession } from '@/lib/auth'
 import { recordSessionEnd } from '@/lib/usageTracking'
 
 export async function POST(req: NextRequest) {
   try {
+    const sid = await getPortalSessionIdFromCookie('parent')
+    if (sid) await revokePortalSession(sid)
     await clearParentAuthCookie()
 
     const { usageSessionId } = await req.json().catch(() => ({ usageSessionId: null }))

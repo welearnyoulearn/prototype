@@ -15,7 +15,8 @@
 // trigger is always safe.
 // Protected: requires Authorization: Bearer <CRON_SECRET> header.
 
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
+import { drainPendingPushes } from '@/lib/push'
 import pool from '@/lib/db'
 
 export async function GET(req: NextRequest) {
@@ -28,11 +29,13 @@ export async function POST(req: NextRequest) {
 
 async function run(req: NextRequest) {
   const cronSecret = process.env.CRON_SECRET
-  if (cronSecret) {
-    const auth = req.headers.get('authorization') ?? ''
-    if (auth.replace('Bearer ', '') !== cronSecret) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
+  if (!cronSecret) {
+    console.error('[cron/exam-status-sweep] CRON_SECRET is not configured')
+    return NextResponse.json({ error: 'Cron is not configured' }, { status: 503 })
+  }
+  const auth = req.headers.get('authorization') ?? ''
+  if (auth !== `Bearer ${cronSecret}`) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
   try {
@@ -91,6 +94,7 @@ async function run(req: NextRequest) {
       } catch { /* non-critical */ }
     }
 
+    after(() => drainPendingPushes())
     return NextResponse.json({ success: true, exams_opened: opened.length, notified })
   } catch (err) {
     console.error('[cron/exam-status-sweep]', err)

@@ -42,6 +42,14 @@ export interface BookInput {
 export type BookType = 'textbook' | 'handbook' | 'workbook'
 export type Audience = 'teacher' | 'student' | 'both'
 
+const MAX_JSON_BYTES = 2 * 1024 * 1024
+const MAX_CHAPTERS = 200
+const MAX_TOPICS_PER_CHAPTER = 500
+const MAX_SUBTOPICS_PER_TOPIC = 500
+const MAX_TITLE_LENGTH = 300
+const MAX_BOOK_DEPTH = 12
+const MAX_BOOK_NODES = 10000
+
 /** Map free-text book-type labels ("Text Book", "Hand Book", ...) to our enum. */
 export function normalizeBookType(raw?: string): BookType | null {
   if (typeof raw !== 'string') return null
@@ -84,6 +92,22 @@ function collectTitles(nodes: BookUnitInput[]): string[] {
     }
   }
   return titles
+}
+
+function validateBookUnits(nodes: BookUnitInput[]): string | null {
+  let seen = 0
+  const stack = nodes.map(node => ({ node, depth: 1 }))
+  while (stack.length) {
+    const { node, depth } = stack.pop()!
+    seen += 1
+    if (seen > MAX_BOOK_NODES) return `Book import exceeds ${MAX_BOOK_NODES} nested items.`
+    if (depth > MAX_BOOK_DEPTH) return `Book import nesting exceeds ${MAX_BOOK_DEPTH} levels.`
+    if (!node || typeof node.title !== 'string' || !node.title.trim()) return 'Every book unit needs a non-empty title.'
+    if (node.title.trim().length > MAX_TITLE_LENGTH) return `Book titles must be ${MAX_TITLE_LENGTH} characters or fewer.`
+    if (node.subtopics !== undefined && !Array.isArray(node.subtopics)) return 'Book unit subtopics must be arrays.'
+    for (const child of node.subtopics ?? []) stack.push({ node: child, depth: depth + 1 })
+  }
+  return null
 }
 
 // Matches a title that looks like a genuine chapter heading: "Chapter 3 ...",
@@ -201,10 +225,12 @@ function parseChapter(ch: ChapterInput, label: string, semester: string | null, 
   if (!ch || typeof ch.title !== 'string' || !ch.title.trim()) {
     return { ok: false, error: `${label}: needs a non-empty "title".` }
   }
+  if (ch.title.trim().length > MAX_TITLE_LENGTH) return { ok: false, error: `${label}: title must be ${MAX_TITLE_LENGTH} characters or fewer.` }
   const rawTopics = ch.topics ?? []
   if (!Array.isArray(rawTopics)) {
     return { ok: false, error: `${label} ("${ch.title}"): "topics" must be an array.` }
   }
+  if (rawTopics.length > MAX_TOPICS_PER_CHAPTER) return { ok: false, error: `${label}: cannot contain more than ${MAX_TOPICS_PER_CHAPTER} topics.` }
   const topics: NormalisedTopic[] = []
   for (let j = 0; j < rawTopics.length; j++) {
     const tp = rawTopics[j] as string | TopicInput
@@ -212,23 +238,26 @@ function parseChapter(ch: ChapterInput, label: string, semester: string | null, 
     if (typeof title !== 'string' || !title.trim()) {
       return { ok: false, error: `${label}, topic ${j + 1}: each topic needs a title (string, or { "title": "..." }).` }
     }
+    if (title.trim().length > MAX_TITLE_LENGTH) return { ok: false, error: `${label}, topic ${j + 1}: title must be ${MAX_TITLE_LENGTH} characters or fewer.` }
     const subtopics: string[] = []
     if (tp && typeof tp === 'object' && tp.subtopics != null) {
       if (!Array.isArray(tp.subtopics)) {
         return { ok: false, error: `${label}, topic ${j + 1} ("${title}"): "subtopics" must be an array of strings.` }
       }
+      if (tp.subtopics.length > MAX_SUBTOPICS_PER_TOPIC) return { ok: false, error: `${label}, topic ${j + 1}: cannot contain more than ${MAX_SUBTOPICS_PER_TOPIC} subtopics.` }
       for (let k = 0; k < tp.subtopics.length; k++) {
         const st = tp.subtopics[k] as string | SubtopicInput
         const stTitle = typeof st === 'string' ? st : st?.title
         if (typeof stTitle !== 'string' || !stTitle.trim()) {
           return { ok: false, error: `${label}, topic ${j + 1} ("${title}"), subtopic ${k + 1}: needs a non-empty title (string, or { "title": "..." }).` }
         }
-        subtopics.push(stTitle)
+        if (stTitle.trim().length > MAX_TITLE_LENGTH) return { ok: false, error: `${label}, topic ${j + 1}, subtopic ${k + 1}: title must be ${MAX_TITLE_LENGTH} characters or fewer.` }
+        subtopics.push(stTitle.trim())
       }
     }
-    topics.push({ title, subtopics })
+    topics.push({ title: title.trim(), subtopics })
   }
-  return { ok: true, value: { title: ch.title, semester, book_type: bookType, audience, book_name: bookName, topics } }
+  return { ok: true, value: { title: ch.title.trim(), semester, book_type: bookType, audience, book_name: bookName, topics } }
 }
 
 /**
@@ -245,6 +274,9 @@ function parseChapter(ch: ChapterInput, label: string, semester: string | null, 
  * paste — whatever's absent just comes out null and renders as a flat list.
  */
 export function parseSyllabusBulk(json: string): ParseResult<BulkParse> {
+  if (new TextEncoder().encode(json).length > MAX_JSON_BYTES) {
+    return { ok: false, error: `Import is too large. Maximum size is ${MAX_JSON_BYTES / 1024 / 1024} MB.` }
+  }
   let parsed: unknown
   try {
     parsed = JSON.parse(json)
@@ -267,12 +299,15 @@ export function parseSyllabusBulk(json: string): ParseResult<BulkParse> {
     bookType = normalizeBookType((parsed as BookInput).book_type)
     audience = normalizeAudience((parsed as BookInput).audience)
     bookName = normalizeBookName((parsed as BookInput).book)
+    const bookError = validateBookUnits((parsed as BookInput).units)
+    if (bookError) return { ok: false, error: bookError }
     const transformed = transformBookUnitsToChapters((parsed as BookInput).units)
     parsed = transformed.chapters
     foldedUnitsCount = transformed.foldedCount
   }
   if (!Array.isArray(parsed)) return { ok: false, error: 'The top level must be an array of chapters (or an object with a "chapters" array).' }
   if (parsed.length === 0) return { ok: false, error: 'The array is empty — add at least one chapter.' }
+  if (parsed.length > MAX_CHAPTERS) return { ok: false, error: `Import cannot contain more than ${MAX_CHAPTERS} top-level items.` }
 
   const chapters: NormalisedChapter[] = []
 
@@ -299,6 +334,8 @@ export function parseSyllabusBulk(json: string): ParseResult<BulkParse> {
       chapters.push(res.value)
     }
   }
+
+  if (chapters.length > MAX_CHAPTERS) return { ok: false, error: `Import cannot contain more than ${MAX_CHAPTERS} chapters.` }
 
   return { ok: true, value: { chapters, foldedUnitsCount } }
 }

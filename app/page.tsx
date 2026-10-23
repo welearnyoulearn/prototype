@@ -1,5 +1,11 @@
-import PremiumLanding from './components/PremiumLanding'
+import PortalLanding from './components/PortalLanding'
+import CloudflareWebAnalytics from '@/components/CloudflareWebAnalytics'
 
 export default function Home() {
-  return <PremiumLanding />
+  return (
+    <>
+      <PortalLanding />
+      <CloudflareWebAnalytics />
+    </>
+  )
 }

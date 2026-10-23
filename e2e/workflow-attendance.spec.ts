@@ -83,7 +83,7 @@ test.describe.serial('Student attendance — all portals, end to end', () => {
 
     owner = await newCtx()
     expect((await call(owner, 'post', '/api/auth/login', { email: school.email, password: school.temp_password })).status).toBe(200)
-    expect((await call(owner, 'post', '/api/auth/change-password', { newPassword: OWNER_PASS })).status).toBe(200)
+    expect((await call(owner, 'post', '/api/auth/change-password', { currentPassword: school.temp_password, newPassword: OWNER_PASS })).status).toBe(200)
     ownerName = `School Owner ${ts}`
     expect((await call(owner, 'put', '/api/auth/profile', { full_name: ownerName, phone: '9000000031' })).status).toBe(200)
     // Start from "every weekday is a working day" so the run behaves the same on any weekday.
@@ -159,9 +159,12 @@ test.describe.serial('Student attendance — all portals, end to end', () => {
     // ── School B (cross-tenant checks) ────────────────────────────────────
     const schoolB = await createSchool(platformCookie, { name: `Attendance E2E B ${ts}`, email: `attb${ts}@e2etest.com`, phone: `97${String(ts).slice(-8)}` })
     schoolBId = schoolB.id
+    // Give school B a plan: without one the plan gate answers 403 FEATURE_DISABLED before the
+    // cross-school check runs, so the 'refused' assertions below would test nothing.
+    await setSubscription(platformCookie, schoolBId, 'premium')
     ownerB = await newCtx()
     expect((await call(ownerB, 'post', '/api/auth/login', { email: schoolB.email, password: schoolB.temp_password })).status).toBe(200)
-    expect((await call(ownerB, 'post', '/api/auth/change-password', { newPassword: OWNER_PASS })).status).toBe(200)
+    expect((await call(ownerB, 'post', '/api/auth/change-password', { currentPassword: schoolB.temp_password, newPassword: OWNER_PASS })).status).toBe(200)
 
     anon.ctx = await newCtx()
   })

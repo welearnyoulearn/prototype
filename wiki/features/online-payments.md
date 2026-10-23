@@ -34,7 +34,6 @@ Parents (pay/report), school admin (verify).
 Screens: `app/school-admin/components/fee-management/FeeCollectTab.tsx`
 
 API routes these screens call (all exist):
-- `GET/POST` /api/fees/day-close
 - `GET` /api/fees/export
 - `GET` /api/fees/ledger
 - `GET/POST` /api/fees/payments

@@ -68,7 +68,8 @@ export async function notifyAbsentParents(params: {
                <hr style="border:none;border-top:1px solid #e5e7eb;margin:20px 0"/>
                <p style="color:#9ca3af;font-size:12px">WLYL School Management System</p>
              </div>
-           </div>`
+           </div>`,
+          { schoolId, source: 'email.attendance_absent' },
         )
         sent++
       } catch (err) {

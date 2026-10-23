@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 import { resolveAcademicYear } from '@/lib/academicYear'
-import { requireSyllabusAccess } from '@/lib/auth'
+import { canAccessSyllabusClass, requireSyllabusAccess } from '@/lib/auth'
 
 // GET /api/syllabus/setup/siblings?school_id=&class_id=&subject=&academic_year=
 //
@@ -21,7 +21,10 @@ export async function GET(req: NextRequest) {
   if (!school_id || !class_id || !subject) {
     return NextResponse.json({ error: 'school_id, class_id, subject required' }, { status: 400 })
   }
-  if (!await requireSyllabusAccess(school_id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const access = await requireSyllabusAccess(school_id)
+  if (!access || !await canAccessSyllabusClass(access, class_id, subject)) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
 
   try {
     await ensureDB()
@@ -56,9 +59,13 @@ export async function GET(req: NextRequest) {
       [school_id, school_subject_id, grade, class_id]
     )
 
+    const visibleRows = access.role === 'teacher'
+      ? (await Promise.all(rows.map(async r => await canAccessSyllabusClass(access, r.class_id, subject) ? r : null))).filter(Boolean)
+      : rows
+
     return NextResponse.json({
       school_subject_id,
-      siblings: rows.map(r => ({
+      siblings: visibleRows.map(r => ({
         class_id: r.class_id,
         grade: r.grade,
         section: r.section,

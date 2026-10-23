@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 import { resolveAcademicYear } from '@/lib/academicYear'
-import { requireSyllabusWriteAccess } from '@/lib/auth'
+import { canWriteSyllabusClass, requireSyllabusWriteAccess } from '@/lib/auth'
 import { parseSyllabusBulk, normalizeBookType, normalizeAudience, normalizeBookName, defaultAudienceForBookType } from '@/lib/syllabus/bulk-import-schema'
+import type { PoolClient } from 'pg'
 
 // POST /api/school/syllabus/bulk-import
 // body: { school_id, class_id, subject, json, book_type?, audience?, book_name? }
@@ -24,7 +25,7 @@ import { parseSyllabusBulk, normalizeBookType, normalizeAudience, normalizeBookN
 // only ever affects the shared master catalog before any school has copied
 // it.
 export async function POST(req: NextRequest) {
-  const client = await pool.connect()
+  let client: PoolClient | null = null
   try {
     await ensureDB()
     const { school_id, class_id, subject, json, book_type, audience, book_name } = await req.json()
@@ -32,7 +33,10 @@ export async function POST(req: NextRequest) {
     if (!school_id || !class_id || !subject) {
       return NextResponse.json({ error: 'school_id, class_id, subject required' }, { status: 400 })
     }
-    if (!await requireSyllabusWriteAccess(school_id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    const writeSession = await requireSyllabusWriteAccess(school_id)
+    if (!writeSession || !await canWriteSyllabusClass(writeSession, class_id, subject)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
     if (typeof json !== 'string') {
       return NextResponse.json({ error: 'json (string) is required' }, { status: 400 })
     }
@@ -58,7 +62,7 @@ export async function POST(req: NextRequest) {
       return { ...ch, book_type: resolvedBookType, audience: resolvedAudience, book_name: resolvedBookName }
     })
 
-    const classRes = await client.query(
+    const classRes = await pool.query(
       'SELECT grade FROM classes WHERE id = $1 AND school_id = $2',
       [class_id, school_id]
     )
@@ -68,12 +72,14 @@ export async function POST(req: NextRequest) {
     const { grade } = classRes.rows[0]
     const academic_year = req.nextUrl.searchParams.get('academic_year') || await resolveAcademicYear(school_id)
 
+    client = await pool.connect()
     await client.query('BEGIN')
+    await client.query('SELECT pg_advisory_xact_lock($1)', [Number(school_id)])
 
     // Find or create the school subject — same as POST /api/syllabus.
     let school_subject_id: number
     const subjectRes = await client.query(
-      'SELECT id FROM school_subjects WHERE school_id = $1 AND grade = $2 AND subject_name = $3 AND academic_year = $4',
+      'SELECT id FROM school_subjects WHERE school_id = $1 AND grade = $2 AND LOWER(TRIM(subject_name)) = LOWER(TRIM($3)) AND academic_year = $4',
       [school_id, grade, subject, academic_year]
     )
     if (subjectRes.rows.length === 0) {
@@ -113,12 +119,15 @@ export async function POST(req: NextRequest) {
 
     let chaptersCreated = 0
     let chaptersUpdated = 0
+    let topicsCreated = 0
+    let topicsUpdated = 0
 
     for (const ch of resolvedChapters) {
       // Re-importing the same book (a re-run, or a corrected paste) matches on
       // (subject, book_type, book_name, chapter_name) and replaces that
-      // chapter's topics instead of duplicating it — same append-mode
-      // matching the platform route uses.
+      // chapter's matching topics without removing omitted topics. Topic IDs
+      // carry progress and visibility history, so re-import must be a safe
+      // merge rather than a destructive replacement.
       const existingChapter = await client.query(
         `SELECT id FROM school_chapters WHERE school_subject_id = $1 AND book_type = $2 AND LOWER(TRIM(COALESCE(book_name, ''))) = LOWER(TRIM(COALESCE($3, ''))) AND LOWER(TRIM(chapter_name)) = LOWER(TRIM($4))`,
         [school_subject_id, ch.book_type, ch.book_name, ch.title],
@@ -131,7 +140,6 @@ export async function POST(req: NextRequest) {
           'UPDATE school_chapters SET semester = COALESCE($1, semester), audience = COALESCE($2, audience) WHERE id = $3',
           [ch.semester, ch.audience, chapterId],
         )
-        await client.query('DELETE FROM school_topics WHERE school_chapter_id = $1', [chapterId])
         chaptersUpdated += 1
       } else {
         const chRes = await client.query(
@@ -146,11 +154,26 @@ export async function POST(req: NextRequest) {
 
       let topicOrder = 0
       for (const t of ch.topics) {
-        await client.query(
-          `INSERT INTO school_topics (school_chapter_id, topic_name, topic_order, subtopics, is_custom)
-           VALUES ($1, $2, $3, $4::jsonb, TRUE)`,
-          [chapterId, t.title, topicOrder, JSON.stringify(t.subtopics)],
+        const existingTopic = await client.query(
+          `SELECT id FROM school_topics
+            WHERE school_chapter_id = $1 AND LOWER(TRIM(topic_name)) = LOWER(TRIM($2))
+            LIMIT 1`,
+          [chapterId, t.title],
         )
+        if (existingTopic.rows.length) {
+          await client.query(
+            `UPDATE school_topics SET topic_order = $1, subtopics = $2::jsonb WHERE id = $3`,
+            [topicOrder, JSON.stringify(t.subtopics), existingTopic.rows[0].id],
+          )
+          topicsUpdated += 1
+        } else {
+          await client.query(
+            `INSERT INTO school_topics (school_chapter_id, topic_name, topic_order, subtopics, is_custom)
+             VALUES ($1, $2, $3, $4::jsonb, TRUE)`,
+            [chapterId, t.title, topicOrder, JSON.stringify(t.subtopics)],
+          )
+          topicsCreated += 1
+        }
         topicOrder += 1
       }
     }
@@ -163,16 +186,19 @@ export async function POST(req: NextRequest) {
       chapters_created: chaptersCreated,
       chapters_updated: chaptersUpdated,
       topics: chapters.reduce((n, c) => n + c.topics.length, 0),
+      topics_created: topicsCreated,
+      topics_updated: topicsUpdated,
+      existing_topics_preserved: true,
       sections_merged: foldedUnitsCount,
     })
   } catch (err) {
-    await client.query('ROLLBACK').catch(() => {})
+    if (client) await client.query('ROLLBACK').catch(() => {})
     console.error('school/syllabus/bulk-import POST error:', err)
     const message = err instanceof Error && /timeout exceeded when trying to connect/.test(err.message)
       ? 'Database connection timed out — try again in a moment.'
       : 'Failed to import syllabus'
     return NextResponse.json({ error: message }, { status: 500 })
   } finally {
-    client.release()
+    client?.release()
   }
 }

@@ -5,10 +5,11 @@ import { Search, ChevronUp, ChevronDown, Bell, Check } from 'lucide-react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 import { INK, TEAL, GOLD, CORAL, GREEN, BORDER, SURFACE, CREAM } from '@/app/components/ulearn/theme'
 import { UlearnCard } from '@/app/components/ulearn/primitives'
+import NotificationBell from '../../components/NotificationBell'
 
 // ── Types — matches GET /api/syllabus/analytics's extended response ────────
 
-type ClassSubjectRow = { subject: string; teacher_name: string | null; total: number; covered: number; pct: number }
+type ClassSubjectRow = { subject: string; teacher_id: number | null; teacher_name: string | null; total: number; covered: number; pct: number }
 type ClassCoverage = {
   class_id: number; grade: string; section: string
   total: number; covered: number; pct: number | null
@@ -24,6 +25,7 @@ type TeacherCoverage = {
 
 type SyllabusData = {
   academic_year: string
+  overall_pct: number | null
   by_class: ClassCoverage[]
   by_teacher: TeacherCoverage[]
 }
@@ -52,7 +54,7 @@ function PctBar({ pct }: { pct: number }) {
   const status = statusOf(pct)
   return (
     <div className="flex items-center gap-2.5 min-w-[140px]">
-      <div className="flex-1 rounded-full h-1.5 overflow-hidden" style={{ background: BORDER }}>
+      <div className="flex-1 rounded-full h-1.5 overflow-hidden" style={{ background: BORDER }} role="progressbar" aria-label="Syllabus coverage" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}>
         <div className="h-full rounded-full transition-all duration-500" style={{ width: `${pct}%`, background: STATUS_COLOR[status] }} />
       </div>
       <span className="text-xs font-bold w-9 text-right tabular-nums" style={{ color: STATUS_COLOR[status] }}>{pct}%</span>
@@ -76,8 +78,8 @@ function initials(name: string) {
 
 // Row shapes the detail table renders — unified so class mode and teacher
 // mode share one sortable-table implementation instead of two near-duplicates.
-type ClassModeRow = { key: string; subject: string; teacherName: string | null; total: number; covered: number; pct: number }
-type TeacherModeRow = { key: string; classLabel: string; grade: string; subject: string; total: number; covered: number; pct: number }
+type ClassModeRow = { key: string; subject: string; teacherId: number | null; teacherName: string | null; total: number; covered: number; pct: number }
+type TeacherModeRow = { key: string; class_id: number; classLabel: string; grade: string; subject: string; total: number; covered: number; pct: number }
 
 type SortKey = 'subject' | 'teacher' | 'class' | 'pct' | 'status'
 
@@ -181,7 +183,7 @@ export default function SyllabusTracking({ schoolId }: { schoolId: number }) {
 
   const classRows: ClassModeRow[] = useMemo(() => {
     if (!selectedClass) return []
-    const rows = selectedClass.subjects.map(s => ({ key: s.subject, subject: s.subject, teacherName: s.teacher_name, total: s.total, covered: s.covered, pct: s.pct }))
+    const rows = selectedClass.subjects.map(s => ({ key: s.subject, subject: s.subject, teacherId: s.teacher_id, teacherName: s.teacher_name, total: s.total, covered: s.covered, pct: s.pct }))
     return sortRows(rows, sortKey, sortDir, r => r.subject, r => r.teacherName ?? '')
   }, [selectedClass, sortKey, sortDir])
 
@@ -189,6 +191,7 @@ export default function SyllabusTracking({ schoolId }: { schoolId: number }) {
     if (!selectedTeacher) return []
     const rows = selectedTeacher.assignments.map(a => ({
       key: `${a.class_id}-${a.subject}`,
+      class_id: a.class_id,
       classLabel: `${a.grade}-${a.section}`,
       grade: a.grade,
       subject: a.subject,
@@ -210,7 +213,7 @@ export default function SyllabusTracking({ schoolId }: { schoolId: number }) {
     setListSearch('')
   }
 
-  async function sendNudge(row: { key: string; subject: string; pct: number }, classLabel: string, teacherId: number | null, teacherLabel: string) {
+  async function sendNudge(row: { key: string; subject: string; pct: number }, classId: number, teacherId: number | null) {
     if (nudgedKeys.has(row.key) || !teacherId) return
     setNudgingKey(row.key)
     try {
@@ -220,8 +223,8 @@ export default function SyllabusTracking({ schoolId }: { schoolId: number }) {
         body: JSON.stringify({
           school_id: schoolId,
           teacher_id: teacherId,
+          class_id: classId,
           subject: row.subject,
-          class_label: classLabel,
           pct: row.pct,
         }),
       })
@@ -232,15 +235,12 @@ export default function SyllabusTracking({ schoolId }: { schoolId: number }) {
     } finally {
       setNudgingKey(null)
     }
-    void teacherLabel
   }
 
   // KPIs — computed from the same by_class data already powering the list.
   const kpis = useMemo(() => {
     if (!data) return { overallPct: 0, onTrack: 0, behind: 0, totalClasses: 0 }
-    const totalChapters = data.by_class.reduce((s, c) => s + c.total, 0)
-    const coveredChapters = data.by_class.reduce((s, c) => s + c.covered, 0)
-    const overallPct = totalChapters > 0 ? Math.round((coveredChapters / totalChapters) * 100) : 0
+    const overallPct = data.overall_pct ?? 0
     const onTrack = data.by_class.filter(c => statusOf(c.pct) === 'green').length
     const behind = data.by_class.filter(c => statusOf(c.pct) === 'red').length
     return { overallPct, onTrack, behind, totalClasses: data.by_class.length }
@@ -251,7 +251,7 @@ export default function SyllabusTracking({ schoolId }: { schoolId: number }) {
       {/* Header + year selector */}
       <div className="rounded-3xl p-4 sm:p-5 flex items-center justify-between gap-4 flex-wrap" style={{ background: CREAM, border: `1px solid ${BORDER}` }}>
         <div>
-          <h2 className="text-lg font-semibold" style={{ color: INK }}>Syllabus Tracking</h2>
+          <h2 className="text-lg font-semibold flex items-center gap-2" style={{ color: INK }}>Syllabus Tracking <NotificationBell schoolId={schoolId} group="syllabus" /></h2>
           <p className="text-sm text-gray-500 mt-0.5">Coverage by class, subject and teacher — chapter-level, updated live.</p>
         </div>
         {years.length > 0 && (
@@ -318,6 +318,7 @@ export default function SyllabusTracking({ schoolId }: { schoolId: number }) {
                 <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg border" style={{ borderColor: BORDER }}>
                   <Search size={13} className="text-gray-400 flex-shrink-0" />
                   <input
+                    aria-label={mode === 'class' ? 'Search classes' : 'Search teachers'}
                     value={listSearch}
                     onChange={e => setListSearch(e.target.value)}
                     placeholder={mode === 'class' ? 'Search class…' : 'Search teacher…'}
@@ -428,7 +429,7 @@ export default function SyllabusTracking({ schoolId }: { schoolId: number }) {
                         )}
                         <SortHeader label="Chapters covered" sortKey="pct" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
                         <SortHeader label="Status" sortKey="status" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
-                        <th className="px-5 py-2.5 border-b" style={{ borderColor: BORDER }} />
+                        <th aria-label="Actions" className="px-5 py-2.5 border-b" style={{ borderColor: BORDER }} />
                       </tr>
                     </thead>
                     <tbody className="divide-y" style={{ borderColor: BORDER }}>
@@ -437,7 +438,7 @@ export default function SyllabusTracking({ schoolId }: { schoolId: number }) {
                           <tr><td colSpan={5} className="text-center py-10 text-gray-400 text-sm">No subjects for this class yet.</td></tr>
                         ) : classRows.map(row => {
                           const status = statusOf(row.pct)
-                          const teacherRowIdForNudge = selectedClass ? findTeacherIdByName(data.by_teacher, row.teacherName) : null
+                          const teacherRowIdForNudge = row.teacherId
                           return (
                             <tr key={row.key} className="hover:bg-gray-50/50 transition-colors">
                               <td className="px-5 py-3.5 font-semibold" style={{ color: INK }}>{row.subject}</td>
@@ -460,7 +461,7 @@ export default function SyllabusTracking({ schoolId }: { schoolId: number }) {
                                     sent={nudgedKeys.has(row.key)}
                                     sending={nudgingKey === row.key}
                                     disabled={!teacherRowIdForNudge}
-                                    onClick={() => selectedClass && sendNudge(row, `${selectedClass.grade}-${selectedClass.section}`, teacherRowIdForNudge, row.teacherName ?? '')}
+                                    onClick={() => selectedClass && sendNudge(row, selectedClass.class_id, teacherRowIdForNudge)}
                                   />
                                 ) : <span className="text-xs text-gray-300">—</span>}
                               </td>
@@ -487,7 +488,7 @@ export default function SyllabusTracking({ schoolId }: { schoolId: number }) {
                                     sent={nudgedKeys.has(row.key)}
                                     sending={nudgingKey === row.key}
                                     disabled={!selectedTeacherId}
-                                    onClick={() => selectedTeacher && sendNudge(row, row.classLabel, selectedTeacherId, selectedTeacher.teacher_name)}
+                                    onClick={() => selectedTeacher && sendNudge(row, row.class_id, selectedTeacherId)}
                                   />
                                 ) : <span className="text-xs text-gray-300">—</span>}
                               </td>
@@ -573,11 +574,6 @@ function statusRank(pct: number): number {
   return s === 'red' ? 0 : s === 'amber' ? 1 : 2
 }
 
-function findTeacherIdByName(byTeacher: TeacherCoverage[], name: string | null): number | null {
-  if (!name) return null
-  return byTeacher.find(t => t.teacher_name === name)?.teacher_id ?? null
-}
-
 function buildChartData(trend: TrendResponse) {
   return trend.weeks.map((week, i) => {
     const row: Record<string, string | number | null> = { week: formatWeekLabel(week) }
@@ -598,15 +594,15 @@ function SortHeader({ label, sortKey, activeKey, dir, onClick }: {
   const active = activeKey === sortKey
   return (
     <th
-      onClick={() => onClick(sortKey)}
+      aria-sort={active ? (dir === 1 ? 'ascending' : 'descending') : 'none'}
       data-testid={`syllabus-tracking-sort-${sortKey}`}
-      className="px-5 py-2.5 text-left text-xs font-semibold border-b cursor-pointer select-none whitespace-nowrap"
+      className="px-5 py-2.5 text-left text-xs font-semibold border-b select-none whitespace-nowrap"
       style={{ borderColor: BORDER, color: active ? INK : '#9CA3AF' }}
     >
-      <span className="inline-flex items-center gap-1">
+      <button type="button" onClick={() => onClick(sortKey)} className="inline-flex items-center gap-1">
         {label}
         {active && (dir === 1 ? <ChevronUp size={12} /> : <ChevronDown size={12} />)}
-      </span>
+      </button>
     </th>
   )
 }
