@@ -383,7 +383,14 @@ export default function PortalLanding() {
 
       <footer className="pl-footer">
         <span>© {new Date().getFullYear()} WeLearnYouLearn</span>
-        <Link href="/admin">Platform administration</Link>
+        <nav aria-label="Policies" className="pl-footer-links">
+          <Link href="/pricing" data-testid="footer-pricing">Pricing</Link>
+          <Link href="/terms" data-testid="footer-terms">Terms</Link>
+          <Link href="/privacy" data-testid="footer-privacy">Privacy</Link>
+          <Link href="/refund-policy" data-testid="footer-refund">Refunds</Link>
+          <Link href="/contact" data-testid="footer-contact">Contact</Link>
+          <Link href="/admin">Platform administration</Link>
+        </nav>
       </footer>
 
     </div>

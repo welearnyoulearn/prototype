@@ -5,6 +5,14 @@ Current bugs and workarounds for the WLYL School prototype.
 <!-- 
 ## Active Issues
 
+### School details — before go-live
+- **Severity:** Low
+- **Detail:**
+  - **GST needs WLYL's state.** The CGST/SGST vs IGST split needs `BILLING_GSTIN` (or `BILLING_STATE_CODE`) and the school's State. Older schools show one "GST 18%" line until Platform Admin fills in School details.
+  - **Policy pages need real company details.** They show [placeholders] until the `BILLING_*` and `LEGAL_*` values are set, and the text needs legal review.
+  - **No classes 11–12.** "Classes run" goes up to class 10, the app-wide grade list.
+- **Status:** See DOCS/SCHOOL-ONBOARDING.md.
+
 ### [#153] No direct LEAP (AP govt attendance app) integration
 - **Severity:** Low (manual route exists)
 - **Detail:** LEAP has no public API or bulk import that we could find. Attendance still has to be keyed into LEAP by the school.

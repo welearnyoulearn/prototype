@@ -516,6 +516,7 @@ input, select, textarea {
 @keyframes pl-drift-c { to { transform: translate(-9rem, -4rem) scale(1.08); } }
 
 .pl-header, .pl-footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; width: min(100% - 32px, 1180px); margin: 0 auto; }
+.pl-footer-links { display: flex; flex-wrap: wrap; justify-content: flex-end; column-gap: 16px; }
 .pl-header { min-height: 72px; }
 .pl-brand { display: inline-flex; align-items: center; gap: 11px; color: inherit; }
 .pl-brand > span { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 10px; background: var(--pl-brand); color: white; font-weight: 750; box-shadow: 0 6px 16px rgb(36 91 70 / .25); }

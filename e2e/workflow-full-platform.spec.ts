@@ -28,23 +28,30 @@ test.describe.serial('Full Platform Workflow', () => {
     await page.waitForURL(/\/platform-admin/, { timeout: 15000 })
     await expect(page.getByText('Active Schools', { exact: true })).toBeVisible({ timeout: 10000 })
 
-    // Click Add School
+    // Add School wizard: School → Tax → Profile → Contacts → Size & needs → Plan → Review
     await page.getByRole('button', { name: 'Add School' }).click()
-    await expect(page.getByText('Add New School')).toBeVisible()
-
-    // Fill out school form
+    await expect(page.getByTestId('add-school-wizard')).toBeVisible()
     const ts = Date.now()
     schoolName = `Sunrise School ${ts}`
-    const modal = page.locator('.fixed').filter({ hasText: 'Add New School' })
-    await modal.getByPlaceholder('e.g. Greenwood High School').fill(schoolName)
-    await modal.getByPlaceholder('Mumbai').fill('Bangalore')
-    await modal.locator('select').nth(1).selectOption('India')
-    await modal.getByPlaceholder('admin@schoolname.edu').fill(`sunrise${ts}@test.com`)
-    await modal.getByPlaceholder('+91 98765 43210').fill('9876512345')
-    await modal.getByPlaceholder('Street, Area, City, State, PIN').fill('100 MG Road, Bangalore, KA 560001')
-
-    // Submit
-    await page.getByRole('button', { name: 'Create School' }).click()
+    await page.getByTestId('wizard-name').fill(schoolName)
+    await page.getByTestId('sd-legalName').fill('Sunrise Educational Trust')
+    await page.getByTestId('sd-address').fill('100 MG Road')
+    await page.getByTestId('sd-city').fill('Bangalore')
+    await page.getByTestId('sd-stateCode').selectOption('29')
+    await page.getByTestId('sd-pin').fill('560001')
+    await page.getByTestId('wizard-next').click()          // → Tax (optional)
+    await page.getByTestId('wizard-next').click()          // → Profile (defaults: CBSE, English, Nursery–10, June)
+    await page.getByTestId('wizard-next').click()          // → Contacts
+    await page.getByTestId('wizard-admin-name').fill('Sunrise Admin')
+    await page.getByTestId('wizard-email').fill(`sunrise${ts}@test.com`)
+    await page.getByTestId('wizard-phone').fill('9876512345')
+    await page.getByTestId('wizard-next').click()          // → Size & needs
+    await page.getByTestId('sd-approxStudents').fill('400')
+    await page.getByTestId('sd-approxStaff').fill('25')
+    await page.getByTestId('wizard-next').click()          // → Plan
+    await page.getByTestId('wizard-plan-none').click()
+    await page.getByTestId('wizard-next').click()          // → Review
+    await page.getByTestId('wizard-send').click()
 
     // Wait for credentials modal
     await expect(page.getByText('School Created!')).toBeVisible({ timeout: 15000 })

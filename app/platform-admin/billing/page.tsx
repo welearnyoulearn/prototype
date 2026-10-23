@@ -347,7 +347,7 @@ function BillDrawer({ bill, gstPending, onChanged }: { bill: Bill; gstPending: b
           ))}
           <div className="border-t border-gray-200 pt-2 space-y-1 tabular-nums">
             <div className="flex justify-between"><span className="text-gray-500">Subtotal</span><span>{inr(bill.subtotal)}</span></div>
-            <div className="flex justify-between"><span className="text-gray-500">GST 18%{gstPending && <span className="ml-1 text-xs text-amber-700" data-testid="bill-drawer-gst-pending">· GST details pending</span>}</span><span>{inr(bill.gst)}</span></div>
+            {bill.gstLines.map((g, i) => <div key={g.label} className="flex justify-between"><span className="text-gray-500">{g.label}{i === 0 && gstPending && <span className="ml-1 text-xs text-amber-700" data-testid="bill-drawer-gst-pending">· GST details pending</span>}{g.label === 'GST 18%' && <span className="ml-1 text-xs text-amber-700">· school state not set</span>}</span><span>{inr(g.amount)}</span></div>)}
             <div className="flex justify-between font-semibold"><span>Total</span><span>{inr(bill.total)}</span></div>
             {bill.paid > 0 && <div className="flex justify-between text-green-700"><span>Received</span><span>{inr(bill.paid)}</span></div>}
           </div>

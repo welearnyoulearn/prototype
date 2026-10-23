@@ -87,7 +87,7 @@ const BOOTSTRAP_MARKER_KEY   = 'initial_schema_bootstrap'
 // silently never runs anywhere, and you will chase a "column does not exist" 500
 // that reproduces on production but never locally against a fresh DB.
 // Adding a migration statement and bumping this number is ONE change, not two.
-const SCHEMA_VERSION = 55
+const SCHEMA_VERSION = 56
 
 // Records the schema level this build finished applying, on the same row as the
 // bootstrap marker (no extra row, no extra round-trip to read it back).
@@ -4072,5 +4072,45 @@ async function runIncrementalMigrations() {
       created INTEGER NOT NULL DEFAULT 0,
       failed JSONB NOT NULL DEFAULT '[]'
     );
+  `)
+
+  // What we know about a school (DOCS/SCHOOL-ONBOARDING.md): legal entity and GST details for the invoice
+  // (state → CGST+SGST or IGST), profile, size, commercial and needs; extra contacts (the accountant also gets
+  // the bills); and each bill's "bill to", fixed when the bill is made so later edits never change it.
+  await pool.query(`
+    ALTER TABLE schools ADD COLUMN IF NOT EXISTS legal_name VARCHAR(255);
+    ALTER TABLE schools ADD COLUMN IF NOT EXISTS entity_type VARCHAR(20);
+    ALTER TABLE schools ADD COLUMN IF NOT EXISTS state_code VARCHAR(2);
+    ALTER TABLE schools ADD COLUMN IF NOT EXISTS pin VARCHAR(6);
+    ALTER TABLE schools ADD COLUMN IF NOT EXISTS gstin VARCHAR(15);
+    ALTER TABLE schools ADD COLUMN IF NOT EXISTS pan VARCHAR(10);
+    ALTER TABLE schools ADD COLUMN IF NOT EXISTS website VARCHAR(255);
+    ALTER TABLE schools ADD COLUMN IF NOT EXISTS medium VARCHAR(40);
+    ALTER TABLE schools ADD COLUMN IF NOT EXISTS classes_from VARCHAR(20);
+    ALTER TABLE schools ADD COLUMN IF NOT EXISTS classes_to VARCHAR(20);
+    ALTER TABLE schools ADD COLUMN IF NOT EXISTS academic_start_month SMALLINT;
+    ALTER TABLE schools ADD COLUMN IF NOT EXISTS udise_code VARCHAR(20);
+    ALTER TABLE schools ADD COLUMN IF NOT EXISTS affiliation_no VARCHAR(40);
+    ALTER TABLE schools ADD COLUMN IF NOT EXISTS approx_students INTEGER;
+    ALTER TABLE schools ADD COLUMN IF NOT EXISTS approx_staff INTEGER;
+    ALTER TABLE schools ADD COLUMN IF NOT EXISTS sales_owner_id INTEGER;
+    ALTER TABLE schools ADD COLUMN IF NOT EXISTS referral_source VARCHAR(120);
+    ALTER TABLE schools ADD COLUMN IF NOT EXISTS go_live_date DATE;
+    ALTER TABLE schools ADD COLUMN IF NOT EXISTS onboarding_notes TEXT;
+    ALTER TABLE schools ADD COLUMN IF NOT EXISTS needs JSONB NOT NULL DEFAULT '{}';
+    CREATE TABLE IF NOT EXISTS school_contacts (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      role VARCHAR(20) NOT NULL CHECK (role IN ('principal', 'correspondent', 'accountant')),
+      name VARCHAR(120) NOT NULL,
+      mobile VARCHAR(10),
+      email VARCHAR(255),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (school_id, role)
+    );
+    ALTER TABLE saas_invoices ADD COLUMN IF NOT EXISTS bill_to_name VARCHAR(255);
+    ALTER TABLE saas_invoices ADD COLUMN IF NOT EXISTS bill_to_address TEXT;
+    ALTER TABLE saas_invoices ADD COLUMN IF NOT EXISTS bill_to_state_code VARCHAR(2);
+    ALTER TABLE saas_invoices ADD COLUMN IF NOT EXISTS bill_to_gstin VARCHAR(15);
   `)
 }
