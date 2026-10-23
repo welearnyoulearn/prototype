@@ -1,14 +1,18 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, Suspense } from 'react'
 import { useRouter } from 'next/navigation'
 import dynamic from 'next/dynamic'
-import AppLoader from '../components/AppLoader'
+import { FullPageLoader } from '@/components/loaders'
 import { FeaturesProvider } from '@/lib/features-context'
 import NotificationBell from '../components/NotificationBell'
 import { useUsageHeartbeat } from '@/lib/useUsageHeartbeat'
 import { useFeatureTracking } from '@/lib/useFeatureTracking'
+import { useSectionNav } from '@/lib/useSectionNav'
 import { getUsageSessionId, clearUsageSessionId } from '@/lib/usageSession'
+import PortalSidebar from '@/components/portal/PortalSidebar'
+import { CalendarDays, Eye, Home, LogOut, Menu } from 'lucide-react'
+import { Skeleton } from '@/components/ui/skeleton'
 
 // Always-loaded (landing tab, and small enough not to be worth its own chunk)
 import SmartSnapshot from './components/SmartSnapshot'
@@ -17,24 +21,24 @@ import TeacherSyllabus from './components/TeacherSyllabus'
 // Lazy-loaded — only downloaded when first opened
 function ModuleSkeleton() {
   return (
-    <div className="space-y-4 animate-pulse">
-      <div className="h-8 bg-gray-100 rounded-xl w-48" />
-      <div className="grid grid-cols-3 gap-4">
-        {[1,2,3].map(i => <div key={i} className="h-28 bg-gray-100 rounded-2xl" />)}
+    <div className="space-y-4" role="status" aria-live="polite" aria-busy="true">
+      <span className="sr-only">Loading section</span>
+      <Skeleton className="h-8 w-48" />
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        {[1,2,3].map(i => <Skeleton key={i} className="h-28" />)}
       </div>
-      <div className="h-64 bg-gray-100 rounded-2xl" />
+      <Skeleton className="h-64" />
     </div>
   )
 }
 // Turbopack requires inline object literals for next/dynamic options
 const ClassView      = dynamic(() => import('./components/ClassView'),      { loading: () => <ModuleSkeleton /> })
-const FullTimetable  = dynamic(() => import('./components/FullTimetable'),  { loading: () => <ModuleSkeleton /> })
-const TeacherLeave   = dynamic(() => import('./components/TeacherLeave'),   { loading: () => <ModuleSkeleton /> })
 const TeacherProfile = dynamic(() => import('./components/TeacherProfile'), { loading: () => <ModuleSkeleton /> })
 const Attendance     = dynamic(() => import('./components/Attendance'),     { loading: () => <ModuleSkeleton /> })
+const SchoolCalendarView = dynamic(() => import('../components/SchoolCalendarView'), { loading: () => <ModuleSkeleton /> })
 const MyStudents     = dynamic(() => import('./components/MyStudents'),     { loading: () => <ModuleSkeleton /> })
 const MyClasses      = dynamic(() => import('./components/MyClasses'),      { loading: () => <ModuleSkeleton /> })
-const DigitalLibrary = dynamic(() => import('../components/library/DigitalLibrary'), { loading: () => <ModuleSkeleton /> })
+const TeacherLibrary = dynamic(() => import('./components/TeacherLibrary'), { loading: () => <ModuleSkeleton /> })
 
 type Teacher = {
   id: number
@@ -54,6 +58,7 @@ type Teacher = {
   school_id: number
   school_name: string
   school_city: string
+  date_of_birth?: string | null
 }
 
 
@@ -65,15 +70,17 @@ type NavSection = {
 // Maps a sidebar nav key to the school-plan feature key that gates it —
 // same feature keys school-admin's sidebar and Class Management already use.
 const NAV_KEY_TO_FEATURE: Record<string, string> = {
-  timetable: 'timetable',
   attendance: 'attendance',
+  calendar: 'calendar',
+  library: 'library',
+  syllabus: 'curriculum',
 }
 
 const NAV_SECTIONS: NavSection[] = [
   {
     label: 'MAIN',
     items: [
-      { key: 'snapshot', label: 'Smart Snapshot', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg> },
+      { key: 'snapshot', label: 'Overview', icon: <Home size={18} /> },
     ],
   },
   {
@@ -83,25 +90,29 @@ const NAV_SECTIONS: NavSection[] = [
       { key: 'my-students', label: 'My Students', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg> },
       { key: 'syllabus', label: 'Syllabus', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" /></svg> },
       { key: 'library', label: 'Digital Library', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253m0-13v13" /></svg> },
-      { key: 'timetable', label: 'Timetable', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg> },
       { key: 'attendance', label: 'Attendance', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" /></svg> },
+      { key: 'calendar', label: 'School Calendar', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg> },
     ],
   },
   {
     label: 'MY ACCOUNT',
     items: [
       { key: 'profile', label: 'My Profile', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg> },
-      { key: 'leave', label: 'Teacher Attend.', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg> },
     ],
   },
 ]
 
-export default function TeacherPortal() {
+function TeacherPortal() {
   const router = useRouter()
   const [teacher, setTeacher]     = useState<Teacher | null>(null)
   const [loading, setLoading]     = useState(true)
-  const [activeNav, setActiveNav] = useState('snapshot')
-  const [visitedNav, setVisitedNav] = useState<Set<string>>(new Set(['snapshot']))
+  // Sidebar section nav lives in the URL's `tab` param — real navigation, so
+  // the browser/phone Back button moves through the portal's own screens.
+  const { current: activeNav, navigate: navigateSection } = useSectionNav<string>('snapshot')
+  const [visitedNav, setVisitedNav] = useState<Set<string>>(new Set([activeNav]))
+  useEffect(() => {
+    setVisitedNav(prev => (prev.has(activeNav) ? prev : new Set([...prev, activeNav])))
+  }, [activeNav])
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [selectedClass, setSelectedClass] = useState<{ id: number; grade: string; section: string; class_teacher_name: string | null } | null>(null)
   const [classViewInitialTab, setClassViewInitialTab] = useState<string | undefined>(undefined)
@@ -110,9 +121,8 @@ export default function TeacherPortal() {
   const trackOpen = useFeatureTracking('teacher')
 
   function navigateTo(key: string) {
-    setActiveNav(key)
-    setVisitedNav(prev => new Set([...prev, key]))
     setSidebarOpen(false)
+    navigateSection(key)
     trackOpen(key)
   }
 
@@ -145,187 +155,198 @@ export default function TeacherPortal() {
       body: JSON.stringify({ usageSessionId }),
     })
     clearUsageSessionId()
-    router.push('/teacher/login')
+    router.replace('/teacher/login')
   }, [router])
 
-  const [enabledFeatures, setEnabledFeatures] = useState<Set<string>>(new Set())
+  // null = still loading (show everything so the sidebar doesn't flash
+  // empty); an actually-empty Set once loaded means the school genuinely has
+  // none of these features and must fail closed — see the nav filter below,
+  // which checks this distinction directly rather than through useFeature()
+  // (which can't tell "loading" from "genuinely zero" once handed a Set).
+  const [enabledFeatures, setEnabledFeatures] = useState<Set<string> | null>(null)
   const [academicYear, setAcademicYear] = useState('')
+  // The school's own current year — never changes based on what the teacher
+  // is viewing, used only to tell whether selectedAcademicYear is read-only.
+  const [schoolCurrentYear, setSchoolCurrentYear] = useState('')
+  const [availableYears, setAvailableYears] = useState<{ id: number; label: string; is_current: boolean }[]>([])
+  // What the teacher has chosen to VIEW — independent of school admin's
+  // active year. Resets to the school's current year on every fresh login
+  // (session-only state, never persisted), and every read-heavy tab passes
+  // this as ?academic_year= on its fetches. Any year other than the school's
+  // current one is read-only throughout the portal.
+  const [selectedAcademicYear, setSelectedAcademicYear] = useState('')
+  const isViewingPastYear = !!selectedAcademicYear && !!schoolCurrentYear && selectedAcademicYear !== schoolCurrentYear
 
   // Fetch teacher identity from session cookie
   useEffect(() => {
     fetch('/api/teacher/auth/me')
       .then(async r => {
-        if (r.status === 401) { router.push('/teacher/login'); return null }
+        if (r.status === 401) { router.replace('/teacher/login'); return null }
         return r.json()
       })
       .then(data => {
         if (!data) return
         setTeacher(data)
       })
-      .catch(() => router.push('/teacher/login'))
+      .catch(() => router.replace('/teacher/login'))
       .finally(() => setLoading(false))
   }, [router])
 
   // A teacher belongs to a school, and the school's plan decides which
-  // features exist — same gate school-admin already applies (e.g. Timetable
-  // tab hidden on the Basic plan). Without this, the teacher portal shows
-  // Timetable/Attendance nav items and tabs regardless of the school's plan.
+  // features exist — same gate school-admin already applies (e.g. the
+  // Attendance tab hidden when it is not in the plan). Without this, the teacher portal shows
+  // Attendance nav items and tabs regardless of the school's plan.
+  // Reads the same override-aware endpoint Student/Parent use (checks
+  // school_feature_overrides before falling back to tier) — a previous
+  // tier-only fetch here ignored per-school overrides entirely and, on a
+  // 'none'-tier school, left enabledFeatures empty forever, which
+  // useFeature() treats as "still loading" and fails OPEN (shows
+  // everything) rather than closed.
   useEffect(() => {
     if (!teacher?.school_id) return
-    fetch(`/api/schools/${teacher.school_id}/subscription`)
-      .then(r => r.json())
-      .then(async subData => {
-        const tier = subData.tier || 'none'
-        if (tier === 'none') return
-        const featRes = await fetch(`/api/platform/features?tier=${tier}`)
-        if (featRes.ok) {
-          const fd = await featRes.json()
-          setEnabledFeatures(new Set(fd.enabled || []))
-        }
-      })
+    fetch(`/api/school/enabled-features?school_id=${teacher.school_id}&portal=teacher`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d?.enabled) setEnabledFeatures(new Set<string>(d.enabled)) })
       .catch(() => {})
   }, [teacher?.school_id])
 
   // Ambient "which year am I looking at" badge — every syllabus/class screen
   // already scopes its own data to the school's active academic year, but
   // gave no visible signal when that year is wrong. One fetch here, shown
-  // once in the header, covers every tab.
+  // once in the header, covers every tab. Also seeds the teacher's own year
+  // selector (Profile tab) to the school's current year on every fresh
+  // login — the teacher's choice is session-only and never persisted, so it
+  // always starts here, never wherever they left it last time.
   useEffect(() => {
     if (!teacher?.school_id) return
     fetch(`/api/academic-year/current?school_id=${teacher.school_id}`)
       .then(r => r.ok ? r.json() : null)
-      .then(d => { if (d?.label) setAcademicYear(d.label) })
+      .then(d => {
+        if (d?.label) {
+          setAcademicYear(d.label)
+          setSchoolCurrentYear(d.label)
+          setSelectedAcademicYear(d.label)
+        }
+      })
+      .catch(() => {})
+    fetch(`/api/academic-years?school_id=${teacher.school_id}`)
+      .then(r => r.ok ? r.json() : [])
+      .then(rows => setAvailableYears(Array.isArray(rows) ? rows.map((r: { id: number; label: string; is_current: boolean }) => ({ id: r.id, label: r.label, is_current: r.is_current })) : []))
       .catch(() => {})
   }, [teacher?.school_id])
 
-  if (loading) return <AppLoader message="Loading your portal" sub="Getting your classes and schedule ready…" />
+  if (loading) return <FullPageLoader portal="teacher" sub="Getting your classes and schedule ready…" />
 
   if (!teacher) return null
 
-  const hour = new Date().getHours()
-  const greeting = hour < 12 ? 'Good Morning' : hour < 17 ? 'Good Afternoon' : 'Good Evening'
-
   return (
-    <FeaturesProvider value={enabledFeatures}>
-    <div className="min-h-screen flex flex-col bg-gray-100">
-      {/* Top bar */}
-      <div className="bg-white border-b border-gray-200 px-4 sm:px-6 py-3 flex items-center justify-between flex-shrink-0 z-30">
-        <div className="flex items-center gap-2 sm:gap-3">
-          <button onClick={() => setSidebarOpen(o => !o)} className="lg:hidden p-1.5 rounded-lg text-gray-500 hover:bg-gray-100 flex-shrink-0">
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" /></svg>
+    <FeaturesProvider value={enabledFeatures ?? new Set()}>
+    <div className="portal-root" data-portal="teacher">
+      <a href="#teacher-content" className="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:bg-white focus:p-3">Skip to content</a>
+      <header className="portal-topbar">
+        <div className="flex min-w-0 items-center gap-3">
+          <button onClick={() => setSidebarOpen(o => !o)} className="portal-icon-button lg:hidden" aria-label="Open navigation" aria-controls="portal-navigation" aria-expanded={sidebarOpen}>
+            <Menu size={20} aria-hidden="true" />
           </button>
-          <nav className="hidden sm:flex items-center gap-1 text-sm text-gray-400">
-            <span>Teacher Portal</span>
-            <span>/</span>
+          <nav className="flex min-w-0 items-center gap-2 text-sm" aria-label="Current location">
+            <span className="hidden shrink-0 font-semibold text-[#235b46] sm:block">Teacher workspace</span>
+            <span className="hidden text-[#a5afa8] sm:block" aria-hidden="true">/</span>
             {activeNav === 'class-view' && selectedClass ? (
               <>
-                <button onClick={() => navigateTo('snapshot')} className="hover:text-emerald-600 transition-colors">Smart Snapshot</button>
-                <span>/</span>
-                <span className="text-gray-700 font-medium">Class {selectedClass.grade}{selectedClass.section}</span>
+                <button onClick={() => navigateTo('snapshot')} className="hidden min-h-10 text-[#647068] hover:text-[#235b46] md:block">Overview</button>
+                <span className="hidden text-[#a5afa8] md:block" aria-hidden="true">/</span>
+                <span className="truncate font-medium text-[#202a25]">Class {selectedClass.grade}{selectedClass.section}</span>
               </>
             ) : (
-              <span className="text-gray-700 font-medium">
-                {NAV_SECTIONS.flatMap(s => s.items).find(i => i.key === activeNav)?.label || 'Smart Snapshot'}
+              <span className="truncate font-medium text-[#202a25]">
+                {NAV_SECTIONS.flatMap(s => s.items).find(i => i.key === activeNav)?.label || 'Overview'}
               </span>
             )}
           </nav>
         </div>
-        <div className="flex items-center gap-2 sm:gap-3">
-          {academicYear && (
-            <span
-              data-testid="academic-year-badge"
-              title="Active academic year — all data on this screen is scoped to this year"
-              className="hidden sm:inline-flex items-center gap-1 bg-gray-100 border border-gray-200 text-gray-500 text-xs font-medium px-2.5 py-1 rounded-full"
-            >
-              📅 {academicYear}
+        <div className="flex shrink-0 items-center gap-2 sm:gap-4">
+          {(selectedAcademicYear || academicYear) && (
+            <span data-testid="academic-year-badge"
+              title={isViewingPastYear
+                ? `Viewing ${selectedAcademicYear} (closed) — read-only. Switch back to ${schoolCurrentYear} in Profile to make changes.`
+                : 'Active academic year — all data on this screen is scoped to this year'}
+              className={`hidden items-center gap-1.5 text-xs sm:inline-flex ${isViewingPastYear ? 'text-amber-800' : 'text-[#647068]'}`}>
+              {isViewingPastYear ? <Eye size={14} aria-hidden="true" /> : <CalendarDays size={14} aria-hidden="true" />}
+              {selectedAcademicYear || academicYear}{isViewingPastYear && <span>· Read only</span>}
             </span>
           )}
-          <p className="hidden sm:block text-sm font-medium text-gray-800">{greeting}, {teacher.name}</p>
           <NotificationBell teacherId={teacher.id} onNavigate={handleNavigate} />
-          <button
-            onClick={handleLogout}
-            className="text-xs text-gray-400 hover:text-red-600 border border-gray-200 hover:border-red-200 px-3 py-1.5 rounded-lg transition flex items-center gap-1.5"
-          >
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
-            Logout
+          <button onClick={handleLogout} className="portal-icon-button text-[#647068] hover:text-red-700" aria-label="Sign out">
+            <LogOut size={18} aria-hidden="true" />
           </button>
         </div>
-      </div>
+      </header>
 
-      <div className="flex flex-1 min-h-0 relative">
-        {sidebarOpen && <div className="fixed inset-0 z-30 bg-black/50 lg:hidden" onClick={() => setSidebarOpen(false)} />}
-
-        <aside className={`fixed inset-y-0 left-0 z-40 lg:relative lg:inset-y-auto lg:left-auto w-52 bg-slate-900 flex-shrink-0 flex flex-col transform transition-transform duration-300 ease-in-out ${sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}>
-          <div className="px-4 py-4 border-b border-slate-700">
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 bg-emerald-600 rounded-lg flex items-center justify-center flex-shrink-0">
-                <span className="text-white text-sm font-bold">W</span>
-              </div>
-              <span className="text-white font-bold text-base">WLYL</span>
-            </div>
-            <p className="text-slate-400 text-xs mt-2 leading-tight">{teacher.school_name}</p>
+      <div className="portal-body">
+        <PortalSidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} label="Teacher navigation" portal="teacher">
+          <div className="portal-identity">
+            <p className="text-base font-semibold tracking-tight text-[#235b46]">WeLearnYouLearn</p>
+            <p className="mt-1 text-xs leading-relaxed text-[#647068]">{teacher.school_name}</p>
           </div>
-
-          <nav className="flex-1 py-3 overflow-y-auto">
+          <nav className="flex-1 overflow-y-auto px-3 py-3" aria-label="Teacher sections">
             {NAV_SECTIONS.map(section => {
-              // Only these nav keys correspond to a school-plan feature gate —
-              // the rest (My Classes, My Students, Syllabus, Profile, Leave)
-              // aren't plan-gated features and always show.
               const visibleItems = section.items.filter(item => {
                 const featureKey = NAV_KEY_TO_FEATURE[item.key]
-                return !featureKey || enabledFeatures.size === 0 || enabledFeatures.has(featureKey)
+                return !featureKey || enabledFeatures === null || enabledFeatures.has(featureKey)
               })
               if (visibleItems.length === 0) return null
               return (
-                <div key={section.label} className="mb-2">
-                  <p className="px-4 py-1.5 text-[10px] font-semibold text-slate-500 uppercase tracking-widest">{section.label}</p>
+                <div key={section.label} className="mb-4">
+                  <p className="portal-nav-label">{section.label}</p>
                   {visibleItems.map(item => (
-                    <button key={item.key}
-                      onClick={() => { if (!item.comingSoon) navigateTo(item.key) }}
-                      className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors text-left ${
-                        item.comingSoon ? 'text-slate-600 cursor-not-allowed'
-                          : activeNav === item.key ? 'bg-emerald-600 text-white'
-                          : 'text-slate-300 hover:bg-slate-800 hover:text-white'
-                      }`}>
-                      {item.icon}
-                      <span>{item.label}</span>
-                      {item.comingSoon && <span className="ml-auto text-[9px] text-slate-600 font-medium">Soon</span>}
+                    <button key={item.key} onClick={() => { if (!item.comingSoon) navigateTo(item.key) }} className="portal-nav-item" aria-current={activeNav === item.key ? 'page' : undefined} disabled={item.comingSoon}>
+                      <span className="shrink-0" aria-hidden="true">{item.icon}</span>
+                      <span className="flex-1">{item.label}</span>
+                      {item.comingSoon && <span className="text-xs">Soon</span>}
                     </button>
                   ))}
                 </div>
               )
             })}
           </nav>
-
-          <div className="px-4 py-4 border-t border-slate-700 flex items-center gap-3">
-            <div className="w-9 h-9 rounded-full bg-emerald-600 flex items-center justify-center text-white font-bold text-sm flex-shrink-0">
-              {teacher.name?.charAt(0)?.toUpperCase() ?? '?'}
-            </div>
-            <div className="min-w-0">
-              <p className="text-white text-xs font-semibold truncate">{teacher.name}</p>
-              <p className="text-slate-400 text-[10px] truncate">
-                {teacher.class_teacher_grade && teacher.class_teacher_section
-                  ? `Class Teacher · Grade ${teacher.class_teacher_grade}`
-                  : teacher.department || 'Teacher'}
-              </p>
+          <div className="portal-account">
+            <div className="flex min-w-0 items-center gap-3">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-[#e6eee8] text-sm font-semibold text-[#235b46]" aria-hidden="true">{teacher.name.charAt(0)}</span>
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium text-[#202a25]">{teacher.name}</p>
+                <p className="mt-0.5 text-xs text-[#647068]">
+                  {teacher.class_teacher_grade && teacher.class_teacher_section
+                    ? `Class teacher · Grade ${teacher.class_teacher_grade}`
+                    : teacher.department || 'Teacher'}
+                </p>
+              </div>
             </div>
           </div>
-        </aside>
+        </PortalSidebar>
 
-        <main className="flex-1 overflow-y-auto p-3 sm:p-6">
+        <main id="teacher-content" tabIndex={-1} className="portal-main">
+          <div className="mx-auto w-full max-w-7xl">
           {visitedNav.has('snapshot')       && <div hidden={activeNav !== 'snapshot'}><SmartSnapshot teacher={teacher} schoolId={teacher.school_id} onNavigate={navigateTo} onViewClass={cls => { setSelectedClass(cls); navigateTo('class-view') }} /></div>}
           {visitedNav.has('class-view') && selectedClass && <div hidden={activeNav !== 'class-view'}><ClassView key={selectedClass.id} classId={selectedClass.id} grade={selectedClass.grade} section={selectedClass.section} schoolId={teacher.school_id} teacherName={teacher.name} teacherId={teacher.id} isClassTeacher={teacher.class_teacher_grade === selectedClass.grade && teacher.class_teacher_section === selectedClass.section} teacher={{ id: teacher.id, name: teacher.name, subject: teacher.subject, department: teacher.department, class_teacher_grade: teacher.class_teacher_grade, class_teacher_section: teacher.class_teacher_section }} onBack={() => navigateTo('snapshot')} initialTab={classViewInitialTab} openExamId={classViewOpenExamId} /></div>}
-          {visitedNav.has('timetable')      && <div hidden={activeNav !== 'timetable'}><FullTimetable teacherId={teacher.id} schoolId={teacher.school_id} /></div>}
           {visitedNav.has('attendance')     && <div hidden={activeNav !== 'attendance'}><Attendance teacherId={teacher.id} schoolId={teacher.school_id} /></div>}
-          {visitedNav.has('leave')          && <div hidden={activeNav !== 'leave'}><TeacherLeave teacherId={teacher.id} schoolId={teacher.school_id} /></div>}
-          {visitedNav.has('profile')        && <div hidden={activeNav !== 'profile'}><TeacherProfile teacher={teacher} onUpdate={setTeacher as (t: unknown) => void} /></div>}
+          {visitedNav.has('calendar')       && <div hidden={activeNav !== 'calendar'}><SchoolCalendarView /></div>}
+          {visitedNav.has('profile')        && <div hidden={activeNav !== 'profile'}><TeacherProfile teacher={teacher} onUpdate={setTeacher as (t: unknown) => void} availableYears={availableYears} selectedAcademicYear={selectedAcademicYear} schoolCurrentYear={schoolCurrentYear} onSelectYear={setSelectedAcademicYear} /></div>}
           {visitedNav.has('my-classes')     && <div hidden={activeNav !== 'my-classes'}><MyClasses teacher={{ id: teacher.id, name: teacher.name, subject: teacher.subject, department: teacher.department, class_teacher_grade: teacher.class_teacher_grade, class_teacher_section: teacher.class_teacher_section }} schoolId={teacher.school_id} onViewClass={cls => { setSelectedClass(cls); navigateTo('class-view') }} onGoToSyllabus={cls => handleNavigate('class-view', { classId: cls.id, tab: 'Syllabus' })} /></div>}
           {visitedNav.has('my-students')    && <div hidden={activeNav !== 'my-students'}><MyStudents teacher={{ id: teacher.id, name: teacher.name, subject: teacher.subject, department: teacher.department, class_teacher_grade: teacher.class_teacher_grade, class_teacher_section: teacher.class_teacher_section }} schoolId={teacher.school_id} /></div>}
-          {visitedNav.has('syllabus')       && <div hidden={activeNav !== 'syllabus'}><TeacherSyllabus teacher={{ id: teacher.id, name: teacher.name, subject: teacher.subject, department: teacher.department, class_teacher_grade: teacher.class_teacher_grade, class_teacher_section: teacher.class_teacher_section }} schoolId={teacher.school_id} onGoToHomework={classId => handleNavigate('class-view', { classId, tab: 'Homework' })} /></div>}
-          {visitedNav.has('library')        && <div hidden={activeNav !== 'library'}><DigitalLibrary apiUrl={`/api/school/library?school_id=${teacher.school_id}`} /></div>}
+          {visitedNav.has('syllabus')       && <div hidden={activeNav !== 'syllabus'}><TeacherSyllabus teacher={{ id: teacher.id, name: teacher.name, subject: teacher.subject, department: teacher.department, class_teacher_grade: teacher.class_teacher_grade, class_teacher_section: teacher.class_teacher_section }} schoolId={teacher.school_id} academicYear={selectedAcademicYear} readOnly={isViewingPastYear} /></div>}
+          {visitedNav.has('library')        && <div hidden={activeNav !== 'library'}><TeacherLibrary teacher={{ id: teacher.id, class_teacher_grade: teacher.class_teacher_grade, class_teacher_section: teacher.class_teacher_section }} schoolId={teacher.school_id} /></div>}
+          </div>
         </main>
       </div>
     </div>
     </FeaturesProvider>
+  )
+}
+
+export default function TeacherPortalPage() {
+  return (
+    <Suspense>
+      <TeacherPortal />
+    </Suspense>
   )
 }

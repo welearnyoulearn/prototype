@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import StudentDetail from './StudentDetail'
+import { InlineLoader } from '@/components/loaders'
 
 type Teacher = {
   id: number
@@ -70,8 +71,7 @@ export default function MyStudents({ teacher, schoolId }: Props) {
         if (cls) classMap.set(`${cls.grade}-${cls.section}`, cls)
       }
       // Class Management's class_subjects assignment — same source used by
-      // Syllabus/My Classes, not the timetable (a class is "theirs" the
-      // moment it's assigned, with or without a timetable existing).
+      // Syllabus/My Classes (a class is "theirs" the moment it's assigned).
       classSubjects.forEach((a: ClassSubjectAssignment) => {
         if (!a.grade || !a.section) return
         const key = `${a.grade}-${a.section}`
@@ -121,9 +121,7 @@ export default function MyStudents({ teacher, schoolId }: Props) {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-      </div>
+      <InlineLoader portal="teacher" label="Loading your classes…" size="lg" className="min-h-64" />
     )
   }
 
@@ -137,7 +135,7 @@ export default function MyStudents({ teacher, schoolId }: Props) {
             </svg>
           </div>
           <h3 className="text-lg font-semibold text-gray-700 mb-2">No Class Assignments</h3>
-          <p className="text-gray-400 text-sm">Ask your school admin to assign you a subject in Class Management.</p>
+          <p className="text-muted-foreground text-sm">Ask your school admin to assign you a subject in Class Management.</p>
         </div>
       </div>
     )
@@ -173,7 +171,7 @@ export default function MyStudents({ teacher, schoolId }: Props) {
       </div>
 
       {classes.length > 1 && (
-        <div className="bg-white rounded-xl border border-gray-200 px-4 py-3 flex items-center gap-3">
+        <div className="bg-white rounded-md border border-gray-200 px-4 py-3 flex items-center gap-3">
           <span className="text-sm font-medium text-gray-600 flex-shrink-0">Class</span>
           <div className="flex gap-2 flex-wrap">
             {classes.map(cls => (
@@ -189,14 +187,14 @@ export default function MyStudents({ teacher, schoolId }: Props) {
       )}
 
       {selectedClass && !isClassTeacher && (
-        <div className="bg-white rounded-xl border border-gray-200 py-16 text-center">
+        <div className="bg-white rounded-md border border-gray-200 py-16 text-center">
           <div className="w-16 h-16 bg-blue-50 rounded-full flex items-center justify-center mx-auto mb-4">
             <svg className="w-8 h-8 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
             </svg>
           </div>
           <h3 className="text-base font-semibold text-gray-700 mb-1">Student list is restricted</h3>
-          <p className="text-gray-400 text-sm max-w-sm mx-auto">
+          <p className="text-muted-foreground text-sm max-w-sm mx-auto">
             Only the class teacher can view the full student list for {selectedClass.grade}-{selectedClass.section}.
             {selectedClass.class_teacher_name
               ? ` Contact ${selectedClass.class_teacher_name} if you need student details.`
@@ -206,13 +204,11 @@ export default function MyStudents({ teacher, schoolId }: Props) {
       )}
 
       {selectedClass && isClassTeacher && (
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <div className="bg-white rounded-md border border-gray-200 overflow-hidden">
           {studentsLoading ? (
-            <div className="flex items-center justify-center py-16">
-              <div className="w-5 h-5 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-            </div>
+            <InlineLoader portal="teacher" label="Loading students…" className="py-16" />
           ) : filtered.length === 0 ? (
-            <div className="text-center py-16 text-gray-400">
+            <div className="text-center py-16 text-muted-foreground">
               {searchQ ? 'No students match your search' : 'No students enrolled in this class'}
             </div>
           ) : (
@@ -225,7 +221,7 @@ export default function MyStudents({ teacher, schoolId }: Props) {
                 ].map(item => (
                   <div key={item.label} className="px-6 py-3 text-center">
                     <p className={`text-xl font-bold ${item.cls}`}>{item.val}</p>
-                    <p className="text-xs text-gray-400">{item.label}</p>
+                    <p className="text-xs text-muted-foreground">{item.label}</p>
                   </div>
                 ))}
               </div>
@@ -236,24 +232,24 @@ export default function MyStudents({ teacher, schoolId }: Props) {
                     className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-gray-50 transition-colors group"
                     onClick={() => openDetail(s)}
                   >
-                    <span className="text-xs text-gray-400 w-6 text-right flex-shrink-0">{idx + 1}</span>
-                    <div className="w-9 h-9 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-white text-sm font-bold flex-shrink-0">
+                    <span className="text-xs text-muted-foreground w-6 text-right flex-shrink-0">{idx + 1}</span>
+                    <div className="w-9 h-9 rounded-full bg-[#d9e9e7] text-[#164749] flex items-center justify-center text-sm font-bold flex-shrink-0">
                       {s.name.charAt(0).toUpperCase()}
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold text-gray-900">{s.name}</p>
-                      <p className="text-xs text-gray-400">{s.roll_number || 'No roll no.'}{s.email ? ` · ${s.email}` : ''}</p>
+                      <p className="text-xs text-muted-foreground">{s.roll_number || 'No roll no.'}{s.email ? ` · ${s.email}` : ''}</p>
                     </div>
                     {isClassTeacher && s.parent_phone && (
                       <a href={`tel:${s.parent_phone}`} onClick={e => e.stopPropagation()}
-                        className="text-xs text-gray-400 hover:text-blue-600 flex items-center gap-1 flex-shrink-0">
+                        className="text-xs text-muted-foreground hover:text-blue-600 flex items-center gap-1 flex-shrink-0">
                         <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
                         </svg>
                         {s.parent_phone}
                       </a>
                     )}
-                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium flex-shrink-0 ${s.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0 ${s.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
                       {s.status}
                     </span>
                     <svg className="w-4 h-4 text-gray-300 group-hover:text-gray-500 flex-shrink-0 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">

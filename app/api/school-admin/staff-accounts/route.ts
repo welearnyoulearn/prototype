@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
-import { getSession, hashPassword, generateTempPassword } from '@/lib/auth'
-import { sendMail } from '@/lib/email'
+import { getSession, hashPassword, generateTempPassword, generateResetToken, revokeUserSessions } from '@/lib/auth'
+import { sendStaffInviteEmail } from '@/lib/email'
+import { INVITE_LINK_HOURS } from '@/lib/staffInvite'
 
 const SCHOOL_ROLES = ['school_admin', 'principal', 'vice_principal']
 
@@ -99,8 +100,9 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      const tempPassword = generateTempPassword(10)
-      const passwordHash = await hashPassword(tempPassword)
+      // The account starts with a random password nobody knows; the invitee sets their
+      // own through a one-time link, so no usable password is ever emailed.
+      const passwordHash = await hashPassword(generateTempPassword(24))
 
       const schoolResult = await pool.query('SELECT name FROM schools WHERE id = $1', [schoolId])
       const schoolName = schoolResult.rows[0]?.name || 'Your School'
@@ -112,24 +114,22 @@ export async function POST(req: NextRequest) {
         [full_name.trim(), email.trim().toLowerCase(), passwordHash, role, schoolId]
       )
 
+      const token = generateResetToken()
+      await pool.query(
+        `INSERT INTO password_reset_tokens (user_id, token, expires_at)
+         VALUES ($1, $2, NOW() + make_interval(hours => $3))`,
+        [result.rows[0].id, token, INVITE_LINK_HOURS]
+      )
+
       const appUrl = process.env.APP_URL || 'http://localhost:3000'
-      sendMail(
-        email.trim(),
-        `Your WLYL ${roleLabel} Access — ${schoolName}`,
-        `<div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:24px">
-          <h2 style="color:#2563eb">Welcome to WLYL School Portal</h2>
-          <p>Hi <strong>${full_name}</strong>,</p>
-          <p>You've been added as <strong>${roleLabel}</strong> of <strong>${schoolName}</strong>.</p>
-          <div style="background:#eff6ff;border:1.5px solid #bfdbfe;border-radius:10px;padding:18px;margin:20px 0">
-            <p style="margin:0 0 8px;font-size:13px;color:#1d4ed8;font-weight:700;text-transform:uppercase;letter-spacing:.5px">Login Credentials</p>
-            <p style="margin:4px 0;font-size:13px"><strong>URL:</strong> <a href="${appUrl}/login?role=school">${appUrl}/login?role=school</a></p>
-            <p style="margin:4px 0;font-size:13px"><strong>Email:</strong> ${email.trim().toLowerCase()}</p>
-            <p style="margin:4px 0;font-size:13px"><strong>Temp Password:</strong> <code style="background:#dbeafe;padding:2px 8px;border-radius:4px;font-size:14px">${tempPassword}</code></p>
-          </div>
-          <p style="color:#dc2626;font-size:13px">⚠ You will be asked to change this password on your first login.</p>
-          <a href="${appUrl}/login?role=school" style="display:inline-block;background:#2563eb;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600;margin-top:8px">Login Now</a>
-        </div>`
-      ).catch(console.error)
+      sendStaffInviteEmail({
+        to: email.trim().toLowerCase(),
+        name: full_name.trim(),
+        roleLabel,
+        schoolName,
+        inviteUrl: `${appUrl}/reset-password?token=${token}`,
+        hours: INVITE_LINK_HOURS,
+      }).catch(console.error)
 
       return NextResponse.json(result.rows[0], { status: 201 })
     } catch (error) {
@@ -178,10 +178,12 @@ export async function DELETE(req: NextRequest) {
       if (id === session.userId) {
         return NextResponse.json({ error: 'Cannot deactivate your own account' }, { status: 400 })
       }
-      await pool.query(
+      const { rowCount } = await pool.query(
         `UPDATE users SET status = 'inactive' WHERE id = $1 AND school_id = $2`,
         [id, session.schoolId]
       )
+      // Take effect immediately — don't leave an open session running.
+      if (rowCount) await revokeUserSessions(id)
       return NextResponse.json({ success: true })
     } catch (error) {
       console.error('[school-admin/staff-accounts DELETE]', error)

@@ -9,7 +9,7 @@ export class HomePage {
 
   async expectVisible() {
     await expect(this.page.getByText('WeLearnYouLearn', { exact: true })).toBeVisible()
-    await expect(this.page.getByText('Smart School')).toBeVisible()
+    await expect(this.page.getByRole('heading', { name: 'Choose your workspace.' })).toBeVisible()
   }
 
   async expectAllPortalCards() {

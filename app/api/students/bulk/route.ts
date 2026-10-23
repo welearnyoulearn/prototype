@@ -2,14 +2,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 import { invalidateCache } from '@/lib/responseCache'
 import { hashPassword, generateTempPassword, requireSchoolAdmin, schoolHasFeature } from '@/lib/auth'
-import { sendStudentWelcomeEmail, sendParentWelcomeEmail } from '@/lib/email'
-import { findOrCreateParent, linkStudentParent } from '@/lib/studentOnboarding'
-
-function generateStudentId(schoolName: string): string {
-  const slug = schoolName.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 10)
-  const num = Math.floor(10000 + Math.random() * 90000)
-  return `wlyl-stu-${slug}-${num}`
-}
+import { sendStudentWelcomeEmail, sendParentWelcomeEmail, sendChildCredentialsToParentEmail } from '@/lib/email'
+import { sendWhatsappMessage } from '@/lib/whatsapp'
+import { findOrCreateParent, linkStudentParent, generateStudentId } from '@/lib/studentOnboarding'
+import { isValidName, NAME_INVALID_MESSAGE } from '@/lib/nameValidation'
 
 export async function POST(req: NextRequest) {
   await ensureDB()
@@ -42,8 +38,10 @@ export async function POST(req: NextRequest) {
     for (let i = 0; i < students.length; i++) {
       const s = students[i]
       if (!s.name?.trim()) { errors.push({ row: i + 1, message: 'Name is required' }); continue }
+      if (!isValidName(s.name)) { errors.push({ row: i + 1, message: `Name: ${NAME_INVALID_MESSAGE}` }); continue }
       if (!s.section?.trim()) { errors.push({ row: i + 1, message: 'Section is required' }); continue }
       if (!s.parent_name?.trim()) { errors.push({ row: i + 1, message: 'Parent name is required' }); continue }
+      if (!isValidName(s.parent_name)) { errors.push({ row: i + 1, message: `Parent Name: ${NAME_INVALID_MESSAGE}` }); continue }
       if (!s.parent_phone?.trim()) { errors.push({ row: i + 1, message: 'Parent phone is required' }); continue }
 
       const schoolRollRaw = s.school_roll_number ?? s.roll_no
@@ -196,6 +194,12 @@ export async function POST(req: NextRequest) {
       const insertedStudents = insertedRes.rows
 
       const processedParentIds = new Map<string, number>()
+      // Resolved parent contact per row (index-aligned with toInsert), so the
+      // "send child's credentials to parent" step below can mail the parent's
+      // real account address rather than assuming it equals this row's
+      // parent_email — an existing parent's actual email can differ (typo on
+      // this row, or the parent's email was set on an earlier sibling's row).
+      const resolvedParentContact: ({ email: string | null; phone: string | null; name: string | null } | null)[] = []
 
       for (let i = 0; i < toInsert.length; i++) {
         const s = toInsert[i]
@@ -203,7 +207,7 @@ export async function POST(req: NextRequest) {
         const pe = s.parent_email?.trim() || null
         const pp = s.parent_phone?.trim() || null
         const pn = s.parent_name?.trim() || null
-        if (!pe && !pp) continue
+        if (!pe && !pp) { resolvedParentContact.push(null); continue }
 
         // Even when parent-portal is disabled, still link to an existing parent
         // (e.g. a sibling onboarded earlier while the flag was on) — only suppress
@@ -215,6 +219,14 @@ export async function POST(req: NextRequest) {
 
         if (match) {
           await linkStudentParent(client, student.id, match.parentId)
+          const parentRow = await client.query('SELECT email, phone, name FROM parents WHERE id = $1', [match.parentId])
+          resolvedParentContact.push({
+            email: parentRow.rows[0]?.email || null,
+            phone: parentRow.rows[0]?.phone || null,
+            name: parentRow.rows[0]?.name || null,
+          })
+        } else {
+          resolvedParentContact.push(null)
         }
       }
 
@@ -251,6 +263,17 @@ export async function POST(req: NextRequest) {
         })
       }
 
+      // needsNewParent[i] is true independently for every row that doesn't
+      // match an EXISTING (pre-batch) parent — it does not dedupe siblings
+      // within this same batch, since findOrCreateParent's own
+      // processedParentIds cache is what does that dedup, one level down.
+      // Two siblings sharing a parent therefore both have needsNewParent
+      // true, but only the first one processed actually gets its
+      // parentTempPasswords[i] hashed and persisted (findOrCreateParent only
+      // creates the row once) — sending the welcome email again per sibling
+      // would hand out a second, never-saved password that doesn't work.
+      // Dedupe the same way parentCredentials already does below.
+      const parentWelcomeSent = new Set<string>()
       for (let i = 0; i < toInsert.length; i++) {
         const s = toInsert[i]
         const student = insertedStudents[i]
@@ -261,12 +284,66 @@ export async function POST(req: NextRequest) {
             loginUrl: `${appUrl}/student/login`,
           }).catch(console.error)
         }
-        if (parentPortalEnabled && needsNewParent[i] && s.parent_email?.trim()) {
-          sendParentWelcomeEmail({
-            to: s.parent_email.trim(), parentName: s.parent_name?.trim() || s.parent_email.trim(),
-            studentName: s.name.trim(), schoolName,
-            tempPassword: parentTempPasswords[i], loginUrl: `${appUrl}/parent/login`,
+        if (studentPortalEnabled && s.phone?.trim()) {
+          sendWhatsappMessage({
+            schoolId: school_id, to: s.phone.trim(), templateName: 'student_credentials', recipientName: s.name.trim(),
+            templateParams: {
+              student_name: s.name.trim(), school_name: schoolName, login: student.roll_number,
+              temp_password: studentTempPasswords[i], login_url: `${appUrl}/student/login`,
+            },
           }).catch(console.error)
+        }
+        if (parentPortalEnabled && needsNewParent[i] && (s.parent_email?.trim() || s.parent_phone?.trim())) {
+          const pe = s.parent_email?.trim() || null
+          const pp = s.parent_phone?.trim() || null
+          const key = pe ? `email:${pe.toLowerCase()}` : `phone:${pp}`
+          if (!parentWelcomeSent.has(key)) {
+            parentWelcomeSent.add(key)
+            const displayName = s.parent_name?.trim() || pe || pp || 'there'
+            if (pe) {
+              sendParentWelcomeEmail({
+                to: pe, parentName: displayName,
+                studentName: s.name.trim(), schoolName,
+                tempPassword: parentTempPasswords[i], loginUrl: `${appUrl}/parent/login`,
+              }).catch(console.error)
+            }
+            if (pp) {
+              sendWhatsappMessage({
+                schoolId: school_id, to: pp, templateName: 'parent_credentials', recipientName: displayName,
+                templateParams: {
+                  parent_name: displayName, student_name: s.name.trim(), school_name: schoolName,
+                  login: pe || pp, temp_password: parentTempPasswords[i], login_url: `${appUrl}/parent/login`,
+                },
+              }).catch(console.error)
+            }
+          }
+        }
+        // Parent always gets a copy of their child's own student-portal
+        // credentials too, regardless of whether the student has their own
+        // email and regardless of whether this parent is new or pre-existing.
+        const parentContact = resolvedParentContact[i]
+        if (studentPortalEnabled && studentTempPasswords[i] && parentContact) {
+          const parentDisplayName = parentContact.name || s.parent_name?.trim() || parentContact.email || parentContact.phone || 'there'
+          if (parentContact.email) {
+            sendChildCredentialsToParentEmail({
+              to: parentContact.email,
+              parentName: parentDisplayName,
+              studentName: s.name.trim(),
+              schoolName,
+              rollNumber: student.roll_number,
+              tempPassword: studentTempPasswords[i],
+              loginUrl: `${appUrl}/student/login`,
+            }).catch(console.error)
+          }
+          if (parentContact.phone) {
+            sendWhatsappMessage({
+              schoolId: school_id, to: parentContact.phone, templateName: 'student_credentials', recipientName: parentDisplayName,
+              templateParams: {
+                student_name: s.name.trim(), school_name: schoolName, login: student.roll_number,
+                temp_password: studentTempPasswords[i], login_url: `${appUrl}/student/login`,
+              },
+            }).catch(console.error)
+          }
         }
       }
 

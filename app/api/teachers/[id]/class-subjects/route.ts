@@ -7,7 +7,7 @@ import { getTeacherSession, requireFeeAccess } from '@/lib/auth'
 // The single source of truth for what a teacher is allowed to see in the
 // Syllabus tab of the teacher portal: every (class, subject) pair they were
 // explicitly assigned via Class Management's class_subjects table — not the
-// looser "any class you have a timetable slot in" logic used previously.
+// looser heuristic used previously.
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params

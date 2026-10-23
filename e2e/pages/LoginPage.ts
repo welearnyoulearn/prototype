@@ -8,7 +8,7 @@ export class AdminLoginPage {
   }
 
   async login(identifier: string, password: string) {
-    await this.page.getByTestId('auth-school-id-or-email-input').fill(identifier)
+    await this.page.getByTestId('auth-email-address-input').fill(identifier)
     await this.page.getByTestId('auth-password-input').fill(password)
     await this.page.getByTestId('auth-submit-btn').click()
   }

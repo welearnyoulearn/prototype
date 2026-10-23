@@ -9,10 +9,10 @@ export async function GET() {
 
     // MyClasses builds a class teacher's own class from class_teacher_grade/section,
     // so the classes join has to be here — without it they only see classes they
-    // happen to have timetable slots for.
+    // happen to be scheduled in.
     const result = await pool.query(
       `SELECT t.id, t.name, t.email, t.subject, t.department, t.employee_id,
-              t.school_id, t.staff_type, t.password_changed,
+              t.school_id, t.staff_type, t.password_changed, t.date_of_birth,
               s.name AS school_name, s.city AS school_city,
               c.id AS class_id,
               c.grade AS class_teacher_grade,

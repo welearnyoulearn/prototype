@@ -2,16 +2,23 @@ import { NextRequest, NextResponse } from 'next/server'
 import { schoolHasFeature, getAnySession, getPlatformSession } from '@/lib/auth'
 import { ALL_FEATURES, Portal } from '@/lib/features'
 
-const VALID_PORTALS: Portal[] = ['school-admin', 'student', 'parent']
+const VALID_PORTALS: Portal[] = ['school-admin', 'student', 'parent', 'teacher']
 
 // GET /api/school/enabled-features?school_id=X&portal=student
 // Returns the feature keys enabled for this school that also apply to the
 // given portal (ALL_FEATURES[i].portals includes it) — checked via
 // schoolHasFeature, so per-school overrides win over the tier default, same
 // precedence every other feature-gated route already uses. This is the one
-// place Student/Parent portal nav-filtering reads from; school-admin keeps
-// using /api/platform/features?tier= for now (tier-only, no override), since
-// changing that would be a separate, wider behavior change.
+// place Student/Parent/Teacher portal nav-filtering reads from; school-admin
+// keeps using /api/platform/features?tier= for now (tier-only, no override),
+// since changing that would be a separate, wider behavior change.
+//
+// Teacher previously read a separate tier-only endpoint that ignored
+// school_feature_overrides and, worse, silently left every feature "enabled"
+// whenever the school's tier was 'none' or the fetch simply hadn't resolved
+// yet — see the fix in app/teacher/page.tsx. Routing through here instead
+// gives the teacher portal the same override-aware, fail-closed-on-'none'
+// behavior student/parent already had.
 export async function GET(req: NextRequest) {
   const schoolId = Number(req.nextUrl.searchParams.get('school_id'))
   const portal = req.nextUrl.searchParams.get('portal') as Portal | null

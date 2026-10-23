@@ -2,8 +2,8 @@ const BASE = 'http://localhost:3000'
 
 export type TestCredentials = {
   platformAdmin: { email: string; password: string }
-  school: { id: number; name: string; code: string; tempPassword: string }
-  schoolAdmin: { identifier: string; password: string; schoolId: number }
+  school: { id: number; name: string; code: string; adminEmail: string; tempPassword: string }
+  schoolAdmin: { email: string; password: string; schoolId: number }
   teacher: { id: number; name: string; email: string; employeeId: string; schoolCode: string }
   student: { id: number; name: string; rollNumber: string }
   parent: { email: string }
@@ -33,16 +33,16 @@ async function apiWithCookie(path: string, cookie: string, body?: object) {
   return { status: res.status, data: await res.json(), setCookie }
 }
 
-async function loginAndGetCookie(identifier: string, password: string): Promise<string> {
+async function loginAndGetCookie(email: string, password: string): Promise<string> {
   const res = await fetch(`${BASE}/api/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ identifier, password }),
+    body: JSON.stringify({ email, password }),
     redirect: 'manual',
   })
   const cookies = res.headers.getSetCookie?.() ?? []
   const authCookie = cookies.find(c => c.startsWith('wlyl-auth='))
-  if (!authCookie) throw new Error(`Login failed for ${identifier}: ${await res.text()}`)
+  if (!authCookie) throw new Error(`Login failed for ${email}: ${await res.text()}`)
   return authCookie.split(';')[0]
 }
 
@@ -75,6 +75,7 @@ export async function seedTestData(): Promise<TestCredentials> {
     id: schoolData.id,
     name: schoolData.name,
     code: schoolData.school_code,
+    adminEmail: schoolData.email,
     tempPassword: schoolData.temp_password,
   }
   console.log(`[seed] Created school: ${school.name} (code: ${school.code})`)
@@ -88,7 +89,7 @@ export async function seedTestData(): Promise<TestCredentials> {
   console.log('[seed] Set school plan to premium')
 
   // 4. Login as school admin to create teacher + student
-  const adminCookie = await loginAndGetCookie(school.code, school.tempPassword)
+  const adminCookie = await loginAndGetCookie(school.adminEmail, school.tempPassword)
   console.log('[seed] Logged in as school admin')
 
   // 5. Create a class
@@ -133,7 +134,7 @@ export async function seedTestData(): Promise<TestCredentials> {
   const creds: TestCredentials = {
     platformAdmin: { email: 'test-platform@wlyl.com', password: KNOWN_PASSWORD },
     school: school,
-    schoolAdmin: { identifier: school.code, password: school.tempPassword, schoolId: school.id },
+    schoolAdmin: { email: school.adminEmail, password: school.tempPassword, schoolId: school.id },
     teacher: {
       id: teacher.id,
       name: teacher.name,

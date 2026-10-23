@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 import { requireSchoolAdmin, generateTempPassword, hashPassword } from '@/lib/auth'
-import { sendStudentWelcomeEmail } from '@/lib/email'
+import { sendStudentWelcomeEmail, sendChildCredentialsToParentEmail } from '@/lib/email'
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   await ensureDB()
@@ -43,6 +43,24 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (student.email) {
     sendStudentWelcomeEmail({
       to: student.email, name: student.name, schoolName: student.school_name,
+      rollNumber: student.roll_number, tempPassword,
+      loginUrl: `${appUrl}/student/login`,
+    }).catch(console.error)
+  }
+
+  // Parent always gets a copy too — looked up via student_parents (the real
+  // link table), not the students.parent_email display column, since that
+  // column can silently diverge from the parent's actual login email.
+  const parentRes = await pool.query(
+    `SELECT p.email, p.name FROM student_parents sp
+     JOIN parents p ON p.id = sp.parent_id
+     WHERE sp.student_id = $1 AND p.email IS NOT NULL`,
+    [studentId]
+  )
+  for (const parent of parentRes.rows) {
+    sendChildCredentialsToParentEmail({
+      to: parent.email, parentName: parent.name || parent.email,
+      studentName: student.name, schoolName: student.school_name,
       rollNumber: student.roll_number, tempPassword,
       loginUrl: `${appUrl}/student/login`,
     }).catch(console.error)

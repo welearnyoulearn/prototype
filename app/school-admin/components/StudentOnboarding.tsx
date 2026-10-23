@@ -2,6 +2,7 @@
 
 import { useRef, useState, useEffect, useCallback, useMemo } from 'react'
 import { parseCSV } from '@/lib/parseCSV'
+import { isValidName, NAME_INVALID_MESSAGE } from '@/lib/nameValidation'
 
 type Props = { schoolId: number; onRefresh?: () => void }
 
@@ -262,11 +263,14 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
     const missing: string[] = []
     valid.forEach((r, i) => {
       if (!r.last_name.trim())    missing.push(`Row ${i + 1}: Last Name is required`)
+      else if (!isValidName(r.last_name)) missing.push(`Row ${i + 1}: Last Name — ${NAME_INVALID_MESSAGE}`)
       if (!r.first_name.trim())   missing.push(`Row ${i + 1}: First Name is required`)
+      else if (!isValidName(r.first_name)) missing.push(`Row ${i + 1}: First Name — ${NAME_INVALID_MESSAGE}`)
       if (r.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(r.email.trim())) missing.push(`Row ${i + 1}: Invalid student email`)
       if (r.parent_email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(r.parent_email.trim())) missing.push(`Row ${i + 1}: Invalid parent email`)
       if (!r.grade.trim())        missing.push(`Row ${i + 1}: Grade is required`)
       if (!r.parent_name.trim())  missing.push(`Row ${i + 1}: Parent Name is required`)
+      else if (!isValidName(r.parent_name)) missing.push(`Row ${i + 1}: Parent Name — ${NAME_INVALID_MESSAGE}`)
       if (!r.parent_phone.trim()) missing.push(`Row ${i + 1}: Parent Phone is required`)
       if (!r.school_roll_number.trim()) missing.push(`Row ${i + 1}: Roll No is required`)
       else if (!/^\d+$/.test(r.school_roll_number.trim()) || parseInt(r.school_roll_number.trim()) <= 0)
@@ -374,11 +378,11 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
             <p className="text-sm text-gray-500 mt-0.5">Bulk enroll students — parent phone required, emails optional</p>
           </div>
           {studentCount !== null && (
-            <div className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-xl px-4 py-2">
-              <span className="text-2xl font-black text-green-600">{studentCount}</span>
+            <div className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-md px-4 py-2">
+              <span className="text-2xl font-semibold text-green-600">{studentCount}</span>
               <div>
                 <p className="text-xs font-semibold text-green-700 leading-none">Students</p>
-                <button onClick={fetchStudentCount} className="text-[10px] text-green-400 hover:text-green-600">refresh</button>
+                <button onClick={fetchStudentCount} className="text-xs text-green-400 hover:text-green-600">refresh</button>
               </div>
             </div>
           )}
@@ -401,15 +405,15 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
               View Credentials
             </button>
           )}
-          <input ref={fileRef} type="file" accept=".csv,.txt,.xlsx" onChange={handleFileImport} className="hidden" />
-          <button onClick={downloadTemplate} title="Download Excel template"
+          <input ref={fileRef} type="file" accept=".csv,.txt,.xlsx" onChange={handleFileImport} className="hidden" data-testid="student-import-file-input" />
+          <button onClick={downloadTemplate} title="Download Excel template" data-testid="student-import-template-btn"
             className="flex items-center gap-2 px-3 py-1.5 border border-gray-200 text-gray-600 rounded-lg text-sm hover:bg-gray-50 transition-colors">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
             </svg>
             Template
           </button>
-          <button onClick={() => fileRef.current?.click()}
+          <button onClick={() => fileRef.current?.click()} data-testid="student-import-csv-btn"
             className="flex items-center gap-2 px-3 py-1.5 border border-gray-200 text-gray-600 rounded-lg text-sm hover:bg-gray-50 transition-colors">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
@@ -439,7 +443,7 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
 
       {dupRollError && (
         <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-xl border border-red-200 max-w-md w-full mx-4 p-6">
+          <div className="bg-white rounded-md shadow-xl border border-red-200 max-w-md w-full mx-4 p-6">
             <div className="flex items-start gap-3 mb-4">
               <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center flex-shrink-0">
                 <svg className="w-5 h-5 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -462,20 +466,20 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
       {/* Duplicate preview modal */}
       {showDupPreview && dupPreview && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 px-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg">
+          <div className="bg-white rounded-lg shadow-2xl w-full max-w-lg">
             <div className="px-6 py-5 border-b border-gray-200">
               <h3 className="text-lg font-bold text-gray-900">Students Already Exist</h3>
               <div className="flex gap-4 mt-3">
-                <div className="flex-1 bg-green-50 rounded-xl px-4 py-3 text-center">
-                  <p className="text-2xl font-black text-green-600">{dupPreview.new_count}</p>
+                <div className="flex-1 bg-green-50 rounded-md px-4 py-3 text-center">
+                  <p className="text-2xl font-semibold text-green-600">{dupPreview.new_count}</p>
                   <p className="text-xs text-green-700 font-medium mt-0.5">New</p>
                 </div>
-                <div className="flex-1 bg-amber-50 rounded-xl px-4 py-3 text-center">
-                  <p className="text-2xl font-black text-amber-600">{dupPreview.existing_count}</p>
+                <div className="flex-1 bg-amber-50 rounded-md px-4 py-3 text-center">
+                  <p className="text-2xl font-semibold text-amber-600">{dupPreview.existing_count}</p>
                   <p className="text-xs text-amber-700 font-medium mt-0.5">Already Exist</p>
                 </div>
-                <div className="flex-1 bg-gray-50 rounded-xl px-4 py-3 text-center">
-                  <p className="text-2xl font-black text-gray-600">{dupPreview.new_count + dupPreview.existing_count}</p>
+                <div className="flex-1 bg-gray-50 rounded-md px-4 py-3 text-center">
+                  <p className="text-2xl font-semibold text-gray-600">{dupPreview.new_count + dupPreview.existing_count}</p>
                   <p className="text-xs text-gray-500 font-medium mt-0.5">Total Detected</p>
                 </div>
               </div>
@@ -532,7 +536,7 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
             <div className="flex gap-2 flex-shrink-0">
               {hasCredentials && (
                 <button onClick={() => setShowCredentials(true)}
-                  className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg text-xs font-medium">
+                  className="bg-primary hover:bg-primary/90 text-white px-3 py-1.5 rounded-lg text-xs font-medium">
                   View Credentials
                 </button>
               )}
@@ -548,7 +552,7 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
       {/* Credentials modal */}
       {showCredentials && result && (
         <div className="fixed inset-0 bg-black/50 flex items-start justify-center z-50 overflow-y-auto py-8 px-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl">
+          <div className="bg-white rounded-lg shadow-2xl w-full max-w-3xl">
             <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
               <div>
                 <h3 className="text-lg font-bold text-gray-900">Enrollment Complete — Credentials</h3>
@@ -559,13 +563,13 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
                   className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${copiedAll ? 'bg-green-100 text-green-700' : 'border border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
                   {copiedAll ? '✓ Copied!' : 'Copy All'}
                 </button>
-                <button onClick={() => { setShowCredentials(false); onRefresh?.() }} className="text-gray-400 hover:text-gray-600 text-2xl leading-none px-1">×</button>
+                <button onClick={() => { setShowCredentials(false); onRefresh?.() }} className="text-muted-foreground hover:text-gray-600 text-2xl leading-none px-1">×</button>
               </div>
             </div>
 
             <div className="px-6 py-4 space-y-6">
               {result.skipped?.length > 0 && (
-                <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
+                <div className="bg-amber-50 border border-amber-200 rounded-md px-4 py-3">
                   <p className="text-sm font-semibold text-amber-800 mb-1">
                     {result.skipped.length} student{result.skipped.length !== 1 ? 's' : ''} skipped — already exist
                   </p>
@@ -578,7 +582,7 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
               )}
 
               {result.studentPortalEnabled === false ? (
-                <div className="bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-600">
+                <div className="bg-gray-50 border border-gray-200 rounded-md px-4 py-3 text-sm text-gray-600">
                   Student portal is not enabled for this school — students were added to the roster without logins.
                 </div>
               ) : (
@@ -587,7 +591,7 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
                   <span className="w-5 h-5 rounded-full bg-blue-100 text-blue-600 text-xs flex items-center justify-center font-bold">S</span>
                   Student Credentials
                 </h4>
-                <div className="overflow-x-auto rounded-xl border border-gray-200">
+                <div className="overflow-x-auto rounded-md border border-gray-200">
                   <table className="w-full text-xs">
                     <thead className="bg-gray-50 border-b border-gray-200">
                       <tr>
@@ -640,16 +644,16 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
               )}
 
               {result.parentPortalEnabled === false ? (
-                <div className="bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-600">
+                <div className="bg-gray-50 border border-gray-200 rounded-md px-4 py-3 text-sm text-gray-600">
                   Parent portal is not enabled for this school — no parent accounts were created.
                 </div>
               ) : result.credentials.parents.length > 0 && (
                 <div>
                   <h4 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
                     <span className="w-5 h-5 rounded-full bg-teal-100 text-teal-600 text-xs flex items-center justify-center font-bold">P</span>
-                    Parent Credentials <span className="font-normal text-gray-400">(new accounts only)</span>
+                    Parent Credentials <span className="font-normal text-muted-foreground">(new accounts only)</span>
                   </h4>
-                  <div className="overflow-x-auto rounded-xl border border-gray-200">
+                  <div className="overflow-x-auto rounded-md border border-gray-200">
                     <table className="w-full text-xs">
                       <thead className="bg-gray-50 border-b border-gray-200">
                         <tr>
@@ -676,7 +680,7 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
                 </div>
               )}
 
-              <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-xs text-amber-700">
+              <div className="bg-amber-50 border border-amber-200 rounded-md px-4 py-3 text-xs text-amber-700">
                 <strong>Note:</strong> These credentials are shown once only. After closing this panel, you can reset individual student passwords using the &quot;View Credentials&quot; button above.
                 {' '}When WhatsApp is configured for your school, credentials will be sent automatically to parent phones.
               </div>
@@ -699,7 +703,7 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
       {/* ── Backfill Confirmation Popup ── */}
       {showBackfillConfirm && portalStatus && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden">
+          <div className="bg-white rounded-lg w-full max-w-sm shadow-2xl overflow-hidden">
             <div className="bg-teal-50 border-b border-teal-100 px-6 py-5">
               <h3 className="font-bold text-gray-900 text-base">Activate Portal Access?</h3>
             </div>
@@ -711,11 +715,11 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
               </p>
               <div className="flex gap-3 mt-5">
                 <button onClick={() => setShowBackfillConfirm(false)} data-testid="backfill-confirm-cancel"
-                  className="flex-1 border border-gray-200 text-gray-600 hover:bg-gray-50 py-2.5 rounded-xl text-sm font-medium transition-colors">
+                  className="flex-1 border border-gray-200 text-gray-600 hover:bg-gray-50 py-2.5 rounded-md text-sm font-medium transition-colors">
                   Cancel
                 </button>
                 <button onClick={handleBackfillPortal} data-testid="backfill-confirm-confirm"
-                  className="flex-1 bg-teal-600 hover:bg-teal-700 text-white py-2.5 rounded-xl text-sm font-medium transition-colors">
+                  className="flex-1 bg-teal-600 hover:bg-teal-700 text-white py-2.5 rounded-md text-sm font-medium transition-colors">
                   Activate
                 </button>
               </div>
@@ -725,13 +729,13 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
       )}
 
       {mode === 'csv' ? (
-        <div className="bg-white rounded-xl border border-gray-200 p-6">
+        <div className="bg-white rounded-md border border-gray-200 p-6">
           <div className="mb-3">
             <p className="text-sm font-medium text-gray-700 mb-1">CSV Format <span className="text-xs font-normal text-amber-600">(roll_no = class roll number, unique per grade+section)</span></p>
             <code className="block bg-gray-50 border border-gray-200 rounded px-3 py-2 text-xs text-gray-600 font-mono">{CSV_HEADER}</code>
           </div>
           <div className="mb-3">
-            <p className="text-xs text-gray-400 mb-1">Example (email columns optional):</p>
+            <p className="text-xs text-muted-foreground mb-1">Example (email columns optional):</p>
             <code className="block bg-gray-50 border border-gray-200 rounded px-3 py-2 text-xs text-gray-500 font-mono whitespace-pre">{CSV_EXAMPLE}</code>
           </div>
           <textarea
@@ -739,11 +743,11 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
             rows={8} placeholder="Paste CSV data here..."
             onChange={e => { if (e.target.value.trim()) { parseText(e.target.value); e.target.value = '' } }}
           />
-          <p className="text-xs text-gray-400 mt-2">Paste triggers auto-parse — or use &quot;Import CSV&quot; button above</p>
+          <p className="text-xs text-muted-foreground mt-2">Paste triggers auto-parse — or use &quot;Import CSV&quot; button above</p>
         </div>
       ) : (
         <>
-          <div className="bg-green-50 border border-green-100 rounded-xl p-4 mb-4 flex items-end gap-3 flex-wrap">
+          <div className="bg-green-50 border border-green-100 rounded-md p-4 mb-4 flex items-end gap-3 flex-wrap">
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">Grade filter</label>
               <input value={filterGrade} onChange={e => setFilterGrade(e.target.value)}
@@ -760,7 +764,7 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
             </button>
           </div>
 
-          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <div className="bg-white rounded-md border border-gray-200 overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-xs" data-testid="onboarding-table">
                 <thead className="bg-gray-50 border-b border-gray-200">
@@ -769,12 +773,12 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
                     <th className="text-left px-3 py-2.5 font-medium text-amber-700 min-w-[80px] bg-amber-50">Roll No <span className="text-red-400">*</span></th>
                     <th className="text-left px-3 py-2.5 font-medium text-gray-500 min-w-[110px]">Last Name <span className="text-red-400">*</span></th>
                     <th className="text-left px-3 py-2.5 font-medium text-gray-500 min-w-[110px]">First Name <span className="text-red-400">*</span></th>
-                    <th className="text-left px-3 py-2.5 font-medium text-gray-500 min-w-[140px]">Student Email <span className="text-gray-400 font-normal text-[10px]">(optional)</span></th>
+                    <th className="text-left px-3 py-2.5 font-medium text-gray-500 min-w-[140px]">Student Email <span className="text-muted-foreground font-normal text-xs">(optional)</span></th>
                     <th className="text-left px-3 py-2.5 font-medium text-gray-500 w-16">Grade <span className="text-red-400">*</span></th>
                     <th className="text-left px-3 py-2.5 font-medium text-gray-500 w-16">Section</th>
                     <th className="text-left px-3 py-2.5 font-medium text-gray-500 min-w-[120px]">Parent Name <span className="text-red-400">*</span></th>
                     <th className="text-left px-3 py-2.5 font-medium text-gray-700 min-w-[110px] bg-blue-50">Parent Phone <span className="text-red-400">*</span></th>
-                    <th className="text-left px-3 py-2.5 font-medium text-gray-500 min-w-[150px]">Parent Email <span className="text-gray-400 font-normal text-[10px]">(optional)</span></th>
+                    <th className="text-left px-3 py-2.5 font-medium text-gray-500 min-w-[150px]">Parent Email <span className="text-muted-foreground font-normal text-xs">(optional)</span></th>
                     <th className="text-left px-3 py-2.5 font-medium text-gray-500 min-w-[100px]">Student Phone</th>
                     <th className="px-3 py-2.5 w-8"></th>
                   </tr>
@@ -782,7 +786,7 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
                 <tbody className="divide-y divide-gray-100">
                   {rows.map((row, i) => (
                     <tr key={i} className="hover:bg-gray-50">
-                      <td className="px-3 py-2 text-gray-400">{i + 1}</td>
+                      <td className="px-3 py-2 text-muted-foreground">{i + 1}</td>
                       <td className="px-3 py-2 bg-amber-50/50 align-top">
                         <input
                           className={`${inputCls} ${rowDupWarnings[i] ? 'border-red-400 ring-1 ring-red-300' : !row.school_roll_number.trim() ? 'border-amber-300' : ''}`}
@@ -791,7 +795,7 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
                           data-testid={`roll-input-${i}`}
                           onChange={e => updateRow(i, 'school_roll_number', e.target.value)} />
                         {rowDupWarnings[i] && (
-                          <p data-testid={`roll-dup-warning-${i}`} className="mt-1 text-[10px] leading-tight text-red-600">
+                          <p data-testid={`roll-dup-warning-${i}`} className="mt-1 text-xs leading-tight text-red-600">
                             {rowDupWarnings[i]}
                           </p>
                         )}
@@ -818,7 +822,7 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
             </div>
             <div className="px-4 py-2 bg-blue-50/30 border-t border-blue-100 flex items-center gap-4">
               <p className="text-xs text-blue-600 font-medium">Parent Phone (blue) is required for credential delivery</p>
-              <p className="text-xs text-gray-400">Student/Parent Email optional — credentials sent by email if provided, else share manually</p>
+              <p className="text-xs text-muted-foreground">Student/Parent Email optional — credentials sent by email if provided, else share manually</p>
               <p className="text-xs text-amber-600">Roll No unique within Grade + Section</p>
             </div>
             {error && (
@@ -833,7 +837,7 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
                 {hasRowDupes && (
                   <span className="text-xs text-red-600 font-medium">Fix duplicate roll numbers before enrolling</span>
                 )}
-                <span className="text-xs text-gray-400">{rows.filter(r => r.last_name.trim() || r.first_name.trim()).length} of {rows.length} rows ready</span>
+                <span className="text-xs text-muted-foreground">{rows.filter(r => r.last_name.trim() || r.first_name.trim()).length} of {rows.length} rows ready</span>
                 <button onClick={handleSubmit} disabled={submitting || checking || hasRowDupes || rows.every(r => !r.last_name.trim() && !r.first_name.trim())}
                   data-testid="enroll-students-btn"
                   className="bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50">
@@ -847,7 +851,7 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
 
       {(submitting || checking) && (
         <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/50 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl shadow-2xl px-10 py-8 flex flex-col items-center gap-5 min-w-[280px]">
+          <div className="bg-white rounded-lg shadow-2xl px-10 py-8 flex flex-col items-center gap-5 min-w-[280px]">
             <svg className="w-10 h-10 animate-spin text-green-600" fill="none" viewBox="0 0 24 24">
               <circle className="opacity-20" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
               <path className="opacity-80" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
@@ -861,7 +865,7 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
                 <div className="h-2 rounded-full bg-green-500 animate-pulse w-3/4" />
               </div>
             )}
-            <p className="text-xs text-gray-400">Do not close or refresh this page</p>
+            <p className="text-xs text-muted-foreground">Do not close or refresh this page</p>
           </div>
         </div>
       )}

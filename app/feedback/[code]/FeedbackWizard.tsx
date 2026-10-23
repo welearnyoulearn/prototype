@@ -1,0 +1,257 @@
+'use client'
+
+import { useEffect, useState } from 'react'
+import WelcomeStep from './steps/WelcomeStep'
+import IdentityStep from './steps/IdentityStep'
+import CategoryPickerStep from './steps/CategoryPickerStep'
+import RatingStep from './steps/RatingStep'
+import AdvancedFormTypeStep from './steps/AdvancedFormTypeStep'
+import AdvancedFormStep from './steps/AdvancedFormStep'
+import FollowupStep from './steps/FollowupStep'
+import ThankYouStep from './steps/ThankYouStep'
+import { AdvancedFormType, FeedbackCategory, FeedbackRole, WizardStep } from './types'
+import { TEAL, INK, CREAM, BORDER } from '@/app/components/ulearn/theme'
+
+const PROGRESS_STEPS: WizardStep[] = ['welcome', 'identity', 'categories', 'rating', 'followup']
+// advancedType/advancedForm occupy the same visual progress slots as
+// categories/rating — the two flows are mutually exclusive branches of the
+// same "pick what to submit, then fill it in" shape, so they share a
+// position rather than needing their own progress-bar entries.
+const PROGRESS_INDEX: Partial<Record<WizardStep, number>> = {
+  welcome: 0, identity: 1, categories: 2, advancedType: 2, rating: 3, advancedForm: 3, followup: 4,
+}
+
+function initialState() {
+  return {
+    step: 'welcome' as WizardStep,
+    role: null as FeedbackRole | null,
+    name: '',
+    phone: '',
+    isAnonymous: false,
+    selectedKeys: [] as string[],
+    ratingIndex: 0,
+    ratings: {} as Record<string, number>,
+    advancedFormType: null as AdvancedFormType | null,
+    advancedFormData: {} as Record<string, string>,
+    quickPicks: [] as string[],
+    freeText: '',
+    voiceKey: null as string | null,
+    submitting: false,
+    submitError: null as string | null,
+  }
+}
+
+export default function FeedbackWizard({ code }: { code: string }) {
+  const [loading, setLoading] = useState(true)
+  const [notFound, setNotFound] = useState(false)
+  const [schoolName, setSchoolName] = useState('')
+  const [categories, setCategories] = useState<FeedbackCategory[]>([])
+  const [s, setS] = useState(initialState())
+
+  useEffect(() => {
+    let cancelled = false
+    fetch(`/api/feedback/resolve?code=${encodeURIComponent(code)}`)
+      .then(res => {
+        if (!res.ok) throw new Error('not_found')
+        return res.json()
+      })
+      .then(data => {
+        if (cancelled) return
+        setSchoolName(data.school_name)
+        setCategories(data.categories)
+        setLoading(false)
+      })
+      .catch(() => {
+        if (!cancelled) { setNotFound(true); setLoading(false) }
+      })
+    return () => { cancelled = true }
+  }, [code])
+
+  const roleCategories = s.role ? categories.filter(c => c.role === s.role) : []
+  const selectedCategories = roleCategories.filter(c => s.selectedKeys.includes(c.key))
+  const givenRatings = selectedCategories.map(c => s.ratings[c.key]).filter((r): r is number => r !== undefined)
+  const overallRating = givenRatings.length > 0 ? givenRatings.reduce((sum, r) => sum + r, 0) / givenRatings.length : 3
+
+  async function submit(body: Record<string, unknown>) {
+    setS(prev => ({ ...prev, submitting: true, submitError: null }))
+    try {
+      const res = await fetch('/api/feedback/submit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      if (res.status === 429) throw new Error('Too many submissions from this device — please try again later.')
+      if (!res.ok) throw new Error('Something went wrong — please try again.')
+      setS(prev => ({ ...prev, step: 'thankyou', submitting: false }))
+    } catch (err) {
+      setS(prev => ({ ...prev, submitting: false, submitError: err instanceof Error ? err.message : 'Something went wrong — please try again.' }))
+    }
+  }
+
+  function handleSubmit() {
+    submit({
+      code,
+      role: s.role,
+      is_anonymous: s.isAnonymous,
+      name: s.isAnonymous ? undefined : s.name || undefined,
+      phone: s.isAnonymous ? undefined : s.phone || undefined,
+      ratings: selectedCategories.map(c => ({ category_key: c.key, rating: s.ratings[c.key] })),
+      quick_picks: s.quickPicks,
+      free_text: s.freeText || undefined,
+      voice_key: s.voiceKey || undefined,
+    })
+  }
+
+  function handleAdvancedSubmit() {
+    submit({
+      code,
+      role: s.role,
+      is_anonymous: s.isAnonymous,
+      name: s.isAnonymous ? undefined : s.name || undefined,
+      phone: s.isAnonymous ? undefined : s.phone || undefined,
+      advanced_form_type: s.advancedFormType,
+      advanced_form_data: s.advancedFormData,
+    })
+  }
+
+  const progressIndex = PROGRESS_INDEX[s.step] ?? -1
+
+  return (
+    <div className="relative flex min-h-screen items-start justify-center overflow-hidden p-6" style={{ background: CREAM }}>
+      {/* Soft decorative shapes instead of a full-bleed gradient — quieter, less "generated hero" */}
+      <div className="pointer-events-none absolute -top-24 -right-24 h-72 w-72 rounded-full opacity-[0.07]" style={{ background: TEAL }} />
+      <div className="pointer-events-none absolute -bottom-28 -left-20 h-64 w-64 rounded-full opacity-[0.06]" style={{ background: '#D2603A' }} />
+
+      <div className="relative mt-8 w-full max-w-[390px] rounded-3xl border bg-white p-6 pb-5 shadow-sm" style={{ borderColor: BORDER }}>
+        {loading && (
+          <div className="py-24 text-center text-sm" style={{ color: '#9CA3AF' }}>Loading…</div>
+        )}
+
+        {!loading && notFound && (
+          <div className="py-16 text-center" data-testid="feedback-not-found">
+            <div className="mb-3 text-5xl">🙈</div>
+            <h1 className="mb-1 text-lg font-bold" style={{ color: INK }}>Feedback form not available</h1>
+            <p className="text-sm" style={{ color: '#9CA3AF' }}>This link may be inactive or incorrect. Please check with the school office.</p>
+          </div>
+        )}
+
+        {!loading && !notFound && (
+          <>
+            {progressIndex >= 0 && (
+              <div className="mb-5 flex gap-1.5">
+                {PROGRESS_STEPS.map((step, i) => (
+                  <span key={step} className="h-[5px] flex-1 overflow-hidden rounded" style={{ background: BORDER }}>
+                    <span
+                      className="block h-full rounded transition-all duration-300"
+                      style={{ width: i <= progressIndex ? '100%' : '0%', background: TEAL }}
+                    />
+                  </span>
+                ))}
+              </div>
+            )}
+
+            {s.step === 'welcome' && (
+              <WelcomeStep
+                schoolName={schoolName}
+                onSelectRole={role => setS(prev => ({ ...prev, role, step: 'identity' }))}
+              />
+            )}
+
+            {s.step === 'identity' && (
+              <IdentityStep
+                name={s.name}
+                phone={s.phone}
+                isAnonymous={s.isAnonymous}
+                onNameChange={v => setS(prev => ({ ...prev, name: v }))}
+                onPhoneChange={v => setS(prev => ({ ...prev, phone: v }))}
+                onAnonymousChange={v => setS(prev => ({ ...prev, isAnonymous: v }))}
+                onBack={() => setS(prev => ({ ...prev, step: 'welcome' }))}
+                onContinue={() => setS(prev => ({ ...prev, step: prev.role === 'other' ? 'advancedType' : 'categories' }))}
+              />
+            )}
+
+            {s.step === 'categories' && s.role && (
+              <CategoryPickerStep
+                role={s.role}
+                categories={roleCategories}
+                selected={s.selectedKeys}
+                onToggle={key => setS(prev => ({
+                  ...prev,
+                  selectedKeys: prev.selectedKeys.includes(key)
+                    ? prev.selectedKeys.filter(k => k !== key)
+                    : [...prev.selectedKeys, key],
+                }))}
+                onBack={() => setS(prev => ({ ...prev, step: 'identity' }))}
+                onContinue={() => setS(prev => ({ ...prev, step: 'rating', ratingIndex: 0 }))}
+              />
+            )}
+
+            {s.step === 'rating' && selectedCategories[s.ratingIndex] && (
+              <RatingStep
+                category={selectedCategories[s.ratingIndex]}
+                value={s.ratings[selectedCategories[s.ratingIndex].key]}
+                onRate={value => setS(prev => ({ ...prev, ratings: { ...prev.ratings, [selectedCategories[prev.ratingIndex].key]: value } }))}
+                index={s.ratingIndex}
+                total={selectedCategories.length}
+                onBack={() => setS(prev => (
+                  prev.ratingIndex === 0
+                    ? { ...prev, step: 'categories' }
+                    : { ...prev, ratingIndex: prev.ratingIndex - 1 }
+                ))}
+                onNext={() => setS(prev => (
+                  prev.ratingIndex + 1 >= selectedCategories.length
+                    ? { ...prev, step: 'followup' }
+                    : { ...prev, ratingIndex: prev.ratingIndex + 1 }
+                ))}
+              />
+            )}
+
+            {s.step === 'advancedType' && (
+              <AdvancedFormTypeStep
+                onSelect={type => setS(prev => ({ ...prev, advancedFormType: type, advancedFormData: {}, step: 'advancedForm' }))}
+                onBack={() => setS(prev => ({ ...prev, step: 'identity' }))}
+              />
+            )}
+
+            {s.step === 'advancedForm' && s.advancedFormType && (
+              <AdvancedFormStep
+                type={s.advancedFormType}
+                values={s.advancedFormData}
+                onChange={(key, value) => setS(prev => ({ ...prev, advancedFormData: { ...prev.advancedFormData, [key]: value } }))}
+                onBack={() => setS(prev => ({ ...prev, step: 'advancedType' }))}
+                onSubmit={handleAdvancedSubmit}
+                submitting={s.submitting}
+                error={s.submitError}
+              />
+            )}
+
+            {s.step === 'followup' && (
+              <FollowupStep
+                code={code}
+                quickPicks={s.quickPicks}
+                onToggleQuickPick={tag => setS(prev => ({
+                  ...prev,
+                  quickPicks: prev.quickPicks.includes(tag) ? prev.quickPicks.filter(t => t !== tag) : [...prev.quickPicks, tag],
+                }))}
+                freeText={s.freeText}
+                onFreeTextChange={v => setS(prev => ({ ...prev, freeText: v }))}
+                onVoiceKeyChange={key => setS(prev => ({ ...prev, voiceKey: key }))}
+                isAnonymous={s.isAnonymous}
+                onAnonymousChange={v => setS(prev => ({ ...prev, isAnonymous: v }))}
+                onBack={() => setS(prev => ({ ...prev, step: 'rating', ratingIndex: Math.max(0, selectedCategories.length - 1) }))}
+                onSubmit={handleSubmit}
+                submitting={s.submitting}
+                error={s.submitError}
+                overallRating={overallRating}
+              />
+            )}
+
+            {s.step === 'thankyou' && (
+              <ThankYouStep onRestart={() => setS(initialState())} />
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  )
+}

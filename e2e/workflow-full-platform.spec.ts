@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test'
 import { PLATFORM_ADMIN_EMAIL, PLATFORM_ADMIN_PASSWORD } from './fixtures/platform-admin'
 
 test.describe.serial('Full Platform Workflow', () => {
-  let schoolCode: string
+  let adminEmail: string
   let schoolTempPass: string
   let schoolId: number
   let schoolName: string
@@ -52,11 +52,11 @@ test.describe.serial('Full Platform Workflow', () => {
     // Capture credentials from the success modal
     const credModal = page.locator('.fixed').filter({ hasText: 'School Created!' })
     const codeEl = credModal.locator('code').first()
-    schoolCode = ((await codeEl.textContent()) ?? '').trim()
+    adminEmail = ((await codeEl.textContent()) ?? '').trim()
     const passEl = credModal.locator('code').nth(1)
     schoolTempPass = ((await passEl.textContent()) ?? '').trim()
 
-    expect(schoolCode).toBeTruthy()
+    expect(adminEmail).toBeTruthy()
     expect(schoolTempPass).toBeTruthy()
 
     // Dismiss modal
@@ -87,13 +87,13 @@ test.describe.serial('Full Platform Workflow', () => {
   })
 
   test('4. School Admin — first login redirects away from login', async ({ page }) => {
-    test.skip(!schoolCode, 'School not created in previous test')
+    test.skip(!adminEmail, 'School not created in previous test')
 
     await page.goto('/login?role=school')
     await expect(page.getByText('School Portal Login')).toBeVisible()
 
-    // Login with school code + temp password
-    await page.getByTestId('auth-school-id-or-email-input').fill(schoolCode)
+    // Login with the admin email + temp password
+    await page.getByTestId('auth-email-address-input').fill(adminEmail)
     await page.getByTestId('auth-password-input').fill(schoolTempPass)
     await page.getByTestId('auth-submit-btn').click()
 

@@ -1,7 +1,9 @@
 # Syllabus Module — End-to-End Workflow
 
-**Status:** Built and merged to `dev` (PR #75, commit `413a876`).
+**Status:** Built and merged to `dev` (PR #75, commit `413a876`). Substantially extended since — see below.
 **Audience:** Engineering team testing the full syllabus flow across all 5 portals.
+
+> **Updated 2026-08-24:** the workflow below still describes the correct high-level shape, but the teacher/school-admin/platform-admin screens changed significantly after this doc was written — teacher-facing bootstrap flows (JSON import + chapter-count), chapter-based Syllabus Tracking analytics, a school-admin "Add Custom Subject" option, and a platform-admin "Missing Content" QA tab were all added. For the current, exhaustive, inch-by-inch reference (exact DB columns, exact API contracts, exact UI behavior per screen, known gaps), see **[`docs/SYLLABUS-FEATURE-README.md`](../../docs/SYLLABUS-FEATURE-README.md)**. This file is kept for its original high-level diagrams; treat the new doc as the source of truth where they disagree.
 
 This is a workflow reference, not a test-case list. It explains how the pieces connect so anyone testing the module knows what to click, in what order, and why a given screen shows what it shows.
 

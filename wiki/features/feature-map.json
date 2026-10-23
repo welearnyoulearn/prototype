@@ -1,0 +1,165 @@
+{
+  "_readme": "Maps every feature in lib/features.ts (the Platform Admin feature config) to its documentation and to the screens that implement it. scripts/product-docs.mjs reads the screens, finds the /api/... routes they call, and checks each route exists — that evidence is written into the feature doc and CATALOG.md. To add a feature: add it to lib/features.ts, add an entry here, create its doc (copy wiki/features/_template.md), run `node scripts/product-docs.mjs`.",
+  "overview": {
+    "doc": "wiki/features/overview.md",
+    "ui": [
+      "app/school-admin/components/Overview.tsx"
+    ]
+  },
+  "staff": {
+    "doc": "wiki/features/staff.md",
+    "ui": [
+      "app/school-admin/components/StaffOnboarding.tsx",
+      "app/school-admin/components/TeachersManagement.tsx"
+    ]
+  },
+  "students": {
+    "doc": "wiki/features/students.md",
+    "ui": [
+      "app/school-admin/components/StudentOnboarding.tsx",
+      "app/school-admin/components/StudentsManagement.tsx",
+      "app/school-admin/components/StudentProfile.tsx"
+    ]
+  },
+  "class-management": {
+    "doc": "wiki/features/class-management.md",
+    "ui": [
+      "app/school-admin/components/ClassManagement.tsx"
+    ]
+  },
+  "student-portal": {
+    "doc": "wiki/features/student-portal.md",
+    "ui": [
+      "app/student/page.tsx",
+      "app/student/components"
+    ]
+  },
+  "parent-portal": {
+    "doc": "wiki/features/parent-portal.md",
+    "ui": [
+      "app/parent/page.tsx",
+      "app/parent/components"
+    ]
+  },
+  "library": {
+    "doc": "wiki/features/library.md",
+    "ui": [
+      "app/components/library",
+      "app/school-admin/components/TextbookLibrary.tsx",
+      "app/teacher/components/TeacherLibrary.tsx"
+    ]
+  },
+  "attendance": {
+    "doc": "wiki/features/attendance.md",
+    "ui": [
+      "app/school-admin/components/AttendanceDashboard.tsx",
+      "app/school-admin/components/AttendanceOverviewDashboard.tsx",
+      "app/school-admin/components/AttendanceTodayPanel.tsx",
+      "app/teacher/components/Attendance.tsx",
+      "app/teacher/components/attendance",
+      "app/components/AttendanceCalendar.tsx",
+      "app/components/attendance-dashboard"
+    ]
+  },
+  "curriculum": {
+    "doc": "wiki/features/curriculum.md",
+    "ui": [
+      "app/school-admin/components/CurriculumCustomizer.tsx",
+      "app/school-admin/components/SyllabusTracking.tsx",
+      "app/school-admin/components/AcademicAnalytics.tsx",
+      "app/teacher/components/TeacherSyllabus.tsx",
+      "app/student/components/StudentSyllabus.tsx",
+      "app/parent/components/ParentSyllabus.tsx"
+    ]
+  },
+  "exam-marks": {
+    "doc": "wiki/features/exam-marks.md",
+    "ui": [
+      "app/school-admin/components/ExamSchedule.tsx",
+      "app/teacher/components/ExamMarks.tsx",
+      "app/student/components/StudentMarks.tsx"
+    ]
+  },
+  "announcements": {
+    "doc": "wiki/features/announcements.md",
+    "ui": [
+      "app/school-admin/components/AnnouncementBoard.tsx"
+    ]
+  },
+  "feedback-management": {
+    "doc": "wiki/features/feedback-management.md",
+    "ui": [
+      "app/school-admin/components/FeedbackManagement.tsx",
+      "app/school-admin/components/feedback",
+      "app/feedback"
+    ]
+  },
+  "fee-management": {
+    "doc": "wiki/features/fee-management.md",
+    "ui": [
+      "app/school-admin/components/FeeManagement.tsx",
+      "app/school-admin/components/fee-management"
+    ]
+  },
+  "online-payments": {
+    "doc": "wiki/features/online-payments.md",
+    "ui": [
+      "app/school-admin/components/fee-management/FeeCollectTab.tsx"
+    ]
+  },
+  "expenses": {
+    "doc": "wiki/features/expenses.md",
+    "ui": [
+      "app/school-admin/components/ExpenseManagement.tsx"
+    ]
+  },
+  "calendar": {
+    "doc": "wiki/features/calendar.md",
+    "ui": [
+      "app/school-admin/components/AcademicCalendar.tsx",
+      "app/components/SchoolCalendarView.tsx"
+    ]
+  },
+  "export": {
+    "doc": "wiki/features/export.md",
+    "ui": [
+      "app/school-admin/components/ExportCenter.tsx",
+      "app/school-admin/components/ExportReportCards.tsx"
+    ]
+  },
+  "settings": {
+    "doc": "wiki/features/settings.md",
+    "ui": [
+      "app/school-admin/components/SchoolSettings.tsx",
+      "app/school-admin/components/StaffProfile.tsx"
+    ]
+  },
+  "year-rollover": {
+    "doc": "wiki/features/year-rollover.md",
+    "ui": [
+      "app/school-admin/components/YearRollover.tsx"
+    ]
+  },
+  "_unlisted": {
+    "_readme": "Shipped or half-shipped parts that are NOT a Platform-Admin feature key. They still belong in the factbook.",
+    "platform-admin": {
+      "doc": "wiki/features/platform-admin.md",
+      "ui": [
+        "app/platform-admin"
+      ]
+    },
+    "feedback-public-form": {
+      "doc": "wiki/features/feedback-management.md",
+      "ui": [
+        "app/feedback"
+      ]
+    },
+    "auth-and-sessions": {
+      "doc": "wiki/features/auth.md",
+      "ui": [
+        "app/login",
+        "app/school-admin/components/IdleSessionGuard.tsx"
+      ]
+    }
+  }
+}

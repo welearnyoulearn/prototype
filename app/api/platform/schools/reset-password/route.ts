@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
-import { requirePlatformAdmin, hashPassword, generateTempPassword } from '@/lib/auth'
+import { requirePlatformAdmin, hashPassword, generateTempPassword, revokeUserSessions } from '@/lib/auth'
 
 // POST /api/platform/schools/reset-password
 // Body: { school_id: number }
-// Generates a new temp password for the school admin and returns it.
+// Generates a new temp password for the school's owner admin (the onboarding account,
+// the only school_admin row carrying a school_code) and returns it. Other staff added
+// later have their own logins and are left alone.
 export async function POST(req: NextRequest) {
   try {
     const session = await requirePlatformAdmin()
@@ -23,7 +25,7 @@ export async function POST(req: NextRequest) {
 
       const updated = await pool.query(
         `UPDATE users SET password_hash = $1, first_login = TRUE
-         WHERE school_id = $2 AND role = 'school_admin'
+         WHERE school_id = $2 AND role = 'school_admin' AND school_code IS NOT NULL
          RETURNING id, email, school_code`,
         [passwordHash, school_id]
       )
@@ -31,6 +33,9 @@ export async function POST(req: NextRequest) {
       if (updated.rowCount === 0) {
         return NextResponse.json({ error: 'No school admin user found for this school' }, { status: 404 })
       }
+
+      // The old password is dead — end any session it opened.
+      await revokeUserSessions(updated.rows[0].id)
 
       // Audit log
       await pool.query(
@@ -41,7 +46,7 @@ export async function POST(req: NextRequest) {
 
       return NextResponse.json({
         success: true,
-        school_code: school.school_code,
+        email: updated.rows[0].email,
         temp_password: tempPassword,
       })
     } catch (error) {

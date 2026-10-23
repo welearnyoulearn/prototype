@@ -3,7 +3,8 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
-import AppLoader from '@/app/components/AppLoader'
+import { FullPageLoader } from '@/components/loaders'
+import { useConfirm } from '@/components/ui/use-confirm'
 
 type SchoolDetail = {
   id: number
@@ -47,6 +48,7 @@ export default function SchoolDetailPage() {
   const [school, setSchool]       = useState<SchoolDetail | null>(null)
   const [loading, setLoading]     = useState(true)
   const [error, setError]         = useState('')
+  const { confirm, ConfirmDialog } = useConfirm()
 
   // Feature plan config (from platform admin)
   const [features, setFeatures]   = useState<Feature[]>([])
@@ -66,7 +68,7 @@ export default function SchoolDetailPage() {
 
   // Reset password
   const [resetting, setResetting]   = useState(false)
-  const [resetCreds, setResetCreds] = useState<{ code: string; pass: string } | null>(null)
+  const [resetCreds, setResetCreds] = useState<{ email: string; pass: string } | null>(null)
 
   // Portal access overrides (student-portal / parent-portal)
   const [portalOverrides, setPortalOverrides] = useState<Record<string, boolean>>({})
@@ -211,7 +213,8 @@ export default function SchoolDetailPage() {
   }
 
   async function handleResetPassword() {
-    if (!confirm('Generate a new temporary password for this school admin?')) return
+    const ok = await confirm('Generate a new temporary password for this school admin?', { title: 'Reset password?', confirmText: 'Generate', destructive: true })
+    if (!ok) return
     setResetting(true); setError('')
     try {
       const res = await fetch('/api/platform/schools/reset-password', {
@@ -221,14 +224,15 @@ export default function SchoolDetailPage() {
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
-      setResetCreds({ code: data.school_code, pass: data.temp_password })
+      setResetCreds({ email: data.email, pass: data.temp_password })
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to reset password')
     } finally { setResetting(false) }
   }
 
   async function handleDelete() {
-    if (!confirm(`Permanently delete "${school?.name}"?`)) return
+    const ok = await confirm(`Permanently delete "${school?.name}"?`, { title: 'Delete school?', confirmText: 'Delete', destructive: true })
+    if (!ok) return
     try {
       const res = await fetch(`/api/schools/${schoolId}`, { method: 'DELETE' })
       if (!res.ok) throw new Error()
@@ -260,7 +264,7 @@ export default function SchoolDetailPage() {
   const hasChanged = school?.tier !== selectedTier
   const currentBadge = TIER_META.find(t => t.key === (school?.tier || 'none'))
 
-  if (loading) return <AppLoader message="Loading school details" sub="Please wait…" />
+  if (loading) return <FullPageLoader portal="platform-admin" message="Loading school details" />
 
   if (!school) {
     return (
@@ -275,6 +279,7 @@ export default function SchoolDetailPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
+      {ConfirmDialog}
       {/* Top bar */}
       <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
         <div className="flex items-center gap-3">
@@ -425,7 +430,7 @@ export default function SchoolDetailPage() {
           <div className="px-6 py-5">
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
               <div>
-                <p className="text-xs text-gray-400 mb-1">Login ID (School Code)</p>
+                <p className="text-xs text-gray-400 mb-1">School ID (reference only — not a login)</p>
                 <code className="text-sm font-mono text-purple-700 bg-purple-50 border border-purple-100 px-2 py-1 rounded block truncate">
                   {school.school_code || '—'}
                 </code>
@@ -577,6 +582,9 @@ export default function SchoolDetailPage() {
           </div>
         </div>
 
+        {/* ── AI Access ────────────────────────────────────────────────────── */}
+        <AiAccessCard schoolId={schoolId} portalOverrides={portalOverrides} />
+
         {/* ── Watchline ────────────────────────────────────────────────────── */}
         <WatchlineCard schoolId={schoolId} schoolName={school?.name ?? ''} portalOverrides={portalOverrides} />
 
@@ -589,7 +597,7 @@ export default function SchoolDetailPage() {
           <div className="px-6 py-5 flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-gray-900">Delete this school</p>
-              <p className="text-xs text-gray-500 mt-0.5">Removes the school and all associated data — teachers, students, timetables, attendance records.</p>
+              <p className="text-xs text-gray-500 mt-0.5">Removes the school and all associated data — teachers, students, classes, attendance records.</p>
             </div>
             <button onClick={handleDelete}
               className="ml-6 flex-shrink-0 text-sm px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white font-medium transition-colors">
@@ -610,8 +618,8 @@ export default function SchoolDetailPage() {
             <div className="px-6 py-5">
               <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 space-y-3">
                 <div>
-                  <p className="text-xs text-amber-700 font-semibold uppercase tracking-wide mb-1">School ID (Login)</p>
-                  <code className="text-sm font-mono text-amber-900 bg-white border border-amber-200 rounded px-3 py-2 block">{resetCreds.code}</code>
+                  <p className="text-xs text-amber-700 font-semibold uppercase tracking-wide mb-1">Admin Email (Login)</p>
+                  <code className="text-sm font-mono text-amber-900 bg-white border border-amber-200 rounded px-3 py-2 block">{resetCreds.email}</code>
                 </div>
                 <div>
                   <p className="text-xs text-amber-700 font-semibold uppercase tracking-wide mb-1">New Temporary Password</p>
@@ -761,6 +769,127 @@ export default function SchoolDetailPage() {
                 Done
               </button>
             </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── AI Access card ────────────────────────────────────────────────────────────
+// Separate from Subscription Plan (school_subscriptions) and from the AI Hub
+// RAG chatbot (built on a different branch, not wired up here). This card only
+// reads/writes school_ai_access.tier — 'ai_pro' persists the selection but has
+// no working chatbot behind it yet, so it's shown with a "Coming soon" badge.
+const AI_TIER_META: { key: string; label: string; desc: string }[] = [
+  { key: 'none',     label: 'None',     desc: 'No AI Access assigned to this school.' },
+  { key: 'ai_basic', label: 'AI Basic', desc: 'Curated panel of external AI tools (Gemini, Claude, ChatGPT) shown in the student AI Hub sidebar. No chatbot, no API costs.' },
+  { key: 'ai_pro',   label: 'AI Pro',   desc: 'Full doubt-clearing AI chatbot. Coming soon — not available yet.' },
+]
+
+function AiAccessCard({ schoolId, portalOverrides }: { schoolId: string; portalOverrides: Record<string, boolean> }) {
+  const [tier, setTier]             = useState('none')
+  const [selectedTier, setSelectedTier] = useState('none')
+  const [loading, setLoading]       = useState(true)
+  const [saving, setSaving]         = useState(false)
+  const [saved, setSaved]           = useState(false)
+  const [error, setError]           = useState('')
+
+  // Same override map the parent page's Portal Access section reads —
+  // re-derived on every render, so flipping the Student Portal Access toggle
+  // unlocks this card immediately with no reload.
+  const studentPortalEnabled = portalOverrides['student-portal'] !== false
+
+  useEffect(() => {
+    fetch(`/api/schools/${schoolId}/ai-access`)
+      .then(r => r.json())
+      .then(d => { setTier(d.tier || 'none'); setSelectedTier(d.tier || 'none') })
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [schoolId])
+
+  async function handleSave() {
+    setSaving(true); setSaved(false); setError('')
+    try {
+      const res = await fetch(`/api/schools/${schoolId}/ai-access`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tier: selectedTier }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      setTier(data.tier)
+      setSaved(true)
+      setTimeout(() => setSaved(false), 3000)
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to save AI Access')
+    } finally { setSaving(false) }
+  }
+
+  const hasChanged = tier !== selectedTier
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      <div className="px-6 py-4 border-b border-gray-100">
+        <h2 className="font-semibold text-gray-900">AI Access</h2>
+        <p className="text-xs text-gray-500 mt-0.5">
+          Assign AI tooling access for this school&apos;s students. Requires Student Portal Access to be enabled.
+        </p>
+      </div>
+
+      {!studentPortalEnabled ? (
+        <div className="px-6 py-8 text-center" data-testid="ai-access-locked">
+          <p className="text-sm text-gray-500 font-medium">🔒 Enable Student Portal Access first</p>
+          <p className="text-xs text-gray-400 mt-1">AI Access can only be assigned once students have portal logins.</p>
+        </div>
+      ) : loading ? (
+        <div className="px-6 py-5"><p className="text-gray-400 text-sm">Loading…</p></div>
+      ) : (
+        <div className="px-6 py-5">
+          {error && <div className="mb-4 text-sm text-red-600">{error}</div>}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            {AI_TIER_META.map(t => {
+              const isSelected = selectedTier === t.key
+              return (
+                <div
+                  key={t.key}
+                  onClick={() => setSelectedTier(t.key)}
+                  data-testid={`ai-access-option-${t.key}`}
+                  className={`relative rounded-xl border-2 p-4 cursor-pointer transition-all hover:shadow-md ${
+                    isSelected ? 'border-purple-400 ring-2 ring-purple-300 bg-purple-50' : 'border-gray-200 bg-white'
+                  }`}
+                >
+                  <div className="flex items-center gap-2 mb-1">
+                    <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center flex-shrink-0 ${
+                      isSelected ? 'border-purple-500 bg-purple-500' : 'border-gray-300 bg-white'
+                    }`}>
+                      {isSelected && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
+                    </div>
+                    <span className="font-bold text-gray-900 text-sm">{t.label}</span>
+                    {t.key === 'ai_pro' && (
+                      <span className="ml-auto text-[10px] font-semibold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded-full flex-shrink-0">
+                        Coming soon
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-gray-500 ml-6">{t.desc}</p>
+                </div>
+              )
+            })}
+          </div>
+
+          <div className="flex items-center gap-4 mt-5">
+            <button onClick={handleSave} disabled={saving || !hasChanged}
+              data-testid="ai-access-save-btn"
+              className="bg-purple-600 hover:bg-purple-700 text-white px-6 py-2.5 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+              {saving ? 'Saving…' : 'Save AI Access'}
+            </button>
+            {saved && (
+              <span className="text-green-600 text-sm font-medium">
+                ✓ Saved{selectedTier === 'ai_pro' ? ' — AI Pro is coming soon, no chatbot enabled yet' : ''}
+              </span>
+            )}
+            {!hasChanged && !saved && <span className="text-gray-400 text-sm">No changes</span>}
           </div>
         </div>
       )}

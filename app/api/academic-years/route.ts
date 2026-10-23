@@ -7,6 +7,18 @@ import { requireFeeAccess, verifyPassword } from '@/lib/auth'
 // creation path (first-login wizard, School Settings, carry-forward "create new
 // year" modal) is a free-typed date picker with no other guard against this.
 const MIN_ACADEMIC_YEAR_DAYS = 270 // ~9 months — shorter terms are almost certainly a typo
+// After the school's first year is set up, the active academic year changes ONLY through
+// Year Rollover (POST /api/academic-years/rollover). Setting a year current here is allowed
+// only while the school has no current year at all (first-time setup).
+const CURRENT_YEAR_LOCKED = 'The active academic year only changes through Year Rollover.'
+async function schoolHasCurrentYear(schoolId: number | string, exceptId?: number | string): Promise<boolean> {
+  const { rows: [r] } = await pool.query(
+    `SELECT 1 AS x FROM academic_years WHERE school_id = $1 AND is_current = TRUE AND ($2::int IS NULL OR id <> $2::int) LIMIT 1`,
+    [Number(schoolId), exceptId ?? null]
+  )
+  return !!r
+}
+
 function validateYearSpan(start_date: string, end_date: string): string | null {
   const start = new Date(start_date)
   const end = new Date(end_date)
@@ -100,6 +112,10 @@ export async function POST(req: NextRequest) {
     }
     const spanError = validateYearSpan(start_date, end_date)
     if (spanError) return NextResponse.json({ error: spanError }, { status: 400 })
+    if (!await requireFeeAccess(school_id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    if (set_current && await schoolHasCurrentYear(school_id)) {
+      return NextResponse.json({ error: CURRENT_YEAR_LOCKED }, { status: 409 })
+    }
 
     const client = await pool.connect()
     try {
@@ -137,13 +153,18 @@ export async function POST(req: NextRequest) {
 }
 
 // PATCH /api/academic-years?id=&school_id=
-// Sets a specific year as current (clears all others for that school).
+// Sets a year as current — first-time setup only (a school with no current year yet).
+// Once a current year exists this returns 409; use Year Rollover to move to the next year.
 export async function PATCH(req: NextRequest) {
   try {
 
     const id        = req.nextUrl.searchParams.get('id')
     const school_id = req.nextUrl.searchParams.get('school_id')
     if (!id || !school_id) return NextResponse.json({ error: 'id and school_id required' }, { status: 400 })
+    if (!await requireFeeAccess(school_id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    if (await schoolHasCurrentYear(school_id, id)) {
+      return NextResponse.json({ error: CURRENT_YEAR_LOCKED }, { status: 409 })
+    }
 
     const client = await pool.connect()
     try {

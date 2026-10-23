@@ -3,25 +3,25 @@
 // inline hex (as the prototype does) rather than Tailwind tokens, which keeps
 // the port faithful and self-contained.
 
-export const INK = '#0F2A3F'
-export const TEAL = '#2A7F8C'
-export const GOLD = '#E8A33D'
-export const CREAM = '#FBF7EF'
-export const CORAL = '#D2603A'
-export const GREEN = '#3E8E5A'
-export const PURPLE = '#5B4E8A'
+export const INK = '#202A25'
+export const TEAL = '#235B46'
+export const GOLD = '#826322'
+export const CREAM = '#F8F9F6'
+export const CORAL = '#A34B36'
+export const GREEN = '#235B46'
+export const PURPLE = '#58655C'
 
 // Neutral borders / surfaces used throughout the prototype cards.
-export const BORDER = '#E5E1D8'
-export const SURFACE = '#FAFAF8'
+export const BORDER = '#DCE3D9'
+export const SURFACE = '#F8F9F6'
 
 // Per-role accent, matching the prototype's role switcher.
 export const ROLE_COLOR = {
-  platform: PURPLE,
+  platform: TEAL,
   school: TEAL,
-  teacher: GOLD,
+  teacher: TEAL,
   student: GREEN,
-  parent: CORAL,
+  parent: TEAL,
 } as const
 
 export type UlearnRole = keyof typeof ROLE_COLOR

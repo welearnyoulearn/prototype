@@ -22,7 +22,7 @@ export default function AdminLoginPage() {
       const res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ identifier: email.trim(), password }),
+        body: JSON.stringify({ email: email.trim(), password }),
       })
       const data = await res.json()
       if (!res.ok) { setError(data.error || 'Invalid credentials'); return }

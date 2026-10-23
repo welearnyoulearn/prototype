@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
-import { hashPassword } from '@/lib/auth'
+import { hashPassword, revokeUserSessions } from '@/lib/auth'
 
 export async function POST(req: NextRequest) {
   try {
@@ -23,6 +23,8 @@ export async function POST(req: NextRequest) {
 
     await pool.query('UPDATE users SET password_hash = $1, first_login = FALSE WHERE id = $2', [newHash, resetRecord.user_id])
     await pool.query('UPDATE password_reset_tokens SET used = TRUE WHERE id = $1', [resetRecord.id])
+    // Whoever knew the old password (or held a stolen session) is signed out.
+    await revokeUserSessions(resetRecord.user_id)
 
     return NextResponse.json({ success: true })
   } catch (error) {

@@ -1,6 +1,8 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { CalendarDays, ChevronLeft, ChevronRight, Inbox } from 'lucide-react'
+import { Skeleton } from '@/components/ui/skeleton'
 
 type ExamItem = {
   id: number
@@ -107,9 +109,10 @@ export default function TestCalendar({ schoolId, classId, studentId, teacherId, 
 
   if (loading) {
     return (
-      <div className="animate-pulse space-y-3">
-        <div className="h-10 bg-gray-100 rounded-xl w-64" />
-        <div className="h-64 bg-gray-100 rounded-xl" />
+      <div className="space-y-3" role="status" aria-live="polite" aria-busy="true">
+        <span className="sr-only">Loading exam calendar</span>
+        <Skeleton className="h-10 w-64" />
+        <Skeleton className="h-64" />
       </div>
     )
   }
@@ -129,36 +132,37 @@ export default function TestCalendar({ schoolId, classId, studentId, teacherId, 
               const m = meta(e.exam_type)
               const isToday = e.exam_date === todayStr
               return (
-                <div
+                <button
+                  type="button"
                   key={e.id}
                   onClick={() => { setYear(d.getFullYear()); setMonth(d.getMonth()); setSelected(e.exam_date) }}
-                  className={`flex-shrink-0 cursor-pointer rounded-xl border p-3 w-40 transition-all hover:shadow-md ${
+                  className={`w-40 flex-shrink-0 rounded-lg border p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-600 focus-visible:ring-offset-2 ${
                     isToday ? 'border-red-300 bg-red-50' : days <= 3 ? 'border-orange-200 bg-orange-50' : 'border-gray-200 bg-white hover:border-blue-200'
                   }`}
                 >
                   <div className="flex items-center justify-between mb-1">
-                    <p className="text-[10px] font-bold text-gray-400">
+                    <p className="text-xs font-semibold text-gray-500">
                       {d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
                     </p>
                     {days === 0 ? (
-                      <span className="text-[9px] font-black text-red-600 bg-red-100 px-1 rounded">TODAY</span>
+                      <span className="rounded bg-red-100 px-1.5 py-0.5 text-xs font-semibold text-red-700">Today</span>
                     ) : days > 0 ? (
-                      <span className={`text-[9px] font-bold px-1 rounded ${days <= 3 ? 'text-orange-700 bg-orange-100' : 'text-gray-500 bg-gray-100'}`}>
+                      <span className={`rounded px-1.5 py-0.5 text-xs font-semibold ${days <= 3 ? 'text-orange-700 bg-orange-100' : 'text-gray-600 bg-gray-100'}`}>
                         {days}d
                       </span>
                     ) : null}
                   </div>
                   <p className="text-xs font-semibold text-gray-800 truncate">{e.exam_name}</p>
-                  <p className="text-[10px] text-gray-400 mt-0.5 truncate">
+                  <p className="mt-0.5 truncate text-xs text-gray-500">
                     {e.subjects.slice(0, 2).join(', ')}{e.subjects.length > 2 ? ` +${e.subjects.length - 2}` : ''}
                   </p>
-                  <span className={`inline-block mt-1.5 text-[9px] font-bold px-1.5 py-0.5 rounded border uppercase ${m.color}`}>
+                  <span className={`mt-1.5 inline-block rounded border px-1.5 py-0.5 text-xs font-semibold ${m.color}`}>
                     {m.label}
                   </span>
                   {mode === 'teacher' || mode === 'admin' ? (
-                    <p className="text-[9px] text-gray-400 mt-1">Grade {e.grade}-{e.section}</p>
+                    <p className="mt-1 text-xs text-gray-500">Grade {e.grade}-{e.section}</p>
                   ) : null}
-                </div>
+                </button>
               )
             })}
           </div>
@@ -169,22 +173,18 @@ export default function TestCalendar({ schoolId, classId, studentId, teacherId, 
         {/* Calendar */}
         <div className="lg:col-span-2 bg-white rounded-xl border border-gray-200 overflow-hidden">
           <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
-            <button onClick={prevMonth} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100">
-              <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-              </svg>
+            <button type="button" onClick={prevMonth} aria-label="Previous month" className="flex h-11 w-11 items-center justify-center rounded-md text-gray-500 hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-600">
+              <ChevronLeft className="h-4 w-4" aria-hidden="true" />
             </button>
-            <h3 className="text-sm font-bold text-gray-800">{MONTHS[month]} {year}</h3>
-            <button onClick={nextMonth} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100">
-              <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-              </svg>
+            <h3 className="text-sm font-semibold text-gray-800">{MONTHS[month]} {year}</h3>
+            <button type="button" onClick={nextMonth} aria-label="Next month" className="flex h-11 w-11 items-center justify-center rounded-md text-gray-500 hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-600">
+              <ChevronRight className="h-4 w-4" aria-hidden="true" />
             </button>
           </div>
 
           <div className="grid grid-cols-7 border-b border-gray-100">
             {DAYS.map(d => (
-              <div key={d} className="text-center py-2 text-[10px] font-semibold text-gray-400 uppercase tracking-wide">{d}</div>
+              <div key={d} className="py-2 text-center text-xs font-semibold uppercase tracking-wide text-gray-500">{d}</div>
             ))}
           </div>
 
@@ -198,10 +198,12 @@ export default function TestCalendar({ schoolId, classId, studentId, teacherId, 
               const isSelected = ds === selected
 
               return (
-                <div
+                <button
+                  type="button"
                   key={ds}
                   onClick={() => setSelected(isSelected ? null : ds)}
-                  className={`min-h-[64px] border-b border-r border-gray-50 p-1.5 cursor-pointer transition-all ${
+                  aria-label={`${day} ${MONTHS[month]}${dayExams.length ? `, ${dayExams.length} exam${dayExams.length === 1 ? '' : 's'}` : ''}`}
+                  className={`min-h-[72px] border-b border-r border-gray-100 p-1.5 text-left transition-colors focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-green-600 ${
                     isSelected ? 'bg-indigo-50' :
                     isToday ? 'bg-blue-50' :
                     isPast ? 'bg-gray-50/50' :
@@ -217,16 +219,16 @@ export default function TestCalendar({ schoolId, classId, studentId, teacherId, 
                     {dayExams.slice(0, 2).map(e => {
                       const m = meta(e.exam_type)
                       return (
-                        <div key={e.id} className={`text-[9px] truncate px-1 py-0.5 rounded font-medium border ${m.color}`}>
+                        <div key={e.id} className={`truncate rounded border px-1 py-0.5 text-xs font-medium ${m.color}`}>
                           {e.exam_name}
                         </div>
                       )
                     })}
                     {dayExams.length > 2 && (
-                      <div className="text-[9px] text-gray-400 pl-1">+{dayExams.length - 2}</div>
+                      <div className="pl-1 text-xs text-gray-500">+{dayExams.length - 2}</div>
                     )}
                   </div>
-                </div>
+                </button>
               )
             })}
           </div>
@@ -236,7 +238,7 @@ export default function TestCalendar({ schoolId, classId, studentId, teacherId, 
             {Object.entries(EXAM_TYPE_META).map(([type, m]) => (
               <div key={type} className="flex items-center gap-1.5">
                 <div className={`w-2.5 h-2.5 rounded-sm ${m.dot}`} />
-                <span className="text-[10px] text-gray-500">{m.label}</span>
+                <span className="text-xs text-gray-500">{m.label}</span>
               </div>
             ))}
           </div>
@@ -258,12 +260,12 @@ export default function TestCalendar({ schoolId, classId, studentId, teacherId, 
                       <div className="flex items-start justify-between gap-2 mb-2">
                         <div>
                           <p className="text-sm font-bold">{e.exam_name}</p>
-                          <span className={`inline-block text-[10px] font-bold px-1.5 py-0.5 rounded border mt-1 ${m.color}`}>
+                          <span className={`mt-1 inline-block rounded border px-1.5 py-0.5 text-xs font-semibold ${m.color}`}>
                             {m.label}
                           </span>
                         </div>
                         {(mode === 'teacher' || mode === 'admin') && (
-                          <span className="text-[10px] font-semibold text-gray-500 bg-white px-1.5 py-0.5 rounded border">
+                          <span className="rounded border bg-white px-1.5 py-0.5 text-xs font-semibold text-gray-500">
                             {e.grade}-{e.section}
                           </span>
                         )}
@@ -271,10 +273,10 @@ export default function TestCalendar({ schoolId, classId, studentId, teacherId, 
 
                       {e.subjects.length > 0 && (
                         <div className="mb-2">
-                          <p className="text-[10px] font-semibold opacity-60 uppercase mb-1">Subjects</p>
+                          <p className="mb-1 text-xs font-semibold uppercase opacity-60">Subjects</p>
                           <div className="flex flex-wrap gap-1">
                             {e.subjects.map(s => (
-                              <span key={s} className="text-[10px] bg-white/60 px-1.5 py-0.5 rounded font-medium">{s}</span>
+                              <span key={s} className="rounded bg-white/60 px-1.5 py-0.5 text-xs font-medium">{s}</span>
                             ))}
                           </div>
                         </div>
@@ -289,7 +291,7 @@ export default function TestCalendar({ schoolId, classId, studentId, teacherId, 
                       )}
 
                       {(mode === 'teacher' || mode === 'admin') && e.total_subjects > 0 && (
-                        <div className="mt-2 pt-2 border-t border-white/40 text-[10px] opacity-70">
+                        <div className="mt-2 border-t border-white/40 pt-2 text-xs opacity-70">
                           Marks: {e.submitted_subjects}/{e.total_subjects} subjects submitted
                         </div>
                       )}
@@ -300,12 +302,12 @@ export default function TestCalendar({ schoolId, classId, studentId, teacherId, 
             </div>
           ) : selected ? (
             <div className="bg-white rounded-xl border border-gray-200 p-6 text-center">
-              <p className="text-2xl mb-2">📭</p>
+              <Inbox className="mx-auto mb-2 h-7 w-7 text-gray-400" aria-hidden="true" />
               <p className="text-sm text-gray-500">No exams on this day</p>
             </div>
           ) : (
             <div className="bg-white rounded-xl border border-gray-200 p-6 text-center">
-              <p className="text-2xl mb-2">📅</p>
+              <CalendarDays className="mx-auto mb-2 h-7 w-7 text-gray-400" aria-hidden="true" />
               <p className="text-sm text-gray-500">Click a date to see exam details</p>
               <p className="text-xs text-gray-400 mt-1">{exams.length} exams scheduled</p>
             </div>

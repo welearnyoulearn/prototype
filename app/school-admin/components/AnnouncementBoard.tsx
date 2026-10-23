@@ -1,490 +1,301 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
+import { useConfirm } from '@/components/ui/use-confirm'
+import AnnouncementComposer, { type ClassRow } from '@/components/announcements/AnnouncementComposer'
+import NoticeModal from '@/components/announcements/NoticeModal'
+import type { NoticeItem } from '@/components/announcements/types'
+import { Archive, CheckCircle2, Clock3, Eye, FileText, Megaphone, Pencil, Pin, Plus, Send, Trash2, Undo2 } from 'lucide-react'
 
-type Announcement = {
-  id: number
-  title: string
-  content: string
-  announcement_type: string
-  target_audience: string
-  priority: string
-  created_by_name: string
-  expires_at: string | null
-  created_at: string
+type Tab = 'live' | 'scheduled' | 'drafts' | 'archive' | 'deleted'
+type Stats = {
+  recipients: number; seen: number; acknowledged: number | null; requires_ack: boolean
+  by_role: Record<string, { recipients: number; seen: number; acked: number }>
+  not_seen: Array<{ id: number; name: string; role: string }>; not_seen_total: number
+  not_acknowledged: Array<{ id: number; name: string; role: string }>
+  history: Array<{ action: string; by_name: string | null; created_at: string; details: Record<string, unknown> | null }>
 }
 
-const TYPE_META: Record<string, { label: string; color: string; bg: string }> = {
-  general:  { label: 'General',  color: 'text-gray-600',   bg: 'bg-gray-100' },
-  circular: { label: 'Circular', color: 'text-blue-700',   bg: 'bg-blue-100' },
-  event:    { label: 'Event',    color: 'text-purple-700', bg: 'bg-purple-100' },
-  alert:    { label: 'Alert',    color: 'text-red-700',    bg: 'bg-red-100' },
-}
-
-const PRIORITY_META: Record<string, { label: string; color: string; dot: string; ring: string }> = {
-  normal: { label: 'Normal', color: 'text-gray-500',   dot: 'bg-gray-400',   ring: 'border-gray-100' },
-  high:   { label: 'High',   color: 'text-amber-600',  dot: 'bg-amber-400',  ring: 'border-amber-200' },
-  urgent: { label: 'Urgent', color: 'text-red-600',    dot: 'bg-red-500',    ring: 'border-red-200' },
-}
-
-// All valid individual audience values
-const AUDIENCE_OPTIONS = [
-  { key: 'teachers', label: 'Teachers', icon: '👨‍🏫', color: 'bg-blue-100 text-blue-700 border-blue-200' },
-  { key: 'students', label: 'Students', icon: '🎓', color: 'bg-emerald-100 text-emerald-700 border-emerald-200' },
-  { key: 'parents',  label: 'Parents',  icon: '👨‍👩‍👧', color: 'bg-violet-100 text-violet-700 border-violet-200' },
+const TABS: Array<{ key: Tab; label: string; icon: typeof Megaphone }> = [
+  { key: 'live', label: 'Live', icon: Megaphone },
+  { key: 'scheduled', label: 'Scheduled', icon: Clock3 },
+  { key: 'drafts', label: 'Drafts', icon: FileText },
+  { key: 'archive', label: 'Archive', icon: Archive },
+  { key: 'deleted', label: 'Deleted', icon: Trash2 },
 ]
+const PRIORITY_META: Record<string, { label: string; color: string }> = {
+  urgent: { label: 'Urgent', color: 'text-red-600' },
+  high: { label: 'High', color: 'text-amber-600' },
+  normal: { label: 'Normal', color: 'text-gray-500' },
+}
+const TYPE_META: Record<string, { label: string; color: string }> = {
+  general: { label: 'General', color: 'text-gray-600' },
+  circular: { label: 'Circular', color: 'text-[#245b46]' },
+  event: { label: 'Event', color: 'text-[#21686a]' },
+  alert: { label: 'Alert', color: 'text-red-700' },
+}
+const AUDIENCE_META: Record<string, { label: string; cls: string }> = {
+  all: { label: 'Everyone', cls: 'bg-indigo-50 text-indigo-700 border-indigo-100' },
+  teachers: { label: 'Teachers', cls: 'bg-blue-50 text-blue-700 border-blue-100' },
+  students: { label: 'Students', cls: 'bg-green-50 text-green-700 border-green-100' },
+  parents: { label: 'Parents', cls: 'bg-purple-50 text-purple-700 border-purple-100' },
+}
+const ACTION_LABEL: Record<string, string> = { created: 'Published', drafted: 'Saved as draft', published: 'Published', edited: 'Edited', unpublished: 'Moved to drafts', deleted: 'Deleted', restored: 'Restored' }
 
-function audienceDisplay(raw: string): { label: string; color: string }[] {
-  if (!raw || raw === 'all') return [{ label: 'Everyone', color: 'bg-indigo-100 text-indigo-700' }]
-  return raw.split(',').map(a => {
-    const opt = AUDIENCE_OPTIONS.find(o => o.key === a.trim())
-    return opt
-      ? { label: opt.label, color: opt.color }
-      : { label: a, color: 'bg-gray-100 text-gray-600' }
-  })
+function fmtDate(s: string) {
+  return new Date(s).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+}
+function fmtDateTime(s: string) {
+  return new Date(s).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })
+}
+function classesLabel(tc: NoticeItem['target_classes']): string | null {
+  if (!tc || tc.length === 0) return null
+  return tc.map(c => (c.section ? `${c.grade}-${c.section}` : `Grade ${c.grade}`)).join(', ')
 }
 
-function AudiencePills({ raw }: { raw: string }) {
-  const chips = audienceDisplay(raw)
-  return (
-    <div className="flex flex-wrap gap-1">
-      {chips.map((c, i) => (
-        <span key={i} className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${c.color}`}>
-          {c.label}
-        </span>
-      ))}
-    </div>
-  )
-}
+export default function AnnouncementBoard({ schoolId, schoolName = 'Your School' }: { schoolId: number; schoolName?: string }) {
+  const [tab, setTab] = useState<Tab>('live')
+  const [mode, setMode] = useState<'list' | 'compose'>('list')
+  const [editing, setEditing] = useState<NoticeItem | null>(null)
+  const [editingScheduled, setEditingScheduled] = useState(false)
+  const [items, setItems] = useState<NoticeItem[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [success, setSuccess] = useState('')
+  const [expanded, setExpanded] = useState<number | null>(null)
+  const [stats, setStats] = useState<Record<number, Stats | 'loading'>>({})
+  const [filterAudience, setFilterAudience] = useState('all')
+  const [classes, setClasses] = useState<ClassRow[]>([])
+  const [preview, setPreview] = useState<NoticeItem | null>(null)
+  const { confirm, ConfirmDialog } = useConfirm()
 
-export default function AnnouncementBoard({ schoolId }: { schoolId: number }) {
-  const [tab, setTab]             = useState<'list' | 'create'>('list')
-  const [items, setItems]         = useState<Announcement[]>([])
-  const [loading, setLoading]     = useState(true)
-  const [deleting, setDeleting]   = useState<number | null>(null)
-  const [saving, setSaving]       = useState(false)
-  const [error, setError]         = useState('')
-  const [success, setSuccess]     = useState('')
-  const [expanded, setExpanded]   = useState<number | null>(null)
-  const [filterAudience, setFilterAudience] = useState<string>('all')
-
-
-  // Form state — target_audience as array
-  const [form, setForm] = useState({
-    title: '', content: '',
-    announcement_type: 'general',
-    target_audience: ['all'] as string[],
-    priority: 'normal', expires_at: '',
-  })
-
-  useEffect(() => { load() }, [schoolId]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  async function load() {
+  const load = useCallback(async (which: Tab = tab) => {
     setLoading(true)
     try {
-      const r = await fetch(`/api/announcements?school_id=${schoolId}`)
+      const r = await fetch(`/api/announcements?school_id=${schoolId}&scope=${which}`)
       const data = await r.json()
       setItems(Array.isArray(data) ? data : [])
     } finally {
       setLoading(false)
     }
-  }
+  }, [schoolId, tab])
 
-  function toggleAudience(key: string) {
-    setForm(f => {
-      if (key === 'all') return { ...f, target_audience: ['all'] }
-      const current = f.target_audience.filter(a => a !== 'all')
-      const next = current.includes(key)
-        ? current.filter(a => a !== key)
-        : [...current, key]
-      return { ...f, target_audience: next.length === 0 ? ['all'] : next }
-    })
-  }
+  useEffect(() => { load(tab) }, [schoolId, tab]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  useEffect(() => {
+    fetch(`/api/classes?school_id=${schoolId}`).then(r => (r.ok ? r.json() : [])).then((rows: unknown) => {
+      setClasses(Array.isArray(rows) ? (rows as ClassRow[]).map(c => ({ grade: c.grade, section: c.section })) : [])
+    }).catch(() => setClasses([]))
+  }, [schoolId])
 
-  async function handleCreate(e: React.FormEvent) {
-    e.preventDefault()
-    if (form.target_audience.length === 0) {
-      setError('Please select at least one audience'); return
-    }
-    setSaving(true)
-    setError('')
+  function flash(msg: string) { setSuccess(msg); setTimeout(() => setSuccess(''), 4000) }
+
+  async function loadStats(id: number) {
+    setStats(s => ({ ...s, [id]: 'loading' }))
     try {
-      const target_audience = form.target_audience.includes('all')
-        ? 'all'
-        : form.target_audience.join(',')
-
-      const r = await fetch('/api/announcements', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...form, target_audience, school_id: schoolId, created_by_name: 'Admin' }),
-      })
-      if (!r.ok) { const d = await r.json(); throw new Error(d.error) }
-      setSuccess('Announcement published successfully!')
-      setForm({ title: '', content: '', announcement_type: 'general', target_audience: ['all'], priority: 'normal', expires_at: '' })
-      setTab('list')
-      await load()
-      setTimeout(() => setSuccess(''), 4000)
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Failed to create announcement')
-    } finally {
-      setSaving(false)
-    }
+      const r = await fetch(`/api/announcements/${id}/stats`)
+      if (r.ok) { const d: Stats = await r.json(); setStats(s => ({ ...s, [id]: d })) }
+      else setStats(s => { const n = { ...s }; delete n[id]; return n })
+    } catch { setStats(s => { const n = { ...s }; delete n[id]; return n }) }
   }
 
-  async function handleDelete(id: number) {
-    setDeleting(id)
-    await fetch(`/api/announcements/${id}`, { method: 'DELETE' })
-    setItems(prev => prev.filter(a => a.id !== id))
-    setDeleting(null)
+  function toggleExpand(n: NoticeItem) {
+    const open = expanded === n.id
+    setExpanded(open ? null : n.id)
+    if (!open) loadStats(n.id)
   }
 
-  function fmtDate(s: string) {
-    return new Date(s).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+  async function change(n: NoticeItem, body: Record<string, unknown>, msg: string) {
+    setError('')
+    const r = await fetch(`/api/announcements/${n.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    if (!r.ok) { const d = await r.json().catch(() => ({})); setError(d.error || 'Could not update the announcement'); return }
+    flash(msg)
+    await load()
   }
 
-  // Filter items by audience
-  const filteredItems = filterAudience === 'all'
-    ? items
-    : items.filter(a => {
-        if (a.target_audience === 'all') return true
-        return a.target_audience.split(',').map(s => s.trim()).includes(filterAudience)
-      })
+  async function handleDelete(n: NoticeItem) {
+    const ok = await confirm('Delete this announcement? Everyone who could see it will lose it. It stays in the Deleted tab for your records.', { title: 'Delete announcement?', confirmText: 'Delete' })
+    if (!ok) return
+    const r = await fetch(`/api/announcements/${n.id}`, { method: 'DELETE' })
+    if (!r.ok) { const d = await r.json().catch(() => ({})); setError(d.error || 'Could not delete the announcement'); return }
+    setItems(prev => prev.filter(a => a.id !== n.id))
+  }
 
+  const filtered = items.filter(a => {
+    if (filterAudience === 'all') return true
+    return a.target_audience === 'all' || a.target_audience.split(',').map(s => s.trim()).includes(filterAudience)
+  })
   const urgentCount = items.filter(a => a.priority === 'urgent').length
-  const highCount   = items.filter(a => a.priority === 'high').length
+
+  if (mode === 'compose') {
+    return (
+      <div className="space-y-5 max-w-6xl">
+        <AnnouncementComposer
+          schoolId={schoolId} schoolName={schoolName} classes={classes} initial={editing} initialScheduled={editingScheduled}
+          onCancel={() => { setMode('list'); setEditing(null) }}
+          onSaved={msg => {
+            const nextTab: Tab = msg.startsWith('Saved as draft') ? 'drafts' : msg.startsWith('Announcement scheduled') ? 'scheduled' : 'live'
+            setMode('list'); setEditing(null); flash(msg)
+            if (nextTab !== tab) setTab(nextTab)
+            else load(nextTab)
+          }}
+        />
+        {ConfirmDialog}
+      </div>
+    )
+  }
 
   return (
-    <div className="space-y-5">
-
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+    <div className="space-y-5 max-w-4xl">
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h2 className="text-xl font-bold text-gray-900">Announcements & Circulars</h2>
+          <h2 className="text-xl font-semibold tracking-tight text-gray-900">Announcement board</h2>
           <p className="text-sm text-gray-400 mt-0.5">
-            {items.length} active
+            {loading ? 'Loading…' : `${items.length} in ${TABS.find(t => t.key === tab)?.label}`}
             {urgentCount > 0 && <span className="ml-2 text-red-500 font-semibold">· {urgentCount} urgent</span>}
-            {highCount > 0 && <span className="ml-2 text-amber-500 font-semibold">· {highCount} high priority</span>}
           </p>
         </div>
-        <div className="flex gap-2 flex-wrap">
-          <button onClick={() => { setTab('list'); load() }}
-            className={`px-4 py-2 rounded-xl text-sm font-semibold transition-all ${tab === 'list'
-              ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-200'
-              : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
-            All Announcements
-          </button>
-          <button onClick={() => setTab('create')}
-            className={`px-4 py-2 rounded-xl text-sm font-semibold transition-all flex items-center gap-1.5 ${tab === 'create'
-              ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-200'
-              : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-            </svg>
-            New Announcement
-          </button>
-        </div>
+        <button data-testid="ann-tab-create" onClick={() => { setEditing(null); setEditingScheduled(false); setMode('compose') }}
+          className="flex min-h-10 items-center gap-2 rounded-md bg-[#245b46] px-4 py-2 text-sm font-semibold text-white hover:bg-[#173e2f]">
+          <Plus size={16} aria-hidden="true" /> New announcement
+        </button>
       </div>
 
-      {success && (
-        <div className="bg-green-50 border border-green-200 text-green-800 px-4 py-3 rounded-xl text-sm flex items-center gap-2">
-          <svg className="w-4 h-4 text-green-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-          </svg>
-          {success}
+      <div className="flex gap-5 overflow-x-auto border-b border-gray-200" role="tablist" aria-label="Announcement status">
+        {TABS.map(t => (
+          <button key={t.key} role="tab" aria-selected={tab === t.key} data-testid={`ann-tab-${t.key}`} onClick={() => { setTab(t.key); setExpanded(null) }}
+            className={`flex min-h-11 shrink-0 items-center gap-2 border-b-2 px-1 text-sm font-semibold transition-colors ${tab === t.key ? 'border-[#245b46] text-[#173e2f]' : 'border-transparent text-gray-500 hover:text-gray-800'}`}>
+            <t.icon size={15} aria-hidden="true" /> {t.label}
+          </button>
+        ))}
+      </div>
+
+      {success && <div data-testid="ann-success" className="bg-green-50 border border-green-200 text-green-800 px-4 py-3 rounded-xl text-sm">✓ {success}</div>}
+      {error && <div data-testid="ann-list-error" className="bg-red-50 border border-red-100 text-red-700 px-4 py-3 rounded-xl text-sm">{error}</div>}
+
+      <div className="flex gap-1.5 flex-wrap">
+        {[{ key: 'all', label: 'All audiences' }, { key: 'teachers', label: 'Teachers' }, { key: 'students', label: 'Students' }, { key: 'parents', label: 'Parents' }].map(o => (
+          <button key={o.key} onClick={() => setFilterAudience(o.key)}
+            className={`px-3 py-1 rounded-full text-xs font-semibold border transition-colors ${filterAudience === o.key ? 'bg-gray-800 border-gray-800 text-white' : 'bg-white border-gray-200 text-gray-500 hover:bg-gray-50'}`}>
+            {o.label}
+          </button>
+        ))}
+      </div>
+
+      {!loading && filtered.length === 0 && (
+        <div className="border-y border-dashed border-gray-300 py-14 text-center">
+          <Megaphone className="mx-auto mb-3 h-6 w-6 text-gray-400" aria-hidden="true" />
+          <p className="text-sm font-medium text-gray-700">{tab === 'live' ? 'No live announcements' : `Nothing in ${TABS.find(t => t.key === tab)?.label}`}</p>
+          <p className="mt-1 text-xs text-gray-400">{tab === 'live' ? 'Create an announcement when your school has something to share.' : 'Items will appear here when their status changes.'}</p>
         </div>
       )}
 
-      {/* ── List View ── */}
-      {tab === 'list' && (
-        <div className="space-y-4">
-
-          {/* Audience filter tabs */}
-          <div className="flex gap-2 flex-wrap">
-            {[
-              { key: 'all',      label: 'All',      count: items.length },
-              { key: 'teachers', label: 'Teachers', count: items.filter(a => a.target_audience === 'all' || a.target_audience.includes('teachers')).length },
-              { key: 'students', label: 'Students', count: items.filter(a => a.target_audience === 'all' || a.target_audience.includes('students')).length },
-              { key: 'parents',  label: 'Parents',  count: items.filter(a => a.target_audience === 'all' || a.target_audience.includes('parents')).length },
-            ].map(f => (
-              <button key={f.key} onClick={() => setFilterAudience(f.key)}
-                className={`px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all flex items-center gap-1.5 ${
-                  filterAudience === f.key
-                    ? 'bg-indigo-600 text-white'
-                    : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
-                {f.label}
-                <span className={`text-[11px] font-bold px-1.5 py-0.5 rounded-full ${
-                  filterAudience === f.key ? 'bg-indigo-500 text-white' : 'bg-gray-100 text-gray-500'}`}>
-                  {f.count}
-                </span>
-              </button>
-            ))}
-          </div>
-
-          {loading && (
-            <div className="space-y-3">
-              {[1,2,3].map(i => (
-                <div key={i} className="bg-white border border-gray-100 rounded-xl p-5 animate-pulse">
-                  <div className="flex gap-3">
-                    <div className="w-2.5 h-2.5 rounded-full bg-gray-200 mt-1.5 flex-shrink-0" />
-                    <div className="flex-1 space-y-2">
-                      <div className="flex gap-2"><div className="h-4 bg-gray-200 rounded-full w-16" /><div className="h-4 bg-gray-100 rounded-full w-14" /></div>
-                      <div className="h-4 bg-gray-200 rounded w-3/4" />
-                      <div className="h-3 bg-gray-100 rounded w-1/3" />
-                    </div>
+      <div className="divide-y border-y border-gray-200">
+        {filtered.map(a => {
+          const pm = PRIORITY_META[a.priority] ?? PRIORITY_META.normal
+          const tm = TYPE_META[a.announcement_type] ?? TYPE_META.general
+          const isOpen = expanded === a.id
+          const st = stats[a.id]
+          const cl = classesLabel(a.target_classes)
+          const scheduled = tab === 'scheduled' && !!a.publish_at
+          return (
+            <div key={a.id} data-testid={`ann-card-${a.id}`}
+              className={`${a.priority === 'urgent' ? 'border-l-2 border-l-red-600' : a.priority === 'high' ? 'border-l-2 border-l-amber-500' : ''}`}>
+              <div className="flex items-start gap-3.5 px-5 py-4 cursor-pointer hover:bg-gray-50/60" onClick={() => toggleExpand(a)}>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap mb-1.5">
+                    <span className={`text-xs font-semibold uppercase tracking-[.06em] ${tm.color}`}>{tm.label}</span>
+                    {a.target_audience.split(',').map(x => x.trim()).map(x => {
+                      const m = AUDIENCE_META[x] ?? AUDIENCE_META.all
+                      return <span key={x} className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${m.cls}`}>{m.label}</span>
+                    })}
+                    {cl && <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-orange-50 text-orange-700 border border-orange-100">{cl}</span>}
+                    {a.priority !== 'normal' && <span className={`text-[10px] font-bold uppercase ${pm.color}`}>● {pm.label}</span>}
+                    {a.pinned && <span className="inline-flex items-center gap-1 text-xs font-semibold text-[#245b46]"><Pin size={12} aria-hidden="true" />Pinned</span>}
+                    {a.requires_ack && <span className="inline-flex items-center gap-1 text-xs font-semibold text-amber-800"><CheckCircle2 size={12} aria-hidden="true" />Needs acknowledgement</span>}
+                    {a.status === 'draft' && <span className="text-[10px] font-bold text-gray-600 bg-gray-100 px-1.5 py-0.5 rounded-full">Draft</span>}
+                    {scheduled && <span className="inline-flex items-center gap-1 text-xs font-semibold text-sky-800"><Clock3 size={12} aria-hidden="true" />{fmtDateTime(a.publish_at as string)}</span>}
+                  </div>
+                  <p className="text-sm font-semibold text-gray-900 leading-snug">{a.title}</p>
+                  <div className="flex items-center gap-2 mt-1.5 text-xs text-gray-400 flex-wrap">
+                    <span className="font-medium text-gray-500">{a.created_by_name}</span>
+                    <span>·</span>
+                    <span>{fmtDate(a.published_at ?? a.created_at)}</span>
+                    {a.expires_at && <><span>·</span><span className="text-amber-500">Expires {fmtDate(a.expires_at)}</span></>}
+                    {a.status === 'published' && tab !== 'deleted' && <><span>·</span><span className="inline-flex items-center gap-1" data-testid={`ann-seen-${a.id}`}><Eye size={12} aria-hidden="true" />{a.seen_count ?? 0} seen</span></>}
                   </div>
                 </div>
-              ))}
-            </div>
-          )}
-
-          {!loading && filteredItems.length === 0 && (
-            <div className="text-center py-20 bg-white border border-gray-100 rounded-2xl">
-              <div className="w-16 h-16 bg-gray-50 rounded-2xl flex items-center justify-center mx-auto mb-4">
-                <svg className="w-8 h-8 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z" />
-                </svg>
+                <span className={`text-gray-300 mt-1.5 transition-transform ${isOpen ? 'rotate-180' : ''}`}>⌄</span>
               </div>
-              <p className="text-gray-600 font-semibold">No announcements found</p>
-              <p className="text-gray-400 text-sm mt-1">
-                {filterAudience !== 'all' ? `No announcements for ${filterAudience} yet.` : 'Click "+ New Announcement" to post one.'}
-              </p>
-            </div>
-          )}
 
-          <div className="space-y-2.5">
-            {filteredItems.map(a => {
-              const pm = PRIORITY_META[a.priority] ?? PRIORITY_META.normal
-              const tm = TYPE_META[a.announcement_type] ?? TYPE_META.general
-              const isOpen = expanded === a.id
-              const isUrgent = a.priority === 'urgent'
-              const isHigh = a.priority === 'high'
+              {isOpen && (
+                <div className="px-5 pb-5 border-t border-gray-50 space-y-4">
+                  <p className="text-sm text-gray-600 mt-4 whitespace-pre-wrap leading-relaxed">{a.content}</p>
 
-              return (
-                <div key={a.id} className={`bg-white border rounded-2xl shadow-sm overflow-hidden transition-all ${
-                  isUrgent ? 'border-red-200' : isHigh ? 'border-amber-200' : 'border-gray-100'
-                }`}>
-                  <div
-                    className="flex items-start gap-3.5 px-5 py-4 cursor-pointer hover:bg-gray-50/60 transition-colors"
-                    onClick={() => setExpanded(isOpen ? null : a.id)}
-                  >
-                    {/* Priority indicator */}
-                    <div className={`w-2 h-2 rounded-full flex-shrink-0 mt-2 ${pm.dot}`} />
-
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap mb-1.5">
-                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${tm.bg} ${tm.color}`}>
-                          {tm.label}
-                        </span>
-                        <AudiencePills raw={a.target_audience} />
-                        {a.priority !== 'normal' && (
-                          <span className={`text-[10px] font-bold uppercase tracking-wide ${pm.color}`}>
-                            ● {pm.label}
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-sm font-semibold text-gray-900 leading-snug">{a.title}</p>
-                      <div className="flex items-center gap-2 mt-1.5 text-xs text-gray-400">
-                        <span className="font-medium text-gray-500">{a.created_by_name}</span>
-                        <span>·</span>
-                        <span>{fmtDate(a.created_at)}</span>
-                        {a.expires_at && (
-                          <>
-                            <span>·</span>
-                            <span className="text-amber-500">Expires {fmtDate(a.expires_at)}</span>
-                          </>
-                        )}
-                      </div>
+                  {/* Who has seen it */}
+                  {tab !== 'deleted' && a.status !== 'draft' && (
+                    <div data-testid={`ann-stats-${a.id}`} className="border-l-2 border-[#dce9dc] bg-[#f6f8f4] p-4 space-y-3">
+                      {!st || st === 'loading' ? <p className="text-xs text-gray-400">Loading reach…</p> : (
+                        <>
+                          <div className="flex items-center justify-between text-sm">
+                            <span data-testid={`ann-reach-${a.id}`} className="font-semibold text-gray-700">Seen by {st.seen} of {st.recipients}</span>
+                            <span className="text-xs text-gray-400">{st.recipients ? Math.round((st.seen / st.recipients) * 100) : 0}%</span>
+                          </div>
+                          <div className="h-2 rounded-full bg-gray-200 overflow-hidden"><div className="h-full bg-indigo-500" style={{ width: `${st.recipients ? (st.seen / st.recipients) * 100 : 0}%` }} /></div>
+                          <div className="flex gap-3 flex-wrap text-xs text-gray-500">
+                            {Object.entries(st.by_role).filter(([, v]) => v.recipients > 0).map(([k, v]) => (
+                              <span key={k} className="capitalize">{k}: {v.seen}/{v.recipients}</span>
+                            ))}
+                          </div>
+                          {st.requires_ack && <p data-testid={`ann-acks-${a.id}`} className="text-sm font-semibold text-amber-700">Acknowledged by {st.acknowledged ?? 0} of {st.recipients}</p>}
+                          {st.not_seen_total > 0 && (
+                            <details data-testid={`ann-notseen-${a.id}`}>
+                              <summary className="text-xs font-semibold text-indigo-600 cursor-pointer">{st.not_seen_total} have not seen it yet</summary>
+                              <p className="text-xs text-gray-500 mt-2 leading-relaxed">
+                                {st.not_seen.map(p => `${p.name} (${p.role})`).join(' · ')}{st.not_seen_total > st.not_seen.length ? ` … and ${st.not_seen_total - st.not_seen.length} more` : ''}
+                              </p>
+                            </details>
+                          )}
+                          {st.requires_ack && st.not_acknowledged.length > 0 && (
+                            <details>
+                              <summary className="text-xs font-semibold text-amber-700 cursor-pointer">{st.not_acknowledged.length} have not acknowledged</summary>
+                              <p className="text-xs text-gray-500 mt-2 leading-relaxed">{st.not_acknowledged.map(p => `${p.name} (${p.role})`).join(' · ')}</p>
+                            </details>
+                          )}
+                        </>
+                      )}
                     </div>
+                  )}
 
-                    <svg className={`w-4 h-4 text-gray-300 flex-shrink-0 mt-1.5 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`}
-                      fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                    </svg>
-                  </div>
+                  {/* History */}
+                  {st && st !== 'loading' && st.history.length > 0 && (
+                    <details>
+                      <summary className="text-xs font-semibold text-gray-500 cursor-pointer">History ({st.history.length})</summary>
+                      <ul className="mt-2 space-y-1 text-xs text-gray-500">
+                        {st.history.map((h, i) => <li key={i}>{fmtDateTime(h.created_at)} — {ACTION_LABEL[h.action] ?? h.action} by {h.by_name ?? '—'}</li>)}
+                      </ul>
+                    </details>
+                  )}
 
-                  {isOpen && (
-                    <div className="px-5 pb-5 border-t border-gray-50">
-                      <p className="text-sm text-gray-600 mt-4 whitespace-pre-wrap leading-relaxed">{a.content}</p>
-                      <div className="flex justify-end mt-4 pt-3 border-t border-gray-50">
-                        <button
-                          onClick={() => handleDelete(a.id)}
-                          disabled={deleting === a.id}
-                          className="text-xs text-red-500 hover:text-red-700 border border-red-200 hover:border-red-400 hover:bg-red-50 px-4 py-1.5 rounded-lg transition-all disabled:opacity-40 font-medium"
-                        >
-                          {deleting === a.id ? 'Deleting…' : '🗑 Delete'}
-                        </button>
-                      </div>
+                  {tab !== 'deleted' && (
+                    <div className="flex justify-end gap-2 flex-wrap pt-3 border-t border-gray-50">
+                      <button data-testid={`ann-preview-${a.id}`} onClick={() => setPreview(a)} className="inline-flex items-center gap-1.5 rounded-md border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50"><Eye size={13} />Preview</button>
+                      {a.status === 'draft' && <button data-testid={`ann-publish-${a.id}`} onClick={() => change(a, { status: 'published', publish_at: null }, 'Announcement published!')} className="inline-flex items-center gap-1.5 rounded-md bg-[#245b46] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#173e2f]"><Send size={13} />Publish</button>}
+                      {a.status === 'published' && <button data-testid={`ann-pin-${a.id}`} onClick={() => change(a, { pinned: !a.pinned }, a.pinned ? 'Unpinned.' : 'Pinned to the top.')} className="inline-flex items-center gap-1.5 rounded-md border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50"><Pin size={13} />{a.pinned ? 'Unpin' : 'Pin'}</button>}
+                      {a.status === 'published' && <button data-testid={`ann-unpublish-${a.id}`} onClick={() => change(a, { status: 'draft' }, 'Moved to drafts.')} className="inline-flex items-center gap-1.5 rounded-md border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50"><Undo2 size={13} />Unpublish</button>}
+                      <button data-testid={`ann-edit-${a.id}`} onClick={() => { setEditing(a); setEditingScheduled(tab === 'scheduled'); setMode('compose') }} className="inline-flex items-center gap-1.5 rounded-md border border-[#c7d8cc] px-3 py-1.5 text-xs font-medium text-[#245b46] hover:bg-[#edf2eb]"><Pencil size={13} />Edit</button>
+                      <button data-testid={`ann-delete-${a.id}`} onClick={() => handleDelete(a)} className="inline-flex items-center gap-1.5 rounded-md border border-red-200 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50"><Trash2 size={13} />Delete</button>
                     </div>
                   )}
                 </div>
-              )
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* ── Create Form ── */}
-      {tab === 'create' && (
-        <form onSubmit={handleCreate} className="bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden">
-          <div className="px-6 py-5 border-b border-gray-50 bg-gradient-to-r from-indigo-50 to-white">
-            <h3 className="text-base font-bold text-gray-900">New Announcement</h3>
-            <p className="text-sm text-gray-500 mt-0.5">Post a notice visible to selected audience</p>
-          </div>
-
-          <div className="p-6 space-y-5">
-            {error && (
-              <div className="bg-red-50 border border-red-100 text-red-700 text-sm px-4 py-3 rounded-xl flex items-center gap-2">
-                <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                {error}
-              </div>
-            )}
-
-
-            <div>
-              <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Title *</label>
-              <input
-                className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
-                placeholder="e.g. School closed for Republic Day"
-                value={form.title}
-                onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
-                required
-              />
+              )}
             </div>
+          )
+        })}
+      </div>
 
-            <div>
-              <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Content *</label>
-              <textarea
-                className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all resize-none"
-                rows={5}
-                placeholder="Write the full announcement here…"
-                value={form.content}
-                onChange={e => setForm(f => ({ ...f, content: e.target.value }))}
-                required
-              />
-            </div>
-
-            {/* Audience — multi-select chips */}
-            <div>
-              <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Send To *</label>
-              <div className="flex flex-wrap gap-2">
-                {/* All chip */}
-                <button
-                  type="button"
-                  onClick={() => toggleAudience('all')}
-                  className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold border-2 transition-all ${
-                    form.target_audience.includes('all')
-                      ? 'bg-indigo-600 border-indigo-600 text-white shadow-sm'
-                      : 'bg-white border-gray-200 text-gray-600 hover:border-indigo-200'
-                  }`}
-                >
-                  🌐 Everyone
-                </button>
-                {AUDIENCE_OPTIONS.map(opt => {
-                  const selected = !form.target_audience.includes('all') && form.target_audience.includes(opt.key)
-                  return (
-                    <button
-                      key={opt.key}
-                      type="button"
-                      onClick={() => toggleAudience(opt.key)}
-                      className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold border-2 transition-all ${
-                        selected
-                          ? 'bg-indigo-600 border-indigo-600 text-white shadow-sm'
-                          : 'bg-white border-gray-200 text-gray-600 hover:border-indigo-200'
-                      }`}
-                    >
-                      {opt.icon} {opt.label}
-                      {selected && (
-                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-                        </svg>
-                      )}
-                    </button>
-                  )
-                })}
-              </div>
-              <p className="text-xs text-gray-400 mt-1.5">
-                {form.target_audience.includes('all')
-                  ? 'This announcement will be visible to all teachers, students, and parents.'
-                  : `Visible only to: ${form.target_audience.join(', ')}`}
-              </p>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Type</label>
-                <select
-                  className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent bg-white transition-all"
-                  value={form.announcement_type}
-                  onChange={e => setForm(f => ({ ...f, announcement_type: e.target.value }))}
-                >
-                  <option value="general">📋 General</option>
-                  <option value="circular">📄 Circular</option>
-                  <option value="event">🎉 Event</option>
-                  <option value="alert">🚨 Alert</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Priority</label>
-                <select
-                  className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent bg-white transition-all"
-                  value={form.priority}
-                  onChange={e => setForm(f => ({ ...f, priority: e.target.value }))}
-                >
-                  <option value="normal">Normal</option>
-                  <option value="high">⚠ High</option>
-                  <option value="urgent">🔴 Urgent</option>
-                </select>
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Expiry Date (optional)</label>
-              <input
-                type="date"
-                className="border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
-                value={form.expires_at}
-                onChange={e => setForm(f => ({ ...f, expires_at: e.target.value }))}
-              />
-              <p className="text-xs text-gray-400 mt-1">Leave blank for no expiry</p>
-            </div>
-
-            <div className="flex gap-3 pt-2">
-              <button
-                type="submit"
-                disabled={saving}
-                className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-xl transition-all disabled:opacity-60 shadow-sm shadow-indigo-200 flex items-center gap-2"
-              >
-                {saving ? (
-                  <>
-                    <svg className="w-4 h-4 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                    </svg>
-                    Publishing…
-                  </>
-                ) : (
-                  <>
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z" />
-                    </svg>
-                    Publish Announcement
-                  </>
-                )}
-              </button>
-              <button
-                type="button"
-                onClick={() => setTab('list')}
-                className="px-4 py-2.5 border border-gray-200 text-gray-600 text-sm font-semibold rounded-xl hover:bg-gray-50 transition-all"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </form>
-      )}
-
+      {preview && <NoticeModal notice={{ ...preview, seen: true, acked: false }} schoolName={schoolName} onClose={() => setPreview(null)} />}
+      {ConfirmDialog}
     </div>
   )
 }

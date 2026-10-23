@@ -1,28 +1,32 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
-import { verifyPassword, JWTPayload, setAuthCookie, setPlatformAuthCookie } from '@/lib/auth'
+import {
+  verifyPassword, JWTPayload, setAuthCookie, setPlatformAuthCookie,
+  createStaffSession, getSessionIdFromCookie, revokeSession,
+} from '@/lib/auth'
 import { recordSessionStart } from '@/lib/usageTracking'
 
 export async function POST(req: NextRequest) {
 
   try {
     await ensureDB()
-    const { identifier, password } = await req.json()
-    // identifier = email (platform admin) OR school_code (school admin)
-    if (!identifier || !password) {
-      return NextResponse.json({ error: 'Identifier and password are required' }, { status: 400 })
+    const { email, password } = await req.json()
+    if (typeof email !== 'string' || !email.trim() || !password) {
+      return NextResponse.json({ error: 'Email and password are required' }, { status: 400 })
     }
 
-    const id = identifier.trim().toLowerCase()
+    const normalizedEmail = email.trim().toLowerCase()
 
-    // Look up user by email or school_code
+    // Every school-portal user (school admin, principal, VP) and platform admin logs in
+    // with their own email — the School ID is no longer a credential, so every action
+    // is attributable to one person.
     const result = await pool.query(
-      `SELECT u.*, up.full_name
+      `SELECT u.*, COALESCE(up.full_name, u.full_name) AS display_name
        FROM users u
        LEFT JOIN user_profiles up ON up.user_id = u.id
-       WHERE LOWER(u.email) = $1 OR LOWER(u.school_code) = $1
+       WHERE LOWER(u.email) = $1
        LIMIT 1`,
-      [id]
+      [normalizedEmail]
     )
 
     if (result.rows.length === 0) {
@@ -63,6 +67,11 @@ export async function POST(req: NextRequest) {
     if (user.role === 'platform_admin') {
       await setPlatformAuthCookie(payload)
     } else {
+      // One school-staff session per browser: logging in as someone else ends the
+      // previous person's session on the server, not just in the cookie.
+      const previousSid = await getSessionIdFromCookie()
+      if (previousSid) await revokeSession(previousSid).catch(() => {})
+      payload.sid = await createStaffSession(user.id)
       await setAuthCookie(payload)
     }
 
@@ -70,7 +79,7 @@ export async function POST(req: NextRequest) {
       schoolId: user.school_id ?? null,
       actorId: user.id,
       actorRole: user.role,
-      actorName: user.full_name || user.email,
+      actorName: user.display_name || user.email,
     })
 
     return NextResponse.json({
@@ -80,6 +89,8 @@ export async function POST(req: NextRequest) {
       profileCompleted: user.profile_completed,
       schoolId: user.school_id,
       usageSessionId,
+      // Shown on the login page as the "last used" account next time.
+      account: { name: user.display_name || user.email, email: user.email, role: user.role },
     })
   } catch (error) {
     console.error('[auth/login]', error)

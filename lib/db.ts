@@ -1,4 +1,6 @@
 import { Pool, types } from 'pg'
+import { matchTeacher } from './matchTeacher'
+import { buildFeedbackCategoryBackfillAllQuery } from './feedback-defaults'
 
 // Return DATE columns as plain "YYYY-MM-DD" strings instead of JS Date objects.
 // Without this, pg serialises dates as UTC midnight which JSON-stringifies to
@@ -41,6 +43,19 @@ const poolConfig = (process.env.PGHOST)
 
 const pool = new Pool(poolConfig)
 
+// Every session-timezone-dependent SQL function (CURRENT_DATE, NOW(), the
+// overdue-status flips in fees/ledger/stats routes, "days until year end",
+// etc.) otherwise resolves in Postgres's server default — UTC on Supabase —
+// while this app's schools operate in IST (UTC+5:30). Between 00:00-05:29 IST
+// that's still "yesterday" in UTC, so a bill due today could show as not-yet-
+// overdue, or a year-end date comparison could be a full day off, for that
+// ~5.5-hour window every single day. This project has already been bitten by
+// the DATE-column half of this exact IST/UTC mismatch once (see the
+// setTypeParser comment above) — this closes the other half, at the
+// connection level, so every existing and future CURRENT_DATE/NOW() query is
+// correct without having to patch each one individually.
+pool.on('connect', client => { client.query(`SET TIME ZONE 'Asia/Kolkata'`).catch(() => {}) })
+
 export default pool
 
 // Lazy singleton — ensures bootstrap runs at most once per server process.
@@ -69,7 +84,7 @@ const BOOTSTRAP_MARKER_KEY   = 'initial_schema_bootstrap'
 // silently never runs anywhere, and you will chase a "column does not exist" 500
 // that reproduces on production but never locally against a fresh DB.
 // Adding a migration statement and bumping this number is ONE change, not two.
-const SCHEMA_VERSION = 1
+const SCHEMA_VERSION = 37
 
 // Records the schema level this build finished applying, on the same row as the
 // bootstrap marker (no extra row, no extra round-trip to read it back).
@@ -616,44 +631,54 @@ export async function initDB() {
       last_activity_date DATE
     )`,
 
-    // ── Syllabus topics (teacher marks coverage) ─────────────────────────────
-    `CREATE TABLE IF NOT EXISTS syllabus_topics (
-      id SERIAL PRIMARY KEY,
-      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
-      class_id INTEGER NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
-      subject VARCHAR(100) NOT NULL,
-      chapter_name VARCHAR(200) NOT NULL,
-      chapter_order INTEGER DEFAULT 0,
-      topic_name VARCHAR(200) NOT NULL,
-      topic_order INTEGER DEFAULT 0,
-      status VARCHAR(20) DEFAULT 'pending',
-      covered_date DATE,
-      covered_by INTEGER REFERENCES teachers(id) ON DELETE SET NULL,
-      created_at TIMESTAMPTZ DEFAULT NOW()
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_syllabus_class ON syllabus_topics(class_id, school_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_syllabus_subject ON syllabus_topics(class_id, subject)`,
-    `CREATE UNIQUE INDEX IF NOT EXISTS idx_syllabus_unique_topic ON syllabus_topics(class_id, subject, chapter_name, topic_name)`,
 
     // ── Exam Marks System ────────────────────────────────────────────────────
+    // Status lifecycle (v2, see EXAM-MARKS-FEATURE-README.md):
+    //   scheduled -> collecting -> teacher_reviewed -> released
+    // 'scheduled': exam created, marks entry not yet open (before exam_date).
+    // 'collecting': exam_date has passed (or admin force-opened it), subject
+    //   teachers can enter/submit marks.
+    // 'teacher_reviewed': every subject submitted and the class teacher has
+    //   reviewed and forwarded to school admin — marks are frozen from here on,
+    //   NOT yet visible to students/parents.
+    // 'released': school admin's final release — this is what actually makes
+    //   results visible to students and parents. Terminal; no un-release.
+    // created_by is nullable because exams are now admin-created; created_by
+    // is who technically owns the row for legacy/audit purposes only — the
+    // real "who can act on this" check is role-based (see lib/examsAuth.ts),
+    // not an identity match against this column.
     `CREATE TABLE IF NOT EXISTS exam_records (
       id SERIAL PRIMARY KEY,
       school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
       class_id INTEGER NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
-      created_by INTEGER NOT NULL REFERENCES teachers(id),
+      created_by INTEGER REFERENCES teachers(id) ON DELETE SET NULL,
+      created_by_admin_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      exam_group_id UUID,
       exam_name VARCHAR(200) NOT NULL,
       exam_type VARCHAR(50) NOT NULL DEFAULT 'unit_test',
       exam_date DATE,
       passing_pct INTEGER NOT NULL DEFAULT 35,
-      status VARCHAR(20) NOT NULL DEFAULT 'draft',
+      status VARCHAR(20) NOT NULL DEFAULT 'scheduled',
+      entry_opened_at TIMESTAMPTZ,
+      teacher_reviewed_at TIMESTAMPTZ,
+      teacher_reviewed_by INTEGER REFERENCES teachers(id) ON DELETE SET NULL,
+      released_at TIMESTAMPTZ,
+      released_by_admin_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
       published_at TIMESTAMPTZ,
       created_at TIMESTAMPTZ DEFAULT NOW(),
       updated_at TIMESTAMPTZ DEFAULT NOW()
     )`,
+    // class_subject_id links a subject slot back to the real class_subjects
+    // catalog entry, closing the old "subject_name is a free string with no
+    // FK" gap — an exam can now only be assigned a subject a class actually
+    // teaches. subject_name stays as a denormalized display copy (so the row
+    // still reads correctly even if the subject is later renamed/removed from
+    // class_subjects) but is no longer the join key for new code.
     `CREATE TABLE IF NOT EXISTS exam_subjects (
       id SERIAL PRIMARY KEY,
       exam_id INTEGER NOT NULL REFERENCES exam_records(id) ON DELETE CASCADE,
       school_id INTEGER NOT NULL,
+      class_subject_id INTEGER REFERENCES class_subjects(id) ON DELETE SET NULL,
       subject_name VARCHAR(100) NOT NULL,
       teacher_id INTEGER REFERENCES teachers(id) ON DELETE SET NULL,
       teacher_name VARCHAR(100),
@@ -661,6 +686,8 @@ export async function initDB() {
       status VARCHAR(20) NOT NULL DEFAULT 'pending',
       submitted_at TIMESTAMPTZ,
       submitted_by INTEGER REFERENCES teachers(id) ON DELETE SET NULL,
+      reopened_at TIMESTAMPTZ,
+      reopened_by INTEGER REFERENCES teachers(id) ON DELETE SET NULL,
       UNIQUE(exam_id, subject_name)
     )`,
     `CREATE TABLE IF NOT EXISTS exam_marks (
@@ -675,18 +702,36 @@ export async function initDB() {
       entered_at TIMESTAMPTZ DEFAULT NOW(),
       UNIQUE(exam_id, student_id, subject_name)
     )`,
+    // parent_id links an acknowledgement to a real, authenticated parent
+    // account (student_parents) rather than a typed name — closes the gap
+    // where a student could sign off on behalf of a parent who never saw it.
+    // parent_name/parent_phone are kept as a display snapshot (a parent's
+    // name at ack time), not the identity check.
     `CREATE TABLE IF NOT EXISTS parent_mark_acks (
       id SERIAL PRIMARY KEY,
       exam_id INTEGER NOT NULL REFERENCES exam_records(id) ON DELETE CASCADE,
       student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+      parent_id INTEGER REFERENCES parents(id) ON DELETE SET NULL,
       school_id INTEGER NOT NULL,
       parent_name VARCHAR(100),
       parent_phone VARCHAR(20),
       acknowledged_at TIMESTAMPTZ DEFAULT NOW(),
       UNIQUE(exam_id, student_id)
     )`,
+    // Nudge log for "remind unacknowledged parent" — lets the class teacher's
+    // UI show "nudged 2 days ago" instead of firing a fresh notification on
+    // every click with no memory of the last one.
+    `CREATE TABLE IF NOT EXISTS parent_mark_ack_nudges (
+      id SERIAL PRIMARY KEY,
+      exam_id INTEGER NOT NULL REFERENCES exam_records(id) ON DELETE CASCADE,
+      student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+      nudged_by INTEGER REFERENCES teachers(id) ON DELETE SET NULL,
+      nudged_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
     `CREATE INDEX IF NOT EXISTS idx_exam_records_class ON exam_records(class_id, school_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_exam_records_group ON exam_records(exam_group_id)`,
     `CREATE INDEX IF NOT EXISTS idx_exam_marks_student ON exam_marks(student_id, exam_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_parent_mark_ack_nudges_exam_student ON parent_mark_ack_nudges(exam_id, student_id)`,
 
     // ── Timetable generation tracking ────────────────────────────────────────
     // Tracks when each class's timetable was generated (enables one-time lock in UI)
@@ -1088,23 +1133,9 @@ export async function initDB() {
     // API route or UI beyond the orphaned HODSyllabus.tsx component.
     `DROP TABLE IF EXISTS department_hods`,
 
-    // ── Extend syllabus_topics with progress-tracking fields ──────────────────
-    `ALTER TABLE syllabus_topics ADD COLUMN IF NOT EXISTS target_date DATE`,
-    `ALTER TABLE syllabus_topics ADD COLUMN IF NOT EXISTS delay_reason TEXT`,
-    // HOD management was removed — no live code reads/writes these.
-    `ALTER TABLE syllabus_topics DROP COLUMN IF EXISTS hod_remark`,
-    `ALTER TABLE syllabus_topics DROP COLUMN IF EXISTS hod_remark_by`,
-    `ALTER TABLE syllabus_topics DROP COLUMN IF EXISTS hod_remark_at`,
-    `ALTER TABLE syllabus_topics ADD COLUMN IF NOT EXISTS last_teacher_id INTEGER REFERENCES teachers(id) ON DELETE SET NULL`,
-
     // ── Soft-delete for classes ───────────────────────────────────────────────
     `ALTER TABLE classes ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ`,
     `CREATE INDEX IF NOT EXISTS idx_classes_deleted ON classes(deleted_at) WHERE deleted_at IS NOT NULL`,
-
-    // ── Syllabus publish workflow: load → review → publish ────────────────────
-    // Default TRUE so existing topics stay visible. Board-load sets FALSE (draft).
-    `ALTER TABLE syllabus_topics ADD COLUMN IF NOT EXISTS published BOOLEAN NOT NULL DEFAULT TRUE`,
-    `CREATE INDEX IF NOT EXISTS idx_syllabus_published ON syllabus_topics(class_id, subject, published)`,
 
     // ── Textbook Library: store extracted PDF text for AI context ─────────────
     // One row per uploaded PDF, keyed by school + grade + subject.
@@ -1628,6 +1659,66 @@ const SYLLABUS_SCHEMA: string[] = [
     // until a second same-type book actually shows up for that subject.
     `ALTER TABLE master_chapters ADD COLUMN IF NOT EXISTS book_name VARCHAR(200)`,
     `ALTER TABLE school_chapters ADD COLUMN IF NOT EXISTS book_name VARCHAR(200)`,
+
+    // Year Rollover keeps the class roll number a student had in the year that just ended, so
+    // the class history is complete even though promotion frees / reassigns the live roll number.
+    `ALTER TABLE student_class_history ADD COLUMN IF NOT EXISTS school_roll_number INTEGER`,
+
+    // What happened to the student at rollover: promoted / repeated / moved (promoted into another
+    // section) / graduated. NULL on rows written before this column existed.
+    `ALTER TABLE student_class_history ADD COLUMN IF NOT EXISTS outcome VARCHAR(12)`,
+    `ALTER TABLE student_class_history ADD COLUMN IF NOT EXISTS promoted_to_section VARCHAR(10)`,
+
+    // ── Announcement workflow (#205) ─────────────────────────────────────────
+    // Drafts + scheduling, pinning, class targeting, greeting cards, translations, acknowledgement,
+    // soft delete (archive + audit trail) and per-reader "seen" tracking.
+    `ALTER TABLE announcements ADD COLUMN IF NOT EXISTS status VARCHAR(10) NOT NULL DEFAULT 'published'`,
+    `ALTER TABLE announcements ADD COLUMN IF NOT EXISTS publish_at TIMESTAMPTZ`,
+    `ALTER TABLE announcements ADD COLUMN IF NOT EXISTS pinned BOOLEAN NOT NULL DEFAULT FALSE`,
+    `ALTER TABLE announcements ADD COLUMN IF NOT EXISTS requires_ack BOOLEAN NOT NULL DEFAULT FALSE`,
+    `ALTER TABLE announcements ADD COLUMN IF NOT EXISTS template_key VARCHAR(40)`,
+    `ALTER TABLE announcements ADD COLUMN IF NOT EXISTS card_data JSONB`,
+    `ALTER TABLE announcements ADD COLUMN IF NOT EXISTS target_classes JSONB`,
+    `ALTER TABLE announcements ADD COLUMN IF NOT EXISTS translations JSONB`,
+    `ALTER TABLE announcements ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ`,
+    `ALTER TABLE announcements ADD COLUMN IF NOT EXISTS updated_by_name VARCHAR(100)`,
+    `ALTER TABLE announcements ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ`,
+    `ALTER TABLE announcements ADD COLUMN IF NOT EXISTS deleted_by_name VARCHAR(100)`,
+    `CREATE TABLE IF NOT EXISTS announcement_reads (
+      id SERIAL PRIMARY KEY,
+      announcement_id INTEGER NOT NULL REFERENCES announcements(id) ON DELETE CASCADE,
+      reader_type VARCHAR(10) NOT NULL CHECK (reader_type IN ('teacher','student','parent')),
+      reader_id INTEGER NOT NULL,
+      seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      acked_at TIMESTAMPTZ,
+      UNIQUE (announcement_id, reader_type, reader_id)
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_announcement_reads_reader ON announcement_reads(reader_type, reader_id)`,
+    `CREATE TABLE IF NOT EXISTS announcement_audit (
+      id SERIAL PRIMARY KEY,
+      announcement_id INTEGER NOT NULL REFERENCES announcements(id) ON DELETE CASCADE,
+      school_id INTEGER NOT NULL,
+      action VARCHAR(20) NOT NULL,
+      by_name VARCHAR(100),
+      details JSONB,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_announcement_audit_ann ON announcement_audit(announcement_id, created_at DESC)`,
+    `CREATE INDEX IF NOT EXISTS idx_announcements_live ON announcements(school_id, status, deleted_at)`,
+
+    // ── Export Data (#206): who downloaded what. Exports hold personal data, so each one is recorded. ──
+    `CREATE TABLE IF NOT EXISTS data_export_log (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      export_key VARCHAR(60) NOT NULL,
+      format VARCHAR(8) NOT NULL,
+      filters JSONB,
+      row_count INTEGER NOT NULL DEFAULT 0,
+      by_user_id INTEGER,
+      by_name VARCHAR(100),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_data_export_log_school ON data_export_log(school_id, created_at DESC)`,
 ]
 
 async function runIncrementalMigrations() {
@@ -1893,21 +1984,34 @@ async function runIncrementalMigrations() {
   // ── DB-level safety constraints on fee ledger amounts ────────────────────────
   // NOT VALID skips scanning existing rows — only new/updated rows are checked.
   // This prevents ensureDB from failing if legacy data has edge-case values.
-  await pool.query(`
-    DO $$ BEGIN
-      ALTER TABLE student_fee_ledger ADD CONSTRAINT chk_amount_due_positive    CHECK (amount_due    >= 0) NOT VALID;
-    EXCEPTION WHEN duplicate_object THEN NULL; END $$
-  `).catch(() => {})
-  await pool.query(`
-    DO $$ BEGIN
-      ALTER TABLE student_fee_ledger ADD CONSTRAINT chk_amount_paid_positive   CHECK (amount_paid   >= 0) NOT VALID;
-    EXCEPTION WHEN duplicate_object THEN NULL; END $$
-  `).catch(() => {})
-  await pool.query(`
-    DO $$ BEGIN
-      ALTER TABLE student_fee_ledger ADD CONSTRAINT chk_waiver_amount_positive CHECK (waiver_amount >= 0) NOT VALID;
-    EXCEPTION WHEN duplicate_object THEN NULL; END $$
-  `).catch(() => {})
+  //
+  // `>= 0` alone does NOT exclude the numeric special value NaN — PostgreSQL's
+  // `numeric` type defines NaN as sorting ABOVE every finite value (so
+  // application code can still ORDER BY it predictably), which means
+  // `'NaN'::numeric >= 0` evaluates to TRUE. A NaN that reaches the database
+  // (e.g. from `Number("NaN")` in application code, which every `<= 0` /
+  // `< x` JS comparison silently treats as "not less than anything") would
+  // pass this constraint unless explicitly excluded — hence the added
+  // `!= 'NaN'` clause on each. (Application-level Number.isFinite() checks
+  // are the primary defense — see the ledger PATCH route — this is
+  // defense-in-depth for any other write path that isn't as careful.)
+  //
+  // DROP + re-ADD (same name), not ADD-with-duplicate_object-caught: these
+  // constraint names already exist on any database that ran an earlier
+  // version of this migration (`>= 0` only, no NaN exclusion) — silently
+  // swallowing "already exists" would leave that weaker check in place
+  // forever instead of upgrading it. Both are NOT VALID and DROP/ADD on a
+  // NOT VALID check is a metadata-only change, no table scan either way.
+  for (const [name, col] of [
+    ['chk_amount_due_positive', 'amount_due'],
+    ['chk_amount_paid_positive', 'amount_paid'],
+    ['chk_waiver_amount_positive', 'waiver_amount'],
+  ]) {
+    await pool.query(`ALTER TABLE student_fee_ledger DROP CONSTRAINT IF EXISTS ${name}`).catch(() => {})
+    await pool.query(
+      `ALTER TABLE student_fee_ledger ADD CONSTRAINT ${name} CHECK (${col} >= 0 AND ${col} != 'NaN') NOT VALID`
+    ).catch(() => {})
+  }
 
   // ── Plan pricing table (may not exist on older DBs that skipped migrations array) ──
   await pool.query(`
@@ -2012,6 +2116,53 @@ async function runIncrementalMigrations() {
     CREATE INDEX IF NOT EXISTS idx_attendance_school_date ON attendance(school_id, date)
   `).catch(() => {})
 
+  // ── Scaling hardening: hot-path indexes on under-indexed tables ─────────────
+  // fee_structures had no dedicated index — only the incidental one from
+  // UNIQUE(school_id, fee_category_id, grade, academic_year). Setup/reports
+  // queries filter by school_id + academic_year before narrowing further.
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_fee_structures_school_year
+      ON fee_structures(school_id, academic_year)
+  `).catch(() => {})
+  // fee_waivers had zero indexes — passbook/ledger recompute (student_id) and
+  // reports (school_id) both fell back to sequential scans.
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_fee_waivers_student ON fee_waivers(student_id)
+  `).catch(() => {})
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_fee_waivers_school ON fee_waivers(school_id)
+  `).catch(() => {})
+  // notifications had zero indexes despite three recipient columns — every
+  // unread-count / list query for a teacher, student, or school was a full scan.
+  // CONCURRENTLY: this table is actively written, so build without locking it.
+  await pool.query(`
+    CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_notifications_recipient_teacher
+      ON notifications(recipient_teacher_id, is_read)
+  `).catch(() => {})
+  await pool.query(`
+    CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_notifications_recipient_student
+      ON notifications(recipient_student_id, is_read)
+  `).catch(() => {})
+  await pool.query(`
+    CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_notifications_recipient_school
+      ON notifications(recipient_school_id, is_read)
+  `).catch(() => {})
+  // tasks: existing indexes (class, teacher, status+due_date) never lead with
+  // school_id — a bare school-wide task query has no supporting index.
+  await pool.query(`
+    CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_tasks_school ON tasks(school_id, status)
+  `).catch(() => {})
+  // exam_subjects: "my pending subject entries" queries filter teacher_id + status.
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_exam_subjects_teacher
+      ON exam_subjects(teacher_id, status)
+  `).catch(() => {})
+  // parent_mark_acks: school-wide acknowledgement-rate reports filter by school_id;
+  // only exam_id/student_id were covered via the UNIQUE(exam_id, student_id).
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_parent_mark_acks_school ON parent_mark_acks(school_id)
+  `).catch(() => {})
+
   // ── Per-school feature overrides (self-heal) ───────────────────────────────────
   // This table's CREATE TABLE only lived in the one-time fresh-DB bootstrap block
   // above, which never re-runs once a database is already bootstrapped — so on any
@@ -2033,15 +2184,17 @@ async function runIncrementalMigrations() {
   `).catch(() => {})
 
   // ── Student/parent portal feature keys ────────────────────────────────────────
-  // New keys default to disabled if unconfigured (see GET /api/platform/features).
-  // Seed every existing tier as enabled so onboarding for existing schools is
-  // unaffected by this change — schools that want to disable portals do so via
-  // a per-school override in school_feature_overrides instead.
+  // Tier default: Basic = off, Standard/Premium = on. These two keys are no
+  // longer editable from the platform-admin global features matrix — the
+  // per-school "Portal Access" toggle (school_feature_overrides) is the only
+  // way to turn either on for a Basic-tier school, or off for a
+  // Standard/Premium one. ON CONFLICT DO NOTHING only seeds a genuinely fresh
+  // database; it never overwrites an existing plan_features row.
   await pool.query(`
     INSERT INTO plan_features (feature_key, tier, enabled)
     VALUES
-      ('student-portal', 'basic', true), ('student-portal', 'standard', true), ('student-portal', 'premium', true),
-      ('parent-portal',  'basic', true), ('parent-portal',  'standard', true), ('parent-portal',  'premium', true)
+      ('student-portal', 'basic', false), ('student-portal', 'standard', true), ('student-portal', 'premium', true),
+      ('parent-portal',  'basic', false), ('parent-portal',  'standard', true), ('parent-portal',  'premium', true)
     ON CONFLICT (feature_key, tier) DO NOTHING
   `).catch(() => {})
 
@@ -2065,6 +2218,40 @@ async function runIncrementalMigrations() {
     INSERT INTO plan_features (feature_key, tier, enabled)
     VALUES
       ('expenses', 'basic', true), ('expenses', 'standard', true), ('expenses', 'premium', true)
+    ON CONFLICT (feature_key, tier) DO NOTHING
+  `).catch(() => {})
+
+  // Student/parent portal nav item newly added to ALL_FEATURES' plan-gating
+  // (results) — same self-heal/seed pattern as library above, enabled at
+  // every tier by default so existing schools keep seeing Results exactly
+  // as before this change. Unlike attendance/exam-schedule/timetable/
+  // fee-management (which reuse the school-admin feature's EXISTING
+  // plan_features rows, and therefore intentionally restrict basic-tier
+  // student/parent portals to match what school-admin already restricts),
+  // this one had no prior concept at all — so there's no existing row to
+  // reuse and no basis to restrict it.
+  // Homework/doubts seed rows removed — Homework/Tasks (#136) and Ask a
+  // Doubt (#137) were pulled out of dev, preserved on feature/136-remove-
+  // homework-tasks and feature/137-remove-ask-a-doubt for future rework.
+  await pool.query(`
+    INSERT INTO plan_features (feature_key, tier, enabled)
+    VALUES
+      ('results',  'basic', true), ('results',  'standard', true), ('results',  'premium', true)
+    ON CONFLICT (feature_key, tier) DO NOTHING
+  `).catch(() => {})
+
+  // Online Fee Payments (UPI) — 'online-payments' is in OVERRIDABLE_FEATURE_KEYS
+  // (same per-school-override model as student-portal/parent-portal), so it
+  // needs its own tier-default seed the same way those do, or every school
+  // reads as disabled until a platform admin explicitly overrides it on.
+  // Defaults OFF at every tier: this gates a real money-collection flow
+  // (parent-submitted UPI transaction IDs, admin verification), so it should
+  // never silently switch on for an existing school — a platform admin opts
+  // a school in explicitly via the per-school feature-override toggle.
+  await pool.query(`
+    INSERT INTO plan_features (feature_key, tier, enabled)
+    VALUES
+      ('online-payments', 'basic', false), ('online-payments', 'standard', false), ('online-payments', 'premium', false)
     ON CONFLICT (feature_key, tier) DO NOTHING
   `).catch(() => {})
 
@@ -2343,4 +2530,873 @@ async function runIncrementalMigrations() {
   `).catch(() => {})
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_feature_rollup_school_day ON feature_usage_daily_rollup(school_id, day DESC)`).catch(() => {})
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_feature_rollup_key_day ON feature_usage_daily_rollup(nav_key, day DESC)`).catch(() => {})
+
+  // ── Teacher uniqueness — was app-level-only (SELECT-then-INSERT), so two
+  // concurrent bulk imports/onboards could both pass the check and both
+  // insert, producing real duplicate rows (same login email, or same
+  // employee_id shown in the UI). A concurrent-safe partial unique index is
+  // the only thing that actually closes that race; the app-level checks stay
+  // in place too so a conflict shows as a friendly per-row message instead of
+  // a raw 500. Partial (WHERE removed_at IS NULL) so a soft-deleted teacher's
+  // old email/phone/employee_id can be reused without a manual cleanup step.
+  // CONCURRENTLY skipped (can't run inside this pool's implicit transaction);
+  // guarded by a pre-check against existing dirty data so a startup that hits
+  // real duplicates logs a warning instead of crashing ensureDB() every boot.
+  await pool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_teachers_email_unique
+      ON teachers (LOWER(email))
+      WHERE email IS NOT NULL AND removed_at IS NULL
+  `).catch(err => {
+    console.error('[migration] Skipped idx_teachers_email_unique — likely pre-existing duplicate active teacher emails. Resolve manually (see removed_at IS NULL rows sharing an email) then rerun.', err.message)
+  })
+  await pool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_teachers_school_phone_unique
+      ON teachers (school_id, phone)
+      WHERE phone IS NOT NULL AND removed_at IS NULL
+  `).catch(err => {
+    console.error('[migration] Skipped idx_teachers_school_phone_unique — likely pre-existing duplicate active teacher phones within a school.', err.message)
+  })
+  await pool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_teachers_school_employee_id_unique
+      ON teachers (school_id, employee_id)
+      WHERE employee_id IS NOT NULL AND removed_at IS NULL
+  `).catch(err => {
+    console.error('[migration] Skipped idx_teachers_school_employee_id_unique — likely pre-existing duplicate active employee_ids within a school.', err.message)
+  })
+
+  // Parent phone uniqueness, scoped per school (not global — the same phone
+  // legitimately recurs across different schools' unrelated parents, and
+  // pre-existing data confirms zero same-school collisions today). This is
+  // what makes "phone" a safe login lookup alongside email in
+  // /api/parent/auth/login — without it, a phone-based lookup could match
+  // more than one row within a school.
+  await pool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_parents_school_phone_unique
+      ON parents (school_id, phone)
+      WHERE phone IS NOT NULL AND phone != ''
+  `).catch(err => {
+    console.error('[migration] Skipped idx_parents_school_phone_unique — likely pre-existing duplicate active parent phones within a school.', err.message)
+  })
+
+  // WhatsApp tables — already present in the fresh-bootstrap migrations[]
+  // array above, but that array only ever runs during initDB()'s fresh-DB
+  // path, never on an existing already-bootstrapped database (same class of
+  // gap as the teacher/parent unique indexes above). Re-declared here,
+  // idempotently, so lib/whatsapp.ts's audit-log insert has somewhere to
+  // write on every database, not just ones bootstrapped after these tables
+  // were added to the schema.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS school_whatsapp_config (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE UNIQUE,
+      provider VARCHAR(20) NOT NULL DEFAULT 'meta',
+      access_token_encrypted TEXT,
+      phone_number_id VARCHAR(50),
+      waba_id VARCHAR(50),
+      fee_reminder_template VARCHAR(100),
+      payment_receipt_template VARCHAR(100),
+      is_active BOOLEAN NOT NULL DEFAULT FALSE,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `).catch(() => {})
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS whatsapp_messages (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      sent_by_user_id INTEGER,
+      sent_by_name TEXT,
+      recipient_phone VARCHAR(20) NOT NULL,
+      recipient_name TEXT,
+      message_type VARCHAR(50) NOT NULL,
+      template_name VARCHAR(100),
+      template_params JSONB DEFAULT '{}',
+      provider VARCHAR(20) NOT NULL,
+      provider_message_id TEXT,
+      status VARCHAR(20) NOT NULL DEFAULT 'queued',
+      failure_reason TEXT,
+      retry_count INTEGER NOT NULL DEFAULT 0,
+      sent_at TIMESTAMPTZ,
+      delivered_at TIMESTAMPTZ,
+      read_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_whatsapp_msg_school ON whatsapp_messages(school_id, created_at DESC)`).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_whatsapp_msg_type ON whatsapp_messages(school_id, message_type)`).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_whatsapp_msg_status ON whatsapp_messages(school_id, status)`).catch(() => {})
+
+  // ── Retire the legacy flat syllabus_topics table ────────────────────────────
+  // Superseded long ago by the normalized school_subjects -> school_chapters ->
+  // school_topics -> school_topic_progress hierarchy. No live route has read or
+  // written to syllabus_topics for some time — the only other reference was one
+  // covered_by=NULL unlink in the teacher-removal route, now removed alongside
+  // this. Rather than a bare DROP, rename it to an _archived table first so any
+  // pre-existing rows stay queryable (e.g. via a one-off SELECT) instead of
+  // being silently destroyed — this only ever runs once, since the second time
+  // through, syllabus_topics no longer exists and the rename is a no-op.
+  await pool.query(`
+    DO $$
+    BEGIN
+      IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'syllabus_topics')
+         AND NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'syllabus_topics_archived') THEN
+        ALTER TABLE syllabus_topics RENAME TO syllabus_topics_archived;
+      END IF;
+    END $$;
+  `).catch(() => {})
+  // A fresh install never created syllabus_topics at all (removed from the
+  // bootstrap block above) — this covers the case where it somehow still
+  // exists post-rename-attempt (e.g. the rename above failed/raced) so no
+  // environment is ever left with a live, unused syllabus_topics table.
+  await pool.query(`DROP TABLE IF EXISTS syllabus_topics`).catch(() => {})
+
+  // ── Class Syllabus Setup — per-class chapter/topic visibility ──────────────
+  // A teacher's own curated view of a subject's board-mandated content: the
+  // platform-admin JSON import isn't always accurate, and non-custom
+  // chapters/topics can never be renamed or deleted (that guardrail stays
+  // exactly as-is) — this is the escape hatch, one class at a time, without
+  // touching the school's shared copy at all.
+  //
+  // Absence of a row always means "active" at this table's own level — the
+  // DEFAULT TRUE below is not just a convenience, it's load-bearing: any
+  // teacher who has never opened Setup for a subject must keep seeing
+  // everything, unchanged from today's behavior. Rows are written ONLY by
+  // POST /api/syllabus/setup/apply — never pre-populated on subscribe, never
+  // written just from opening/viewing the Setup screen.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS class_chapter_visibility (
+      id SERIAL PRIMARY KEY,
+      class_id INTEGER NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
+      school_chapter_id INTEGER NOT NULL REFERENCES school_chapters(id) ON DELETE CASCADE,
+      is_active BOOLEAN NOT NULL DEFAULT TRUE,
+      updated_by INTEGER REFERENCES teachers(id) ON DELETE SET NULL,
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(class_id, school_chapter_id)
+    )
+  `).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_class_chapter_visibility_class ON class_chapter_visibility(class_id)`).catch(() => {})
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS class_topic_visibility (
+      id SERIAL PRIMARY KEY,
+      class_id INTEGER NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
+      school_topic_id INTEGER NOT NULL REFERENCES school_topics(id) ON DELETE CASCADE,
+      is_active BOOLEAN NOT NULL DEFAULT TRUE,
+      updated_by INTEGER REFERENCES teachers(id) ON DELETE SET NULL,
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(class_id, school_topic_id)
+    )
+  `).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_class_topic_visibility_class ON class_topic_visibility(class_id)`).catch(() => {})
+
+  // Tracks whether a teacher has completed setup at least once for a
+  // (class, subject) pair — GET /api/syllabus/setup reads this to tell the
+  // frontend whether to render the Setup screen unchecked-by-default (first
+  // time) or pre-filled with the teacher's actual current selection (re-edit
+  // via "Edit Syllabus Setup"). setup_completed_at stays NULL until the
+  // first real Apply submission.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS class_subject_setup_status (
+      id SERIAL PRIMARY KEY,
+      class_id INTEGER NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
+      school_subject_id INTEGER NOT NULL REFERENCES school_subjects(id) ON DELETE CASCADE,
+      setup_completed_at TIMESTAMPTZ,
+      setup_by INTEGER REFERENCES teachers(id) ON DELETE SET NULL,
+      UNIQUE(class_id, school_subject_id)
+    )
+  `).catch(() => {})
+
+  // ── Class Syllabus Setup — semester-wise organization (per class, not shared) ──
+  // A teacher can optionally group their class's chapters under Semester 1/2/...
+  // headers in the Setup screen — purely a per-class display/organization aid on
+  // top of the same select/deselect flow, deliberately NOT written to the
+  // shared school_chapters.semester column (which is the school-wide book-tab
+  // grouping every class/teacher of that subscribed subject shares). Two
+  // classes can split the same subject into different semester counts/groupings
+  // without affecting each other.
+  await pool.query(`ALTER TABLE class_chapter_visibility ADD COLUMN IF NOT EXISTS semester_label VARCHAR(50)`).catch(() => {})
+  await pool.query(`ALTER TABLE class_subject_setup_status ADD COLUMN IF NOT EXISTS semester_mode BOOLEAN NOT NULL DEFAULT FALSE`).catch(() => {})
+  await pool.query(`ALTER TABLE class_subject_setup_status ADD COLUMN IF NOT EXISTS semester_count INTEGER`).catch(() => {})
+
+  // ── Backfill school_subjects.master_subject_id ────────────────────────────────
+  // Only POST /api/school/subscribe ever set this FK on INSERT. Every other path
+  // that creates a school_subjects row as a side effect of adding content —
+  // bulk-import, bootstrap-chapters, and the syllabus/chapters find-or-create —
+  // leaves it NULL, and copy-from-year then just carries that NULL forward into
+  // the next academic year. The Digital Library and the syllabus materials panel
+  // both join through this FK to master_subject_materials, so a NULL here makes
+  // real uploaded textbooks/handbooks silently invisible even though the school
+  // genuinely subscribed to that (board, grade, subject) elsewhere. Backfill by
+  // matching master_subjects on (grade, subject_name) — case-insensitively, since
+  // find-or-create paths don't normalize casing — preferring the row whose board
+  // also matches when school_subjects.board is set. Also backfills a NULL board
+  // from the matched master row, purely cosmetic but keeps the two columns
+  // consistent for anything else that reads school_subjects.board directly.
+  await pool.query(`
+    UPDATE school_subjects ss
+    SET master_subject_id = m.id,
+        board = COALESCE(ss.board, m.board)
+    FROM master_subjects m
+    WHERE ss.master_subject_id IS NULL
+      AND m.grade = ss.grade
+      AND lower(m.subject_name) = lower(ss.subject_name)
+      AND (ss.board IS NULL OR m.board = ss.board)
+      AND NOT EXISTS (
+        SELECT 1 FROM master_subjects m2
+        WHERE m2.grade = ss.grade AND lower(m2.subject_name) = lower(ss.subject_name)
+          AND m2.id <> m.id
+          AND (ss.board IS NULL OR m2.board = ss.board)
+      )
+  `).catch((e: unknown) => {
+    console.error('[db] school_subjects.master_subject_id backfill failed', e)
+  })
+
+  // ── Syllabus coverage trend (school-admin's Syllabus Tracking screen) ──────
+  // One row per (class, school_subject, snapshot_date) captured weekly by
+  // /api/cron/syllabus-coverage-snapshot, so the trend chart has a real
+  // history to plot instead of only ever showing today's single point.
+  // total_chapters/covered_chapters here use the exact same chapter-covered
+  // definition as GET /api/syllabus/analytics (a chapter counts as covered
+  // only when every one of its (visible) topics is covered) — captured as a
+  // point-in-time count, not recomputed retroactively, so past weeks keep
+  // reading correctly even if a class's chapter set changes later (a chapter
+  // added/removed via Class Syllabus Setup only affects snapshots taken
+  // after that change).
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS syllabus_coverage_snapshots (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      class_id INTEGER NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
+      school_subject_id INTEGER NOT NULL REFERENCES school_subjects(id) ON DELETE CASCADE,
+      academic_year VARCHAR(20) NOT NULL,
+      snapshot_date DATE NOT NULL,
+      total_chapters INTEGER NOT NULL,
+      covered_chapters INTEGER NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(class_id, school_subject_id, snapshot_date)
+    )
+  `).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_syllabus_coverage_snapshots_lookup ON syllabus_coverage_snapshots(school_id, class_id, academic_year)`).catch(() => {})
+
+  // ── Exam Marks System v2 — admin-created exams, teacher review, real ──────
+  // parent identity, class_subjects FK. See EXAM-MARKS-FEATURE-README.md.
+  // created_by was NOT NULL REFERENCES teachers(id) — admin-created exams
+  // have no teacher creator, so this must become nullable before any admin
+  // exam can be inserted at all.
+  await pool.query(`ALTER TABLE exam_records ALTER COLUMN created_by DROP NOT NULL`).catch(() => {})
+  await pool.query(`ALTER TABLE exam_records ADD COLUMN IF NOT EXISTS created_by_admin_id INTEGER REFERENCES users(id) ON DELETE SET NULL`).catch(() => {})
+  await pool.query(`ALTER TABLE exam_records ADD COLUMN IF NOT EXISTS exam_group_id UUID`).catch(() => {})
+  await pool.query(`ALTER TABLE exam_records ADD COLUMN IF NOT EXISTS entry_opened_at TIMESTAMPTZ`).catch(() => {})
+  await pool.query(`ALTER TABLE exam_records ADD COLUMN IF NOT EXISTS teacher_reviewed_at TIMESTAMPTZ`).catch(() => {})
+  await pool.query(`ALTER TABLE exam_records ADD COLUMN IF NOT EXISTS teacher_reviewed_by INTEGER REFERENCES teachers(id) ON DELETE SET NULL`).catch(() => {})
+  await pool.query(`ALTER TABLE exam_records ADD COLUMN IF NOT EXISTS released_at TIMESTAMPTZ`).catch(() => {})
+  await pool.query(`ALTER TABLE exam_records ADD COLUMN IF NOT EXISTS released_by_admin_id INTEGER REFERENCES users(id) ON DELETE SET NULL`).catch(() => {})
+  // Existing rows default to 'draft'/'collecting'/'published' under the old
+  // 3-state model — map them onto the new 4-state lifecycle once so old data
+  // reads correctly under the new status checks (draft has no v2 equivalent
+  // short of 'scheduled'; a draft exam had no subjects yet either way).
+  await pool.query(`UPDATE exam_records SET status = 'scheduled' WHERE status = 'draft'`).catch(() => {})
+  await pool.query(`UPDATE exam_records SET status = 'released', released_at = published_at WHERE status = 'published'`).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_exam_records_group ON exam_records(exam_group_id)`).catch(() => {})
+
+  await pool.query(`ALTER TABLE exam_subjects ADD COLUMN IF NOT EXISTS class_subject_id INTEGER REFERENCES class_subjects(id) ON DELETE SET NULL`).catch(() => {})
+  await pool.query(`ALTER TABLE exam_subjects ADD COLUMN IF NOT EXISTS reopened_at TIMESTAMPTZ`).catch(() => {})
+  await pool.query(`ALTER TABLE exam_subjects ADD COLUMN IF NOT EXISTS reopened_by INTEGER REFERENCES teachers(id) ON DELETE SET NULL`).catch(() => {})
+  // Best-effort backfill of the new FK for existing rows — matched by
+  // (class_id via exam_records, subject_name). Left NULL where ambiguous or
+  // no longer present in class_subjects; exam_subjects.subject_name remains
+  // the display fallback either way, so this never breaks an existing row.
+  await pool.query(`
+    UPDATE exam_subjects es
+    SET class_subject_id = cs.id
+    FROM exam_records er, class_subjects cs
+    WHERE es.exam_id = er.id
+      AND cs.class_id = er.class_id
+      AND lower(cs.subject_name) = lower(es.subject_name)
+      AND es.class_subject_id IS NULL
+  `).catch(() => {})
+
+  await pool.query(`ALTER TABLE parent_mark_acks ADD COLUMN IF NOT EXISTS parent_id INTEGER REFERENCES parents(id) ON DELETE SET NULL`).catch(() => {})
+  // Best-effort backfill: link existing typed-name acks to a real parent
+  // account where the student has exactly one linked parent (the common
+  // case) — ambiguous multi-parent students are left NULL rather than guessed.
+  await pool.query(`
+    UPDATE parent_mark_acks pma
+    SET parent_id = sp.parent_id
+    FROM (
+      SELECT student_id, MIN(parent_id) AS parent_id, COUNT(*) AS cnt
+      FROM student_parents GROUP BY student_id
+    ) sp
+    WHERE pma.student_id = sp.student_id AND sp.cnt = 1 AND pma.parent_id IS NULL
+  `).catch(() => {})
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS parent_mark_ack_nudges (
+      id SERIAL PRIMARY KEY,
+      exam_id INTEGER NOT NULL REFERENCES exam_records(id) ON DELETE CASCADE,
+      student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+      nudged_by INTEGER REFERENCES teachers(id) ON DELETE SET NULL,
+      nudged_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_parent_mark_ack_nudges_exam_student ON parent_mark_ack_nudges(exam_id, student_id)`).catch(() => {})
+
+  // Parent notifications did not exist before this feature — notifications
+  // only ever had teacher/student/school recipient columns (confirmed absent
+  // by the exams/marks investigation; GET /api/notifications explicitly
+  // 401'd every parent session). Adding a real recipient column makes parent
+  // notifications (exam scheduled, marks released, ack nudges) a first-class
+  // case of the same table, not a special path.
+  await pool.query(`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS recipient_parent_id INTEGER REFERENCES parents(id) ON DELETE CASCADE`).catch(() => {})
+  await pool.query(`CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_notifications_recipient_parent ON notifications(recipient_parent_id, is_read)`).catch(() => {})
+
+  // ── Combined 'exam-marks' feature flag — replaces exam-schedule + results ──
+  // The exam/marks feature used to be gated by two separate flags
+  // (exam-schedule for school-admin's screen + parent's exam calendar,
+  // results for student/parent's marks views) — a school could end up with
+  // admin able to schedule exams while students/parents couldn't see
+  // results, or the reverse. Consolidated into one 'exam-marks' flag
+  // covering all four portals. Seeded from exam-schedule's existing
+  // per-tier values (both flags had identical basic/standard/premium
+  // settings in practice) so no existing school's access changes; a
+  // brand-new database with neither old key configured falls through to
+  // the same basic=off/standard+premium=on default every other
+  // student/parent-portal feature uses.
+  await pool.query(`
+    INSERT INTO plan_features (feature_key, tier, enabled)
+    SELECT 'exam-marks', tier, enabled FROM plan_features WHERE feature_key = 'exam-schedule'
+    ON CONFLICT (feature_key, tier) DO NOTHING
+  `).catch(() => {})
+  await pool.query(`
+    INSERT INTO plan_features (feature_key, tier, enabled)
+    VALUES ('exam-marks', 'basic', false), ('exam-marks', 'standard', true), ('exam-marks', 'premium', true)
+    ON CONFLICT (feature_key, tier) DO NOTHING
+  `).catch(() => {})
+  // Carry over any per-school override that existed on either old key —
+  // whichever value was set wins if both happened to be overridden
+  // differently (shouldn't occur in practice, but ON CONFLICT DO NOTHING
+  // keeps the first one written rather than erroring).
+  await pool.query(`
+    INSERT INTO school_feature_overrides (school_id, feature_key, enabled)
+    SELECT school_id, 'exam-marks', enabled FROM school_feature_overrides
+    WHERE feature_key IN ('exam-schedule', 'results')
+    ON CONFLICT (school_id, feature_key) DO NOTHING
+  `).catch(() => {})
+  // The old keys are removed from ALL_FEATURES (lib/features.ts) so they no
+  // longer appear in the platform-admin matrix or gate anything — their
+  // plan_features/school_feature_overrides rows are left in place rather
+  // than deleted (harmless dead data, and safer than a destructive DELETE
+  // in a migration that runs unattended on every school's database).
+
+  // ── One-time backfill: class_subjects gaps for already-subscribed grades ──
+  // Before this session, a subject subscribed via Syllabus Customizer was
+  // only auto-assigned to classes that (a) already existed AND were
+  // explicitly checked in the Subscribe modal's class-picker, or (b) were
+  // created AFTER the subject was subscribed. A class created earlier, or
+  // left unchecked at subscribe time, never caught up on its own — stuck
+  // showing that subject as a manual "click to add" suggestion in Class
+  // Management forever. POST /api/school/subscribe and POST /api/classes
+  // both now auto-assign correctly going forward; this fixes the gap for
+  // data that already exists.
+  //
+  // Deliberately a ONE-TIME pass, not a check that re-runs on every page
+  // load: class_subjects has no soft-delete, so a subject an admin
+  // genuinely removed from one specific class (e.g. that section doesn't
+  // take an elective) is indistinguishable from one that was simply never
+  // added — a live reconciliation would silently resurrect a deliberate
+  // removal. Running once, gated by SCHEMA_VERSION like every other
+  // migration here, fixes today's real gaps without ever touching a
+  // decision made after this point.
+  try {
+    const { rows: gaps } = await pool.query(`
+      SELECT DISTINCT ss.school_id, ss.grade, ss.subject_name, c.id AS class_id
+      FROM school_subjects ss
+      JOIN classes c ON c.school_id = ss.school_id AND c.grade = ss.grade AND c.deleted_at IS NULL
+      WHERE NOT EXISTS (
+        SELECT 1 FROM class_subjects cs WHERE cs.class_id = c.id AND cs.subject_name = ss.subject_name
+      )
+    `)
+    if (gaps.length > 0) {
+      // Cache each school's active teaching staff — most schools have many
+      // gap rows sharing the same school_id, no need to re-query per row.
+      const staffCache = new Map<number, { id: number; subject: string; teaches_grades: string | null }[]>()
+      for (const gap of gaps) {
+        if (!staffCache.has(gap.school_id)) {
+          const { rows: staff } = await pool.query(
+            `SELECT id, subject, teaches_grades FROM teachers
+             WHERE school_id = $1 AND staff_type = 'teaching' AND status = 'active'
+               AND subject IS NOT NULL AND subject != ''`,
+            [gap.school_id]
+          )
+          staffCache.set(gap.school_id, staff)
+        }
+        const staff = staffCache.get(gap.school_id)!
+        const eligible = staff.filter(t => {
+          if (!t.teaches_grades) return true
+          const allowed = t.teaches_grades.split(',').map((g: string) => g.trim().toUpperCase())
+          return allowed.includes(gap.grade.toUpperCase())
+        })
+        const resolvedTeacherId = matchTeacher(gap.subject_name, eligible.length > 0 ? eligible : staff)
+        await pool.query(
+          `INSERT INTO class_subjects (class_id, subject_name, teacher_id, periods_per_week)
+           VALUES ($1, $2, $3, 4)
+           ON CONFLICT (class_id, subject_name) DO NOTHING`,
+          [gap.class_id, gap.subject_name, resolvedTeacherId]
+        )
+      }
+      console.log(`[db] class_subjects backfill: filled ${gaps.length} missing (class, subscribed subject) gap(s)`)
+    }
+  } catch (e: unknown) {
+    console.error('[db] class_subjects backfill failed', e)
+  }
+
+  // ── Feedback Management ────────────────────────────────────────────────
+  // public_code is deliberately separate from schools.school_code (the
+  // admin/teacher login identifier) — this one gets printed on a QR poster
+  // that anyone can scan/photograph, and must be freely rotatable without
+  // ever affecting login.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS feedback_settings (
+      school_id    INTEGER PRIMARY KEY REFERENCES schools(id) ON DELETE CASCADE,
+      public_code  VARCHAR(20) NOT NULL UNIQUE,
+      is_active    BOOLEAN NOT NULL DEFAULT TRUE,
+      created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `).catch(() => {})
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS feedback_categories (
+      id          SERIAL PRIMARY KEY,
+      school_id   INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      role        VARCHAR(20) NOT NULL,
+      key         VARCHAR(50) NOT NULL,
+      label       VARCHAR(100) NOT NULL,
+      icon        VARCHAR(10),
+      department  VARCHAR(100),
+      is_active   BOOLEAN NOT NULL DEFAULT TRUE,
+      sort_order  INTEGER NOT NULL DEFAULT 0,
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE(school_id, role, key)
+    )
+  `).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_feedback_categories_school_role ON feedback_categories(school_id, role)`).catch(() => {})
+
+  // Submission identity/context only — ratings live in feedback_submission_ratings
+  // (a submission can rate several categories at once; the issue pipeline
+  // operates on individual ratings, not whole submissions).
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS feedback_submissions (
+      id               SERIAL PRIMARY KEY,
+      school_id        INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      role             VARCHAR(20) NOT NULL,
+      is_anonymous     BOOLEAN NOT NULL DEFAULT FALSE,
+      submitter_name   VARCHAR(150),
+      submitter_phone  VARCHAR(50),
+      quick_pick_tags  TEXT,
+      free_text        TEXT,
+      voice_object_key VARCHAR(255),
+      ip_hash          VARCHAR(64) NOT NULL,
+      created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_feedback_submissions_school_created ON feedback_submissions(school_id, created_at DESC)`).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_feedback_submissions_rate_limit ON feedback_submissions(school_id, ip_hash, created_at)`).catch(() => {})
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS feedback_submission_ratings (
+      id             SERIAL PRIMARY KEY,
+      submission_id  INTEGER NOT NULL REFERENCES feedback_submissions(id) ON DELETE CASCADE,
+      school_id      INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      category_id    INTEGER REFERENCES feedback_categories(id) ON DELETE SET NULL,
+      category_key   VARCHAR(50) NOT NULL,
+      category_label VARCHAR(100) NOT NULL,
+      department     VARCHAR(100),
+      rating         SMALLINT NOT NULL CHECK (rating BETWEEN 1 AND 5),
+      priority       VARCHAR(10),
+      status         VARCHAR(20) NOT NULL DEFAULT 'open',
+      created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_feedback_ratings_submission ON feedback_submission_ratings(submission_id)`).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_feedback_ratings_school_category ON feedback_submission_ratings(school_id, category_key)`).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_feedback_ratings_issues ON feedback_submission_ratings(school_id, priority, status) WHERE priority IS NOT NULL`).catch(() => {})
+
+  // Rate-limit log for the public, unauthenticated voice-upload-url route —
+  // separate from feedback_submissions' own ip_hash column because a voice
+  // upload attempt doesn't necessarily result in a submission (an attacker
+  // could otherwise mint unlimited presigned R2 PUT URLs for free).
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS feedback_voice_upload_log (
+      id         SERIAL PRIMARY KEY,
+      school_id  INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      ip_hash    VARCHAR(64) NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_feedback_voice_upload_log_rate_limit ON feedback_voice_upload_log(school_id, ip_hash, created_at)`).catch(() => {})
+
+  // Advanced Forms (Meeting/Event/Exam/Academic) — a structured-fields
+  // alternative to category emoji-ratings, reached from the "Advanced
+  // Forms" role card. advanced_form_data is an opaque JSON blob of
+  // whatever fields that form type defines (see ADVANCED_FORM_FIELDS in
+  // app/feedback/[code]/types.ts) — no per-field columns, so adding a
+  // field to a form type needs no migration.
+  await pool.query(`ALTER TABLE feedback_submissions ADD COLUMN IF NOT EXISTS advanced_form_type VARCHAR(20)`).catch(() => {})
+  await pool.query(`ALTER TABLE feedback_submissions ADD COLUMN IF NOT EXISTS advanced_form_data JSONB`).catch(() => {})
+
+  // One-time backfill: seed default categories for schools that existed
+  // before this feature shipped, in a single set-based query. New schools
+  // get the same defaults synchronously in POST /api/schools — both read
+  // DEFAULT_FEEDBACK_CATEGORIES from lib/feedback-defaults.ts so the list is
+  // defined exactly once. ON CONFLICT DO NOTHING makes this safe to re-run
+  // on every startup.
+  try {
+    const { sql, params } = buildFeedbackCategoryBackfillAllQuery()
+    await pool.query(sql, params)
+  } catch (e: unknown) {
+    console.error('[db] feedback_categories backfill failed', e)
+  }
+
+  // ── AI Access (Platform Admin) ──────────────────────────────────────────
+  // Separate concept from school_subscriptions.tier (basic/standard/premium
+  // feature plan) and from the AI Hub RAG chatbot's own school_ai_subscriptions
+  // schema (built on a different branch, not present here). This table only
+  // tracks which AI Access tier a platform admin has assigned to a school —
+  // 'ai_pro' is accepted for forward-compatibility but has no working
+  // chatbot behind it yet (UI shows "coming soon" until that lands).
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS school_ai_access (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE UNIQUE,
+      tier VARCHAR(20) NOT NULL DEFAULT 'none' CHECK (tier IN ('none', 'ai_basic', 'ai_pro')),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `).catch(() => {})
+
+  // ── Fee tables that were previously only self-healed inline in their own
+  // route files (categories/PUT, day-close, payments/cancel, structures/POST),
+  // each hit lazily via its own local `CREATE TABLE IF NOT EXISTS` with no
+  // shared source of truth. Promoted here so ensureDB() — already the single
+  // bootstrap path every other domain relies on — covers them too; the route
+  // files now call ensureDB() instead of carrying their own copy of the DDL,
+  // which closes off the drift risk of the two copies silently diverging.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS fee_category_changelog (
+      id            SERIAL PRIMARY KEY,
+      school_id     INTEGER NOT NULL,
+      category_id   INTEGER NOT NULL,
+      field_changed TEXT    NOT NULL,
+      old_value     TEXT,
+      new_value     TEXT,
+      changed_by    TEXT    NOT NULL DEFAULT 'Admin',
+      changed_at    TIMESTAMPTZ DEFAULT NOW()
+    )
+  `).catch(() => {})
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS fee_day_close (
+      id            SERIAL PRIMARY KEY,
+      school_id     INTEGER NOT NULL,
+      close_date    DATE    NOT NULL,
+      total_cash    NUMERIC(10,2) NOT NULL DEFAULT 0,
+      total_cheque  NUMERIC(10,2) NOT NULL DEFAULT 0,
+      total_upi     NUMERIC(10,2) NOT NULL DEFAULT 0,
+      total_online  NUMERIC(10,2) NOT NULL DEFAULT 0,
+      total_dd      NUMERIC(10,2) NOT NULL DEFAULT 0,
+      system_cash   NUMERIC(10,2) NOT NULL DEFAULT 0,
+      actual_cash   NUMERIC(10,2),
+      difference    NUMERIC(10,2),
+      receipt_from  TEXT,
+      receipt_to    TEXT,
+      txn_count     INTEGER NOT NULL DEFAULT 0,
+      submitted_by  TEXT NOT NULL,
+      submitted_at  TIMESTAMPTZ DEFAULT NOW(),
+      notes         TEXT,
+      UNIQUE(school_id, close_date)
+    )
+  `).catch(() => {})
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS fee_payment_corrections (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER NOT NULL,
+      payment_id INTEGER NOT NULL,
+      ledger_id INTEGER NOT NULL,
+      student_id INTEGER NOT NULL,
+      action TEXT NOT NULL,                 -- cancel | correct
+      old_amount NUMERIC(10,2),
+      new_amount NUMERIC(10,2),
+      old_mode TEXT, new_mode TEXT,
+      reason TEXT NOT NULL,
+      done_by TEXT NOT NULL,
+      new_receipt_number TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `).catch(() => {})
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS fee_structure_history (
+      id               SERIAL PRIMARY KEY,
+      school_id        INTEGER NOT NULL,
+      fee_structure_id INTEGER,
+      fee_category_id  INTEGER NOT NULL,
+      grade            TEXT    NOT NULL,
+      academic_year    TEXT    NOT NULL,
+      old_amount       NUMERIC(10,2),
+      new_amount       NUMERIC(10,2) NOT NULL,
+      old_due_day      INTEGER,
+      new_due_day      INTEGER NOT NULL,
+      change_type      TEXT    NOT NULL DEFAULT 'updated',
+      changed_by       TEXT    NOT NULL DEFAULT 'Admin',
+      changed_at       TIMESTAMPTZ DEFAULT NOW()
+    )
+  `).catch(() => {})
+
+  // fee_payments.ledger_id is joined/filtered in nearly every fee route
+  // (payments GET, audit-log, day-close, export, passbook, passout,
+  // payments/cancel, payments/verify) via `JOIN student_fee_ledger l ON
+  // l.id = fp.ledger_id` or `WHERE ledger_id = $1` — never had its own index
+  // despite fee_payments growing without bound (one row per payment, forever).
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_fee_payments_ledger ON fee_payments(ledger_id)
+  `).catch(() => {})
+
+  // ── One-time backfill: year-end write-offs mislabeled as waiver_type='full' ──
+  //
+  // What happened: before this fix, a year-end "write off this debt" decision
+  // (an admin giving up on collecting from a student who left/graduated
+  // without paying) was recorded with the SAME waiver_type ('full') as a
+  // genuine discretionary fee waiver granted to a student — e.g. a scholarship
+  // or hardship reduction. Because every "Waived" figure in the app (Overview,
+  // Reports, Stats, Passbook, Archive, the downloadable Audit Report) excludes
+  // only 'carry_forward' bookkeeping entries and treats everything else as a
+  // real discretionary waiver, every year-end write-off was silently counted
+  // as if the school had chosen to reduce that student's fee — inflating
+  // "Waived" and understating "Net Demand" on every closed year's records.
+  //
+  // The fix (see app/api/fees/year-end/route.ts): write-offs now get their own
+  // waiver_type, 'writeoff', which every "Waived" total already excludes
+  // alongside 'carry_forward'. This statement retags PAST write-off rows so
+  // already-closed years' reports become correct too, not just future ones.
+  //
+  // How a past write-off is identified: a fee_waivers row with waiver_type =
+  // 'full' whose reason matches the exact auto-generated text the year-end
+  // route wrote when the admin didn't type a custom reason — 'Year-end
+  // write-off <academic year>' (e.g. "Year-end write-off 2026-27"). This only
+  // catches write-offs that used that default reason. A write-off where the
+  // admin typed their own custom reason instead looks identical, in the
+  // data, to a genuine discretionary waiver with an unusual reason — there is
+  // no reliable signal to tell those apart after the fact, so this backfill
+  // deliberately leaves them as 'full' rather than guessing. Safe to re-run:
+  // once retagged to 'writeoff', a row no longer matches waiver_type='full'
+  // and this UPDATE will not touch it again.
+  await pool.query(`
+    UPDATE fee_waivers
+    SET waiver_type = 'writeoff'
+    WHERE waiver_type = 'full'
+      AND reason LIKE 'Year-end write-off %'
+  `).catch(() => {})
+
+  // ── Idempotency keys — see lib/idempotency.ts ───────────────────────────────
+  // Backs the payments/waivers duplicate-submission guard: a network timeout +
+  // client retry (or an impatient double-click) previously had no protection
+  // beyond "does the balance still have room for this amount" — which happily
+  // admits a genuine duplicate when it does. UNIQUE(school_id, idempotency_key,
+  // endpoint) is the actual lock: a second request claiming the same key blocks
+  // on this row until the first transaction commits or rolls back, then either
+  // replays the first one's stored response or (if it rolled back) proceeds
+  // itself — see claimIdempotencyKey()'s comment for the full mechanism.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS idempotency_keys (
+      id              SERIAL PRIMARY KEY,
+      school_id       INTEGER NOT NULL,
+      idempotency_key TEXT    NOT NULL,
+      endpoint        TEXT    NOT NULL,
+      response_status INTEGER,
+      response_body   JSONB,
+      created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE(school_id, idempotency_key, endpoint)
+    )
+  `).catch(() => {})
+  // Rows only need to live long enough to catch a retry (seconds to minutes,
+  // realistically) — nothing prunes this table yet. Fine at this scale; revisit
+  // with a created_at-based cleanup if it ever becomes a real row-count concern.
+
+  // ── Class Circle birthdays ───────────────────────────────────────────────
+  // date_of_birth is optional and never backfilled — existing records are
+  // simply never included in the daily birthday sweep until someone fills
+  // it in (first-login prompt or profile edit), never a broken/missing state.
+  await pool.query(`ALTER TABLE students ADD COLUMN IF NOT EXISTS date_of_birth DATE`).catch(() => {})
+  await pool.query(`ALTER TABLE teachers ADD COLUMN IF NOT EXISTS date_of_birth DATE`).catch(() => {})
+  await pool.query(`ALTER TABLE parents  ADD COLUMN IF NOT EXISTS date_of_birth DATE`).catch(() => {})
+
+  // There is no standalone "grades" table in this schema — students.grade is
+  // a plain string, and `classes` rows are per-section (school_id, grade,
+  // section), not per-grade. A Class Circle spans every section of a grade,
+  // so it's keyed on the natural (school_id, grade) pair directly rather than
+  // a foreign key into `classes`. Created lazily (get-or-create) the first
+  // time a grade actually needs one — see getOrCreateClassCircle in
+  // lib/classCircle.ts — not pre-seeded for every grade in every school.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS class_circles (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      grade VARCHAR(20) NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE(school_id, grade)
+    )
+  `).catch(() => {})
+
+  // One row per person per birthday that has actually fired. This is the
+  // idempotency ledger for ALL three roles (student/teacher/parent), not
+  // just students — the UNIQUE constraint is what guarantees "once per
+  // person per year" even if the daily cron somehow runs twice, not just
+  // "don't call the job twice" discipline. class_circle_id is only ever set
+  // for student posts (the only role shown in a circle); teacher/parent
+  // birthdays are notification-only (see the daily cron) and always leave
+  // it NULL.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS birthday_posts (
+      id SERIAL PRIMARY KEY,
+      person_type VARCHAR(10) NOT NULL CHECK (person_type IN ('student', 'teacher', 'parent')),
+      person_id INTEGER NOT NULL,
+      class_circle_id INTEGER REFERENCES class_circles(id) ON DELETE CASCADE,
+      post_date DATE NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE(person_type, person_id, post_date)
+    )
+  `).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_birthday_posts_circle ON birthday_posts(class_circle_id, post_date)`).catch(() => {})
+
+  // Reactions on a student birthday post only — teacher/parent posts never
+  // have a circle_id and never have a wishing UI, so no row is ever created
+  // against one. `message` is always the server-side default text, never
+  // free-typed by the wisher (no moderation surface needed). One wish per
+  // wisher per post — UNIQUE prevents the same classmate padding the count.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS birthday_wishes (
+      id SERIAL PRIMARY KEY,
+      birthday_post_id INTEGER NOT NULL REFERENCES birthday_posts(id) ON DELETE CASCADE,
+      wisher_type VARCHAR(10) NOT NULL CHECK (wisher_type IN ('student', 'teacher', 'parent')),
+      wisher_id INTEGER NOT NULL,
+      message TEXT NOT NULL DEFAULT 'Happy Birthday! 🎉',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE(birthday_post_id, wisher_type, wisher_id)
+    )
+  `).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_birthday_wishes_post ON birthday_wishes(birthday_post_id)`).catch(() => {})
+
+  // ── Server-side sessions for school staff (revocable logout, idle timeout) ──
+  // One row per login. The JWT carries the id (`sid`); getSession() rejects a token
+  // whose row is revoked, idle or past expires_at, so logout/deactivation take effect
+  // immediately instead of waiting for the JWT to expire.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS user_sessions (
+      id UUID PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      expires_at TIMESTAMPTZ NOT NULL,
+      revoked_at TIMESTAMPTZ,
+      user_agent VARCHAR(300)
+    )
+  `)
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_user_sessions_user ON user_sessions(user_id) WHERE revoked_at IS NULL`)
+
+  // School ID is no longer a login credential, so every onboarding admin needs an email.
+  // Older schools were created with the school's contact email optional — backfill the
+  // owner account from it where that is unambiguous (skips addresses already used by
+  // another user). Owners still without an email need one set by the platform admin.
+  await pool.query(`
+    UPDATE users u SET email = LOWER(s.email)
+      FROM schools s
+     WHERE u.school_id = s.id
+       AND u.role = 'school_admin' AND u.school_code IS NOT NULL
+       AND COALESCE(u.email, '') = ''
+       AND COALESCE(s.email, '') <> ''
+       AND NOT EXISTS (SELECT 1 FROM users x WHERE LOWER(x.email) = LOWER(s.email))
+  `)
+
+  // ── Attendance: session locking, mistake reports, Academic Calendar (#153) ───────────
+  // One row per (class, date, session). Its UNIQUE key IS the lock: the first teacher to
+  // insert wins, everyone else is told who marked it. attendance keeps the per-student rows.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS attendance_sessions (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      class_id INTEGER NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
+      date DATE NOT NULL,
+      session VARCHAR(20) NOT NULL CHECK (session IN ('morning', 'afternoon')),
+      marked_by_teacher_id INTEGER REFERENCES teachers(id) ON DELETE SET NULL,
+      marked_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      marked_by_name VARCHAR(255) NOT NULL,
+      marked_by_role VARCHAR(20) NOT NULL,
+      marked_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      last_edited_at TIMESTAMPTZ,
+      last_edited_by_name VARCHAR(255),
+      edit_count INTEGER NOT NULL DEFAULT 0,
+      UNIQUE (class_id, date, session)
+    )
+  `)
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_attendance_sessions_school_date ON attendance_sessions(school_id, date)`)
+  // Days marked before session locking existed count as already marked (by whoever marked last).
+  await pool.query(`
+    INSERT INTO attendance_sessions (school_id, class_id, date, session, marked_by_teacher_id, marked_by_name, marked_by_role, marked_at)
+    SELECT DISTINCT ON (a.class_id, a.date, a.session)
+           a.school_id, a.class_id, a.date, a.session, a.marked_by_teacher_id,
+           COALESCE(t.name, 'a teacher'), 'teacher', COALESCE(a.marked_at, NOW())
+    FROM attendance a
+    LEFT JOIN teachers t ON t.id = a.marked_by_teacher_id
+    WHERE a.school_id IS NOT NULL AND a.class_id IS NOT NULL AND a.session IN ('morning', 'afternoon')
+    ORDER BY a.class_id, a.date, a.session, a.marked_at DESC NULLS LAST
+    ON CONFLICT (class_id, date, session) DO NOTHING
+  `)
+
+  // A teacher who spots a wrong record on a locked session tells the admin instead of overwriting it.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS attendance_issue_reports (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      class_id INTEGER NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
+      date DATE NOT NULL,
+      session VARCHAR(20) NOT NULL CHECK (session IN ('morning', 'afternoon')),
+      reported_by_teacher_id INTEGER REFERENCES teachers(id) ON DELETE SET NULL,
+      reported_by_name VARCHAR(255) NOT NULL,
+      note TEXT NOT NULL,
+      status VARCHAR(20) NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'resolved')),
+      resolved_by_name VARCHAR(255),
+      resolved_at TIMESTAMPTZ,
+      resolution_note TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `)
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_attendance_reports_school ON attendance_issue_reports(school_id, status, created_at DESC)`)
+  await pool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_attendance_reports_open
+      ON attendance_issue_reports(class_id, date, session, reported_by_teacher_id) WHERE status = 'open'
+  `)
+
+  // Academic Calendar: who can see an entry, who created it, and sane date ranges.
+  await pool.query(`ALTER TABLE school_calendar ADD COLUMN IF NOT EXISTS audience VARCHAR(20) NOT NULL DEFAULT 'everyone'`)
+  await pool.query(`ALTER TABLE school_calendar ADD COLUMN IF NOT EXISTS created_by_name VARCHAR(255)`)
+  await pool.query(`ALTER TABLE school_calendar ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()`)
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_school_calendar_range ON school_calendar(school_id, event_date, end_date)`)
+  // NOT VALID: enforced for new/changed rows without failing on any old bad row.
+  await pool.query(`
+    DO $$ BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'school_calendar_range_chk') THEN
+        ALTER TABLE school_calendar ADD CONSTRAINT school_calendar_range_chk
+          CHECK (end_date IS NULL OR end_date >= event_date) NOT VALID;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'school_calendar_audience_chk') THEN
+        ALTER TABLE school_calendar ADD CONSTRAINT school_calendar_audience_chk
+          CHECK (audience IN ('everyone', 'staff')) NOT VALID;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'attendance_status_chk') THEN
+        ALTER TABLE attendance ADD CONSTRAINT attendance_status_chk
+          CHECK (status IN ('present', 'absent', 'late')) NOT VALID;
+      END IF;
+    END $$
+  `)
+  // 0 = Sunday … 6 = Saturday. Weekly-off days are not working days (no marking, not counted).
+  await pool.query(`ALTER TABLE schools ADD COLUMN IF NOT EXISTS weekly_off_days SMALLINT[] NOT NULL DEFAULT '{0}'`)
 }

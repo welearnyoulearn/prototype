@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import AppLoader from '../components/AppLoader'
+import { FullPageLoader } from '@/components/loaders'
 
 export default function SetupPage() {
   const router = useRouter()
@@ -39,10 +39,10 @@ export default function SetupPage() {
     }
   }
 
-  if (exists === null) return <AppLoader message="Checking setup status" sub="Please wait…" />
+  if (exists === null) return <FullPageLoader portal="platform-admin" message="Checking setup status" />
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-950 to-slate-900 flex items-center justify-center p-4">
+    <div className="min-h-screen bg-[#17221b] flex items-center justify-center p-4">
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
           <div className="inline-flex items-center justify-center w-16 h-16 bg-purple-600 rounded-2xl mb-4 shadow-lg">

@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { SyllabusTracking, type TeacherObj } from './ClassView'
 import { INK, GOLD, BORDER, CREAM } from '@/app/components/ulearn/theme'
 import { Pills, UlearnCard } from '@/app/components/ulearn/primitives'
+import { Skeleton } from '@/components/ui/skeleton'
 
 type ClassOption = {
   id: number
@@ -21,11 +22,12 @@ type ClassSubjectAssignment = {
 }
 
 export default function TeacherSyllabus({
-  teacher, schoolId, onGoToHomework,
+  teacher, schoolId, academicYear, readOnly,
 }: {
   teacher: TeacherObj
   schoolId: number
-  onGoToHomework: (classId: number) => void
+  academicYear?: string
+  readOnly?: boolean
 }) {
   const [classes, setClasses] = useState<ClassOption[]>([])
   const [assignments, setAssignments] = useState<ClassSubjectAssignment[]>([])
@@ -36,7 +38,7 @@ export default function TeacherSyllabus({
     // Class visibility comes from two sources: the class they're class
     // teacher of (they oversee the whole class regardless of subject), plus
     // every (class, subject) pair Class Management explicitly assigned them
-    // via class_subjects — replacing the old "any timetable slot" heuristic,
+    // via class_subjects — replacing an older heuristic,
     // which let a teacher see subjects that weren't actually theirs.
     Promise.all([
       fetch(`/api/teachers/${teacher.id}/class-subjects`).then(r => r.json()).catch(() => []),
@@ -58,11 +60,23 @@ export default function TeacherSyllabus({
       const found = Array.from(picked.values())
       setClasses(found)
       setAssignments(assigned)
-      if (found.length > 0) setActiveKey(`${found[0].grade}-${found[0].section}`)
+      // Only auto-select on first load — activeKey starts '' and the caller
+      // (page.tsx) passes `teacher` as a fresh object literal every render,
+      // so this effect can refire on any unrelated parent re-render. Without
+      // this guard, that refire unconditionally snapped a teacher's manual
+      // class-pill selection back to the first class every time.
+      setActiveKey(prev => prev || (found.length > 0 ? `${found[0].grade}-${found[0].section}` : prev))
     }).finally(() => setLoading(false))
-  }, [teacher, schoolId])
+  }, [teacher.id, teacher.class_teacher_grade, teacher.class_teacher_section, schoolId])
 
-  if (loading) return <div className="text-sm text-gray-400 p-4">Loading your classes…</div>
+  if (loading) return (
+    <div className="space-y-4" role="status" aria-live="polite" aria-busy="true">
+      <span className="sr-only">Loading your classes</span>
+      <Skeleton className="h-20 w-full" />
+      <div className="flex gap-2"><Skeleton className="h-10 w-24" /><Skeleton className="h-10 w-24" /></div>
+      <Skeleton className="h-48 w-full" />
+    </div>
+  )
 
   if (classes.length === 0) {
     return (
@@ -81,7 +95,7 @@ export default function TeacherSyllabus({
 
   return (
     <div className="space-y-4">
-      <div className="rounded-3xl p-4 sm:p-5" style={{ background: CREAM, border: `1px solid ${BORDER}` }}>
+      <div className="rounded-lg border-l-4 p-4 sm:p-5" style={{ background: CREAM, borderColor: BORDER, borderLeftColor: GOLD }}>
         <h2 className="text-lg font-semibold" style={{ color: INK }}>Syllabus</h2>
         <p className="text-sm text-gray-500 mt-0.5">
           Pick a class to track what&apos;s been taught and mark topics as covered.
@@ -103,7 +117,8 @@ export default function TeacherSyllabus({
         teacher={teacher}
         isClassTeacher={isClassTeacher}
         allowedSubjects={allowedSubjects}
-        onGoToHomework={() => onGoToHomework(active.id)}
+        academicYear={academicYear}
+        readOnly={readOnly}
       />
     </div>
   )
