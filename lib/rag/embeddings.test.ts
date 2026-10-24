@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { afterEach, beforeEach, test } from 'node:test'
-import { EMBEDDING_DIMS, embedTexts } from './embeddings'
+import { EMBEDDING_DIMS, EmbeddingQuotaError, embedTexts } from './embeddings'
 
 const realFetch = globalThis.fetch
 const vec = () => Array.from({ length: EMBEDDING_DIMS }, () => 0.1)
@@ -42,4 +42,11 @@ test('fails fast on a 429 by default (student request falls back to keyword sear
 test('throws on wrong dimensions', async () => {
   globalThis.fetch = async () => ok(1, 768)
   await assert.rejects(embedTexts(['a']), /768 dims/)
+})
+
+test('stops at once when the daily quota is used up, even with retries allowed', async () => {
+  let calls = 0
+  globalThis.fetch = async () => (++calls, new Response('{"errors":[{"code":4006,"message":"you have used up your daily free allocation of 10,000 neurons"}]}', { status: 429 }))
+  await assert.rejects(embedTexts(['a'], { rateLimitTries: 10 }), EmbeddingQuotaError)
+  assert.equal(calls, 1)
 })

@@ -63,7 +63,7 @@ async function main() {
   const { default: pool } = await import('../lib/db')
   const { r2Config } = await import('../lib/r2')
   const { chunkPages } = await import('../lib/rag/chunk')
-  const { embeddingsConfigured, embedTexts, toPgVector } = await import('../lib/rag/embeddings')
+  const { embeddingsConfigured, embedTexts, toPgVector, EmbeddingQuotaError } = await import('../lib/rag/embeddings')
   const embed = embeddingsConfigured()
   if (!embed && !dryRun) console.log('Embeddings not configured — indexing for keyword search only (re-run once EMBEDDINGS_* is set to backfill).')
   const r2 = r2Config()
@@ -148,6 +148,12 @@ async function main() {
       const secs = ((Date.now() - started) / 1000).toFixed(1)
       console.log(`#${m.id} "${m.title}" pages=${pages.length} chunks=${chunks.length} ${secs}s`)
     } catch (err) {
+      if (err instanceof EmbeddingQuotaError) {
+        // Nothing for this book was written; stop instead of failing every remaining book. Re-run to resume.
+        console.error(`#${m.id} "${m.title}" stopped: ${err.message}`)
+        failed += materials.length - materials.indexOf(m) // this and the remaining books
+        break
+      }
       failed++
       const message = err instanceof Error ? err.message : String(err)
       console.error(`#${m.id} "${m.title}" FAILED: ${message}`)

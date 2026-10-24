@@ -1,11 +1,14 @@
 // Text embeddings for the student tutor (#407) via any OpenAI-compatible /embeddings
-// endpoint that honours `dimensions` (e.g. Gemini gemini-embedding-001). material_chunks.embedding
+// endpoint (Cloudflare Workers AI @cf/baai/bge-m3 in use). material_chunks.embedding
 // is vector(1024), so the model must produce (or be truncated to) 1024-dim vectors.
 
 export const EMBEDDING_DIMS = 1024
 const BATCH_SIZE = 20
 const MAX_TRIES = 3
 const DEFAULT_429_WAIT_S = 60
+
+/** The provider's daily allowance is used up — retrying today is pointless. */
+export class EmbeddingQuotaError extends Error {}
 
 type EmbeddingsResponse = { data?: { index: number; embedding: number[] }[] }
 
@@ -22,7 +25,7 @@ function config(): { url: string; apiKey: string; model: string } {
   return {
     url: `${baseUrl.replace(/\/+$/, '')}/embeddings`,
     apiKey,
-    model: process.env.EMBEDDINGS_MODEL || 'gemini-embedding-001',
+    model: process.env.EMBEDDINGS_MODEL || '@cf/baai/bge-m3',
   }
 }
 
@@ -57,11 +60,15 @@ async function embedBatch(input: string[], cfg: ReturnType<typeof config>, maxTr
       return vectors
     }
     const rateLimited = res.status === 429
+    const detail = (await res.text().catch(() => '')).slice(0, 300)
+    // Cloudflare Workers AI: code 4006 "you have used up your daily free allocation".
+    if (rateLimited && /\b4006\b|daily free allocation/i.test(detail)) {
+      throw new EmbeddingQuotaError(`Embeddings daily quota exhausted: ${detail}`)
+    }
     const retryAfter = Number(res.headers.get('retry-after'))
     if (rateLimited) waitMs = (res.headers.get('retry-after') && Number.isFinite(retryAfter) ? retryAfter : DEFAULT_429_WAIT_S) * 1000
     const retryable = rateLimited || res.status >= 500
     if (!retryable || attempt >= (rateLimited ? maxTries429 : MAX_TRIES)) {
-      const detail = (await res.text().catch(() => '')).slice(0, 300)
       throw new Error(`Embeddings request failed: HTTP ${res.status} ${detail}`)
     }
   }
