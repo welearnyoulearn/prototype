@@ -5,6 +5,33 @@ export type PageText = { page: number; text: string }
 export type Chunk = { page: number; chunkIndex: number; content: string }
 
 const MIN_PAGE_CHARS = 40
+// A chunk is kept only if at least this share of its non-space characters are real words.
+const MIN_WORD_SHARE = 0.5
+
+// Many AP Telugu/Sanskrit (and some maths) PDFs use legacy non-Unicode fonts whose text layer
+// extracts as Latin-1/Latin-Extended letters and stray symbols ("Á|üuÛÑT‘·«+"). Words containing
+// these are dropped; legitimate maths symbols (° ± ² ³ × ÷ ≤ ≥ √) are left alone.
+const LEGACY_FONT_CHAR = /[\u00A1-\u00AF\u00B4\u00B6\u00B8-\u00BB\u00BF-\u00D6\u00D8-\u00F6\u00F8-\u02FF\u2039\u203A\u2206\u220F\u2211\u222B\u25CA\uF8FF]/
+
+export function dropLegacyFontWords(text: string): string {
+  return text.split(/(\s+)/).filter((tok) => !LEGACY_FONT_CHAR.test(tok)).join('').replace(/[ \t]{2,}/g, ' ').trim()
+}
+
+// Real words: ASCII words with a vowel, or words wholly in an Indic or Greek script.
+function isRealWord(w: string): boolean {
+  if (/^[A-Za-z]+$/.test(w)) return /[aeiouy]/i.test(w) && (w.length >= 2 || /^[aAI]$/.test(w))
+  return /^[\u0900-\u0DFF]+$/.test(w) || /^[\u0370-\u03FF]+$/.test(w)
+}
+
+// Share of non-space characters that sit in real words — low for garbled font output
+// like "F22222F222222" or "2Q2X2e2222", high for prose in any of the textbook scripts.
+export function wordShare(text: string): number {
+  const total = text.replace(/\s/g, '').length
+  if (total === 0) return 0
+  let real = 0
+  for (const [w] of text.matchAll(/[\p{L}\p{M}]+/gu)) if (isRealWord(w)) real += w.length
+  return real / total
+}
 
 // Keeps paragraph breaks ("\n\n"), folds every other whitespace run into one space, and
 // collapses a phrase repeated back-to-back (running headers come out of the text layer as
@@ -41,7 +68,7 @@ export function chunkPages(
   const chunks: Chunk[] = []
 
   for (const { page, text: raw } of pages) {
-    const text = normalise(raw)
+    const text = dropLegacyFontWords(normalise(raw))
     if (text.replace(/\s/g, '').length < MIN_PAGE_CHARS) continue
 
     let start = 0
@@ -49,7 +76,7 @@ export function chunkPages(
       let end = text.length
       if (end - start > size) end = breakPoint(text, start + Math.floor(size / 2), start + size)
       const content = text.slice(start, end).trim()
-      if (content) chunks.push({ page, chunkIndex: chunks.length, content })
+      if (content && wordShare(content) >= MIN_WORD_SHARE) chunks.push({ page, chunkIndex: chunks.length, content })
       if (end >= text.length) break
       // Step back by the overlap, then forward to the next word so no chunk starts mid-word.
       const back = end - overlap

@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { chunkPages, normalise } from './chunk'
+import { chunkPages, dropLegacyFontWords, normalise, wordShare } from './chunk'
 
 const sentence = (i: number) => `This is sentence number ${i} about the water cycle and rainfall. `
 const longText = Array.from({ length: 60 }, (_, i) => sentence(i)).join('')
@@ -57,4 +57,24 @@ test('normalise folds whitespace, keeps paragraphs and collapses repeated headin
     normalise('Pastoralists in the Modern WorldPastoralists in the Modern World 97'),
     'Pastoralists in the Modern World 97',
   )
+})
+
+test('legacy-font words are dropped, maths symbols kept', () => {
+  assert.equal(dropLegacyFontWords('Photosynthesis Á|üuÛÑT‘·«+ makes food'), 'Photosynthesis makes food')
+  assert.equal(dropLegacyFontWords('x² + 2x ≤ 10 × 3 ÷ 2 at 30°'), 'x² + 2x ≤ 10 × 3 ÷ 2 at 30°')
+})
+
+test('wordShare is high for prose in any textbook script, low for garbled text', () => {
+  assert.ok(wordShare('The area drained by a single river system is called a drainage basin.') > 0.8)
+  assert.ok(wordShare('పర్యావరణం గురించి తెలుసుకుందాం') > 0.8)
+  assert.ok(wordShare('F22222F222222F222222 2Q2X2e2222 222 IH IH 10 22IH2a2IH') < 0.5)
+})
+
+test('pages that are garbled font output produce no chunks', () => {
+  const chunks = chunkPages([
+    { page: 1, text: 'q&ÉT#·Tø=+{≤qT. »+‘·Te⁄\\|ü≥¢ <äj·T‘√ ñ+{≤qT. F22222F222222F222222 2Q2X2e2222 2wFD2S2wF2$;2U2wF2@SC2IHFS25' },
+    { page: 2, text: longText },
+  ])
+  assert.ok(chunks.length > 0)
+  assert.ok(chunks.every((c) => c.page === 2))
 })
