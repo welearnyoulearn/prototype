@@ -40,6 +40,24 @@ Current bugs and workarounds for the WLYL School prototype.
 
 ## Active Issues
 
+### [#407] About 25 textbooks have legacy-font text the tutor can't read
+- **Severity:** Medium
+- **Detail:** Telugu & Sanskrit literature, Value Education, all Maths SEM-II books and parts of the bilingual science/social books use legacy non-Unicode fonts and extract as garbage. The chunker drops the garbled text, so these books have few or no chunks and the tutor can't answer from them.
+- **Workaround:** None; students get answers only from the readable books.
+- **Status:** Needs OCR (e.g. a vision model) — not done.
+
+### [#407] Telugu keyword search is weak
+- **Severity:** Low
+- **Detail:** These PDFs extract Telugu with broken conjuncts, so full-text matching rarely hits.
+- **Workaround:** None needed — vector search carries Telugu questions.
+- **Status:** Revisit if Telugu answers are poor after OCR.
+
+### [#407] `material_chunks` was dropped from the shared Supabase DB (2026-10-24)
+- **Severity:** Medium (tutor had no textbook context until restored)
+- **Detail:** An external SQL call (`drop table if exists public.material_chunks`) removed the table; cause unknown. It was recreated from the `lib/db.ts` migration and fully re-indexed.
+- **Workaround:** If the tutor stops finding passages, re-run `pnpm dlx tsx scripts/index-materials.ts` (resumable).
+- **Status:** Cause still unknown; watch for a repeat.
+
 ### [#358] Two upload screens aren't counted as storage usage
 - **Severity:** Low (track-only service, nothing is billed)
 - **Detail:** School logos (School Profile) and platform curriculum images upload to Cloudinary, but their save calls don't send the file size, so `storage.upload` misses them.

@@ -19,8 +19,24 @@ Students (own data only).
 
 - **Look and feel (#229):** a student-only "sticker-book" design — bold outlined cards, 3D Fluent Emoji stickers, a display + handwritten font pair, and a per-screen colour (the page wash and the active nav chip change colour per section). Each screen uses the pattern that fits its job: dashboard quest tiles and a notice pinboard, syllabus subject folders with notebook chapters, a library bookshelf, birthday greeting cards with chat-bubble wishes, a report-card marks page with a certificate score card, a habit-tracker attendance calendar, a wall-planner school calendar, an ID-card profile and retro-window AI Hub. The school's uploaded logo shows top-left, as in the school admin portal. Styles live in `app/student-ui.css`, scoped to `[data-student-ui]`, so no other portal changes.
 - Dashboard (attendance note, quests, announcements), Syllabus progress (each subject panel shows a "Taught by …" chip, from `/api/student/subjects` — the class_subjects assignment, not the syllabus data itself), Digital Library, **My Attendance** (own calendar, month/year %, trend, upcoming holidays), School Calendar, My Marks, Class Circle (classmates' birthdays), profile and password.
-- **AI Hub** is a page of links to external AI assistants (Gemini, Claude, ChatGPT), shown only for schools with AI access enabled — it is not a built-in tutor.
+- **AI Hub** is a page of links to external AI assistants (Gemini, Claude, ChatGPT), shown only for schools with AI access enabled. For AI Pro schools it also hosts the built-in **AI Tutor** (see below).
 - Removed from `dev` (each preserved on its own branch): the Learning Hub and Daily Knowledge (#164), the weekly test (#168) and the rewards marketplace (#165).
+
+## AI Tutor (AI Pro)
+
+**Status:** Built (#407, on `feature/407-student-rag-tutor`, not yet merged)
+
+**What it does:** AI Pro students ask questions in AI Hub and get answers drawn only from their school's board and grade textbooks, citing book and page. Limit is 60 questions per student per day. Chats are saved in `ai_chat_sessions`.
+
+**How it works:**
+- `POST /api/student/tutor` streams the answer (NDJSON). Retrieval is hybrid — vector plus keyword search fused with RRF — scoped by board, grade and subject (falling back to the whole grade; if `schools.board` is unset, all boards for the grade).
+- Textbook chunks live in `material_chunks`, built offline by `scripts/index-materials.ts`. Embeddings are Cloudflare `@cf/baai/bge-m3` (1024 dims); the answer comes from OmniRoute (`ddgw/claude-haiku-4-5`, then `ddgw/gpt-5.4-mini`). Key files: `lib/rag/`, `lib/tutor.ts`, `app/student/components/StudentTutorChat.tsx`.
+- See `DOCS/DECISIONS.md` (2026-10-20, amended 2026-10-24).
+
+**Limits:**
+- About 25 books (Telugu & Sanskrit literature, Value Education, all Maths SEM-II, parts of the bilingual science/social books) use legacy fonts that can't be extracted; they have few or no chunks until OCR is added.
+- Telugu keyword matching is weak because of broken conjuncts in the extracted text; vector search carries Telugu questions.
+- The Cloudflare free embedding tier (10,000 neurons/day) covers live questions, but a full re-index may need two days or the paid plan.
 
 ## Rules and limits
 
@@ -68,3 +84,4 @@ API routes these screens call (all exist):
 |------|--------|-------|
 | 2026-09-21 | Doc created from the code; status checked with `scripts/product-docs.mjs` | #162 |
 | 2026-09-24 | Sticker-book redesign of every student screen; school logo in the sidebar | #229 |
+| 2026-10-24 | AI Tutor (RAG over board textbooks) in AI Hub for AI Pro | #407 |
