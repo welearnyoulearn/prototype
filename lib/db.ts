@@ -1,4 +1,5 @@
 import { Pool, types } from 'pg'
+import { getCloudflareContext } from '@opennextjs/cloudflare'
 import { matchTeacher } from './matchTeacher'
 import { buildFeedbackCategoryBackfillAllQuery } from './feedback-defaults'
 
@@ -43,8 +44,6 @@ const poolConfig = (process.env.PGHOST)
       options: '-c timezone=Asia/Kolkata',
     }
 
-const pool = new Pool(poolConfig)
-
 // Every session-timezone-dependent SQL function (CURRENT_DATE, NOW(), the
 // overdue-status flips in fees/ledger/stats routes, "days until year end",
 // etc.) otherwise resolves in Postgres's server default — UTC on Supabase —
@@ -58,6 +57,55 @@ const pool = new Pool(poolConfig)
 // correct without having to patch each one individually. Supplying it in the
 // startup options also avoids racing a connect-event query with the first
 // application query on that client.
+
+function createPool(perRequest: boolean, hyperdriveUrl?: string) {
+  // Workers cannot TLS-handshake with Supabase directly (connections drop
+  // mid-handshake), so on Workers pg talks plain TCP to the local Hyperdrive
+  // binding, which holds the TLS pool to Supabase. Hyperdrive ignores startup
+  // `options`, so the Asia/Kolkata timezone must come from the DB role default.
+  // connectionTimeoutMillis: a request that outgrows its 3 connections fails
+  // loudly (naming its route in the logs) instead of hanging the page forever.
+  if (hyperdriveUrl) return new Pool({ connectionString: hyperdriveUrl, max: 3, connectionTimeoutMillis: 10_000 })
+  return new Pool({ ...poolConfig, max: perRequest ? 3 : poolConfig.max })
+}
+
+// A Workers isolate forbids using a TCP socket opened by one request from
+// another, so the single module-level Pool that works on Vercel/Node would
+// hand a stale, cross-request socket to pg and crash. On Workers, key a Pool
+// per request (via its ctx, the one object unique to that request) instead.
+// max: 3, not 1 — code elsewhere does pool.query() while still holding a
+// client checked out via pool.connect(); max: 1 would let that second query
+// starve waiting for the single connection its own request is holding,
+// deadlocking the request.
+const globalForPool = globalThis as unknown as { pool?: Pool }
+const perRequestPool = new WeakMap<object, Pool>()
+
+function current(): Pool {
+  let requestKey: object | undefined
+  let hyperdriveUrl: string | undefined
+  try {
+    const { ctx, env } = getCloudflareContext()
+    requestKey = ctx as object
+    hyperdriveUrl = (env as { HYPERDRIVE?: { connectionString: string } }).HYPERDRIVE?.connectionString
+  } catch {
+    // Not on Workers (plain Node: next dev, scripts, tests).
+  }
+  if (!requestKey) return (globalForPool.pool ??= createPool(false))
+
+  let requestPool = perRequestPool.get(requestKey)
+  if (!requestPool) perRequestPool.set(requestKey, (requestPool = createPool(true, hyperdriveUrl)))
+  return requestPool
+}
+
+// A Proxy so the ~1000 `pool.query`/`pool.connect` call sites keep working
+// unchanged while each Workers request transparently gets its own Pool.
+const pool = new Proxy({} as Pool, {
+  get(_target, prop) {
+    const client = current()
+    const value = Reflect.get(client, prop)
+    return typeof value === 'function' ? value.bind(client) : value
+  },
+})
 
 export default pool
 

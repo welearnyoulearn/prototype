@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 import { requireSchoolAdmin, generateTempPassword, hashPortalPassword, revokePortalSessions, schoolHasFeature } from '@/lib/auth'
 import { sendTeacherWelcomeEmail } from '@/lib/email'
@@ -66,10 +66,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   }
 
   const appUrl = process.env.APP_URL || 'http://localhost:3000'
-  sendTeacherWelcomeEmail({
+  after(() => sendTeacherWelcomeEmail({
     schoolId: teacher.school_id, to: teacher.email, name: teacher.name, schoolName: teacher.school_name,
     tempPassword, loginUrl: `${appUrl}/teacher/login`,
-  }).catch(console.error)
+  }).catch(console.error))
 
   return NextResponse.json({ temp_password: tempPassword })
 }

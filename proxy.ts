@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import type { NextFetchEvent } from 'next/server'
 import { jwtVerify } from 'jose'
 import { JWT_SECRET as JWT_SECRET_RAW, INGEST_SECRET, COOKIE_ADMIN, COOKIE_PLATFORM, COOKIE_TEACHER, COOKIE_STUDENT, COOKIE_PARENT } from '@/lib/auth-constants'
 import { featureRequirementForApiPath } from '@/lib/featureRoutes'
@@ -222,7 +223,7 @@ const COUNT_SKIP_PREFIXES = ['/api/internal/', '/api/cron/', '/api/platform/', '
 const requestCounts = new Map<number, number>()
 let countsFlushedAt = Date.now()
 
-async function countApiRequest(req: NextRequest, origin: string, pathname: string): Promise<void> {
+async function countApiRequest(req: NextRequest, event: NextFetchEvent | undefined, origin: string, pathname: string): Promise<void> {
   if (COUNT_SKIP_PREFIXES.some(p => pathname.startsWith(p))) return
   const schoolId = await requestSchoolId(req)
   if (schoolId === null) return
@@ -233,11 +234,13 @@ async function countApiRequest(req: NextRequest, origin: string, pathname: strin
   requestCounts.clear()
   countsFlushedAt = Date.now()
   for (let i = 0; i < counts.length; i += 1000) {
-    fetch(`${origin}/api/internal/usage-ingest`, {
+    // waitUntil keeps the flush alive past the response on Workers.
+    const flush = fetch(`${origin}/api/internal/usage-ingest`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-ingest-secret': INGEST_SECRET },
       body: JSON.stringify({ counts: counts.slice(i, i + 1000) }),
-    }).catch(() => { /* counting must never break the request */ })
+    }).then(() => undefined).catch(() => { /* counting must never break the request */ })
+    event?.waitUntil(flush)
   }
 }
 
@@ -262,7 +265,8 @@ function extractActorRole(req: NextRequest): string | null {
 }
 
 // ── Main proxy ───────────────────────────────────────────────────────────────
-export async function proxy(req: NextRequest) {
+// event is optional so unit tests can call proxy(req) directly.
+export async function proxy(req: NextRequest, event?: NextFetchEvent) {
   const { pathname } = req.nextUrl
   const host         = req.headers.get('host') ?? ''
   const isAdminSubdomain = host.startsWith('admin.')
@@ -290,7 +294,7 @@ export async function proxy(req: NextRequest) {
         return NextResponse.redirect(new URL('/login?role=platform', req.url))
       }
       if (payload.firstLogin) return NextResponse.redirect(new URL('/change-password?first=1&portal=platform', req.url))
-      return watchlineAndNext(req, origin, pathname)
+      return watchlineAndNext(req, event, origin, pathname)
     }
     if (pathname.startsWith('/login') || pathname.startsWith('/forgot-password') || pathname.startsWith('/reset-password') || pathname.startsWith('/change-password')) {
       return NextResponse.next()
@@ -306,7 +310,7 @@ export async function proxy(req: NextRequest) {
       return NextResponse.redirect(new URL('/admin', req.url))
     }
     if (payload.firstLogin) return NextResponse.redirect(new URL('/change-password?first=1&portal=platform', req.url))
-    return watchlineAndNext(req, origin, pathname)
+    return watchlineAndNext(req, event, origin, pathname)
   }
 
   if (await isLockedRequest(req, pathname, origin)) {
@@ -321,7 +325,7 @@ export async function proxy(req: NextRequest) {
     return NextResponse.json({ error: 'Feature not enabled', code: 'FEATURE_DISABLED', feature: requirement.primary }, { status: 403 })
   }
 
-  if (pathname.startsWith('/api/')) await countApiRequest(req, origin, pathname)
+  if (pathname.startsWith('/api/')) await countApiRequest(req, event, origin, pathname)
 
   if (isPublic(pathname) || pathname === '/') return NextResponse.next()
 
@@ -338,7 +342,7 @@ export async function proxy(req: NextRequest) {
       return NextResponse.redirect(new URL('/change-password?first=1', req.url))
     }
     // Never cache authenticated pages — after logout the Back button must not replay them.
-    const res = await watchlineAndNext(req, origin, pathname)
+    const res = await watchlineAndNext(req, event, origin, pathname)
     res.headers.set('Cache-Control', 'no-store')
     return res
   }
@@ -353,7 +357,7 @@ export async function proxy(req: NextRequest) {
     if (!payload.passwordChanged && pathname === '/teacher') {
       return NextResponse.redirect(new URL('/teacher/change-password', req.url))
     }
-    return watchlineAndNext(req, origin, pathname)
+    return watchlineAndNext(req, event, origin, pathname)
   }
 
   // ── Student ───────────────────────────────────────────────────────────────
@@ -366,7 +370,7 @@ export async function proxy(req: NextRequest) {
     if (!payload.passwordChanged && pathname === '/student') {
       return NextResponse.redirect(new URL('/student/change-password', req.url))
     }
-    return watchlineAndNext(req, origin, pathname)
+    return watchlineAndNext(req, event, origin, pathname)
   }
 
   // ── Parent ────────────────────────────────────────────────────────────────
@@ -379,15 +383,17 @@ export async function proxy(req: NextRequest) {
     if (!payload.passwordChanged && pathname === '/parent') {
       return NextResponse.redirect(new URL('/parent/change-password', req.url))
     }
-    return watchlineAndNext(req, origin, pathname)
+    return watchlineAndNext(req, event, origin, pathname)
   }
 
   return NextResponse.next()
 }
 
-// Fires Watchline log-ingest (fire-and-forget) then returns NextResponse.next().
+// Fires Watchline log-ingest then returns NextResponse.next(). The fetch is
+// registered with event.waitUntil() so it survives past the response on
+// Workers/serverless, instead of being killed as a bare fire-and-forget.
 // Only logs API routes for schools that have monitoring enabled.
-async function watchlineAndNext(req: NextRequest, origin: string, pathname: string): Promise<NextResponse> {
+async function watchlineAndNext(req: NextRequest, event: NextFetchEvent | undefined, origin: string, pathname: string): Promise<NextResponse> {
   if (!pathname.startsWith('/api/') || SKIP_ROUTES.has(pathname)) {
     return NextResponse.next()
   }
@@ -403,22 +409,25 @@ async function watchlineAndNext(req: NextRequest, origin: string, pathname: stri
     const actorRole = extractActorRole(req)
     const duration  = Date.now() - start
 
-    fetch(`${origin}/api/internal/log-ingest`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        secret: INGEST_SECRET,
-        type: 'request',
-        data: {
-          school_id:   schoolId,
-          route:       pathname,
-          method:      req.method,
-          status_code: 200,
-          duration_ms: duration,
-          actor_role:  actorRole,
-        },
-      }),
-    }).catch(() => { /* never let logging break the request */ })
+    const ingest = (
+      fetch(`${origin}/api/internal/log-ingest`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          secret: INGEST_SECRET,
+          type: 'request',
+          data: {
+            school_id:   schoolId,
+            route:       pathname,
+            method:      req.method,
+            status_code: 200,
+            duration_ms: duration,
+            actor_role:  actorRole,
+          },
+        }),
+      }).then(() => undefined).catch(() => { /* never let logging break the request */ })
+    )
+    event?.waitUntil(ingest)
   }
 
   return response

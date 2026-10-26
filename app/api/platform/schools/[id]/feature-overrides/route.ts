@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
 import pool from '@/lib/db'
 import { requirePlatformAdmin, schoolHasFeature } from '@/lib/auth'
 import { OVERRIDABLE_FEATURE_KEYS } from '@/lib/features'
@@ -17,9 +17,9 @@ function maybeAutoBackfill(schoolId: number, featureKey: string, isNowEnabled: b
   if (featureKey !== 'student-portal' && featureKey !== 'parent-portal') return
   const wantStudent = featureKey === 'student-portal'
   const wantParent = featureKey === 'parent-portal'
-  backfillPortalCredentials({ schoolId, wantStudent, wantParent }).catch(err =>
+  after(() => backfillPortalCredentials({ schoolId, wantStudent, wantParent }).catch(err =>
     console.error(`[feature-overrides] auto-backfill failed for school ${schoolId} (${featureKey}):`, err)
-  )
+  ))
 }
 
 // GET /api/platform/schools/[id]/feature-overrides

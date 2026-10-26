@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
 import pool from '@/lib/db'
 import { sendMail } from '@/lib/email'
 import { buildHealth } from '@/lib/watchline'
@@ -119,8 +119,8 @@ async function runCleanup() {
 <p style="font-size:13px;color:#6b7280;margin-top:8px">Cleanup deleted: ${JSON.stringify(deleted)}</p>
 </body></html>`
 
-      sendMail(ADMIN_EMAIL, '🚨 CRITICAL: Watchline log storage is almost full — action required', html)
-        .catch(e => console.error('[log-cleanup] alert email failed:', e))
+      after(() => sendMail(ADMIN_EMAIL, '🚨 CRITICAL: Watchline log storage is almost full — action required', html)
+        .catch(e => console.error('[log-cleanup] alert email failed:', e)))
     }
   } catch (e) {
     console.error('[log-cleanup] health check failed:', e)

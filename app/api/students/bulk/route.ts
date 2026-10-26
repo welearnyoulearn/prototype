@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 import { invalidateCache } from '@/lib/responseCache'
 import { hashPortalPassword, generateTempPassword, requireSchoolAdmin, schoolHasFeature } from '@/lib/auth'
@@ -260,24 +260,25 @@ export async function POST(req: NextRequest) {
       // batch. Siblings reuse the processed-parent cache, so only one password
       // is hashed, persisted and delivered for that parent account.
       const parentWelcomeSent = new Set<string>()
+      const notifications: Promise<unknown>[] = []
       for (let i = 0; i < toInsert.length; i++) {
         const s = toInsert[i]
         const student = insertedStudents[i]
         if (studentPortalEnabled && s.email?.trim()) {
-          sendStudentWelcomeEmail({
+          notifications.push(sendStudentWelcomeEmail({
             schoolId: school_id, to: s.email.trim(), name: s.name.trim(), schoolName,
             rollNumber: student.roll_number, tempPassword: studentTempPasswords[i],
             loginUrl: `${appUrl}/student/login`,
-          }).catch(console.error)
+          }).catch(console.error))
         }
         if (studentPortalEnabled && s.phone?.trim()) {
-          sendWhatsappMessage({
+          notifications.push(sendWhatsappMessage({
             schoolId: school_id, to: s.phone.trim(), templateName: 'student_credentials', recipientName: s.name.trim(),
             templateParams: {
               student_name: s.name.trim(), school_name: schoolName, login: student.roll_number,
               temp_password: studentTempPasswords[i], login_url: `${appUrl}/student/login`,
             },
-          }).catch(console.error)
+          }).catch(console.error))
         }
         if (parentPortalEnabled && needsNewParent[i] && (s.parent_email?.trim() || s.parent_phone?.trim())) {
           const pe = s.parent_email?.trim() || null
@@ -287,20 +288,20 @@ export async function POST(req: NextRequest) {
             parentWelcomeSent.add(key)
             const displayName = s.parent_name?.trim() || pe || pp || 'there'
             if (pe) {
-              sendParentWelcomeEmail({
+              notifications.push(sendParentWelcomeEmail({
                 schoolId: school_id, to: pe, parentName: displayName,
                 studentName: s.name.trim(), schoolName,
                 tempPassword: parentTempPasswords[i], loginUrl: `${appUrl}/parent/login`,
-              }).catch(console.error)
+              }).catch(console.error))
             }
             if (pp) {
-              sendWhatsappMessage({
+              notifications.push(sendWhatsappMessage({
                 schoolId: school_id, to: pp, templateName: 'parent_credentials', recipientName: displayName,
                 templateParams: {
                   parent_name: displayName, student_name: s.name.trim(), school_name: schoolName,
                   login: pe || pp, temp_password: parentTempPasswords[i], login_url: `${appUrl}/parent/login`,
                 },
-              }).catch(console.error)
+              }).catch(console.error))
             }
           }
         }
@@ -311,7 +312,7 @@ export async function POST(req: NextRequest) {
         if (studentPortalEnabled && studentTempPasswords[i] && parentContact) {
           const parentDisplayName = parentContact.name || s.parent_name?.trim() || parentContact.email || parentContact.phone || 'there'
           if (parentContact.email) {
-            sendChildCredentialsToParentEmail({
+            notifications.push(sendChildCredentialsToParentEmail({
               schoolId: school_id, to: parentContact.email,
               parentName: parentDisplayName,
               studentName: s.name.trim(),
@@ -319,19 +320,20 @@ export async function POST(req: NextRequest) {
               rollNumber: student.roll_number,
               tempPassword: studentTempPasswords[i],
               loginUrl: `${appUrl}/student/login`,
-            }).catch(console.error)
+            }).catch(console.error))
           }
           if (parentContact.phone) {
-            sendWhatsappMessage({
+            notifications.push(sendWhatsappMessage({
               schoolId: school_id, to: parentContact.phone, templateName: 'student_credentials', recipientName: parentDisplayName,
               templateParams: {
                 student_name: s.name.trim(), school_name: schoolName, login: student.roll_number,
                 temp_password: studentTempPasswords[i], login_url: `${appUrl}/student/login`,
               },
-            }).catch(console.error)
+            }).catch(console.error))
           }
         }
       }
+      after(() => Promise.allSettled(notifications))
 
       invalidateCache(`classes:${school_id}`)
       return NextResponse.json({

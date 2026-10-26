@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
 import pool from '@/lib/db'
 import { generateTempPassword, hashPortalPassword, requireSchoolAdmin, schoolHasFeature } from '@/lib/auth'
 import { sendTeacherWelcomeEmail } from '@/lib/email'
@@ -171,14 +171,17 @@ export async function POST(req: NextRequest) {
   invalidateCache(`teachers:${schoolId}:teaching`)
   invalidateCache(`teachers:${schoolId}:non_teaching`)
   const loginUrl = `${process.env.APP_URL || 'http://localhost:3000'}/teacher/login`
-  inserted.forEach((teacher, i) => {
+  const notifications = inserted.flatMap((teacher, i) => {
     const row = normalized[i]
-    sendTeacherWelcomeEmail({ schoolId, to: row.email, name: String(teacher.name), schoolName, tempPassword: tempPasswords[i], loginUrl }).catch(console.error)
-    sendWhatsappMessage({
-      schoolId, to: row.phone, templateName: 'staff_credentials', recipientName: String(teacher.name),
-      templateParams: { staff_name: String(teacher.name), school_name: schoolName, login: row.email, temp_password: tempPasswords[i], login_url: loginUrl },
-    }).catch(console.error)
+    return [
+      sendTeacherWelcomeEmail({ schoolId, to: row.email, name: String(teacher.name), schoolName, tempPassword: tempPasswords[i], loginUrl }).catch(console.error),
+      sendWhatsappMessage({
+        schoolId, to: row.phone, templateName: 'staff_credentials', recipientName: String(teacher.name),
+        templateParams: { staff_name: String(teacher.name), school_name: schoolName, login: row.email, temp_password: tempPasswords[i], login_url: loginUrl },
+      }).catch(console.error),
+    ]
   })
+  after(() => Promise.allSettled(notifications))
 
   return NextResponse.json({ inserted: inserted.length, teachers: inserted, credentials, errors: [] }, { status: 201 })
 }

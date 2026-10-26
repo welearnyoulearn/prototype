@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 import {
   verifyPasswordForLogin, JWTPayload, setAuthCookie, setPlatformAuthCookie,
@@ -49,7 +49,7 @@ export async function POST(req: NextRequest) {
     await clearAuthRateLimit(req, 'staff-login', normalizedEmail)
 
     // Track last login timestamp
-    pool.query('UPDATE users SET last_login_at = NOW() WHERE id = $1', [user.id]).catch(() => {})
+    after(() => pool.query('UPDATE users SET last_login_at = NOW() WHERE id = $1', [user.id]).catch(() => {}))
 
     const payload: JWTPayload = {
       userId: user.id,

@@ -35,6 +35,21 @@ Move an entry to [completed.md](completed.md) when it ships. Add new entries at 
 - [x] Web: `firebase-messaging-sw.js`, "Turn on" prompt in NotificationBell, token registered on enable/visit and removed on logout (all four portals). Needs a real Firebase project to test end to end.
 - [x] Parent mobile app (Expo, #133): `/api/parent/push/expo` on `device_tokens`, Expo sender in the same dispatcher
 - [ ] `FIREBASE_SERVICE_ACCOUNT` in Vercel; real-phone test of the mobile app on a development or Play build
+### Cloudflare Workers hosting — phase 1, workers.dev preview (#381)
+**Type:** Infrastructure
+**Branch:** `feature/381-cloudflare-deploy`
+**Summary:** Run the app on Cloudflare Workers (OpenNext) against Supabase via Hyperdrive. Phase 1 stops at a workers.dev preview; DNS and the production cutover from Vercel are separate.
+**Progress:**
+- [x] OpenNext scaffolding, per-request `pg` pool, `scheduled()` handler for all 9 crons
+- [x] Post-response emails / WhatsApp / log writes moved into `after()`
+- [x] Textbook upload: `pdf-parse` → `unpdf`, no filesystem writes
+- [x] Hyperdrive config (caching off) + 16 Worker secrets; `postgres` role default timezone set to Asia/Kolkata (Hyperdrive drops startup options)
+- [x] First workers.dev deploy: https://wlyl.welearnyoulearn.workers.dev — pages, health (db connected) and login verified
+- [ ] Full Playwright suite against the preview (needs E2E platform-admin creds; writes test data)
+- [ ] Workers Paid before cutover: 9 crons > Free limit of 5; login uses ~500 ms CPU vs Free's 10 ms
+- [ ] Backup cron within Workers CPU/memory limits; restore without in-memory gunzip
+- [ ] `next/image` on Workers; review in-isolate caches
+
 ### Usage credits & real WhatsApp sending (#358, #359)
 **Type:** Feature
 **Portals:** Platform Admin, School Admin

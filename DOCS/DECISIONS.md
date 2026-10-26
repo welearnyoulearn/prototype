@@ -37,6 +37,13 @@ Non-obvious technical decisions and their reasoning for the WLYL School prototyp
 **Decision:** The check moved to `lib/crossSite.ts` (dependency-free, so `proxy.ts` can still run on the Edge) and now allows an `Origin` that exactly matches an entry of `TRUSTED_APP_ORIGINS`. Anything else behaves as before. With the variable unset nothing is trusted.
 **Alternatives considered:** dropping the guard for parent routes (reopens login CSRF for parents); having the app strip `Origin` and `Sec-Fetch-*` before proxying (hides the problem and defeats the guard for every route); wildcard or suffix matching (a look-alike subdomain would pass).
 **Consequences:** Each deployment must set `TRUSTED_APP_ORIGINS` to the parent app's address (and `http://localhost:3002` for local work). Moving the app to a new domain needs a config change here first.
+## 2026-10-18 — Host on Cloudflare Workers via OpenNext, keep Supabase Postgres (#381)
+
+**Context:** The app runs on Vercel serverless; each lambda holds its own Supavisor connection (31 of 60 Postgres connections sat idle on 2026-10-18). Cloudflare already hosts our R2 backups and the same OpenNext setup runs varchas.store.
+**Decision:** Run the Next.js app on Cloudflare Workers with `@opennextjs/cloudflare`, keeping Supabase as the database (via Hyperdrive). Workers Paid plan is required: bcrypt cost 12 is ~300 ms CPU per login, over the Free plan's 10 ms. The nine `vercel.json` crons map to a `scheduled()` handler in `custom-worker.js`. Post-response work must go through `after()` / `waitUntil` — un-awaited promises are killed when the response returns.
+**Alternatives considered:** vinext (Cloudflare's newer recommendation for Next 16) — still beta; revisit once OpenNext is live. Moving the database to D1 — rejected: every query is raw Postgres via `pg`.
+**Consequences:** `lib/db.ts` keys a `pg` Pool per request on Workers. In-isolate caches (`lib/responseCache.ts`, Watchline flags) are per-isolate, not global. No local filesystem: the textbook upload no longer keeps the original PDF (only its extracted text was ever used). Bundle was 5.7 MB gzipped against the 10 MB limit. DNS (Hostinger) and production cutover are a separate step.
+
 ## 2026-10-09 — Usage is recorded per service in one place, priced per plan by month (#358)
 
 **Context:** Paid services (WhatsApp, AI, email, exports) had no usage record, so nothing could be limited or billed, and the old `plan_pricing` columns only knew about WhatsApp.

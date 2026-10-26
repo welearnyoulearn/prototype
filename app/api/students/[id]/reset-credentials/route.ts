@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 import { requireSchoolAdmin, generateTempPassword, hashPassword, revokePortalSessions } from '@/lib/auth'
 import { sendStudentWelcomeEmail, sendChildCredentialsToParentEmail } from '@/lib/email'
@@ -41,12 +41,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const appUrl = process.env.APP_URL || 'http://localhost:3000'
 
   // Send new credentials via email if student has one
+  const notifications: Promise<unknown>[] = []
   if (student.email) {
-    sendStudentWelcomeEmail({
+    notifications.push(sendStudentWelcomeEmail({
       schoolId: student.school_id, to: student.email, name: student.name, schoolName: student.school_name,
       rollNumber: student.roll_number, tempPassword,
       loginUrl: `${appUrl}/student/login`,
-    }).catch(console.error)
+    }).catch(console.error))
   }
 
   // Parent always gets a copy too — looked up via student_parents (the real
@@ -59,13 +60,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     [studentId]
   )
   for (const parent of parentRes.rows) {
-    sendChildCredentialsToParentEmail({
+    notifications.push(sendChildCredentialsToParentEmail({
       schoolId: student.school_id, to: parent.email, parentName: parent.name || parent.email,
       studentName: student.name, schoolName: student.school_name,
       rollNumber: student.roll_number, tempPassword,
       loginUrl: `${appUrl}/student/login`,
-    }).catch(console.error)
+    }).catch(console.error))
   }
+  after(() => Promise.allSettled(notifications))
 
   return NextResponse.json({ temp_password: tempPassword })
 }

@@ -222,7 +222,10 @@ export async function PUT(
 
     const editClient = await pool.connect()
     try {
-    await editClient.query('SELECT pg_advisory_lock($1)', [actor.schoolId])
+    // Transaction-scoped lock: Hyperdrive pools per transaction, so a session
+    // lock and its unlock could land on different server connections and leak.
+    await editClient.query('BEGIN')
+    await editClient.query('SELECT pg_advisory_xact_lock($1)', [actor.schoolId])
     const { rows: [exam] } = await editClient.query(
       'SELECT e.*, c.class_teacher_id FROM exam_records e JOIN classes c ON c.id = e.class_id WHERE e.id = $1 AND e.school_id = $2', [id, actor.schoolId]
     )
@@ -309,18 +312,20 @@ export async function PUT(
       }
       if (roomChanged) changes.push(`room changed to ${room || 'TBA'}`)
       if (instructionsChanged) changes.push('instructions updated')
-      await notifyExamChange(
+      // After COMMIT, on the pool: notifyExamChange swallows insert errors, and one failing
+      // inside the edit transaction would abort it, turning COMMIT into a silent ROLLBACK.
+      after(() => notifyExamChange(
         exam.id, exam.class_id, actor.schoolId, studentIds, exam.class_teacher_id, updated.assigned_teacher_id,
         `${exam.exam_name} updated`,
         `${exam.exam_name} has been updated: ${changes.join('; ')}. Please review the latest details.`,
-        editClient,
-      )
+      ))
     }
 
     after(() => dispatchPendingPushes())
     return NextResponse.json(updated)
     } finally {
-      await editClient.query('SELECT pg_advisory_unlock($1)', [actor.schoolId]).catch(() => undefined)
+      // COMMIT releases the lock; on an aborted transaction Postgres turns it into a ROLLBACK.
+      await editClient.query('COMMIT').catch(() => editClient.query('ROLLBACK').catch(() => undefined))
       editClient.release()
     }
   } catch (err: unknown) {

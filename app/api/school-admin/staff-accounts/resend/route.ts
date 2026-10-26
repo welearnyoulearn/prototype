@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
 import pool from '@/lib/db'
 import { getSession, generateResetToken, hashResetToken } from '@/lib/auth'
 import { sendStaffInviteEmail } from '@/lib/email'
@@ -48,7 +48,7 @@ export async function POST(req: NextRequest) {
     )
 
     const appUrl = process.env.APP_URL || 'http://localhost:3000'
-    sendStaffInviteEmail({
+    after(() => sendStaffInviteEmail({
       to: user.email,
       name: user.full_name,
       roleLabel: ROLE_LABELS[user.role] || user.role,
@@ -56,7 +56,7 @@ export async function POST(req: NextRequest) {
       schoolId: user.school_id,
       inviteUrl: `${appUrl}/reset-password?token=${token}`,
       hours: INVITE_LINK_HOURS,
-    }).catch(console.error)
+    }).catch(console.error))
 
     return NextResponse.json({ success: true })
   } catch (err: unknown) {

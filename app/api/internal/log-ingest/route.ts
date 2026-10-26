@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
 import { logRequest, logError } from '@/lib/logger'
 import { isValidIngestSecret } from '@/lib/auth-constants'
 
@@ -13,9 +13,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
     if (body.type === 'request') {
-      logRequest(body.data)
+      after(() => logRequest(body.data))
     } else if (body.type === 'error') {
-      logError(body.data)
+      after(() => logError(body.data))
     }
     return NextResponse.json({ ok: true })
   } catch {
