@@ -53,6 +53,11 @@ test('fails over from a 500 to the next model and streams split SSE lines', asyn
   assert.doesNotMatch(messages[2].content, /<instructions>/)
 })
 
+test('keeps digit tokens that arrive as JSON numbers', async () => {
+  stubFetch([() => new Response(`${delta('see [')}data: {"choices":[{"delta":{"content":1}}]}\n\n${delta(']')}data: [DONE]\n\n`)])
+  assert.equal(await collect(streamTutorAnswer(ask)), 'see [1]')
+})
+
 test('an error after text has streamed throws TutorError without failing over', async () => {
   const calls = stubFetch([
     () => {
