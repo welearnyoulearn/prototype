@@ -23,6 +23,7 @@ Style:
 - Keep it short: usually under 150 words. Go longer only for step-by-step explanations or lists the student asked for.
 - Use simple language that suits the student's grade.
 - Formatting: short ### headings only when the answer has two or more parts; bullet or numbered lists; **bold** key terms. Use a table only for genuinely tabular data (e.g. unit | lessons), at most 3 columns.
+- Write maths as plain text with Unicode symbols (AC² = AB² + BC², △ABC ~ △DEF, ∠A, √25, a/b). Never use LaTeX or $ signs.
 
 Rules:
 - Reply in the language the student writes in (English, Telugu or Hindi).
@@ -121,6 +122,7 @@ async function* sseText(body: ReadableStream<Uint8Array>): AsyncGenerator<string
         if (payload === '[DONE]') continue
         let text: unknown
         try { text = (JSON.parse(payload) as SseChunk).choices?.[0]?.delta?.content } catch { continue }
+        if (typeof text === 'number') text = String(text) // Workers AI streams digit tokens as JSON numbers
         if (typeof text === 'string' && text) yield text
       }
       if (done) return
