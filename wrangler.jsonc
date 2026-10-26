@@ -1,7 +1,8 @@
 {
 	"$schema": "node_modules/wrangler/config-schema.json",
 	"main": "custom-worker.js",
-	"name": "wlyl",
+	"name": "wlyl-tutor",
+	// #407 tutor preview: a separate Worker so the main wlyl preview is untouched.
 	// Supabase (and its pooler) is in AWS ap-south-1, Mumbai. Pin the Worker next to it: every
 	// request makes several sequential DB round trips, so DB distance dominates, not visitor distance.
 	// Smart placement never moved a low-traffic Worker (it ran in Marseille).
@@ -19,27 +20,14 @@
 		"directory": ".open-next/assets",
 		"binding": "ASSETS"
 	},
-	// Keep in sync with vercel.json crons (and the map in custom-worker.js).
-	"triggers": {
-		"crons": [
-			"30 3 * * 1",   // usage-digest
-			"0 2 * * *",    // log-cleanup
-			"30 2 * * *",   // backup
-			"0 2 * * 1",    // syllabus-coverage-snapshot
-			"0 0 * * *",    // exam-status-sweep
-			"0 1 * * *",    // exam-reminders
-			"20 1 * * *",   // fee-year-end-reminders
-			"30 18 * * *",  // birthday-sweep
-			"30 4 * * *",   // plan-expiry
-			"30 0 * * *",   // billing
-		]
-	},
+	// No crons: the main wlyl Worker runs them; a second copy would run billing/backups twice.
+	"triggers": { "crons": [] },
 	"services": [
 		{
 			// Self-reference service binding, the service name must match the worker name
 			// see https://opennext.js.org/cloudflare/caching
 			"binding": "WORKER_SELF_REFERENCE",
-			"service": "wlyl"
+			"service": "wlyl-tutor"
 		}
 	],
 	"images": {
