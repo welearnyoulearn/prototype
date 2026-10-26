@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
 import { BookOpen, Plus, Send, Square } from 'lucide-react'
 import { Sticker } from './stickers'
+import { citedSources, isTableSeparator, tableCells } from '@/lib/tutor-text'
 
 type Source = { n: number; title: string; page: number; url: string }
 type ChatMessage = { role: 'user' | 'assistant'; content: string; sources: Source[] }
@@ -16,7 +17,7 @@ type StreamLine =
 
 const MAX_CHARS = 1000
 
-// Minimal markdown: **bold** inline, "- " / "1. " lists, blank-line paragraphs.
+// Minimal markdown: **bold** inline, # headings, "- " / "1. " lists, GFM tables, blank-line paragraphs.
 // Everything renders through React text nodes, so model output can never inject HTML.
 function inline(text: string): ReactNode[] {
   return text.split(/(\*\*[^*]+\*\*)/g).map((part, i) =>
@@ -34,17 +35,41 @@ function MarkdownLite({ text }: { text: string }) {
     blocks.push(list.ordered ? <ol key={blocks.length} className="list-decimal pl-5">{items}</ol> : <ul key={blocks.length} className="list-disc pl-5">{items}</ul>)
     list = null
   }
-  for (const line of text.split('\n')) {
+  const lines = text.split('\n')
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    const header = tableCells(line)
+    if (header && isTableSeparator(lines[i + 1] ?? '')) {
+      flushPara(); flushList()
+      const rows: string[][] = []
+      for (i += 2; i < lines.length; i++) {
+        const cells = tableCells(lines[i])
+        if (!cells) { i--; break }
+        rows.push(cells)
+      }
+      blocks.push(
+        <div key={blocks.length} className="overflow-x-auto">
+          <table className="border-collapse text-left text-sm">
+            <thead><tr>{header.map((c, j) => <th key={j} className="border px-2 py-1 font-extrabold">{inline(c)}</th>)}</tr></thead>
+            <tbody>{rows.map((r, k) => <tr key={k}>{r.map((c, j) => <td key={j} className="border px-2 py-1 align-top">{inline(c)}</td>)}</tr>)}</tbody>
+          </table>
+        </div>)
+      continue
+    }
+    const heading = line.match(/^\s*#{1,6}\s+(.*)$/)
     const bullet = line.match(/^\s*[-*]\s+(.*)$/)
     const numbered = line.match(/^\s*\d+[.)]\s+(.*)$/)
     const item = bullet ?? numbered
-    if (item) {
+    if (heading) {
+      flushPara(); flushList()
+      blocks.push(<h4 key={blocks.length} className="text-sm font-extrabold">{inline(heading[1].replace(/\s*#+\s*$/, ''))}</h4>)
+    } else if (item) {
       flushPara()
       const ordered = !!numbered
       if (list && list.ordered !== ordered) flushList()
       list ??= { ordered, items: [] }
       list.items.push(item[1])
-    } else if (!line.trim()) { flushPara(); flushList() }
+    } else if (!line.trim() || /^\s*([-*_])\s*\1\s*\1[\s\-*_]*$/.test(line)) { flushPara(); flushList() } // blank or --- rule
     else { flushList(); para.push(line.trim()) }
   }
   flushPara(); flushList()
@@ -198,7 +223,7 @@ export default function StudentTutorChat() {
                 <p className="font-bold">Ask a doubt from your textbook</p>
                 <p className="sb-muted max-w-sm text-sm">Answers come from your school&apos;s textbooks, with page links so you can read more.</p>
               </div>
-            ) : messages.map((m, i) => m.role === 'user' ? (
+            ) : messages.map(m => ({ ...m, sources: citedSources(m.sources, m.content) })).map((m, i) => m.role === 'user' ? (
               <div key={i} className="flex justify-end">
                 <div className="sb-bubble whitespace-pre-wrap text-sm" style={{ background: 'var(--sb-blue-soft)' }} data-testid="tutor-message-user">{m.content}</div>
               </div>

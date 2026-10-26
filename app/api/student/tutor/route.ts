@@ -3,7 +3,7 @@ import { z } from 'zod'
 import pool from '@/lib/db'
 import { getStudentSession } from '@/lib/auth'
 import { retrieveChunks } from '@/lib/rag/retrieve'
-import { streamTutorAnswer, tutorConfigured, TutorError, type TutorTurn } from '@/lib/tutor'
+import { formatSyllabus, retrievalQuery, streamTutorAnswer, tutorConfigured, TutorError, type SyllabusRow, type TutorTurn } from '@/lib/tutor'
 
 // Student AI tutor (AI Pro). Answers stream back as NDJSON lines:
 //   {"type":"sources",...} → {"type":"delta","text":...}… → {"type":"done","sessionId":N}  (or {"type":"error"})
@@ -32,6 +32,24 @@ async function loadOwnSession(id: number, studentId: number, schoolId: number) {
     [id, studentId, schoolId]
   )
   return row ?? null
+}
+
+// The grade's chapter list: the school's own if it has any, else the board's master list.
+// Teacher-only handbook units are left out; workbook rows sort last so textbook names win the dedupe.
+async function loadSyllabus(schoolId: number, board: string | null, grade: string): Promise<SyllabusRow[]> {
+  const order = `ORDER BY s.subject_name, c.book_type = 'workbook', c.chapter_order, c.id`
+  const own = await pool.query<SyllabusRow>(
+    `SELECT s.subject_name AS subject, c.book_name AS book, c.chapter_name AS chapter
+     FROM school_subjects s JOIN school_chapters c ON c.school_subject_id = s.id
+     WHERE s.school_id = $1 AND s.grade = $2 AND c.audience IS DISTINCT FROM 'teacher' ${order}`,
+    [schoolId, grade])
+  if (own.rows.length || !board) return own.rows
+  const master = await pool.query<SyllabusRow>(
+    `SELECT s.subject_name AS subject, c.book_name AS book, c.chapter_name AS chapter
+     FROM master_subjects s JOIN master_chapters c ON c.subject_id = s.id
+     WHERE s.board = $1 AND s.grade = $2 AND c.audience IS DISTINCT FROM 'teacher' ${order}`,
+    [board, grade])
+  return master.rows
 }
 
 // GET — this student's last 20 chats, or one chat's messages with ?sessionId=
@@ -95,11 +113,20 @@ export async function POST(req: NextRequest) {
     if (!tutorConfigured()) return NextResponse.json({ error: 'AI tutor is not configured yet' }, { status: 503 })
 
     const { rows: [school] } = await pool.query<{ board: string | null }>(`SELECT board FROM schools WHERE id = $1`, [session.schoolId])
-    const scope = { board: school?.board ?? null, grade: session.grade, query: message, limit: 6 }
+    const board = school?.board ?? null
+    const previousQuestion = chat?.messages.filter(m => m.role === 'user').at(-1)?.content
+    const scope = { board, grade: session.grade, query: retrievalQuery(message, previousQuestion), limit: 6 }
     // Class subject names ("Biology") don't always match book subjects ("Biological Science"),
     // so a subject that matches no book falls back to the whole grade.
-    let chunks = await retrieveChunks({ ...scope, subject })
-    if (subject && chunks.length === 0) chunks = await retrieveChunks(scope)
+    const [found, syllabusRows] = await Promise.all([
+      retrieveChunks({ ...scope, subject }),
+      loadSyllabus(session.schoolId, board, session.grade).catch((err: unknown) => {
+        console.error('[student/tutor syllabus]', err)
+        return []
+      }),
+    ])
+    const chunks = subject && found.length === 0 ? await retrieveChunks(scope) : found
+    const syllabus = formatSyllabus(syllabusRows, subject)
     const history: TutorTurn[] = (chat?.messages ?? []).filter(m => m.content.trim()).slice(-6).map(m => ({ role: m.role, content: m.content }))
     const userAt = new Date().toISOString()
 
@@ -114,7 +141,7 @@ export async function POST(req: NextRequest) {
             type: 'sources',
             sources: chunks.map((c, i) => ({ n: i + 1, title: c.title, materialType: c.materialType, subject: c.subject, page: c.page, url: `${c.fileUrl}#page=${c.page}` })),
           })
-          for await (const text of streamTutorAnswer({ excerpts: chunks, question: message, history })) {
+          for await (const text of streamTutorAnswer({ excerpts: chunks, question: message, history, syllabus })) {
             if (cancelled) break
             answer += text
             send({ type: 'delta', text })

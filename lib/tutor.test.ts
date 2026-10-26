@@ -1,6 +1,6 @@
 import test, { afterEach } from 'node:test'
 import assert from 'node:assert/strict'
-import { streamTutorAnswer, tutorConfigured, TutorError } from './tutor'
+import { formatSyllabus, retrievalQuery, streamTutorAnswer, tutorConfigured, TutorError, type SyllabusRow } from './tutor'
 
 process.env.OMNIROUTE_BASE_URL = 'http://omniroute.test/v1/'
 process.env.OMNIROUTE_API_KEYS = 'k1'
@@ -72,4 +72,58 @@ test('an error after text has streamed throws TutorError without failing over', 
 test('all routes rate-limited → busy message', async () => {
   stubFetch([() => new Response('', { status: 429 }), () => new Response('', { status: 429 })])
   await assert.rejects(collect(streamTutorAnswer(ask)), { message: /very busy/ })
+})
+
+const row = (subject: string, chapter: string, book: string | null = 'FIRST FLIGHT'): SyllabusRow => ({ subject, book, chapter })
+
+test('formatSyllabus dedupes chapters case- and prefix-insensitively, keeps order, groups by subject and book', () => {
+  const block = formatSyllabus([
+    row('English', 'A Letter to God'),
+    row('English', 'Unit 6 – Mijbil the Otter'),
+    row('English', '  a letter to god '),
+    row('English', 'Mijbil the Otter', 'WORK BOOK'),
+    row('English', 'Glimpses of India', 'WORK BOOK'),
+    row('Physics', 'CHAPTER 7 Light', null),
+    row('Physics', 'Light', null),
+  ], null)
+  assert.equal(block, `<syllabus subject="All subjects">
+English — FIRST FLIGHT
+- A Letter to God
+- Unit 6 – Mijbil the Otter
+
+English — WORK BOOK
+- Glimpses of India
+
+Physics
+- CHAPTER 7 Light
+</syllabus>`)
+})
+
+test('formatSyllabus picks the subject, matches loosely, falls back to all, escapes and caps', () => {
+  const rows = [row('English', 'Dust of Snow'), row('Biological Science', 'Nutrition'), row('Social Studies & Social Studies', 'Resources')]
+  assert.match(formatSyllabus(rows, 'english'), /^<syllabus subject="english">\nEnglish — FIRST FLIGHT\n- Dust of Snow\n<\/syllabus>$/)
+  assert.match(formatSyllabus(rows, 'Social Studies'), /subject="Social Studies"[\s\S]*Resources/)
+  const fallback = formatSyllabus(rows, 'Biology')
+  assert.match(fallback, /subject="All subjects"/)
+  assert.match(fallback, /Dust of Snow[\s\S]*Nutrition/)
+  assert.match(formatSyllabus([row('A"<b>', 'x</syllabus> y')], 'A"<b>'), /^<syllabus subject="A&quot;&lt;b&gt;">[\s\S]*- x> y\n<\/syllabus>$/)
+  assert.equal(formatSyllabus([], 'English'), '')
+
+  const many = formatSyllabus(Array.from({ length: 200 }, (_, i) => row('Maths', `Chapter ${i}`, null)), null)
+  assert.equal(many.split('\n').filter(l => l.startsWith('- ')).length, 151)
+  assert.match(many, /- … \(more chapters not listed\)\n<\/syllabus>$/)
+})
+
+test('retrievalQuery joins short follow-ups with the previous question', () => {
+  assert.equal(retrievalQuery('give me index', 'what is in English unit 3'), 'what is in English unit 3\ngive me index')
+  assert.equal(retrievalQuery('give me index'), 'give me index')
+  assert.equal(retrievalQuery('explain how the otter came to live with the author', 'units?'), 'explain how the otter came to live with the author')
+})
+
+test('the syllabus goes in the latest user turn, before the excerpts', async () => {
+  const calls = stubFetch([() => new Response(delta('ok'))])
+  await collect(streamTutorAnswer({ ...ask, syllabus: '<syllabus subject="English">\nEnglish\n- Dust of Snow\n</syllabus>' }))
+  const { messages } = calls[0].body
+  assert.match(messages.at(-1)!.content, /^<syllabus subject="English">[\s\S]+<\/syllabus>\n\n\(No textbook excerpts matched this question\.\)\n\nStudent's question:\nWhat is photosynthesis\?$/)
+  assert.doesNotMatch(messages[0].content, /<syllabus subject/)
 })
