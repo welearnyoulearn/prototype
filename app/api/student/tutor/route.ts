@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import pool from '@/lib/db'
 import { getStudentSession } from '@/lib/auth'
-import { retrieveChunks } from '@/lib/rag/retrieve'
-import { formatSyllabus, retrievalQuery, streamTutorAnswer, tutorConfigured, TutorError, type SyllabusRow, type TutorTurn } from '@/lib/tutor'
+import { searchChunks } from '@/lib/rag/rewrite'
+import { formatSyllabus, streamTutorAnswer, tutorConfigured, TutorError, wantsSyllabus, type SyllabusRow, type TutorTurn } from '@/lib/tutor'
 
 // Student AI tutor (AI Pro). Answers stream back as NDJSON lines:
 //   {"type":"sources",...} → {"type":"delta","text":...}… → {"type":"done","sessionId":N}  (or {"type":"error"})
@@ -115,18 +115,22 @@ export async function POST(req: NextRequest) {
     const { rows: [school] } = await pool.query<{ board: string | null }>(`SELECT board FROM schools WHERE id = $1`, [session.schoolId])
     const board = school?.board ?? null
     const previousQuestion = chat?.messages.filter(m => m.role === 'user').at(-1)?.content
-    const scope = { board, grade: session.grade, query: retrievalQuery(message, previousQuestion), limit: 6 }
-    // retrieveChunks maps class subjects ("Biology") to book subjects ("Biological Science");
-    // a subject with no books at all (e.g. "sports") falls back to the whole grade.
-    const [found, syllabusRows] = await Promise.all([
-      retrieveChunks({ ...scope, subject }),
-      loadSyllabus(session.schoolId, board, session.grade).catch((err: unknown) => {
-        console.error('[student/tutor syllabus]', err)
-        return []
+    const syllabusLoad = loadSyllabus(session.schoolId, board, session.grade).catch((err: unknown) => {
+      console.error('[student/tutor syllabus]', err)
+      return [] as SyllabusRow[]
+    })
+    // searchChunks maps class subjects ("Biology") to book subjects ("Biological Science"), rewrites
+    // Telugu/Hindi/short questions into English search terms, and falls back to the whole grade
+    // for a subject with no books (e.g. "sports").
+    const [{ chunks }, syllabusRows] = await Promise.all([
+      searchChunks({
+        board, grade: session.grade, subject, message, previousQuestion, limit: 6,
+        gradeSubjects: syllabusLoad.then(rows => [...new Set(rows.map(r => r.subject))]),
       }),
+      syllabusLoad,
     ])
-    const chunks = subject && found.length === 0 ? await retrieveChunks(scope) : found
-    const syllabus = formatSyllabus(syllabusRows, subject)
+    // The chapter list only helps course-content questions; elsewhere it is noise and cost.
+    const syllabus = wantsSyllabus(message, previousQuestion) ? formatSyllabus(syllabusRows, subject) : ''
     const history: TutorTurn[] = (chat?.messages ?? []).filter(m => m.content.trim()).slice(-6).map(m => ({ role: m.role, content: m.content }))
     const userAt = new Date().toISOString()
 

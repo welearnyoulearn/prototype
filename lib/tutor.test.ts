@@ -1,6 +1,6 @@
 import test, { afterEach } from 'node:test'
 import assert from 'node:assert/strict'
-import { formatSyllabus, retrievalQuery, streamTutorAnswer, tutorConfigured, TutorError, type SyllabusRow } from './tutor'
+import { completeOnce, formatSyllabus, retrievalQuery, streamTutorAnswer, tutorConfigured, TutorError, wantsSyllabus, type SyllabusRow } from './tutor'
 
 process.env.OMNIROUTE_BASE_URL = 'http://omniroute.test/v1/'
 process.env.OMNIROUTE_API_KEYS = 'k1'
@@ -123,6 +123,35 @@ test('retrievalQuery joins short follow-ups with the previous question', () => {
   assert.equal(retrievalQuery('give me index', 'what is in English unit 3'), 'what is in English unit 3\ngive me index')
   assert.equal(retrievalQuery('give me index'), 'give me index')
   assert.equal(retrievalQuery('explain how the otter came to live with the author', 'units?'), 'explain how the otter came to live with the author')
+})
+
+test('wantsSyllabus: course-content questions in English (incl. typos), Telugu and Hindi, and their short follow-ups', () => {
+  for (const q of ['what is the syllabus for class 10', 'silabus for science', 'chapters in maths', 'what do we study in science', 'తెలుగు సిలబస్ ఏమిటి', 'हिंदी का पाठ्यक्रम बताओ'])
+    assert.equal(wantsSyllabus(q), true, q)
+  for (const q of ['what is photosynthesis', 'solve x^2-5x+6=0', 'ఘర్షణ అంటే ఏమిటి'])
+    assert.equal(wantsSyllabus(q), false, q)
+  assert.equal(wantsSyllabus('and maths?', 'What is the syllabus for science?'), true)
+  assert.equal(wantsSyllabus('explain refraction of light through a glass slab please', 'syllabus?'), false)
+})
+
+test('completeOnce returns the first choice text, and null on HTTP errors', async () => {
+  const calls = stubFetch([
+    () => new Response(JSON.stringify({ choices: [{ message: { content: '{"query":"x"}' } }] })),
+    () => new Response('no', { status: 429 }),
+  ])
+  assert.equal(await completeOnce('p', { maxTokens: 10, timeoutMs: 1000 }), '{"query":"x"}')
+  assert.equal(calls[0].body.model, 'm1')
+  assert.equal(await completeOnce('p', { maxTokens: 10, timeoutMs: 1000 }), null)
+})
+
+test('a Telugu or Hindi question asks for a reply in that language', async () => {
+  const calls = stubFetch([() => new Response(delta('ok')), () => new Response(delta('ok')), () => new Response(delta('ok'))])
+  await collect(streamTutorAnswer({ ...ask, question: 'కిరణజన్య సంయోగక్రియ అంటే ఏమిటి?' }))
+  await collect(streamTutorAnswer({ ...ask, question: 'घर्षण क्या है?' }))
+  await collect(streamTutorAnswer(ask))
+  assert.match(calls[0].body.messages.at(-1)!.content, /\(Reply in Telugu\.\)$/)
+  assert.match(calls[1].body.messages.at(-1)!.content, /\(Reply in Hindi\.\)$/)
+  assert.doesNotMatch(calls[2].body.messages.at(-1)!.content, /Reply in/)
 })
 
 test('the syllabus goes in the latest user turn, before the excerpts', async () => {

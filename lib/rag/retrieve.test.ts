@@ -56,3 +56,9 @@ test('pickChunks collapses chunks with the same text and respects the limit', ()
   assert.deepEqual(pickChunks(cs, { limit: 6 }).map((c) => c.id), [1, 3])
   assert.equal(pickChunks(cs, { limit: 1 }).length, 1)
 })
+
+test('pickChunks nudges the hinted subject up without dropping others', () => {
+  const cs = [cand(1, 1 / 61, 'Physics'), cand(2, 1 / 62, 'Science & Science')]
+  assert.deepEqual(pickChunks(cs, { limit: 6, hintSubjects: ['Science & Science'] }).map((c) => c.id), [2, 1])
+  assert.deepEqual(pickChunks([cand(1, 2 / 61, 'Physics'), cand(2, 1 / 61, 'Hindi')], { limit: 6, hintSubjects: ['Hindi'] }).map((c) => c.id), [1, 2])
+})
