@@ -116,8 +116,8 @@ export async function POST(req: NextRequest) {
     const board = school?.board ?? null
     const previousQuestion = chat?.messages.filter(m => m.role === 'user').at(-1)?.content
     const scope = { board, grade: session.grade, query: retrievalQuery(message, previousQuestion), limit: 6 }
-    // Class subject names ("Biology") don't always match book subjects ("Biological Science"),
-    // so a subject that matches no book falls back to the whole grade.
+    // retrieveChunks maps class subjects ("Biology") to book subjects ("Biological Science");
+    // a subject with no books at all (e.g. "sports") falls back to the whole grade.
     const [found, syllabusRows] = await Promise.all([
       retrieveChunks({ ...scope, subject }),
       loadSyllabus(session.schoolId, board, session.grade).catch((err: unknown) => {
