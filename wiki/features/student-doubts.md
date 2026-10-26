@@ -9,15 +9,22 @@
 
 ## What it does
 
-A student who gets a quiz question wrong can send it to their subject teacher. The doubt is tracked until **the student** confirms it is clear. Parents and the school see every step, and a doubt not handled within 2 working days is escalated.
+When a student is still confused after seeing a quiz question's explanation, they can ask their subject teacher. The doubt is resolved only when the student **proves** they understood by answering a fresh question on that topic. Teachers earn **WLYL Stars** for doubts that end in proven understanding.
 
 ## How it will work
 
-- **Raise:** "Ask Teacher" on a wrong quiz answer. The question, the student's answer and the correct answer are attached; the student can add a note.
-- **Routing:** subject teacher (`class_subjects`) → class teacher → school-admin queue. Several students on the same question appear to the teacher as one card.
-- **Lifecycle:** raised → seen → explained (in class or by chat) → **clarified, set by the student only**. "Still not clear" reopens it.
-- **SLA:** due at the end of the 2nd working day after it is raised. The teacher is reminded first. Once overdue, the parent and school admin are notified (admins get one daily digest).
-- **Visibility:** the parent sees each doubt's full timeline. The school admin sees open and overdue doubts by teacher, subject and class, plus response times.
+- **Raise:** "Still confused? Ask Teacher" appears after the explanation. The question, the student's answer and an optional note are attached.
+- **Routing:** subject teacher (`class_subjects`) → class teacher → school-admin queue. Several students on the same question form one cluster.
+- **Teacher, every morning:** a "Class misconceptions" card with the top 3 most-missed questions. **One tap "Covered in class"** explains the whole cluster; a single doubt can also be answered by chat.
+- **Proof:** after "explained", the student gets a fresh question on the same topic. Correct + "I understand now" = **clarified**, and the student earns reward points.
+- **Teacher WLYL Stars:**
+  - awarded at proof, never for "explained" alone
+  - a bonus when the doubt was explained within 2 working days
+  - Stars for class-wide misconceptions covered in class
+  - no negative Stars
+- **Visibility:**
+  - parents see each doubt's timeline, with waiting time shown and no push about teachers
+  - after the pilot, doubts overdue by 2 working days are escalated to management, and the school admin gets a doubt dashboard and a "Star teachers" report
 
 This is a new build. It is **not** the removed Ask a Doubt (#137), and it uses different tables and a different feature key.
 
@@ -26,8 +33,8 @@ This is a new build. It is **not** the removed Ask a Doubt (#137), and it uses d
 | Phase | Issue |
 |---|---|
 | Feature key (this doc) | #431 |
-| Ask Teacher, inbox, chat, clarify | #435 |
-| SLA, escalation, dashboards | #436 |
+| Ask Teacher, misconceptions card, proof-question clarify, WLYL Stars | #435 |
+| Escalation to management, dashboards (after the pilot) | #436 |
 | Ask WLYL AI hand-off | #438 |
 
 Epic: #430.

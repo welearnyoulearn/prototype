@@ -9,26 +9,38 @@
 
 ## What it does
 
-Every working day each class gets a short MCQ quiz on the topics its teachers marked covered, in syllabus order. It is graded automatically, ranked on a class leaderboard, and summarised to parents in the evening.
+A 5-minute daily habit. Every working day each student gets 5 MCQs on the topics their class just covered, with instant feedback. Students earn reward points, and parents get a weekly learning report.
 
 ## How it will work
 
 - **Question bank:** prepared **once** per syllabus topic (MCQs with answers and a short explanation, AI-written with a verify pass) and stored. Daily posting never calls AI.
-- **Daily posting** (cron, working days only, from the school calendar): per class and academic subject, 2 questions from topics covered in the last 5 working days and 1 revision question; at most 15.
-- **Taking it:** 15:30–21:00 IST by default (school setting), one attempt, per-student question and option order. The answer key stays on the server.
-- **After close:** correct answers and explanations are revealed, ranks are frozen, and parents get one summary notification.
-- **Wrong answers** offer "Ask Teacher" (see [student-doubts.md](student-doubts.md)) and, later, "Ask WLYL AI".
-- **Parents see** their child's score, rank, class average and the top 3. They never see other children's scores.
+- **Daily posting** (cron, working days only, from the school calendar):
+  - 2–3 subjects per day in rotation
+  - questions from topics covered in the last 5 working days; the syllabus plan dates (`target_date`) are used if coverage wasn't marked
+  - 4 questions on those topics + 1 revision question
+  - **each student draws different questions** on the same topics
+- **Taking it:**
+  - in the student portal or the parent mobile app, 15:30–21:00 IST by default
+  - one attempt
+  - **after each answer:** the correct answer and the explanation are shown at once
+- **Wrong answers** show the explanation first, then "Still confused? Ask Teacher" (see [student-doubts.md](student-doubts.md)) and, later, "Ask WLYL AI".
+- **Reward points:**
+  - participation, correct answers, perfect score
+  - working-day streaks
+  - proven doubts and weekly improvement
+  - capped per day, never negative
+- **Leaderboard:** weekly points, plus Most Improved and a class participation goal.
+- **Parents** get a weekly "learning week" report. They see their child's position, the class average and the top 3, never other children's scores.
 
 ## Planned build
 
 | Phase | Issue |
 |---|---|
 | Feature key (this doc) | #431 |
-| Question bank | #432 |
-| Daily posting, attempt, grading | #433 |
-| Leaderboard, rewards, parent view | #434 |
-| Insights (topic mastery, reteach list) | #437 |
+| Question bank (pilot grades) | #432 |
+| 5-question daily quiz, instant feedback | #433 |
+| Reward points, streaks, leaderboard, weekly parent report | #434 |
+| Insights (after the pilot) | #437 |
 
 Epic: #430.
 
