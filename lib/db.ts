@@ -87,7 +87,7 @@ const BOOTSTRAP_MARKER_KEY   = 'initial_schema_bootstrap'
 // silently never runs anywhere, and you will chase a "column does not exist" 500
 // that reproduces on production but never locally against a fresh DB.
 // Adding a migration statement and bumping this number is ONE change, not two.
-const SCHEMA_VERSION = 56
+const SCHEMA_VERSION = 57
 
 // Records the schema level this build finished applying, on the same row as the
 // bootstrap marker (no extra row, no extra round-trip to read it back).
@@ -2378,6 +2378,18 @@ async function runIncrementalMigrations() {
     INSERT INTO plan_features (feature_key, tier, enabled)
     VALUES
       ('online-payments', 'basic', false), ('online-payments', 'standard', false), ('online-payments', 'premium', false)
+    ON CONFLICT (feature_key, tier) DO NOTHING
+  `).catch(() => {})
+
+  // Daily Quiz + Student Doubts (#430/#431) — new Learning features. OFF at every tier
+  // until they launch: a platform admin switches them on in the features matrix. Without
+  // a row here /api/platform/features would show them unconfigured, and an explicit OFF
+  // row keeps a later default change from silently enabling an unfinished feature.
+  await pool.query(`
+    INSERT INTO plan_features (feature_key, tier, enabled)
+    VALUES
+      ('daily-quiz',     'basic', false), ('daily-quiz',     'standard', false), ('daily-quiz',     'premium', false),
+      ('student-doubts', 'basic', false), ('student-doubts', 'standard', false), ('student-doubts', 'premium', false)
     ON CONFLICT (feature_key, tier) DO NOTHING
   `).catch(() => {})
 

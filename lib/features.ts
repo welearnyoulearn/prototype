@@ -30,6 +30,13 @@ export const ALL_FEATURES: { key: string; label: string; category: string; porta
   // lib/db.ts's migration for how existing schools were carried over.
   { key: 'exam-marks',         label: 'Exam Schedule & Marks',           category: 'Scheduling', portals: ['school-admin', 'student', 'parent', 'teacher'] },
 
+  // ── Learning ─────────────────────────────────────────────────────────────────
+  // Daily Quiz + Student Doubts (epic #430). Seeded OFF at every tier in lib/db.ts until
+  // launch. The doubts key is deliberately not 'doubts': older databases can still hold
+  // plan_features / override rows for the removed Ask a Doubt (#137) under that name.
+  { key: 'daily-quiz',         label: 'Daily Quiz & Leaderboard',        category: 'Learning', portals: ['school-admin', 'teacher', 'student', 'parent'] },
+  { key: 'student-doubts',     label: 'Student Doubts',                  category: 'Learning', portals: ['school-admin', 'teacher', 'student', 'parent'] },
+
   // ── Analytics & Intelligence ─────────────────────────────────────────────────
 
   // ── Communication ────────────────────────────────────────────────────────────
@@ -49,7 +56,7 @@ export const ALL_FEATURES: { key: string; label: string; category: string; porta
   { key: 'year-rollover',      label: 'Year Rollover',                   category: 'Administration', portals: ['school-admin'] },
 ]
 
-export const CATEGORY_ORDER = ['Core', 'Scheduling', 'Analytics', 'Finance', 'Communication', 'Administration']
+export const CATEGORY_ORDER = ['Core', 'Scheduling', 'Learning', 'Analytics', 'Finance', 'Communication', 'Administration']
 
 // Features that can be overridden per-school via school_feature_overrides,
 // taking precedence over the tier-level plan_features setting.
