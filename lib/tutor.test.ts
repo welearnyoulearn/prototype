@@ -1,6 +1,6 @@
 import test, { afterEach } from 'node:test'
 import assert from 'node:assert/strict'
-import { completeOnce, formatSyllabus, retrievalQuery, streamTutorAnswer, tutorConfigured, TutorError, wantsSyllabus, type SyllabusRow } from './tutor'
+import { completeOnce, formatSyllabus, retrievalQuery, streamTutorAnswer, SYSTEM_PROMPT, trimHistory, tutorConfigured, TutorError, wantsSyllabus, type SyllabusRow } from './tutor'
 
 process.env.OMNIROUTE_BASE_URL = 'http://omniroute.test/v1/'
 process.env.OMNIROUTE_API_KEYS = 'k1'
@@ -14,7 +14,7 @@ const delta = (text: string) => `data: ${JSON.stringify({ choices: [{ delta: { c
 
 // Each call returns the next response; records request bodies.
 function stubFetch(responses: (() => Response)[]) {
-  const calls: { url: string; body: { model: string; messages: { role: string; content: string }[] } }[] = []
+  const calls: { url: string; body: { model: string; messages: { role: string; content: string }[]; max_tokens: number; stream_options?: { include_usage: boolean } } }[] = []
   globalThis.fetch = async (input, init) => {
     calls.push({ url: String(input), body: JSON.parse(String(init?.body)) })
     return responses[calls.length - 1]()
@@ -160,4 +160,47 @@ test('the syllabus goes in the latest user turn, before the excerpts', async () 
   const { messages } = calls[0].body
   assert.match(messages.at(-1)!.content, /^<syllabus subject="English">[\s\S]+<\/syllabus>\n\n\(No textbook excerpts matched this question\.\)\n\nStudent's question:\nWhat is photosynthesis\?$/)
   assert.doesNotMatch(messages[0].content, /<syllabus subject/)
+})
+
+test('trimHistory keeps the last 4 turns, starts with a user turn and cuts old answers to ~300 chars', () => {
+  const long = 'a'.repeat(1000)
+  const turns = [
+    { role: 'user' as const, content: 'q1' }, { role: 'assistant' as const, content: 'a1' },
+    { role: 'user' as const, content: 'q2' }, { role: 'assistant' as const, content: long },
+    { role: 'user' as const, content: 'q3' }, { role: 'assistant' as const, content: 'short' },
+  ]
+  const trimmed = trimHistory(turns)
+  assert.deepEqual(trimmed.map(t => t.content.slice(0, 5)), ['q2', 'aaaaa', 'q3', 'short'])
+  assert.equal(trimmed[1].content.length, 301)
+  assert.ok(trimmed[1].content.endsWith('…'))
+  assert.deepEqual(trimHistory(turns.slice(1, 4)).map(t => t.role), ['user', 'assistant']) // [a1, q2, long] → leading assistant dropped
+  assert.equal(turns[3].content, long) // input untouched
+})
+
+test('max_tokens is 500 normally and 900 when a syllabus is sent; usage is requested', async () => {
+  const calls = stubFetch([() => new Response(delta('ok')), () => new Response(delta('ok'))])
+  await collect(streamTutorAnswer(ask))
+  await collect(streamTutorAnswer({ ...ask, syllabus: '<syllabus subject="x">\n- a\n</syllabus>' }))
+  assert.deepEqual(calls.map(c => c.body.max_tokens), [500, 900])
+  assert.deepEqual(calls[0].body.stream_options, { include_usage: true })
+})
+
+test('a usage-only final chunk is logged and does not break the stream', async () => {
+  stubFetch([() => new Response(`${delta('Hi')}data: {"choices":[],"usage":{"prompt_tokens":1200,"completion_tokens":90}}\n\ndata: [DONE]\n\n`)])
+  const logs: string[] = []
+  const realLog = console.log
+  console.log = (...a: unknown[]) => { logs.push(a.join(' ')) }
+  try {
+    assert.equal(await collect(streamTutorAnswer(ask)), 'Hi')
+  } finally { console.log = realLog }
+  assert.deepEqual(logs, ['[tutor] usage model=m1 in=1200 out=90'])
+})
+
+test('the prompt keeps the grounding, homework and language rules and stays short', () => {
+  assert.ok(SYSTEM_PROMPT.length < 2800, String(SYSTEM_PROMPT.length))
+  assert.match(SYSTEM_PROMPT, /Answer ONLY from the textbook excerpts/)
+  assert.match(SYSTEM_PROMPT, /Never invent facts/)
+  assert.match(SYSTEM_PROMPT, /Don't state the final result/)
+  assert.match(SYSTEM_PROMPT, /Reply in the language of the student's latest message/)
+  assert.match(SYSTEM_PROMPT, /### Key points/)
 })

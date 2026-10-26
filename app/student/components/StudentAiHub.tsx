@@ -28,9 +28,13 @@ export default function StudentAiHub({ tier }: { tier: 'ai_basic' | 'ai_pro' | '
 
   if (tier === 'ai_pro') {
     return (
-      <div className="mx-auto max-w-5xl space-y-7">
-        <StudentPageIntro {...INTRO} title="AI Tutor" description="Ask doubts from your textbooks. Every answer links to the book page it came from."
-          aside={<span className="sb-chip" data-size="lg" data-tone="violet"><Sticker name="sparkles" size="xs" />AI Pro access</span>} />
+      <div className="mx-auto max-w-5xl">
+        {/* One compact line, only on desktop — on mobile the portal header already says AI Hub and the chat needs the height. */}
+        <div className="mb-2 flex items-center gap-2 max-lg:sr-only">
+          <Sticker name="robot" size="sm" />
+          <h1 className="sb-display text-xl">AI Tutor</h1>
+          <span className="sb-chip" data-tone="violet"><Sticker name="sparkles" size="xs" />AI Pro</span>
+        </div>
         <StudentTutorChat />
       </div>
     )
