@@ -87,7 +87,7 @@ const BOOTSTRAP_MARKER_KEY   = 'initial_schema_bootstrap'
 // silently never runs anywhere, and you will chase a "column does not exist" 500
 // that reproduces on production but never locally against a fresh DB.
 // Adding a migration statement and bumping this number is ONE change, not two.
-const SCHEMA_VERSION = 57
+const SCHEMA_VERSION = 58
 
 // Records the schema level this build finished applying, on the same row as the
 // bootstrap marker (no extra row, no extra round-trip to read it back).
@@ -4124,5 +4124,85 @@ async function runIncrementalMigrations() {
     ALTER TABLE saas_invoices ADD COLUMN IF NOT EXISTS bill_to_address TEXT;
     ALTER TABLE saas_invoices ADD COLUMN IF NOT EXISTS bill_to_state_code VARCHAR(2);
     ALTER TABLE saas_invoices ADD COLUMN IF NOT EXISTS bill_to_gstin VARCHAR(15);
+  `)
+
+  // Daily Quiz question bank (#432). Questions belong to a syllabus topic: a master topic (shared by every
+  // school on that board) or, later, a school's own custom topic. Prepared once per subject from Platform
+  // Admin (Claude writes, Groq answers blind, only agreeing questions are kept), then published per subject.
+  // A subject's questions reach students only after quiz_bank_subjects.status = 'published'.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS quiz_questions (
+      id SERIAL PRIMARY KEY,
+      master_subject_id INTEGER REFERENCES master_subjects(id) ON DELETE CASCADE,
+      master_topic_id INTEGER REFERENCES master_topics(id) ON DELETE CASCADE,
+      school_topic_id INTEGER REFERENCES school_topics(id) ON DELETE CASCADE,
+      language VARCHAR(20) NOT NULL DEFAULT 'english',
+      stem TEXT NOT NULL,
+      options JSONB NOT NULL,
+      correct_index SMALLINT NOT NULL CHECK (correct_index BETWEEN 0 AND 3),
+      explanation TEXT,
+      difficulty VARCHAR(10) NOT NULL DEFAULT 'medium' CHECK (difficulty IN ('easy', 'medium', 'hard')),
+      source VARCHAR(10) NOT NULL CHECK (source IN ('ai', 'import', 'admin')),
+      status VARCHAR(10) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'retired', 'pulled')),
+      fingerprint VARCHAR(64) NOT NULL,
+      served_count INTEGER NOT NULL DEFAULT 0,
+      correct_count INTEGER NOT NULL DEFAULT 0,
+      report_count INTEGER NOT NULL DEFAULT 0,
+      updated_by INTEGER,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      CHECK (master_topic_id IS NOT NULL OR school_topic_id IS NOT NULL)
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_quiz_questions_master_fp ON quiz_questions(master_topic_id, fingerprint) WHERE master_topic_id IS NOT NULL;
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_quiz_questions_school_fp ON quiz_questions(school_topic_id, fingerprint) WHERE school_topic_id IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS idx_quiz_questions_subject ON quiz_questions(master_subject_id, status);
+
+    CREATE TABLE IF NOT EXISTS quiz_question_reports (
+      id SERIAL PRIMARY KEY,
+      question_id INTEGER NOT NULL REFERENCES quiz_questions(id) ON DELETE CASCADE,
+      student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      reason VARCHAR(20) NOT NULL CHECK (reason IN ('wrong_answer', 'unclear', 'typo', 'other')),
+      note TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      resolved_at TIMESTAMPTZ,
+      UNIQUE (question_id, student_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS quiz_bank_subjects (
+      master_subject_id INTEGER PRIMARY KEY REFERENCES master_subjects(id) ON DELETE CASCADE,
+      -- Preparation progress only. Being live is published_at, kept separate so topping up a published
+      -- subject never takes it offline for the daily quiz.
+      status VARCHAR(12) NOT NULL DEFAULT 'idle' CHECK (status IN ('idle', 'generating', 'checking', 'ready')),
+      use_textbook BOOLEAN NOT NULL DEFAULT FALSE,
+      material_id INTEGER REFERENCES master_subject_materials(id) ON DELETE SET NULL,
+      anthropic_file_id VARCHAR(120),
+      anthropic_file_expires_at TIMESTAMPTZ,
+      textbook_tokens INTEGER,
+      batch_id VARCHAR(120),
+      batch_submitted_at TIMESTAMPTZ,
+      last_error TEXT,
+      started_by INTEGER,
+      published_by INTEGER,
+      published_at TIMESTAMPTZ,
+      -- Set while one caller (an open admin screen or the daily cron) collects this subject's batch,
+      -- so two callers never collect it twice. A stale claim (>10 min) is taken over.
+      claimed_at TIMESTAMPTZ,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS quiz_bank_chapters (
+      master_chapter_id INTEGER PRIMARY KEY REFERENCES master_chapters(id) ON DELETE CASCADE,
+      master_subject_id INTEGER NOT NULL REFERENCES master_subjects(id) ON DELETE CASCADE,
+      status VARCHAR(10) NOT NULL CHECK (status IN ('queued', 'generated', 'done', 'failed')),
+      raw_output JSONB,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      generated_count INTEGER NOT NULL DEFAULT 0,
+      kept_count INTEGER NOT NULL DEFAULT 0,
+      last_error TEXT,
+      claimed_at TIMESTAMPTZ,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_quiz_bank_chapters_subject ON quiz_bank_chapters(master_subject_id, status);
   `)
 }

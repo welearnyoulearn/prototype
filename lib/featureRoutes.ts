@@ -49,6 +49,7 @@ export function featureRequirementForApiPath(pathname: string, method = 'GET'): 
   if (pathname.startsWith('/api/feedback/') && !pathname.startsWith('/api/feedback/resolve') && !pathname.startsWith('/api/feedback/submit') && !pathname.startsWith('/api/feedback/voice-upload-url')) return one('feedback-management')
   if (pathname.startsWith('/api/announcements')) return one('announcements')
   if (pathname.startsWith('/api/academic-years/rollover')) return one('year-rollover')
+  if (pathname.startsWith('/api/teacher/quiz-bank') || pathname.startsWith('/api/student/quiz')) return one('daily-quiz')
   return null
 }
 
@@ -59,5 +60,5 @@ export function featureForApiPath(pathname: string): string | null {
 export const GATED_FEATURE_KEYS = [
   'staff', 'students', 'class-management', 'attendance', 'curriculum', 'exam-marks',
   'library', 'announcements', 'export', 'year-rollover', 'fee-management',
-  'expenses', 'calendar', 'feedback-management',
+  'expenses', 'calendar', 'feedback-management', 'daily-quiz',
 ] as const

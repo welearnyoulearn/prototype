@@ -12,8 +12,9 @@ Move an entry to [completed.md](completed.md) when it ships. Add new entries at 
 **Summary:** Daily MCQ quiz per class from covered topics (bank prepared once), class leaderboard, parent summaries; wrong answers become tracked doubts that only the student can mark clarified, escalated after 2 working days. Plan: issues #431–#438.
 **Progress:**
 - [x] Issues created (#430 epic, #431–#438)
-- [ ] P0 #431: feature keys `daily-quiz` / `student-doubts` (OFF), Learning category, docs
-- [ ] P1 #432 question bank · P2 #433 daily quiz · P3 #434 leaderboard/parents · P4 #435 doubts · P5 #436 SLA · P6 #437 insights · P7 #438 AI hook
+- [x] P0 #431: feature keys `daily-quiz` / `student-doubts` (OFF), Learning category, docs (PR #439)
+- [x] P1 #432 question bank: Platform Admin → Question Bank (Claude batch + Groq check, review, publish), teacher Quiz Questions view, student report endpoint (`feature/432-quiz-question-bank`)
+- [ ] P2 #433 daily quiz · P3 #434 leaderboard/parents · P4 #435 doubts · P5 #436 SLA · P6 #437 insights · P7 #438 AI hook
 
 ### Push notifications via Firebase (FCM)
 **Type:** Feature

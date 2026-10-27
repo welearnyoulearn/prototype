@@ -82,7 +82,10 @@
   },
   "daily-quiz": {
     "doc": "wiki/features/daily-quiz.md",
-    "ui": []
+    "ui": [
+      "app/platform-admin/question-bank",
+      "app/teacher/components/TeacherQuizBank.tsx"
+    ]
   },
   "student-doubts": {
     "doc": "wiki/features/student-doubts.md",

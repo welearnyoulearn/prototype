@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "WLYL School Management API",
-    "version": "2026-10-24",
+    "version": "2026-10-27",
     "description": "Every API route in the WLYL platform, generated from the route handlers on the `dev` branch.\n\n## How to read this\n\n- **Sections and subcategories.** The sidebar groups routes by area, such as Fees & finance, then by topic, such as Waivers.\n- **Who can call.** The coloured badges on each route show which signed-in users it accepts. A red **Public** badge means the route has no sign-in check in code.\n- **Checks.** Extra rules inside the route, such as \"parent must own this student\", are listed under Checks.\n- **Feature flag.** Routes that are switched off unless the school's plan includes a feature say which one.\n\n## Signing in\n\nEach portal has its own session cookie: `wlyl-platform`, `wlyl-auth` (school admin), `wlyl-teacher`, `wlyl-student` and `wlyl-parent`. Sign in to the app in this browser, then use **Test Request** on any route. Scheduled jobs take `Authorization: Bearer $CRON_SECRET`."
   },
   "servers": [
@@ -175,6 +175,10 @@
     {
       "name": "Platform billing",
       "description": "Platform admin: bills, plan and service prices, usage, renewals and per-school price overrides."
+    },
+    {
+      "name": "Question bank",
+      "description": "Daily Quiz question bank (#432): one-time preparation of MCQs per subject (Claude writes, Groq checks), review and publishing in Platform Admin, the teachers' read-only view, and student reports."
     }
   ],
   "x-tagGroups": [
@@ -49440,6 +49444,1009 @@
             }
           }
         }
+      }
+    },
+    "/api/platform/quiz-bank": {
+      "get": {
+        "tags": [
+          "Question bank"
+        ],
+        "summary": "List subjects with question-bank progress",
+        "description": "Every academic master subject of one board and grade with its topics, topics at the minimum question count, active questions, preparation status and whether it is published.\n\n**Who can call:** Platform admin.\n\n**Checks:** requirePlatformAdmin(); board and grade required.",
+        "operationId": "getPlatformQuizBank",
+        "security": [
+          {
+            "platformAdmin": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "board",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "CBSE"
+            }
+          },
+          {
+            "name": "grade",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "7"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Subjects",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "subjects": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          }
+        ],
+        "x-source-file": "app/api/platform/quiz-bank/route.ts"
+      }
+    },
+    "/api/platform/quiz-bank/subjects/{id}": {
+      "get": {
+        "tags": [
+          "Question bank"
+        ],
+        "summary": "Question-bank detail for one subject",
+        "description": "Chapters → topics with active / retired / pulled counts, each chapter's last preparation result, the subject's textbooks, open student reports, and the target and minimum per topic.\n\n**Who can call:** Platform admin.\n\n**Checks:** requirePlatformAdmin(); subject must be academic.",
+        "operationId": "getPlatformQuizBankSubject",
+        "security": [
+          {
+            "platformAdmin": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Master subject id",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Subject detail",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {}
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Subject not found"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          }
+        ],
+        "x-source-file": "app/api/platform/quiz-bank/subjects/[id]/route.ts"
+      }
+    },
+    "/api/platform/quiz-bank/subjects/{id}/estimate": {
+      "post": {
+        "tags": [
+          "Question bank"
+        ],
+        "summary": "Estimate a preparation run",
+        "description": "What preparing the subject would do and its maximum cost. Imports questions typed into Master Syllabus (idempotent) and, when a textbook is chosen, uploads it once to Anthropic and counts its tokens so Start can reuse it.\n\n**Who can call:** Platform admin.\n\n**Checks:** requirePlatformAdmin(); material_id must be a textbook of this subject. Needs ANTHROPIC_API_KEY when a textbook is used (503 otherwise).",
+        "operationId": "postPlatformQuizBankEstimate",
+        "security": [
+          {
+            "platformAdmin": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Master subject id",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "material_id": {
+                    "type": "integer",
+                    "nullable": true,
+                    "description": "Textbook to read, or null for syllabus topics only"
+                  }
+                },
+                "required": [
+                  "material_id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Estimate",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "imported": {
+                      "type": "integer"
+                    },
+                    "topics": {
+                      "type": "integer"
+                    },
+                    "topics_needing": {
+                      "type": "integer"
+                    },
+                    "chapters": {
+                      "type": "integer"
+                    },
+                    "questions_needed": {
+                      "type": "integer"
+                    },
+                    "textbook_tokens": {
+                      "type": "integer",
+                      "nullable": true
+                    },
+                    "estimated_max_usd": {
+                      "type": "number"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Subject or textbook not found"
+          },
+          "500": {
+            "description": "Internal server error"
+          },
+          "503": {
+            "description": "ANTHROPIC_API_KEY not set"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          }
+        ],
+        "x-source-file": "app/api/platform/quiz-bank/subjects/[id]/estimate/route.ts"
+      }
+    },
+    "/api/platform/quiz-bank/subjects/{id}/start": {
+      "post": {
+        "tags": [
+          "Question bank"
+        ],
+        "summary": "Start preparing a subject",
+        "description": "Submits one Claude Message Batches request per chapter that still has topics below the target. Claude writes in the background; /advance or the daily cron collects and checks the results.\n\n**Who can call:** Platform admin.\n\n**Checks:** requirePlatformAdmin(); one preparation per subject at a time (409); 409 when every topic is already full.",
+        "operationId": "postPlatformQuizBankStart",
+        "security": [
+          {
+            "platformAdmin": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Master subject id",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "material_id": {
+                    "type": "integer",
+                    "nullable": true
+                  }
+                },
+                "required": [
+                  "material_id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Started",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "chapters": {
+                      "type": "integer"
+                    },
+                    "topics": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Subject not found"
+          },
+          "409": {
+            "description": "Already running, or nothing to prepare"
+          },
+          "500": {
+            "description": "Internal server error"
+          },
+          "503": {
+            "description": "ANTHROPIC_API_KEY not set"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          }
+        ],
+        "x-source-file": "app/api/platform/quiz-bank/subjects/[id]/start/route.ts"
+      }
+    },
+    "/api/platform/quiz-bank/subjects/{id}/publish": {
+      "post": {
+        "tags": [
+          "Question bank"
+        ],
+        "summary": "Publish or unpublish a subject",
+        "description": "After the admin's spot-check, makes the subject's questions available to the daily quiz (or takes them back out). Only published subjects ever reach students.\n\n**Who can call:** Platform admin.\n\n**Checks:** requirePlatformAdmin(); cannot publish while preparing or with no questions (409).",
+        "operationId": "postPlatformQuizBankPublish",
+        "security": [
+          {
+            "platformAdmin": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Master subject id",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "published": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "published"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Publishing state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "published_at": {
+                      "type": "string",
+                      "format": "date-time",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "409": {
+            "description": "Not ready to publish"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          }
+        ],
+        "x-source-file": "app/api/platform/quiz-bank/subjects/[id]/publish/route.ts"
+      }
+    },
+    "/api/platform/quiz-bank/advance": {
+      "post": {
+        "tags": [
+          "Question bank"
+        ],
+        "summary": "Move preparations forward",
+        "description": "Called every few seconds by the open Question Bank screen: collects finished Claude batches and checks generated chapters with Groq (blind answers; only agreeing questions are saved) for up to about 60 seconds. Safe to run alongside the cron — work is claimed.\n\n**Who can call:** Platform admin.\n\n**Checks:** requirePlatformAdmin().",
+        "operationId": "postPlatformQuizBankAdvance",
+        "security": [
+          {
+            "platformAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Progress",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "collected": {
+                      "type": "integer"
+                    },
+                    "checked": {
+                      "type": "integer"
+                    },
+                    "failed": {
+                      "type": "integer"
+                    },
+                    "retryLater": {
+                      "type": "boolean"
+                    },
+                    "pending": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          }
+        ],
+        "x-source-file": "app/api/platform/quiz-bank/advance/route.ts"
+      }
+    },
+    "/api/platform/quiz-bank/topics/{id}/questions": {
+      "get": {
+        "tags": [
+          "Question bank"
+        ],
+        "summary": "Questions of one topic",
+        "description": "Every question of a master topic (pulled first, then active, then retired) with its answer, explanation, source and open student reports.\n\n**Who can call:** Platform admin.\n\n**Checks:** requirePlatformAdmin().",
+        "operationId": "getPlatformQuizBankTopicQuestions",
+        "security": [
+          {
+            "platformAdmin": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Master topic id",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Questions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "questions": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          }
+        ],
+        "x-source-file": "app/api/platform/quiz-bank/topics/[id]/questions/route.ts"
+      }
+    },
+    "/api/platform/quiz-bank/questions/{id}": {
+      "patch": {
+        "tags": [
+          "Question bank"
+        ],
+        "summary": "Edit, retire or restore a question",
+        "description": "Fix a question's wording, options, answer, explanation or difficulty, or retire / restore it. Restoring or retiring resolves its open student reports. The shared bank is edited by Platform Admin only.\n\n**Who can call:** Platform admin.\n\n**Checks:** requirePlatformAdmin(); the result must still be a valid question (4 distinct options, one correct); 409 when another question in the topic says the same thing.",
+        "operationId": "patchPlatformQuizBankQuestion",
+        "security": [
+          {
+            "platformAdmin": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Question id",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "stem": {
+                    "type": "string"
+                  },
+                  "options": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "minItems": 4,
+                    "maxItems": 4
+                  },
+                  "correct_index": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 3
+                  },
+                  "explanation": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "difficulty": {
+                    "type": "string",
+                    "enum": [
+                      "easy",
+                      "medium",
+                      "hard"
+                    ]
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "active",
+                      "retired"
+                    ]
+                  }
+                },
+                "required": []
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated question",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "question": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Question not found"
+          },
+          "409": {
+            "description": "Duplicate question"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          }
+        ],
+        "x-source-file": "app/api/platform/quiz-bank/questions/[id]/route.ts"
+      }
+    },
+    "/api/platform/quiz-bank/reports": {
+      "get": {
+        "tags": [
+          "Question bank"
+        ],
+        "summary": "Questions reported by students",
+        "description": "Questions with open student reports, pulled ones (3+ reports, out of use) first.\n\n**Who can call:** Platform admin.\n\n**Checks:** requirePlatformAdmin().",
+        "operationId": "getPlatformQuizBankReports",
+        "security": [
+          {
+            "platformAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Reported questions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "questions": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          }
+        ],
+        "x-source-file": "app/api/platform/quiz-bank/reports/route.ts"
+      }
+    },
+    "/api/cron/quiz-bank": {
+      "get": {
+        "tags": [
+          "Question bank"
+        ],
+        "summary": "Collect and check question-bank preparations",
+        "description": "Backup for the Question Bank screen: collects finished Claude batches and checks their chapters with Groq, so a preparation always completes even if nobody keeps the screen open. Idempotent; invoked daily by Vercel Cron.\n\n**Who can call:** Cron.\n\n**Checks:** Authorization: Bearer $CRON_SECRET (503 when CRON_SECRET is not configured).",
+        "operationId": "getCronQuizBank",
+        "security": [
+          {
+            "cron": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Progress",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "collected": {
+                      "type": "integer"
+                    },
+                    "checked": {
+                      "type": "integer"
+                    },
+                    "pending": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "500": {
+            "description": "Internal server error"
+          },
+          "503": {
+            "description": "Cron is not configured"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Cron",
+            "color": "#475569"
+          }
+        ],
+        "x-source-file": "app/api/cron/quiz-bank/route.ts"
+      },
+      "post": {
+        "tags": [
+          "Question bank"
+        ],
+        "summary": "Collect and check question-bank preparations",
+        "description": "Backup for the Question Bank screen: collects finished Claude batches and checks their chapters with Groq, so a preparation always completes even if nobody keeps the screen open. Idempotent; invoked daily by Vercel Cron.\n\n**Who can call:** Cron.\n\n**Checks:** Authorization: Bearer $CRON_SECRET (503 when CRON_SECRET is not configured).",
+        "operationId": "postCronQuizBank",
+        "security": [
+          {
+            "cron": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Progress",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "collected": {
+                      "type": "integer"
+                    },
+                    "checked": {
+                      "type": "integer"
+                    },
+                    "pending": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "500": {
+            "description": "Internal server error"
+          },
+          "503": {
+            "description": "Cron is not configured"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Cron",
+            "color": "#475569"
+          }
+        ],
+        "x-source-file": "app/api/cron/quiz-bank/route.ts"
+      }
+    },
+    "/api/teacher/quiz-bank": {
+      "get": {
+        "tags": [
+          "Question bank"
+        ],
+        "summary": "Quiz questions for my subjects",
+        "description": "Without subject_id: the published question-bank subjects this teacher teaches. With subject_id: that subject's active questions with answers and explanations, by chapter and topic. Read-only.\n\n**Who can call:** Teacher.\n\n**Checks:** getTeacherSession(); school has the daily-quiz feature; the teacher must teach the subject (class_subjects) and it must be published.",
+        "operationId": "getTeacherQuizBank",
+        "security": [
+          {
+            "teacher": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "subject_id",
+            "in": "query",
+            "required": false,
+            "description": "Master subject id",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Subjects or questions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "subjects": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "questions": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Teacher",
+            "color": "#0f766e"
+          }
+        ],
+        "x-source-file": "app/api/teacher/quiz-bank/route.ts"
+      }
+    },
+    "/api/student/quiz/questions/{id}/report": {
+      "post": {
+        "tags": [
+          "Question bank"
+        ],
+        "summary": "Report a quiz question",
+        "description": "A student flags a question as wrong, unclear or mistyped. Each student counts once; three open reports pull the question from use until Platform Admin reviews it.\n\n**Who can call:** Student.\n\n**Checks:** getStudentSession(); school has the daily-quiz feature; the question must be active, of a published subject the school uses for the student's grade.",
+        "operationId": "postStudentQuizQuestionReport",
+        "security": [
+          {
+            "student": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Question id",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "enum": [
+                      "wrong_answer",
+                      "unclear",
+                      "typo",
+                      "other"
+                    ]
+                  },
+                  "note": {
+                    "type": "string",
+                    "maxLength": 300
+                  }
+                },
+                "required": [
+                  "reason"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Already reported by this student",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "already_reported": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Reported",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "already_reported": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Question not found"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Student",
+            "color": "#15803d"
+          }
+        ],
+        "x-source-file": "app/api/student/quiz/questions/[id]/report/route.ts"
       }
     }
   },
