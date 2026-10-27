@@ -100,6 +100,40 @@ export async function answerMcqsBlind(
   return answers
 }
 
+// ─── Daily Quiz: "Ask WLYL AI" about a reviewed question (#435) ───────────
+// Only after the answers are out, so nothing is given away. Short, kind, at the student's level, in the
+// question's language. Not metered against the school's AI plan: it is part of the Student Doubts feature
+// and capped per student per day by the caller (lib/studentDoubts.ts).
+export async function explainQuizDoubt(q: {
+  grade: string; subject: string; language: string; stem: string; options: string[]
+  correctIndex: number; explanation: string | null; chosenIndex: number | null; studentMessage: string | null
+}): Promise<string> {
+  const letters = ['A', 'B', 'C', 'D']
+  const lang = q.language === 'telugu' ? 'Telugu' : q.language === 'hindi' ? 'Hindi' : 'simple English'
+  const prompt = [
+    `Question: ${q.stem}`,
+    ...q.options.map((o, i) => `${letters[i]}. ${o}`),
+    `Correct answer: ${letters[q.correctIndex]}. ${q.options[q.correctIndex]}`,
+    q.chosenIndex === null ? 'The student did not answer.' : `The student chose: ${letters[q.chosenIndex]}. ${q.options[q.chosenIndex]}`,
+    q.explanation ? `Book explanation: ${q.explanation}` : '',
+    q.studentMessage ? `The student says: "${q.studentMessage}"` : 'The student read the explanation and is still confused.',
+  ].filter(Boolean).join('\n')
+  try {
+    return await callAI(
+      `You are WLYL's friendly tutor for a Grade ${q.grade} ${q.subject} student. Explain why the correct answer is right${q.chosenIndex !== null && q.chosenIndex !== q.correctIndex ? ' and why the student\'s choice is not' : ''}, using a simple everyday example. Write in ${lang}, in at most 120 words, no markdown headings. Never be discouraging. Only talk about this question and its topic.`,
+      prompt,
+      400,
+      false,
+      undefined,
+      0.4,
+    )
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    if (/Groq API error (429|5\d\d)/.test(msg) || /fetch failed|ECONN|ETIMEDOUT/i.test(msg)) throw new AIRetryLaterError(msg)
+    throw err
+  }
+}
+
 // ─── 4. Announcement Drafter ──────────────────────────────────────────────
 
 export async function draftAnnouncement(

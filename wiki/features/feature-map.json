@@ -94,7 +94,11 @@
   },
   "student-doubts": {
     "doc": "wiki/features/student-doubts.md",
-    "ui": []
+    "ui": [
+      "components/dailyQuiz/Doubts.tsx",
+      "app/teacher/components/TeacherDoubts.tsx",
+      "app/school-admin/components/SchoolDoubts.tsx"
+    ]
   },
   "announcements": {
     "doc": "wiki/features/announcements.md",

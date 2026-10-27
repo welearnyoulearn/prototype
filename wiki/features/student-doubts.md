@@ -2,40 +2,36 @@
 
 **Platform Admin feature key:** `student-doubts`
 **Portal:** School Admin / Teacher / Student / Parent
-**Status:** Planned. Only the feature key exists (seeded OFF at every tier); there are no screens or API routes yet.
+**Status:** Built (#435) on top of the Daily Quiz; needs both `daily-quiz` and `student-doubts` on. Escalation to management comes after the pilot (#436). The feature key is seeded OFF at every tier.
 **Last updated:** 2026-10-27
 
 ---
 
 ## What it does
 
-When a student is still confused after seeing a quiz question's explanation, they can ask their subject teacher. The doubt is resolved only when the student **proves** they understood by answering a fresh question on that topic. Teachers earn **WLYL Stars** for doubts that end in proven understanding.
+After a daily quiz's answers are out, a student who is still confused goes step by step: read the explanation → **Ask WLYL AI** → **Ask your teacher**. A doubt is clarified only when the student **proves** they understood by answering a fresh question on the same topic. Then the student earns reward points and the teacher who explained earns **WLYL Stars**.
 
-## How it will work
+## How it works (built, #435)
 
-- **Raise:** "Still confused? Ask Teacher" appears after the explanation. The question, the student's answer and an optional note are attached.
-- **Routing:** subject teacher (`class_subjects`) → class teacher → school-admin queue. Several students on the same question form one cluster.
-- **Teacher, every morning:** a "Class misconceptions" card with the top 3 most-missed questions. **One tap "Covered in class"** explains the whole cluster; a single doubt can also be answered by chat.
-- **Proof:** after "explained", the student gets a fresh question on the same topic. Correct + "I understand now" = **clarified**, and the student earns reward points.
-- **Teacher WLYL Stars:**
-  - awarded at proof, never for "explained" alone
-  - a bonus when the doubt was explained within 2 working days
-  - Stars for class-wide misconceptions covered in class
-  - no negative Stars
-- **Visibility:**
-  - parents see each doubt's timeline, with waiting time shown and no push about teachers
-  - after the pilot, doubts overdue by 2 working days are escalated to management, and the school admin gets a doubt dashboard and a "Star teachers" report
+- **Ask WLYL AI** (under each reviewed question): a short explanation from Groq, tailored to the student's answer and an optional "what's confusing", in the question's language. At most 10 a day per student. Not metered against the school's AI plan.
+- **Ask your teacher** (after the AI reply): the question, the student's answer and an optional note go to the **subject teacher** (`class_subjects`), else the **class teacher**. One doubt per question, 3 a day. The teacher gets a notification.
+- **Teacher → Doubts:**
+  - **Class misconceptions:** the 3 most-missed questions in their subjects from each class's latest closed quiz, with “N of M got it wrong”, open doubts, and one tap **“Covered in class”**, which answers every open doubt on it in that class.
+  - **Doubts by question:** students stuck on the same question are grouped, so one reply answers all of them. Each shows how many school days it has waited, whether the student tried WLYL AI, and “answered — not understood yet” when the proof failed.
+  - **WLYL Stars:** this month and in all.
+- **Proof:** once answered, the student taps **“Try a fresh question”** (same topic, unseen first, never the original, no answer key sent). Right + **“I understand now”** = **clarified**: **+5 points** to the student, **+3 Stars** to the teacher who explained, **+2 more** if it was explained within 2 working days. Wrong = still answered, and they can try another or say **“Still not clear”**, which reopens it for the teacher. If the topic has no other question, the student can mark it understood without points or Stars.
+- **Ledgers:** `student_points` and `teacher_star_points` (one row per award, unique per action and doubt, never negative), ready for a future rewards marketplace.
+- **Badge:** Comeback (5 proven doubts).
+- **Parents** see each doubt's timeline read-only, with “Waiting for teacher · N school days”. No push about teachers.
+- **School Admin → Daily Quiz:** doubts per teacher (open, overdue over 2 school days, answered, clarified this month) and this month's **Star teachers**.
 
 This is a new build. It is **not** the removed Ask a Doubt (#137), and it uses different tables and a different feature key.
 
-## Planned build
+## Next
 
 | Phase | Issue |
 |---|---|
-| Feature key (this doc) | #431 |
-| Ask Teacher, misconceptions card, proof-question clarify, WLYL Stars | #435 |
-| Escalation to management, dashboards (after the pilot) | #436 |
-| Ask WLYL AI hand-off | #438 |
+| Escalation to management, daily digest (after the pilot) | #436 |
 
 Epic: #430.
 
@@ -44,10 +40,20 @@ Epic: #430.
 <!-- AUTO:evidence:student-doubts:start (generated by scripts/product-docs.mjs — do not edit by hand) -->
 **Code evidence** — checked against the repository on every run of `node scripts/product-docs.mjs`.
 
-Screens: _none found_
+Screens: `components/dailyQuiz/Doubts.tsx`, `app/teacher/components/TeacherDoubts.tsx`, `app/school-admin/components/SchoolDoubts.tsx`
 
 API routes these screens call (all exist):
-- _none_
+- `GET` /api/parent/doubts
+- `GET` /api/school/doubts-report
+- `GET/POST` /api/student/doubts
+- `POST` /api/student/doubts/ai
+- `POST` /api/student/doubts/{}/confirm
+- `POST` /api/student/doubts/{}/proof
+- `POST` /api/student/doubts/{}/proof/answer
+- `POST` /api/student/doubts/{}/reopen
+- `GET` /api/teacher/doubts
+- `POST` /api/teacher/doubts/covered
+- `POST` /api/teacher/doubts/explain
 
 ✅ Every API route the screens call exists.
 <!-- AUTO:evidence:student-doubts:end -->
@@ -62,3 +68,4 @@ API routes these screens call (all exist):
 | Date | Change | Issue |
 |------|--------|-------|
 | 2026-10-27 | Feature key registered (OFF at every tier); doc created as Planned | #431 |
+| 2026-10-27 | Ask WLYL AI → Ask Teacher, teacher Doubts screen (misconceptions, covered in class, replies), proof question, points and WLYL Stars, parent timeline, School Admin report | #435 |

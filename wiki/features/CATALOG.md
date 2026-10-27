@@ -19,7 +19,7 @@ Every feature a school can be switched on for has exactly one doc below. "Code e
 | **Syllabus Customizer** (`curriculum`) | Scheduling | school-admin, student, parent, teacher | [curriculum.md](curriculum.md) | ✅ all routes exist |
 | **Exam Schedule & Marks** (`exam-marks`) | Scheduling | school-admin, student, parent, teacher | [exam-marks.md](exam-marks.md) | ✅ all routes exist |
 | **Daily Quiz & Leaderboard** (`daily-quiz`) | Learning | school-admin, teacher, student, parent | [daily-quiz.md](daily-quiz.md) | ✅ all routes exist |
-| **Student Doubts** (`student-doubts`) | Learning | school-admin, teacher, student, parent | [student-doubts.md](student-doubts.md) | 🕓 planned — no screens yet |
+| **Student Doubts** (`student-doubts`) | Learning | school-admin, teacher, student, parent | [student-doubts.md](student-doubts.md) | ✅ all routes exist |
 | **Announcement Board** (`announcements`) | Communication | school-admin | [announcements.md](announcements.md) | ✅ all routes exist |
 | **Feedback Management** (`feedback-management`) | Communication | school-admin | [feedback-management.md](feedback-management.md) | ✅ all routes exist |
 | **Fee Management** (`fee-management`) | Finance | school-admin, parent | [fee-management.md](fee-management.md) | ✅ all routes exist |

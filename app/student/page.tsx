@@ -351,7 +351,7 @@ function StudentPortal() {
         <main id="student-content" tabIndex={-1} className="portal-main">
           <div className="mx-auto w-full max-w-5xl pb-6">
             {visitedNav.has('dashboard')   && <div hidden={activeNav !== 'dashboard'}><StudentDashboard student={student} classId={classId} schoolId={student.school_id} onNavigate={navigateTo} isNavItemVisible={isNavItemVisible} /></div>}
-            {visitedNav.has('daily-quiz') && isNavItemVisible('daily-quiz') && <div hidden={activeNav !== 'daily-quiz'}><StudentDailyQuiz /></div>}
+            {visitedNav.has('daily-quiz') && isNavItemVisible('daily-quiz') && <div hidden={activeNav !== 'daily-quiz'}><StudentDailyQuiz doubtsEnabled={enabledFeatures?.has('student-doubts') ?? false} /></div>}
             {visitedNav.has('class-circle') && <div hidden={activeNav !== 'class-circle'}><StudentClassCircle /></div>}
             {visitedNav.has('attendance') && isNavItemVisible('attendance') && (
               <div hidden={activeNav !== 'attendance'}>

@@ -183,6 +183,10 @@
     {
       "name": "Daily quiz",
       "description": "Daily Quiz (#433): one question per class subject every working day from what the class covered, taken by the student (or through the parent), answers shown after the close, missed quizzes open late for 7 days, and the Platform Admin settings for when it runs."
+    },
+    {
+      "name": "Student doubts",
+      "description": "Student Doubts (#435): after a Daily Quiz's answers are out, Ask WLYL AI then Ask Teacher; the teacher answers (or covers it in class); a fresh question on the same topic proves understanding, earning the student points and the teacher WLYL Stars."
     }
   ],
   "x-tagGroups": [
@@ -51949,6 +51953,911 @@
           }
         ],
         "x-source-file": "app/api/school/quiz-report/route.ts"
+      }
+    },
+    "/api/student/doubts": {
+      "get": {
+        "tags": [
+          "Student doubts"
+        ],
+        "summary": "My doubts",
+        "description": "The student's doubts, newest first, with the teacher's answer, proof state and timeline. With attempt_id, also which of that quiz's questions already have WLYL AI help or a doubt (only once its answers are out).\n\n**Who can call:** Student.\n\n**Checks:** getStudentSession(); the student acts only for themself; daily-quiz and student-doubts features on.",
+        "operationId": "getStudentDoubts",
+        "security": [
+          {
+            "student": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "attempt_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Doubts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "doubts": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "help": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden, or a feature is off"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Student",
+            "color": "#15803d"
+          }
+        ],
+        "x-source-file": "app/api/student/doubts/route.ts"
+      },
+      "post": {
+        "tags": [
+          "Student doubts"
+        ],
+        "summary": "Ask the teacher",
+        "description": "Raises a doubt about a quiz question whose answers are out. Routed to the subject teacher, else the class teacher, who is notified. One doubt per question; 3 a day.\n\n**Who can call:** Student.\n\n**Checks:** getStudentSession(); the student acts only for themself; daily-quiz and student-doubts features on.",
+        "operationId": "postStudentDoubt",
+        "security": [
+          {
+            "student": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "attempt_id": {
+                    "type": "integer"
+                  },
+                  "item_id": {
+                    "type": "integer"
+                  },
+                  "note": {
+                    "type": "string",
+                    "maxLength": 500
+                  }
+                },
+                "required": [
+                  "attempt_id",
+                  "item_id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Raised",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "integer"
+                    },
+                    "routedToTeacher": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden, or a feature is off"
+          },
+          "404": {
+            "description": "Question not found"
+          },
+          "409": {
+            "description": "Answers not out yet, or already asked"
+          },
+          "429": {
+            "description": "Daily limit reached"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Student",
+            "color": "#15803d"
+          }
+        ],
+        "x-source-file": "app/api/student/doubts/route.ts"
+      }
+    },
+    "/api/student/doubts/ai": {
+      "post": {
+        "tags": [
+          "Student doubts"
+        ],
+        "summary": "Ask WLYL AI",
+        "description": "A short explanation (Groq) of a quiz question whose answers are out, tailored to the student's answer and optional message, in the question's language. 10 a day per student.\n\n**Who can call:** Student.\n\n**Checks:** getStudentSession(); the student acts only for themself; daily-quiz and student-doubts features on.",
+        "operationId": "postStudentDoubtAI",
+        "security": [
+          {
+            "student": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "attempt_id": {
+                    "type": "integer"
+                  },
+                  "item_id": {
+                    "type": "integer"
+                  },
+                  "message": {
+                    "type": "string",
+                    "maxLength": 300
+                  }
+                },
+                "required": [
+                  "attempt_id",
+                  "item_id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Reply",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "reply": {
+                      "type": "string"
+                    },
+                    "left": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden, or a feature is off"
+          },
+          "409": {
+            "description": "Answers not out yet"
+          },
+          "429": {
+            "description": "Daily limit reached"
+          },
+          "500": {
+            "description": "Internal server error"
+          },
+          "503": {
+            "description": "AI busy or not configured"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Student",
+            "color": "#15803d"
+          }
+        ],
+        "x-source-file": "app/api/student/doubts/ai/route.ts"
+      }
+    },
+    "/api/student/doubts/{id}/proof": {
+      "post": {
+        "tags": [
+          "Student doubts"
+        ],
+        "summary": "Get a fresh question",
+        "description": "Once the teacher has answered: a fresh question on the same topic (never the original, unseen first, the same one until answered). No answer key. question is null when the topic has no other question.\n\n**Who can call:** Student.\n\n**Checks:** getStudentSession(); the student acts only for themself; daily-quiz and student-doubts features on.",
+        "operationId": "postStudentDoubtProof",
+        "security": [
+          {
+            "student": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Doubt id",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Question",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "question": {
+                      "type": "object",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden, or a feature is off"
+          },
+          "404": {
+            "description": "Doubt not found"
+          },
+          "409": {
+            "description": "Not answered yet, or already clarified"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Student",
+            "color": "#15803d"
+          }
+        ],
+        "x-source-file": "app/api/student/doubts/[id]/proof/route.ts"
+      }
+    },
+    "/api/student/doubts/{id}/proof/answer": {
+      "post": {
+        "tags": [
+          "Student doubts"
+        ],
+        "summary": "Answer the fresh question",
+        "description": "Answers the fresh question once. Returns whether it was right, the right answer and its explanation. A wrong answer shows the teacher it is not understood yet.\n\n**Who can call:** Student.\n\n**Checks:** getStudentSession(); the student acts only for themself; daily-quiz and student-doubts features on.",
+        "operationId": "postStudentDoubtProofAnswer",
+        "security": [
+          {
+            "student": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Doubt id",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "chosen_index": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 3
+                  }
+                },
+                "required": [
+                  "chosen_index"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "correct": {
+                      "type": "boolean"
+                    },
+                    "correctIndex": {
+                      "type": "integer"
+                    },
+                    "explanation": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden, or a feature is off"
+          },
+          "404": {
+            "description": "Doubt not found"
+          },
+          "409": {
+            "description": "No pending fresh question"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Student",
+            "color": "#15803d"
+          }
+        ],
+        "x-source-file": "app/api/student/doubts/[id]/proof/answer/route.ts"
+      }
+    },
+    "/api/student/doubts/{id}/confirm": {
+      "post": {
+        "tags": [
+          "Student doubts"
+        ],
+        "summary": "I understand now",
+        "description": "After a correct fresh question: the doubt is clarified, the student earns +5 points and the teacher who answered earns +3 WLYL Stars (+2 if answered within 2 working days), each once. If the topic has no other question it is clarified without points or Stars.\n\n**Who can call:** Student.\n\n**Checks:** getStudentSession(); the student acts only for themself; daily-quiz and student-doubts features on.",
+        "operationId": "postStudentDoubtConfirm",
+        "security": [
+          {
+            "student": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Doubt id",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Clarified",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "clarified": {
+                      "type": "boolean"
+                    },
+                    "points": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden, or a feature is off"
+          },
+          "404": {
+            "description": "Doubt not found"
+          },
+          "409": {
+            "description": "Fresh question not answered correctly yet"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Student",
+            "color": "#15803d"
+          }
+        ],
+        "x-source-file": "app/api/student/doubts/[id]/confirm/route.ts"
+      }
+    },
+    "/api/student/doubts/{id}/reopen": {
+      "post": {
+        "tags": [
+          "Student doubts"
+        ],
+        "summary": "Still not clear",
+        "description": "Sends an answered doubt back to the teacher, with an optional note. The teacher is notified.\n\n**Who can call:** Student.\n\n**Checks:** getStudentSession(); the student acts only for themself; daily-quiz and student-doubts features on.",
+        "operationId": "postStudentDoubtReopen",
+        "security": [
+          {
+            "student": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Doubt id",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "note": {
+                    "type": "string",
+                    "maxLength": 500
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Reopened",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "reopened": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden, or a feature is off"
+          },
+          "404": {
+            "description": "Doubt not found"
+          },
+          "409": {
+            "description": "Only an answered doubt can be reopened"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Student",
+            "color": "#15803d"
+          }
+        ],
+        "x-source-file": "app/api/student/doubts/[id]/reopen/route.ts"
+      }
+    },
+    "/api/parent/doubts": {
+      "get": {
+        "tags": [
+          "Student doubts"
+        ],
+        "summary": "A child's doubts",
+        "description": "One of the parent's children's doubts with their timeline; an open one shows how many school days it has waited.\n\n**Who can call:** Parent, for one of their own children (read-only).\n\n**Checks:** getParentSession(); the child must be the parent's own and in the parent's school; daily-quiz and student-doubts features on.",
+        "operationId": "getParentDoubts",
+        "security": [
+          {
+            "parent": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "student_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Doubts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "doubts": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden, or a feature is off"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Parent",
+            "color": "#b45309"
+          }
+        ],
+        "x-source-file": "app/api/parent/doubts/route.ts"
+      }
+    },
+    "/api/teacher/doubts": {
+      "get": {
+        "tags": [
+          "Student doubts"
+        ],
+        "summary": "Doubts, misconceptions and Stars",
+        "description": "Open and recently answered doubts grouped by class and question, the class misconceptions card (3 most-missed questions per class and subject from the latest closed quiz) and the teacher's WLYL Stars.\n\n**Who can call:** Teacher.\n\n**Checks:** getTeacherSession(); only doubts routed to the teacher (or unrouted ones in a class they are class teacher of); daily-quiz and student-doubts features on.",
+        "operationId": "getTeacherDoubts",
+        "security": [
+          {
+            "teacher": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Doubts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "clusters": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "misconceptions": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "stars": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden, or a feature is off"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Teacher",
+            "color": "#0f766e"
+          }
+        ],
+        "x-source-file": "app/api/teacher/doubts/route.ts"
+      }
+    },
+    "/api/teacher/doubts/explain": {
+      "post": {
+        "tags": [
+          "Student doubts"
+        ],
+        "summary": "Answer doubts",
+        "description": "Answers one or more open doubts (e.g. everyone stuck on the same question). Each student is notified and can then try a fresh question.\n\n**Who can call:** Teacher.\n\n**Checks:** getTeacherSession(); only doubts routed to the teacher (or unrouted ones in a class they are class teacher of); daily-quiz and student-doubts features on.",
+        "operationId": "postTeacherDoubtsExplain",
+        "security": [
+          {
+            "teacher": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "doubt_ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer"
+                    }
+                  },
+                  "reply": {
+                    "type": "string",
+                    "maxLength": 2000
+                  }
+                },
+                "required": [
+                  "doubt_ids",
+                  "reply"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Answered",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "explained": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden, or a feature is off"
+          },
+          "404": {
+            "description": "None of the doubts are open and the teacher's"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Teacher",
+            "color": "#0f766e"
+          }
+        ],
+        "x-source-file": "app/api/teacher/doubts/explain/route.ts"
+      }
+    },
+    "/api/teacher/doubts/covered": {
+      "post": {
+        "tags": [
+          "Student doubts"
+        ],
+        "summary": "Covered in class",
+        "description": "One tap on a most-missed question of a subject the teacher teaches in that class: marks it covered and answers every open doubt on it there.\n\n**Who can call:** Teacher.\n\n**Checks:** getTeacherSession(); only doubts routed to the teacher (or unrouted ones in a class they are class teacher of); daily-quiz and student-doubts features on.",
+        "operationId": "postTeacherDoubtsCovered",
+        "security": [
+          {
+            "teacher": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "class_id": {
+                    "type": "integer"
+                  },
+                  "question_id": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "class_id",
+                  "question_id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Covered",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "covered": {
+                      "type": "boolean"
+                    },
+                    "explained": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden, or a feature is off"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Teacher",
+            "color": "#0f766e"
+          }
+        ],
+        "x-source-file": "app/api/teacher/doubts/covered/route.ts"
+      }
+    },
+    "/api/school/doubts-report": {
+      "get": {
+        "tags": [
+          "Student doubts"
+        ],
+        "summary": "Doubts and Star teachers",
+        "description": "Per teacher: open, overdue (over 2 school days), answered and clarified this month; this month's WLYL Stars leaders. Read-only.\n\n**Who can call:** School admin, principal or vice principal.\n\n**Checks:** requireSchoolAdmin(); the school comes from the session; daily-quiz and student-doubts features on.",
+        "operationId": "getSchoolDoubtsReport",
+        "security": [
+          {
+            "schoolAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Report",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "byTeacher": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "starTeachers": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden, or a feature is off"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
+          }
+        ],
+        "x-source-file": "app/api/school/doubts-report/route.ts"
       }
     }
   },

@@ -904,7 +904,7 @@ function ParentDashboard() {
           {/* ── DAILY QUIZ ─────────────────────────────────────────────────── */}
           {visited.has('daily-quiz') && isNavItemVisible('daily-quiz') && (
           <div hidden={activeNav !== 'daily-quiz'}>
-            <ParentDailyQuiz studentId={student.id} studentName={student.name} />
+            <ParentDailyQuiz studentId={student.id} studentName={student.name} doubtsEnabled={enabledFeatures?.has('student-doubts') ?? false} />
           </div>
           )}
 

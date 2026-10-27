@@ -16,7 +16,8 @@ Move an entry to [completed.md](completed.md) when it ships. Add new entries at 
 - [x] P1 #432 question bank: Platform Admin → Question Bank (Claude batch + Groq check, review, publish), teacher Quiz Questions view, student report endpoint (`feature/432-quiz-question-bank`)
 - [x] P2 #433 daily quiz: posting per class, student + parent quiz screens, answers after the close, late for 7 days, ready/reminder/results notices, Platform Admin → Daily Quiz settings (`feature/433-daily-quiz`)
 - [x] P3 #434 points ledger, working-day streak, badges, weekly leaderboard, parent view + weekly report, School Admin report (`feature/434-quiz-points-leaderboard`)
-- [ ] P4 #435 doubts (Ask WLYL AI → Ask Teacher) · P5 #436 SLA · P6 #437 insights · P7 #438 AI hook
+- [x] P4 #435 doubts: Ask WLYL AI → Ask Teacher, teacher Doubts (misconceptions, covered in class, replies), proof question, points + WLYL Stars, parent timeline, School Admin report (`feature/435-student-doubts`)
+- [ ] Next: P5 #436 SLA · P6 #437 insights · P7 #438 AI hook
 
 ### Push notifications via Firebase (FCM)
 **Type:** Feature

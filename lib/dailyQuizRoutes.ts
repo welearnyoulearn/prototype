@@ -14,10 +14,9 @@ import { progressView } from '@/lib/quizRewards'
 export type QuizPortal = 'student' | 'parent'
 export type QuizActor = { studentId: number; schoolId: number; parentId: number | null }
 
-const FEATURE_OFF = { error: 'Feature not enabled', code: 'FEATURE_DISABLED', feature: 'daily-quiz' }
 
 /** The student this request acts for, or the error response to return. */
-export async function quizActor(req: NextRequest, portal: QuizPortal): Promise<QuizActor | NextResponse> {
+export async function quizActor(req: NextRequest, portal: QuizPortal, feature: 'daily-quiz' | 'student-doubts' = 'daily-quiz'): Promise<QuizActor | NextResponse> {
   let actor: QuizActor
   if (portal === 'student') {
     const s = await getStudentSession()
@@ -33,7 +32,10 @@ export async function quizActor(req: NextRequest, portal: QuizPortal): Promise<Q
     if (!s) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     actor = { studentId, schoolId: p.schoolId, parentId: p.parentId }
   }
-  if (!await schoolHasFeature(actor.schoolId, 'daily-quiz')) return NextResponse.json(FEATURE_OFF, { status: 403 })
+  // Doubts sit on top of the quiz, so they need both features.
+  for (const key of feature === 'daily-quiz' ? ['daily-quiz'] : ['daily-quiz', 'student-doubts']) {
+    if (!await schoolHasFeature(actor.schoolId, key)) return NextResponse.json({ error: 'Feature not enabled', code: 'FEATURE_DISABLED', feature: key }, { status: 403 })
+  }
   return actor
 }
 

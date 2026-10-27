@@ -48,6 +48,7 @@ const ClassManagement       = dynamic(() => import('./components/ClassManagement
 const CurriculumCustomizer   = dynamic(() => import('./components/CurriculumCustomizer'),   { loading: () => <ModuleSkeleton /> })
 const DigitalLibrary         = dynamic(() => import('@/app/components/library/DigitalLibrary'), { loading: () => <ModuleSkeleton /> })
 const SchoolDailyQuiz        = dynamic(() => import('./components/SchoolDailyQuiz'),        { loading: () => <ModuleSkeleton /> })
+const SchoolDoubts           = dynamic(() => import('./components/SchoolDoubts'),           { loading: () => <ModuleSkeleton /> })
 const AcademicAnalytics      = dynamic(() => import('./components/AcademicAnalytics'),      { loading: () => <ModuleSkeleton /> })
 const ExamSchedule          = dynamic(() => import('./components/ExamSchedule'),           { loading: () => <ModuleSkeleton /> })
 const TeachersManagement    = dynamic(() => import('./components/TeachersManagement'),     { loading: () => <ModuleSkeleton /> })
@@ -985,7 +986,7 @@ function SchoolAdmin() {
                 {visited.has('curriculum')       && <div hidden={activeNav !== 'curriculum'}><CurriculumCustomizer schoolId={selectedSchool.id} /></div>}
                 {visited.has('library')          && <div hidden={activeNav !== 'library'}><DigitalLibrary apiUrl={`/api/school/library?school_id=${selectedSchool.id}`} /></div>}
                 {visited.has('syllabus-tracking') && <div hidden={activeNav !== 'syllabus-tracking'}><AcademicAnalytics schoolId={selectedSchool.id} /></div>}
-                {visited.has('daily-quiz') && navEnabled('daily-quiz') && <div hidden={activeNav !== 'daily-quiz'}><SchoolDailyQuiz /></div>}
+                {visited.has('daily-quiz') && navEnabled('daily-quiz') && <div hidden={activeNav !== 'daily-quiz'}><SchoolDailyQuiz extra={navEnabled('student-doubts') ? <SchoolDoubts /> : null} /></div>}
                 {visited.has('exam-schedule')    && <div hidden={activeNav !== 'exam-schedule'}><ExamSchedule schoolId={selectedSchool.id} /></div>}
                 {visited.has('announcements')    && <div hidden={activeNav !== 'announcements'}><AnnouncementBoard schoolId={selectedSchool.id} schoolName={selectedSchool.name} /></div>}
                 {visited.has('feedback-management') && <div hidden={activeNav !== 'feedback-management'}><FeedbackManagement schoolId={selectedSchool.id} /></div>}

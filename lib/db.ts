@@ -87,7 +87,7 @@ const BOOTSTRAP_MARKER_KEY   = 'initial_schema_bootstrap'
 // silently never runs anywhere, and you will chase a "column does not exist" 500
 // that reproduces on production but never locally against a fresh DB.
 // Adding a migration statement and bumping this number is ONE change, not two.
-const SCHEMA_VERSION = 60
+const SCHEMA_VERSION = 61
 
 // Records the schema level this build finished applying, on the same row as the
 // bootstrap marker (no extra row, no extra round-trip to read it back).
@@ -4319,5 +4319,90 @@ async function runIncrementalMigrations() {
       sent_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       PRIMARY KEY (student_id, week_start)
     );
+  `)
+
+  // Student Doubts (#435). After a quiz's answers are out: read the explanation → Ask WLYL AI → Ask Teacher.
+  // A doubt goes to the subject teacher (else the class teacher). It is clarified only when the student answers
+  // a fresh question on the same topic correctly and confirms; then the student earns points and the teacher
+  // who explained earns WLYL Stars (teacher_star_points, a ledger like student_points).
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS student_doubts (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+      class_id INTEGER NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
+      attempt_id INTEGER REFERENCES daily_quiz_attempts(id) ON DELETE SET NULL,
+      question_id INTEGER NOT NULL REFERENCES quiz_questions(id) ON DELETE CASCADE,
+      master_topic_id INTEGER REFERENCES master_topics(id) ON DELETE SET NULL,
+      subject_name VARCHAR(100) NOT NULL,
+      chosen_index SMALLINT,
+      note TEXT,
+      ai_tried BOOLEAN NOT NULL DEFAULT FALSE,
+      teacher_id INTEGER REFERENCES teachers(id) ON DELETE SET NULL,
+      status VARCHAR(12) NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'explained', 'clarified')),
+      reply TEXT,
+      replied_by INTEGER REFERENCES teachers(id) ON DELETE SET NULL,
+      explained_at TIMESTAMPTZ,
+      explained_in_class BOOLEAN NOT NULL DEFAULT FALSE,
+      proof_question_id INTEGER REFERENCES quiz_questions(id) ON DELETE SET NULL,
+      proof_chosen_index SMALLINT,
+      proof_correct BOOLEAN,
+      proof_at TIMESTAMPTZ,
+      clarified_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (student_id, question_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_student_doubts_teacher ON student_doubts(teacher_id, status);
+    CREATE INDEX IF NOT EXISTS idx_student_doubts_class ON student_doubts(class_id, question_id, status);
+    CREATE INDEX IF NOT EXISTS idx_student_doubts_school ON student_doubts(school_id, status, created_at);
+
+    -- Every step, for the student, parent, teacher and school timelines.
+    CREATE TABLE IF NOT EXISTS student_doubt_events (
+      id SERIAL PRIMARY KEY,
+      doubt_id INTEGER NOT NULL REFERENCES student_doubts(id) ON DELETE CASCADE,
+      actor_type VARCHAR(10) NOT NULL CHECK (actor_type IN ('student', 'teacher', 'system')),
+      actor_id INTEGER,
+      event VARCHAR(20) NOT NULL,
+      note TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_student_doubt_events_doubt ON student_doubt_events(doubt_id, created_at);
+
+    -- "Ask WLYL AI" answers: shown again on reload, and counted for the per-student daily limit.
+    CREATE TABLE IF NOT EXISTS doubt_ai_help (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+      question_id INTEGER NOT NULL REFERENCES quiz_questions(id) ON DELETE CASCADE,
+      attempt_id INTEGER REFERENCES daily_quiz_attempts(id) ON DELETE SET NULL,
+      message TEXT,
+      reply TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_doubt_ai_help_student ON doubt_ai_help(student_id, created_at);
+
+    -- A teacher's one-tap "Covered in class" on a most-missed question.
+    CREATE TABLE IF NOT EXISTS quiz_misconceptions_covered (
+      class_id INTEGER NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
+      question_id INTEGER NOT NULL REFERENCES quiz_questions(id) ON DELETE CASCADE,
+      teacher_id INTEGER REFERENCES teachers(id) ON DELETE SET NULL,
+      covered_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (class_id, question_id)
+    );
+
+    -- WLYL Stars for teachers: one row per award (balance = sum), unique per (teacher, action, reference).
+    CREATE TABLE IF NOT EXISTS teacher_star_points (
+      id SERIAL PRIMARY KEY,
+      teacher_id INTEGER NOT NULL REFERENCES teachers(id) ON DELETE CASCADE,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      action VARCHAR(40) NOT NULL,
+      stars INTEGER NOT NULL,
+      reference_type VARCHAR(30) NOT NULL,
+      reference_id INTEGER NOT NULL,
+      earned_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (teacher_id, action, reference_type, reference_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_teacher_star_points_school ON teacher_star_points(school_id, earned_at);
   `)
 }

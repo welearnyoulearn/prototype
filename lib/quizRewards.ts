@@ -24,13 +24,13 @@ type Db = Pick<PoolClient, 'query'>
 const LEARNING_REFS = `('daily_quiz_attempt', 'daily_quiz_week', 'student_doubt')`
 
 /** One ledger row; false when that award was already given. */
-export async function awardStudentPoints(db: Db, studentId: number, schoolId: number, action: string, points: number, refType: 'daily_quiz_attempt' | 'daily_quiz_week' | 'student_doubt', refId: number): Promise<boolean> {
+export async function awardStudentPoints(db: Db, studentId: number, schoolId: number, action: string, points: number, refType: 'daily_quiz_attempt' | 'daily_quiz_week' | 'student_doubt', refId: number, earnedAt: Date = new Date()): Promise<boolean> {
   if (points <= 0) return false
   const { rowCount } = await db.query(`
-    INSERT INTO student_points (student_id, school_id, action_type, points, reference_id, reference_type, points_type)
-    VALUES ($1, $2, $3, $4, $5, $6, 'academic')
+    INSERT INTO student_points (student_id, school_id, action_type, points, reference_id, reference_type, points_type, earned_at)
+    VALUES ($1, $2, $3, $4, $5, $6, 'academic', $7)
     ON CONFLICT (student_id, action_type, reference_type, reference_id) WHERE reference_type IN ${LEARNING_REFS} DO NOTHING
-  `, [studentId, schoolId, action, points, refId, refType])
+  `, [studentId, schoolId, action, points, refId, refType, earnedAt])
   return (rowCount ?? 0) > 0
 }
 
@@ -72,13 +72,13 @@ export async function awardOnFinish(client: Db, attemptId: number, now: Date = n
   `, [attemptId])
   if (!t) return
   const p = participationAward(t.is_late)
-  await awardStudentPoints(client, t.student_id, t.school_id, p.action, p.points, 'daily_quiz_attempt', attemptId)
+  await awardStudentPoints(client, t.student_id, t.school_id, p.action, p.points, 'daily_quiz_attempt', attemptId, now)
   await grantBadge(client, t.student_id, t.school_id, 'quiz_starter')
 
   const quizzes = await classQuizzes(client, t.class_id, t.student_id, istNow(now).date, now)
   const after = quizStreak(quizzes)
   for (const m of milestonesCrossed(streakWithout(quizzes, t.quiz_id), after)) {
-    await awardStudentPoints(client, t.student_id, t.school_id, m.action, m.points, 'daily_quiz_attempt', attemptId)
+    await awardStudentPoints(client, t.student_id, t.school_id, m.action, m.points, 'daily_quiz_attempt', attemptId, now)
     await grantBadge(client, t.student_id, t.school_id, m.badge)
   }
   if (t.is_late) await client.query('UPDATE daily_quiz_attempts SET points_settled_at = NOW() WHERE id = $1', [attemptId])
@@ -99,7 +99,7 @@ export async function settleAccuracy(where: { studentId?: number; quizIds?: numb
   `, params)
   for (const r of rows) {
     for (const a of accuracyAwards(false, r.correct_count ?? 0, r.total_count ?? 0)) {
-      await awardStudentPoints(pool, r.student_id, r.school_id, a.action, a.points, 'daily_quiz_attempt', r.id)
+      await awardStudentPoints(pool, r.student_id, r.school_id, a.action, a.points, 'daily_quiz_attempt', r.id, now)
     }
     const { rows: [c] } = await pool.query<{ n: number }>(`SELECT COUNT(*)::int AS n FROM student_points WHERE student_id = $1 AND action_type = 'daily_quiz_perfect'`, [r.student_id])
     if (c.n >= SHARP_SHOOTER_PERFECTS) await grantBadge(pool, r.student_id, r.school_id, 'sharp_shooter')
@@ -257,7 +257,7 @@ export async function runWeeklyReports(schoolId: number, now: Date = new Date())
   for (const cls of classes) {
     const week = await classWeek(cls, now)
     for (const r of week.improved) {
-      if (r.gain >= WEEKLY_IMPROVED.minGainPct) await awardStudentPoints(pool, r.studentId, schoolId, 'weekly_improved', WEEKLY_IMPROVED.points, 'daily_quiz_week', weekRef(ws))
+      if (r.gain >= WEEKLY_IMPROVED.minGainPct) await awardStudentPoints(pool, r.studentId, schoolId, 'weekly_improved', WEEKLY_IMPROVED.points, 'daily_quiz_week', weekRef(ws), now)
     }
     for (const row of week.board) {
       const { rowCount } = await pool.query(`INSERT INTO quiz_weekly_reports (student_id, week_start) VALUES ($1, $2) ON CONFLICT DO NOTHING`, [row.studentId, ws])
