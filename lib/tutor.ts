@@ -220,15 +220,18 @@ export async function* streamTutorAnswer(opts: { excerpts: RetrievedChunk[]; que
           continue
         }
         const seen: { usage?: Usage } = {}
+        let answerChars = 0
         for await (const text of sseText(res.body, u => { seen.usage = u })) {
           clearTimeout(timer)
           yielded = true
+          answerChars += text.length
           yield text
         }
-        if (seen.usage) {
-          logUsage(model, seen.usage)
-          opts.onUsage?.({ input: seen.usage.prompt_tokens ?? 0, output: seen.usage.completion_tokens ?? 0 })
-        }
+        if (seen.usage) logUsage(model, seen.usage)
+        // OmniRoute's streams carry no usage, so estimate it for metering.
+        // ponytail: ~4 chars per token, low for Telugu/Hindi text; fine while answers are mostly English.
+        const usage = seen.usage ?? { prompt_tokens: Math.ceil(messages.reduce((n, m) => n + m.content.length, 0) / 4), completion_tokens: Math.ceil(answerChars / 4) }
+        if (yielded) opts.onUsage?.({ input: usage.prompt_tokens ?? 0, output: usage.completion_tokens ?? 0 })
         if (yielded) return
         console.error('[tutor] route failed', model, 'empty stream')
         failures.push(null)

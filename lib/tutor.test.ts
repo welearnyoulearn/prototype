@@ -207,6 +207,15 @@ test('streamTutorAnswer reports the final chunk\'s usage to onUsage', async () =
   assert.deepEqual(seen, [{ input: 1200, output: 90 }])
 })
 
+test('streamTutorAnswer estimates usage when the stream carries none', async () => {
+  stubFetch([() => new Response(`${delta('12345678')}data: [DONE]\n\n`)])
+  const seen: TutorUsage[] = []
+  assert.equal(await collect(streamTutorAnswer({ ...ask, onUsage: u => seen.push(u) })), '12345678')
+  assert.equal(seen.length, 1)
+  assert.equal(seen[0].output, 2)
+  assert.ok(seen[0].input > 500, String(seen[0].input)) // the system prompt alone is ~2,500 chars
+})
+
 test('completeOnce reports usage to onUsage when the response has it', async () => {
   stubFetch([
     () => new Response(JSON.stringify({ choices: [{ message: { content: 'x' } }], usage: { prompt_tokens: 300, completion_tokens: 40 } })),
