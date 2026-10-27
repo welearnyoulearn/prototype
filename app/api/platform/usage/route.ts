@@ -75,7 +75,7 @@ export async function GET(req: NextRequest) {
       const tier = s.tier ?? 'none'
       const row: UsageSchoolRow = {
         schoolId: s.id, schoolName: s.name, schoolCode: s.school_code ?? '', tier,
-        deactivated: s.deactivated, charged: {}, counted: {}, extra: 0,
+        deactivated: s.deactivated, charged: {}, counted: {}, extra: 0, ourCost: 0,
       }
       for (const m of charged) {
         const used = qty.get(`${s.id}|${m.key}`) ?? 0
@@ -96,7 +96,9 @@ export async function GET(req: NextRequest) {
         row.counted[m.key] = used
         totals[m.key].quantity += used
       }
+      for (const m of active) if (m.ourCostPerUnit !== null) row.ourCost += ((qty.get(`${s.id}|${m.key}`) ?? 0) / m.unitSize) * m.ourCostPerUnit
       row.extra = round2(row.extra)
+      row.ourCost = round2(row.ourCost)
       schools.push(row)
     }
     for (const t of Object.values(totals)) t.extra = round2(t.extra)

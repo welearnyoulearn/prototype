@@ -3,7 +3,7 @@
 // which retrieval fuses with the original query. Any failure falls back to the original alone.
 import { z } from 'zod'
 import { retrieveChunks, keywordQuery, type QueryExpansion, type RetrievedChunk } from '@/lib/rag/retrieve'
-import { completeOnce, retrievalQuery } from '@/lib/tutor'
+import { completeOnce, retrievalQuery, type TutorUsage } from '@/lib/tutor'
 
 const REWRITE_TIMEOUT_MS = 4000
 
@@ -53,9 +53,9 @@ Reply with JSON only: {"query": "...", "keywords": ["..."], "subject": "..." or 
 - subject: the most likely subject from their list, or null.`
 }
 
-export async function rewriteQuery(opts: { message: string; grade: string; gradeSubjects: string[]; previousQuestion?: string }): Promise<Rewrite | null> {
+export async function rewriteQuery(opts: { message: string; grade: string; gradeSubjects: string[]; previousQuestion?: string; onUsage?: (u: TutorUsage) => void }): Promise<Rewrite | null> {
   const text = await completeOnce(rewritePrompt(opts.message, opts.grade, opts.gradeSubjects, opts.previousQuestion), {
-    maxTokens: 120, timeoutMs: REWRITE_TIMEOUT_MS,
+    maxTokens: 120, timeoutMs: REWRITE_TIMEOUT_MS, onUsage: opts.onUsage,
   })
   return text ? parseRewrite(text, opts.gradeSubjects) : null
 }
@@ -74,6 +74,8 @@ export async function searchChunks(opts: {
   // The grade's subjects (from the syllabus query, which runs alongside the original query's search).
   gradeSubjects: Promise<string[]>
   limit: number
+  // The rewrite's tokens, for metering.
+  onUsage?: (u: TutorUsage) => void
 }): Promise<{ chunks: RetrievedChunk[]; rewrite: Rewrite | null }> {
   const rewriting = needsRewrite(opts.message)
     ? opts.gradeSubjects.then((gradeSubjects) => rewriteQuery({ ...opts, gradeSubjects }), () => null)

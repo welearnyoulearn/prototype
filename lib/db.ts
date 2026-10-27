@@ -87,7 +87,7 @@ const BOOTSTRAP_MARKER_KEY   = 'initial_schema_bootstrap'
 // silently never runs anywhere, and you will chase a "column does not exist" 500
 // that reproduces on production but never locally against a fresh DB.
 // Adding a migration statement and bumping this number is ONE change, not two.
-const SCHEMA_VERSION = 58
+const SCHEMA_VERSION = 59
 
 // Records the schema level this build finished applying, on the same row as the
 // bootstrap marker (no extra row, no extra round-trip to read it back).
@@ -4112,4 +4112,19 @@ async function runIncrementalMigrations() {
   } catch (err) {
     console.warn('[db] material_chunks.embedding DROP NOT NULL skipped:', err)
   }
+  // Student AI tutor metering (#441). Questions carry the limit (what schools think in); tokens carry
+  // our cost — ₹0.013 per 1,000 tokens is Claude Haiku at $0.10 in / $0.50 out per million, ~3,000 in
+  // + 400 out per question, ₹88/$ (see DOCS/ai-tutor-cost-deck.html); editable in Plans & Pricing.
+  // Defaults: 10,000 questions a month per school, no extra charge.
+  await pool.query(`
+    INSERT INTO usage_meters (key, name, unit_label, unit_size, category, our_cost_per_unit, is_billable, sort_order) VALUES
+      ('tutor.question', 'AI tutor questions', 'question', 1, 'ai', NULL, TRUE, 8),
+      ('tutor.tokens', 'AI tutor tokens', '1,000 tokens', 1000, 'ai', 0.013, FALSE, 9)
+    ON CONFLICT (key) DO NOTHING;
+    INSERT INTO usage_prices (meter_key, tier, effective_month, in_plan, included_per_month, unit_price, monthly_cap, at_cap) VALUES
+      ('tutor.question', 'basic',    '2026-01-01', TRUE, 10000, 0, 10000, 'block'),
+      ('tutor.question', 'standard', '2026-01-01', TRUE, 10000, 0, 10000, 'block'),
+      ('tutor.question', 'premium',  '2026-01-01', TRUE, 10000, 0, 10000, 'block')
+    ON CONFLICT DO NOTHING;
+  `)
 }

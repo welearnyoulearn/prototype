@@ -40,6 +40,9 @@ Rules:
 
 export type TutorTurn = { role: 'user' | 'assistant'; content: string }
 
+// Tokens one model call used, for metering (#441).
+export type TutorUsage = { input: number; output: number }
+
 export class TutorError extends Error {}
 
 const attr = (s: string) => s.replace(/[&"<>]/g, c => ({ '&': '&amp;', '"': '&quot;', '<': '&lt;', '>': '&gt;' })[c] ?? c)
@@ -120,7 +123,7 @@ export function tutorConfigured(): boolean {
 }
 
 /** One short non-streaming completion with the first key and model (e.g. the query rewrite); null on any failure or timeout. */
-export async function completeOnce(prompt: string, opts: { maxTokens: number; timeoutMs: number }): Promise<string | null> {
+export async function completeOnce(prompt: string, opts: { maxTokens: number; timeoutMs: number; onUsage?: (u: TutorUsage) => void }): Promise<string | null> {
   const { url, keys, models } = config()
   if (!keys.length) return null
   try {
@@ -131,7 +134,9 @@ export async function completeOnce(prompt: string, opts: { maxTokens: number; ti
       signal: AbortSignal.timeout(opts.timeoutMs),
     })
     if (!res.ok) return null
-    const text = ((await res.json()) as { choices?: { message?: { content?: unknown } }[] }).choices?.[0]?.message?.content
+    const data = (await res.json()) as { choices?: { message?: { content?: unknown } }[]; usage?: Usage }
+    if (data.usage) opts.onUsage?.({ input: data.usage.prompt_tokens ?? 0, output: data.usage.completion_tokens ?? 0 })
+    const text = data.choices?.[0]?.message?.content
     return typeof text === 'string' ? text : null
   } catch {
     return null
@@ -187,7 +192,7 @@ export function trimHistory(history: TutorTurn[]): TutorTurn[] {
 }
 
 /** Streams the tutor's answer as text chunks. Throws TutorError with a student-safe message when no route answers. */
-export async function* streamTutorAnswer(opts: { excerpts: RetrievedChunk[]; question: string; history: TutorTurn[]; syllabus?: string }): AsyncGenerator<string> {
+export async function* streamTutorAnswer(opts: { excerpts: RetrievedChunk[]; question: string; history: TutorTurn[]; syllabus?: string; onUsage?: (u: TutorUsage) => void }): AsyncGenerator<string> {
   const { url, keys, models } = config()
   const messages: TutorTurn[] = [
     ...trimHistory(opts.history),
@@ -220,7 +225,10 @@ export async function* streamTutorAnswer(opts: { excerpts: RetrievedChunk[]; que
           yielded = true
           yield text
         }
-        if (seen.usage) logUsage(model, seen.usage)
+        if (seen.usage) {
+          logUsage(model, seen.usage)
+          opts.onUsage?.({ input: seen.usage.prompt_tokens ?? 0, output: seen.usage.completion_tokens ?? 0 })
+        }
         if (yielded) return
         console.error('[tutor] route failed', model, 'empty stream')
         failures.push(null)

@@ -2,8 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import pool from '@/lib/db'
 import { getStudentSession } from '@/lib/auth'
+import { checkAllowance, recordUsage } from '@/lib/usage'
 import { searchChunks } from '@/lib/rag/rewrite'
-import { formatSyllabus, streamTutorAnswer, tutorConfigured, TutorError, wantsSyllabus, type SyllabusRow, type TutorTurn } from '@/lib/tutor'
+import { formatSyllabus, streamTutorAnswer, tutorConfigured, TutorError, wantsSyllabus, type SyllabusRow, type TutorTurn, type TutorUsage } from '@/lib/tutor'
 
 // Student AI tutor (AI Pro). Answers stream back as NDJSON lines:
 //   {"type":"sources",...} → {"type":"delta","text":...}… → {"type":"done","sessionId":N}  (or {"type":"error"})
@@ -93,6 +94,13 @@ export async function POST(req: NextRequest) {
     const subject = parsed.data.subject || null
 
     if (!(await hasAiPro(session.schoolId))) return NextResponse.json({ error: 'AI Pro is not enabled for your school' }, { status: 403 })
+    // The school's monthly question limit (#441), set in Platform admin → Plans & Pricing / Billing.
+    const allowance = await checkAllowance(session.schoolId, 'tutor.question', 1)
+    if (!allowance.allowed) {
+      return allowance.reason === 'limit_reached'
+        ? NextResponse.json({ error: "Your school has used this month's AI tutor questions. The tutor will be back on the 1st." }, { status: 429 })
+        : NextResponse.json({ error: 'The AI tutor is not included in your school\'s plan.' }, { status: 403 })
+    }
 
     const chat = sessionId ? await loadOwnSession(sessionId, session.studentId, session.schoolId) : null
     if (sessionId && !chat) return NextResponse.json({ error: 'Chat not found' }, { status: 404 })
@@ -119,12 +127,14 @@ export async function POST(req: NextRequest) {
       console.error('[student/tutor syllabus]', err)
       return [] as SyllabusRow[]
     })
+    let tokens = 0
+    const onUsage = (u: TutorUsage) => { tokens += u.input + u.output }
     // searchChunks maps class subjects ("Biology") to book subjects ("Biological Science"), rewrites
     // Telugu/Hindi/short questions into English search terms, and falls back to the whole grade
     // for a subject with no books (e.g. "sports").
     const [{ chunks }, syllabusRows] = await Promise.all([
       searchChunks({
-        board, grade: session.grade, subject, message, previousQuestion, limit: 6,
+        board, grade: session.grade, subject, message, previousQuestion, limit: 6, onUsage,
         gradeSubjects: syllabusLoad.then(rows => [...new Set(rows.map(r => r.subject))]),
       }),
       syllabusLoad,
@@ -145,7 +155,7 @@ export async function POST(req: NextRequest) {
             type: 'sources',
             sources: chunks.map((c, i) => ({ n: i + 1, title: c.title, materialType: c.materialType, subject: c.subject, page: c.page, url: `${c.fileUrl}#page=${c.page}` })),
           })
-          for await (const text of streamTutorAnswer({ excerpts: chunks, question: message, history, syllabus })) {
+          for await (const text of streamTutorAnswer({ excerpts: chunks, question: message, history, syllabus, onUsage })) {
             if (cancelled) break
             answer += text
             send({ type: 'delta', text })
@@ -168,6 +178,16 @@ export async function POST(req: NextRequest) {
           if (!cancelled) send({ type: 'error', message: err instanceof TutorError ? err.message : 'Something went wrong. Please try again.' })
         } finally {
           if (!cancelled) controller.close()
+          // Metered once an answer came back, also when the student stopped it midway (the tokens were spent).
+          // After close, so limit-alert emails never hold the student's stream open.
+          // ponytail: rewrite tokens spent on a question that then failed go unrecorded; meter them if that ever adds up.
+          if (answer) {
+            const usage = { schoolId: session.schoolId, source: 'student.tutor', actor: { role: 'student', id: session.studentId } }
+            await Promise.all([
+              recordUsage({ ...usage, meterKey: 'tutor.question', quantity: 1 }),
+              tokens > 0 && recordUsage({ ...usage, meterKey: 'tutor.tokens', quantity: tokens }),
+            ])
+          }
         }
       },
       cancel() { cancelled = true },

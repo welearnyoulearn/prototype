@@ -1,6 +1,6 @@
 import test, { afterEach } from 'node:test'
 import assert from 'node:assert/strict'
-import { completeOnce, formatSyllabus, retrievalQuery, streamTutorAnswer, SYSTEM_PROMPT, trimHistory, tutorConfigured, TutorError, wantsSyllabus, type SyllabusRow } from './tutor'
+import { completeOnce, formatSyllabus, retrievalQuery, streamTutorAnswer, SYSTEM_PROMPT, trimHistory, tutorConfigured, TutorError, wantsSyllabus, type SyllabusRow, type TutorUsage } from './tutor'
 
 process.env.OMNIROUTE_BASE_URL = 'http://omniroute.test/v1/'
 process.env.OMNIROUTE_API_KEYS = 'k1'
@@ -194,6 +194,28 @@ test('a usage-only final chunk is logged and does not break the stream', async (
     assert.equal(await collect(streamTutorAnswer(ask)), 'Hi')
   } finally { console.log = realLog }
   assert.deepEqual(logs, ['[tutor] usage model=m1 in=1200 out=90'])
+})
+
+test('streamTutorAnswer reports the final chunk\'s usage to onUsage', async () => {
+  stubFetch([() => new Response(`${delta('Hi')}data: {"choices":[],"usage":{"prompt_tokens":1200,"completion_tokens":90}}\n\ndata: [DONE]\n\n`)])
+  const seen: TutorUsage[] = []
+  const realLog = console.log
+  console.log = () => {}
+  try {
+    assert.equal(await collect(streamTutorAnswer({ ...ask, onUsage: u => seen.push(u) })), 'Hi')
+  } finally { console.log = realLog }
+  assert.deepEqual(seen, [{ input: 1200, output: 90 }])
+})
+
+test('completeOnce reports usage to onUsage when the response has it', async () => {
+  stubFetch([
+    () => new Response(JSON.stringify({ choices: [{ message: { content: 'x' } }], usage: { prompt_tokens: 300, completion_tokens: 40 } })),
+    () => new Response(JSON.stringify({ choices: [{ message: { content: 'y' } }] })),
+  ])
+  const seen: TutorUsage[] = []
+  assert.equal(await completeOnce('p', { maxTokens: 10, timeoutMs: 1000, onUsage: u => seen.push(u) }), 'x')
+  assert.equal(await completeOnce('p', { maxTokens: 10, timeoutMs: 1000, onUsage: u => seen.push(u) }), 'y')
+  assert.deepEqual(seen, [{ input: 300, output: 40 }])
 })
 
 test('the prompt keeps the grounding, homework and language rules and stays short', () => {

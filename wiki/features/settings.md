@@ -52,6 +52,9 @@ API routes these screens call (all exist):
 - `POST` /api/auth/change-password
 - `POST` /api/auth/logout
 - `GET` /api/auth/me
+- `GET` /api/billing/invoices
+- `GET` /api/billing/plan
+- `GET` /api/billing/usage
 - `GET` /api/plan/status
 - `GET/POST` /api/platform/features
 - `DELETE/GET/PATCH/POST` /api/school-admin/staff-accounts

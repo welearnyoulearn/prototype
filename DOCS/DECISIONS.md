@@ -11,6 +11,16 @@ Non-obvious technical decisions and their reasoning for the WLYL School prototyp
 **Consequences:** What trade-offs come with this decision?
 -->
 
+## 2026-10-27 — AI tutor metered as questions (limit) and tokens (cost) (#441)
+
+**Context:** The student AI tutor only logged its tokens. We need a per-school monthly limit and to know what each school costs us.
+
+**Decision:** Two meters in the existing usage system. `tutor.question` is billable and carries the limit (10,000 a month per school by default, blocked at the cap, no extra charge), because schools think in questions. `tutor.tokens` is track-only and carries our cost (₹0.013 per 1,000 tokens: Claude Haiku at $0.10 in / $0.50 out per million, ~3,000 in + 400 out per question, ₹88/$), since what we pay varies with each question's length. Both are recorded once an answer is produced, including when the student stops it midway.
+
+**Alternatives considered:** Reusing `ai.tokens` (rejected: it meters the Groq helpers with a token-based plan limit, a number schools can't reason about); one question meter with a flat cost (rejected: hides long syllabus answers and the rewrite call).
+
+**Consequences:** The per-student daily limit (60) stays alongside the school limit. Query-rewrite tokens spent on a question that then fails are not recorded. Billing → Usage shows a per-school "Our cost" over every meter with a cost.
+
 
 ## 2026-10-20 — Student tutor RAG: pgvector in Supabase, OpenAI-compatible embeddings, Claude Haiku 5.5
 

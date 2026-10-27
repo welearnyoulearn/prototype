@@ -73,7 +73,7 @@ export default function BillingPage() {
     .filter(r => !overOnly || Object.values(r.charged).some(c => c && c.used > c.included))
   const start = pageStart(offset, rows.length)
   const platformEmails = usage?.platform['email.sent'] ?? 0
-  const cols = 4 + chargedMeters.length
+  const cols = 5 + chargedMeters.length
 
   return (
     <div className="p-6 max-w-6xl">
@@ -135,7 +135,7 @@ export default function BillingPage() {
             <table className="w-full text-sm min-w-[800px]">
               <thead><tr className="text-left"><th className="px-4 py-2.5">School</th><th className="px-4 py-2.5">Plan</th>
                 {chargedMeters.map(m => <th key={m.key} className="px-4 py-2.5">{m.name}</th>)}
-                <th className="px-4 py-2.5 text-right">Emails</th><th className="px-4 py-2.5 text-right">Extra so far</th></tr></thead>
+                <th className="px-4 py-2.5 text-right">Emails</th><th className="px-4 py-2.5 text-right">Our cost</th><th className="px-4 py-2.5 text-right">Extra so far</th></tr></thead>
               <tbody>
                 {loading && Array.from({ length: 4 }).map((_, i) => (
                   <tr key={`sk-${i}`} data-testid="usage-skeleton-row">{Array.from({ length: usage ? cols : 6 }).map((_, c) => <td key={c} className="px-4 py-3"><Skeleton className="h-3 w-full max-w-32" /></td>)}</tr>
@@ -152,6 +152,7 @@ export default function BillingPage() {
                       return <td key={m.key} className="px-4 py-3">{c ? <UsageBar used={c.used} included={c.included} paused={c.paused} /> : <span className="text-xs text-gray-400">Not in plan</span>}</td>
                     })}
                     <td className="px-4 py-3 text-right tabular-nums">{(r.counted['email.sent'] ?? 0).toLocaleString('en-IN')}</td>
+                    <td className="px-4 py-3 text-right tabular-nums">{inr(r.ourCost)}</td>
                     <td className="px-4 py-3 text-right font-semibold tabular-nums">{inr(r.extra)}</td>
                   </tr>
                 ))}
