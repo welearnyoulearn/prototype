@@ -49,7 +49,7 @@ export function featureRequirementForApiPath(pathname: string, method = 'GET'): 
   if (pathname.startsWith('/api/feedback/') && !pathname.startsWith('/api/feedback/resolve') && !pathname.startsWith('/api/feedback/submit') && !pathname.startsWith('/api/feedback/voice-upload-url')) return one('feedback-management')
   if (pathname.startsWith('/api/announcements')) return one('announcements')
   if (pathname.startsWith('/api/academic-years/rollover')) return one('year-rollover')
-  if (pathname.startsWith('/api/teacher/quiz-bank') || pathname.startsWith('/api/student/quiz')) return one('daily-quiz')
+  if (pathname.startsWith('/api/teacher/quiz-bank') || pathname.startsWith('/api/student/quiz') || pathname.startsWith('/api/parent/quiz')) return one('daily-quiz')
   return null
 }
 

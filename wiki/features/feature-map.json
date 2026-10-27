@@ -84,7 +84,11 @@
     "doc": "wiki/features/daily-quiz.md",
     "ui": [
       "app/platform-admin/question-bank",
-      "app/teacher/components/TeacherQuizBank.tsx"
+      "app/platform-admin/daily-quiz",
+      "app/teacher/components/TeacherQuizBank.tsx",
+      "components/dailyQuiz",
+      "app/student/components/StudentDailyQuiz.tsx",
+      "app/parent/components/ParentDailyQuiz.tsx"
     ]
   },
   "student-doubts": {

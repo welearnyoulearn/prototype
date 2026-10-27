@@ -87,7 +87,7 @@ const BOOTSTRAP_MARKER_KEY   = 'initial_schema_bootstrap'
 // silently never runs anywhere, and you will chase a "column does not exist" 500
 // that reproduces on production but never locally against a fresh DB.
 // Adding a migration statement and bumping this number is ONE change, not two.
-const SCHEMA_VERSION = 58
+const SCHEMA_VERSION = 59
 
 // Records the schema level this build finished applying, on the same row as the
 // bootstrap marker (no extra row, no extra round-trip to read it back).
@@ -4204,5 +4204,98 @@ async function runIncrementalMigrations() {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
     CREATE INDEX IF NOT EXISTS idx_quiz_bank_chapters_subject ON quiz_bank_chapters(master_subject_id, status);
+  `)
+
+  // Daily Quiz (#433). One quiz per class per working day: one question per class subject whose bank is
+  // published (lib/quizBank.ts), from topics the class covered recently. Each student draws their own
+  // questions. Answers stay hidden until the class quiz closes; a missed quiz can be taken late for 7 days.
+  await pool.query(`
+    -- Platform Admin only. school_id NULL = the global row; a school row overrides only the fields it sets.
+    CREATE TABLE IF NOT EXISTS quiz_settings (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER UNIQUE REFERENCES schools(id) ON DELETE CASCADE,
+      season_start CHAR(5),
+      season_end CHAR(5),
+      open_time CHAR(5),
+      close_time CHAR(5),
+      grades INTEGER[],
+      updated_by INTEGER,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_quiz_settings_global ON quiz_settings ((school_id IS NULL)) WHERE school_id IS NULL;
+    INSERT INTO quiz_settings (school_id, season_start, season_end, open_time, close_time, grades)
+    SELECT NULL, '07-01', '03-15', '15:30', '21:00', ARRAY[3,4,5,6,7,8,9,10]
+    WHERE NOT EXISTS (SELECT 1 FROM quiz_settings WHERE school_id IS NULL);
+
+    -- opens_at / closes_at are frozen when the quiz is created, so a later settings change never moves a past quiz.
+    CREATE TABLE IF NOT EXISTS daily_quizzes (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      class_id INTEGER NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
+      quiz_date DATE NOT NULL,
+      opens_at TIMESTAMPTZ NOT NULL,
+      closes_at TIMESTAMPTZ NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (class_id, quiz_date)
+    );
+    CREATE INDEX IF NOT EXISTS idx_daily_quizzes_school_date ON daily_quizzes(school_id, quiz_date);
+
+    CREATE TABLE IF NOT EXISTS daily_quiz_items (
+      id SERIAL PRIMARY KEY,
+      quiz_id INTEGER NOT NULL REFERENCES daily_quizzes(id) ON DELETE CASCADE,
+      position SMALLINT NOT NULL,
+      master_subject_id INTEGER NOT NULL REFERENCES master_subjects(id) ON DELETE CASCADE,
+      subject_name VARCHAR(100) NOT NULL,
+      source VARCHAR(10) NOT NULL CHECK (source IN ('covered', 'planned', 'revision')),
+      topic_ids INTEGER[] NOT NULL,
+      UNIQUE (quiz_id, master_subject_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS daily_quiz_attempts (
+      id SERIAL PRIMARY KEY,
+      quiz_id INTEGER NOT NULL REFERENCES daily_quizzes(id) ON DELETE CASCADE,
+      student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      is_late BOOLEAN NOT NULL DEFAULT FALSE,
+      status VARCHAR(12) NOT NULL DEFAULT 'in_progress' CHECK (status IN ('in_progress', 'submitted')),
+      started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      submitted_at TIMESTAMPTZ,
+      correct_count INTEGER,
+      total_count INTEGER,
+      UNIQUE (quiz_id, student_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_daily_quiz_attempts_student ON daily_quiz_attempts(student_id, quiz_id);
+
+    -- One row per drawn question. chosen_index can change until submit; is_correct is set on submit.
+    CREATE TABLE IF NOT EXISTS daily_quiz_answers (
+      id SERIAL PRIMARY KEY,
+      attempt_id INTEGER NOT NULL REFERENCES daily_quiz_attempts(id) ON DELETE CASCADE,
+      item_id INTEGER NOT NULL REFERENCES daily_quiz_items(id) ON DELETE CASCADE,
+      question_id INTEGER NOT NULL REFERENCES quiz_questions(id) ON DELETE CASCADE,
+      position SMALLINT NOT NULL,
+      chosen_index SMALLINT CHECK (chosen_index BETWEEN 0 AND 3),
+      is_correct BOOLEAN,
+      answered_at TIMESTAMPTZ,
+      UNIQUE (attempt_id, item_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_daily_quiz_answers_question ON daily_quiz_answers(question_id);
+
+    CREATE TABLE IF NOT EXISTS student_topic_mastery (
+      student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+      master_topic_id INTEGER NOT NULL REFERENCES master_topics(id) ON DELETE CASCADE,
+      attempted INTEGER NOT NULL DEFAULT 0,
+      correct INTEGER NOT NULL DEFAULT 0,
+      last_wrong_at TIMESTAMPTZ,
+      last_seen_at TIMESTAMPTZ,
+      PRIMARY KEY (student_id, master_topic_id)
+    );
+
+    -- Claimed before sending, so each notice (ready / reminder / results) goes once per quiz however often the cron runs.
+    CREATE TABLE IF NOT EXISTS daily_quiz_notices (
+      quiz_id INTEGER NOT NULL REFERENCES daily_quizzes(id) ON DELETE CASCADE,
+      kind VARCHAR(10) NOT NULL CHECK (kind IN ('ready', 'reminder', 'results')),
+      sent_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (quiz_id, kind)
+    );
   `)
 }

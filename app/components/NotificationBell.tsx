@@ -97,6 +97,9 @@ const TYPE_NAV: Record<string, string> = {
   fee_year_end_reminder: 'fee-management', // school admin: open Fee Management (Year-End tab)
   fee_writeoff_request: 'fee-management',
   fee_writeoff_decided: 'fee-management',
+  daily_quiz_ready: 'daily-quiz',       // student / parent: open the Daily Quiz
+  daily_quiz_reminder: 'daily-quiz',
+  daily_quiz_results: 'daily-quiz',
 }
 
 export type NotificationPortal = 'teacher' | 'admin' | 'student' | 'parent'

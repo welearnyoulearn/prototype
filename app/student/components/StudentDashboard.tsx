@@ -8,6 +8,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { GOOD_ATTENDANCE_PCT, LOW_ATTENDANCE_PCT, todayIST } from '@/lib/attendanceRules'
 import { StudentProgressTrack, studentReveal } from './StudentExperience'
 import { Sticker, type StickerName, type Tone } from './stickers'
+import { DailyQuizHomeCard } from '@/components/dailyQuiz/DailyQuiz'
 
 type Student = {
   id: number; name: string; grade: string; section: string; roll_number: string
@@ -20,6 +21,7 @@ type Props = {
 type Quest = { key: string; label: string; description: string; sticker: StickerName; tone: Tone; tilt: number }
 
 const QUESTS: Quest[] = [
+  { key: 'daily-quiz', label: 'Daily quiz', description: 'One question per subject, every school day.', sticker: 'brain', tone: 'mint', tilt: 6 },
   { key: 'syllabus', label: 'Syllabus', description: 'See what you’re learning in each subject.', sticker: 'graduation-cap', tone: 'blue', tilt: -10 },
   { key: 'my-marks', label: 'My marks', description: 'Check your released results.', sticker: 'trophy', tone: 'yellow', tilt: 8 },
   { key: 'library', label: 'Digital library', description: 'Open your textbooks and handbooks.', sticker: 'books', tone: 'violet', tilt: -6 },
@@ -64,7 +66,7 @@ export default function StudentDashboard({ student, classId, schoolId, onNavigat
 
   const firstName = student.name.split(' ')[0]
   const today = new Date(`${todayIST()}T00:00:00Z`).toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' })
-  const quests = QUESTS.filter(q => isNavItemVisible?.(q.key) ?? q.key !== 'ai-hub')
+  const quests = QUESTS.filter(q => isNavItemVisible?.(q.key) ?? (q.key !== 'ai-hub' && q.key !== 'daily-quiz'))
 
   if (loading) {
     return (
@@ -116,6 +118,10 @@ export default function StudentDashboard({ student, classId, schoolId, onNavigat
           )}
         </div>
       </motion.section>
+
+      {isNavItemVisible?.('daily-quiz') && (
+        <DailyQuizHomeCard experience="student" query="" onOpen={() => onNavigate?.('daily-quiz')} />
+      )}
 
       {quests.length > 0 && (
         <section aria-labelledby="student-learning-title">
