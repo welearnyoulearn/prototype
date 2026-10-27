@@ -48,6 +48,8 @@ export function DoubtHelp({ q, attempt, onDoubtRaised }: { q: AttemptQuestion; a
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // If WLYL AI can't answer (busy, daily limit, not set up), the student can still go straight to the teacher.
+  const [aiFailed, setAiFailed] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -66,7 +68,7 @@ export function DoubtHelp({ q, attempt, onDoubtRaised }: { q: AttemptQuestion; a
       setHelp(h => h && { ...h, ai: { ...h.ai, [qid]: r.reply } })
       void loadHelp(attempt.attemptId, true)
       setStage('idle')
-    } catch (e) { setError((e as Error).message) }
+    } catch (e) { setError((e as Error).message); setAiFailed(true); setStage('idle') }
     finally { setBusy(false) }
   }
   async function askTeacher() {
@@ -124,8 +126,8 @@ export function DoubtHelp({ q, attempt, onDoubtRaised }: { q: AttemptQuestion; a
               <Sparkles className="h-4 w-4" aria-hidden="true" /> {q.isCorrect ? 'Ask WLYL AI' : 'Still confused? Ask WLYL AI'}
             </button>
           )}
-          {aiReply && (
-            <button type="button" onClick={() => setStage('ask-teacher')} className="inline-flex items-center gap-1.5 rounded-full border-2 border-sky-500 px-3 py-1.5 text-sm font-bold text-sky-700 hover:bg-sky-50" data-testid={`doubt-ask-teacher-${q.position}`}>
+          {(aiReply || aiFailed) && (
+            <button type="button" onClick={() => { setError(null); setStage('ask-teacher') }} className="inline-flex items-center gap-1.5 rounded-full border-2 border-sky-500 px-3 py-1.5 text-sm font-bold text-sky-700 hover:bg-sky-50" data-testid={`doubt-ask-teacher-${q.position}`}>
               <MessageCircleQuestion className="h-4 w-4" aria-hidden="true" /> Still not clear? Ask your teacher
             </button>
           )}
