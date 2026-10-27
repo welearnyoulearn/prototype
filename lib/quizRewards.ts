@@ -217,6 +217,12 @@ export async function progressView(studentId: number, schoolId: number, viewer: 
   const week = await classWeek(cls, now)
   const me = week.board.find(r => r.studentId === studentId)
   const mine = week.cur.get(studentId) ?? { quizzes: 0, correct: 0, total: 0 }
+  // Finished on time counts today's quiz as soon as it is done; only accuracy waits for the close.
+  const { rows: [done] } = await pool.query<{ n: number }>(`
+    SELECT COUNT(*)::int AS n FROM daily_quiz_attempts t JOIN daily_quizzes z ON z.id = t.quiz_id
+    WHERE t.student_id = $1 AND z.class_id = $2 AND z.quiz_date >= $3::date AND z.quiz_date < $4::date
+      AND t.status = 'submitted' AND NOT t.is_late
+  `, [studentId, cls.id, week.weekStart, addDays(week.weekStart, 7)])
   const strengths = await subjectStrengths(studentId, cls.id, week.weekStart, addDays(week.weekStart, 7), now)
   const avg = week.board.length ? Math.round(week.board.reduce((n, r) => n + r.points, 0) / week.board.length) : 0
   const leaderboard = viewer === 'student'
@@ -230,7 +236,7 @@ export async function progressView(studentId: number, schoolId: number, viewer: 
     streak: await studentStreak(cls.id, studentId, now),
     badges,
     week: {
-      weekStart: week.weekStart, quizzes: week.classGoal.quizzes, finished: mine.quizzes,
+      weekStart: week.weekStart, quizzes: week.classGoal.quizzes, finished: done.n,
       accuracy: mine.total ? Math.round((mine.correct / mine.total) * 100) : null,
       strongest: strengths.strongest, weakest: strengths.weakest, subjects: strengths.subjects,
     },

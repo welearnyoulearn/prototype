@@ -86,7 +86,7 @@ export default function QuizProgress({ experience, query }: { experience: QuizEx
             <ol className="mt-3 space-y-1">
               {lb.top.map(r => (
                 <li key={`${r.rank}-${r.name}`} className={`flex items-center justify-between rounded-xl px-3 py-1.5 text-sm ${r.isMe ? 'bg-yellow-100 font-extrabold' : ''}`}>
-                  <span><span className="inline-block w-8 font-bold text-gray-500">#{r.rank}</span>{r.name}{r.isMe && (parent ? ` (${first})` : ' (you)')}</span>
+                  <span><span className="inline-block w-8 font-bold text-gray-500">#{r.rank}</span>{r.name}{r.isMe && (parent ? ' (your child)' : ' (you)')}</span>
                   <span className="font-bold tabular-nums">{r.points} pts</span>
                 </li>
               ))}

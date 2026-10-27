@@ -20,14 +20,46 @@ async function call<T>(url: string, init?: RequestInit): Promise<T> {
   return d as T
 }
 
-// <input type="date"> needs a year; the season is month-day only, so a fixed leap year carries it.
-const toDateInput = (md: string) => `2000-${md}`
-const fromDateInput = (v: string) => v.slice(5)
+// The season repeats every year, so it is a day and a month ('MM-DD'), never a full date.
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+const MONTH_DAYS = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+const pad = (n: number) => String(n).padStart(2, '0')
+const mdLabel = (md: string) => `${Number(md.slice(3))} ${MONTHS[Number(md.slice(0, 2)) - 1]}`
 
 function describe(s: Settings) {
-  const md = (v: string) => new Date(`2000-${v}T00:00:00Z`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: 'UTC' })
+  const md = (v: string) => `${Number(v.slice(3))} ${MONTHS[Number(v.slice(0, 2)) - 1].slice(0, 3)}`
   const grades = s.grades.length ? `Grades ${s.grades.join(', ')}` : 'No grades'
   return `${md(s.seasonStart)} – ${md(s.seasonEnd)} · ${s.openTime}–${s.closeTime} IST · ${grades}`
+}
+
+/** Day + month pickers for a season boundary. With `inherit`, the empty choice means "use the global setting". */
+function MonthDayField({ label, value, onChange, inherit, testid }: {
+  label: string; value: string | null; onChange: (v: string | null) => void; inherit: string | null; testid: string
+}) {
+  const month = value ? Number(value.slice(0, 2)) : 0
+  const day = value ? Number(value.slice(3)) : 0
+  const setMonth = (m: number) => {
+    if (!m) return onChange(null)
+    onChange(`${pad(m)}-${pad(Math.min(day || 1, MONTH_DAYS[m - 1]))}`)
+  }
+  const select = 'mt-1 rounded-lg border bg-white px-3 py-2'
+  return (
+    <fieldset className="text-sm font-medium text-gray-700">
+      <legend>{label}</legend>
+      <div className="flex gap-2">
+        <select aria-label={`${label}: day`} className={`${select} w-20`} value={day || ''} disabled={!month} data-testid={`${testid}-day`}
+          onChange={e => onChange(`${pad(month)}-${pad(Number(e.target.value))}`)}>
+          {!month && <option value="">—</option>}
+          {month > 0 && Array.from({ length: MONTH_DAYS[month - 1] }, (_, i) => <option key={i + 1} value={i + 1}>{i + 1}</option>)}
+        </select>
+        <select aria-label={`${label}: month`} className={`${select} flex-1`} value={month || ''} data-testid={`${testid}-month`}
+          onChange={e => setMonth(Number(e.target.value))}>
+          {inherit !== null && <option value="">Use global ({mdLabel(inherit)})</option>}
+          {MONTHS.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
+        </select>
+      </div>
+    </fieldset>
+  )
 }
 
 function SettingsFields({ value, onChange, inherit, testid }: {
@@ -39,16 +71,10 @@ function SettingsFields({ value, onChange, inherit, testid }: {
   const gradesInherited = inherit !== null && value.grades === null
   return (
     <div className="grid gap-4 sm:grid-cols-2">
-      <label className="text-sm font-medium text-gray-700">Season starts
-        <input type="date" data-testid={`${testid}-season-start`} className="mt-1 block w-full rounded-lg border px-3 py-2" value={field('seasonStart') ? toDateInput(field('seasonStart') as string) : ''}
-          onChange={e => onChange({ ...value, seasonStart: e.target.value ? fromDateInput(e.target.value) : null })} />
-        {inherit && value.seasonStart === null && <span className="text-xs text-gray-500">Using global ({inherit.seasonStart})</span>}
-      </label>
-      <label className="text-sm font-medium text-gray-700">Season ends
-        <input type="date" data-testid={`${testid}-season-end`} className="mt-1 block w-full rounded-lg border px-3 py-2" value={field('seasonEnd') ? toDateInput(field('seasonEnd') as string) : ''}
-          onChange={e => onChange({ ...value, seasonEnd: e.target.value ? fromDateInput(e.target.value) : null })} />
-        {inherit && value.seasonEnd === null && <span className="text-xs text-gray-500">Using global ({inherit.seasonEnd})</span>}
-      </label>
+      <MonthDayField label="Season starts" value={value.seasonStart} inherit={inherit?.seasonStart ?? null} testid={`${testid}-season-start`}
+        onChange={v => onChange({ ...value, seasonStart: v })} />
+      <MonthDayField label="Season ends" value={value.seasonEnd} inherit={inherit?.seasonEnd ?? null} testid={`${testid}-season-end`}
+        onChange={v => onChange({ ...value, seasonEnd: v })} />
       <label className="text-sm font-medium text-gray-700">Opens at (IST)
         <input type="time" data-testid={`${testid}-open`} className="mt-1 block w-full rounded-lg border px-3 py-2" value={(field('openTime') as string | null) ?? ''}
           onChange={e => onChange({ ...value, openTime: e.target.value || null })} />

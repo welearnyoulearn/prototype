@@ -30,7 +30,7 @@ export default function StudentDailyQuiz({ doubtsEnabled }: { doubtsEnabled: boo
         renderReviewActions={doubtsEnabled ? (q, attempt) => <DoubtHelp q={q} attempt={attempt} onDoubtRaised={() => setDoubtsChanged(n => n + 1)} /> : undefined}
         footer={
           <>
-            {doubtsEnabled && <StudentDoubtsPanel refreshKey={doubtsChanged} />}
+            {doubtsEnabled && <StudentDoubtsPanel refreshKey={doubtsChanged} onClarified={() => setFinished(n => n + 1)} />}
             <QuizProgress key={finished} experience="student" query="" />
           </>
         }

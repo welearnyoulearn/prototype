@@ -93,7 +93,7 @@ export function DoubtHelp({ q, attempt, onDoubtRaised }: { q: AttemptQuestion; a
       )}
       {doubt ? (
         <p className="inline-flex items-center gap-1.5 rounded-full bg-sky-100 px-3 py-1 text-xs font-bold text-sky-800" data-testid={`doubt-status-${q.position}`}>
-          <MessageCircleQuestion className="h-3.5 w-3.5" aria-hidden="true" /> Asked your teacher · {DOUBT_STATUS_TEXT[doubt.status]} — see My doubts below
+          <MessageCircleQuestion className="h-3.5 w-3.5" aria-hidden="true" /> Asked your teacher · {DOUBT_STATUS_TEXT[doubt.status]} — follow it in My doubts on the Daily quiz page
         </p>
       ) : stage === 'ask-ai' ? (
         <div className="space-y-2 rounded-xl border p-3">
@@ -154,21 +154,26 @@ function DoubtQuestion({ d }: { d: DoubtView }) {
 }
 
 /** The student's doubts: teacher answers, the fresh question that proves it, "I understand now". */
-export function StudentDoubtsPanel({ refreshKey }: { refreshKey?: number }) {
+export function StudentDoubtsPanel({ refreshKey, onClarified }: { refreshKey?: number; onClarified?: () => void }) {
   const [doubts, setDoubts] = useState<DoubtView[] | null>(null)
   const load = useCallback(() => call<{ doubts: DoubtView[] }>('/api/student/doubts').then(d => setDoubts(d.doubts)).catch(() => setDoubts([])), [])
   useEffect(() => { const t = setTimeout(() => { void load() }, 0); return () => clearTimeout(t) }, [load, refreshKey])
+  // A teacher's answer shows up without a reload while the page stays open.
+  useEffect(() => {
+    const t = setInterval(() => { if (!document.hidden) void load() }, 60_000)
+    return () => clearInterval(t)
+  }, [load])
   if (!doubts || doubts.length === 0) return null
   return (
     <section className="space-y-3" aria-labelledby="my-doubts" data-testid="my-doubts">
       <h3 id="my-doubts" className="text-base font-extrabold">My doubts</h3>
-      {doubts.map(d => <StudentDoubtCard key={d.id} d={d} onChange={load} />)}
+      {doubts.map(d => <StudentDoubtCard key={d.id} d={d} onChange={load} onClarified={onClarified} />)}
     </section>
   )
 }
 
 type Proof = { id: number; stem: string; options: string[]; language: string }
-function StudentDoubtCard({ d, onChange }: { d: DoubtView; onChange: () => void }) {
+function StudentDoubtCard({ d, onChange, onClarified }: { d: DoubtView; onChange: () => void; onClarified?: () => void }) {
   const [proof, setProof] = useState<Proof | null | 'none'>(null)
   const [result, setResult] = useState<{ correct: boolean; correctIndex: number; explanation: string | null; chosen: number } | null>(null)
   const [reopening, setReopening] = useState(false)
@@ -191,7 +196,7 @@ function StudentDoubtCard({ d, onChange }: { d: DoubtView; onChange: () => void 
   })
   const confirm = () => run(async () => {
     const r = await call<{ points: number }>(`/api/student/doubts/${d.id}/confirm`, { method: 'POST', body: '{}' })
-    setCelebrate(r.points); onChange()
+    setCelebrate(r.points); onChange(); onClarified?.()
   })
   const reopen = () => run(async () => {
     await call(`/api/student/doubts/${d.id}/reopen`, { method: 'POST', body: JSON.stringify({ note: note.trim() || undefined }) })

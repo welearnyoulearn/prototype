@@ -300,7 +300,7 @@ function Player({ experience, attempt: initial, url, onFinished, onExit }: {
           {q.options.map((opt, i) => {
             const chosen = q.chosenIndex === i
             return (
-              <button key={i} type="button" role="radio" aria-checked={chosen} disabled={saving !== null} onClick={() => choose(i)} data-testid={`daily-quiz-option-${i}`}
+              <button key={i} type="button" role="radio" aria-checked={chosen} aria-label={`${LETTERS[i]}. ${opt}`} disabled={saving !== null} onClick={() => choose(i)} data-testid={`daily-quiz-option-${i}`}
                 className={`flex min-h-14 items-center gap-3 rounded-2xl border-2 px-4 py-3 text-left text-base font-semibold transition ${chosen ? 'border-gray-900 bg-yellow-200' : 'border-gray-300 bg-white hover:border-gray-900'}`}>
                 <span className={`grid h-8 w-8 shrink-0 place-items-center rounded-full border-2 text-sm font-extrabold ${chosen ? 'border-gray-900 bg-gray-900 text-white' : 'border-gray-400'}`}>{LETTERS[i]}</span>
                 <span className="min-w-0 flex-1">{opt}</span>
