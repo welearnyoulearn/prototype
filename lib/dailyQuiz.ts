@@ -16,6 +16,7 @@ import type { PoolClient } from 'pg'
 import { resolveAcademicYear } from '@/lib/academicYear'
 import { nonWorkingDay, nonWorkingDaysMap } from '@/lib/attendance'
 import { schoolHasFeature } from '@/lib/auth'
+import { awardOnFinish, runWeeklyReports, settleAccuracy } from '@/lib/quizRewards'
 import {
   DEFAULT_QUIZ_SETTINGS, LATE_DAYS, REMINDER_BEFORE_CLOSE_MIN, addDays, answersVisible, chooseTopics, gradeNumber,
   inSeason, istInstant, istNow, lateAllowed, quizPhase, quizSettingsSchema, recentWorkingDays, resolveSettings,
@@ -247,12 +248,12 @@ export async function closeOverdueAttempts(where: { studentId?: number; quizIds?
   `, params)
   for (const r of rows) {
     if (r.answered === 0) await pool.query(`DELETE FROM daily_quiz_attempts WHERE id = $1 AND status = 'in_progress'`, [r.id])
-    else await gradeAttempt(r.id)
+    else await gradeAttempt(r.id, now)
   }
 }
 
 /** Marks every answer, records the score and topic mastery. Runs once: only an in-progress attempt is graded. */
-async function gradeAttempt(attemptId: number): Promise<boolean> {
+async function gradeAttempt(attemptId: number, now: Date): Promise<boolean> {
   const client = await pool.connect()
   try {
     await client.query('BEGIN')
@@ -288,6 +289,8 @@ async function gradeAttempt(attemptId: number): Promise<boolean> {
         last_wrong_at = COALESCE(EXCLUDED.last_wrong_at, student_topic_mastery.last_wrong_at),
         last_seen_at = EXCLUDED.last_seen_at
     `, [attemptId, claimed.student_id])
+    // Points, streak and badges in the same transaction, so finishing and its reward can't come apart.
+    await awardOnFinish(client, attemptId, now)
     await client.query('COMMIT')
     return true
   } catch (err) {
@@ -359,6 +362,7 @@ export async function todayView(studentId: number, schoolId: number, now: Date =
   const { effective } = await schoolSettings(schoolId)
   const today = istNow(now).date
   await closeOverdueAttempts({ studentId }, now)
+  await settleAccuracy({ studentId }, now)
 
   const view: TodayView = { studentName: ctx.name, today, status: 'no_class', opensAt: null, closesAt: null, quiz: null, late: [], recent: [] }
   const day = await dayStatus(ctx.cls, today, effective)
@@ -516,6 +520,7 @@ async function attemptRow(studentId: number, schoolId: number, attemptId: number
 /** The attempt's questions. The answer key and explanations are included only once answers are visible. */
 export async function attemptView(studentId: number, schoolId: number, attemptId: number, now: Date = new Date()): Promise<AttemptView> {
   await closeOverdueAttempts({ studentId }, now)
+  await settleAccuracy({ studentId }, now)
   const t = await attemptRow(studentId, schoolId, attemptId)
   const visible = answersVisible(t.status === 'submitted', t.is_late, now, t.closes_at)
   const { rows } = await pool.query<{ item_id: number; position: number; subject_name: string; topic_name: string | null; stem: string; options: string[]; language: string; chosen_index: number | null; correct_index: number; explanation: string | null; is_correct: boolean | null; question_id: number }>(`
@@ -560,7 +565,7 @@ export async function submitAttempt(studentId: number, schoolId: number, attempt
   if (t.status === 'submitted') return { completed: true, alreadyFinished: true, answersAt: t.is_late ? null : t.closes_at.toISOString() }
   const { rows: [c] } = await pool.query<{ open: number }>('SELECT COUNT(*) FILTER (WHERE chosen_index IS NULL)::int AS open FROM daily_quiz_answers WHERE attempt_id = $1', [attemptId])
   if (c.open > 0) throw new DailyQuizError(`Answer all questions before finishing (${c.open} left).`, 409)
-  await gradeAttempt(attemptId)
+  await gradeAttempt(attemptId, now)
   return { completed: true, alreadyFinished: false, answersAt: t.is_late ? null : t.closes_at.toISOString() }
 }
 
@@ -616,7 +621,9 @@ function hhmm(d: Date): string {
  */
 export async function runDailyQuizCron(now: Date = new Date()) {
   const today = istNow(now).date
-  const summary = { schools: 0, posted: 0, ready: 0, reminders: 0, results: 0 }
+  const summary = { schools: 0, posted: 0, ready: 0, reminders: 0, results: 0, weeklyReports: 0 }
+  // The parents' weekly report goes with the Saturday evening runs (after the reminder time and the close).
+  const weeklyDue = new Date(`${today}T00:00:00Z`).getUTCDay() === 6 && istNow(now).minutes >= 18 * 60
   const { rows: schools } = await pool.query<{ id: number }>('SELECT id FROM schools WHERE deleted_at IS NULL ORDER BY id')
   for (const { id: schoolId } of schools) {
     if (!(await schoolHasFeature(schoolId, 'daily-quiz'))) continue
@@ -641,6 +648,7 @@ export async function runDailyQuizCron(now: Date = new Date()) {
       const closeLabel = hhmm(quiz.closes_at)
       if (now >= quiz.closes_at) {
         await closeOverdueAttempts({ quizIds: [quiz.id] }, now)
+        await settleAccuracy({ quizIds: [quiz.id] }, now)
         if (await claimNotice(quiz.id, 'results')) {
           const { rows } = await pool.query<Recipient>(`
             SELECT t.student_id, t.school_id, s.name FROM daily_quiz_attempts t JOIN students s ON s.id = t.student_id
@@ -669,6 +677,7 @@ export async function runDailyQuizCron(now: Date = new Date()) {
         }
       }
     }
+    if (weeklyDue) summary.weeklyReports += await runWeeklyReports(schoolId, now)
   }
   return summary
 }

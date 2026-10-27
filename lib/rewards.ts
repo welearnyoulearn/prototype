@@ -33,6 +33,13 @@ export const BADGE_DEFS = [
   { type: 'test_5',           label: 'Test Regular',     emoji: '📋', desc: 'Completed 5 weekly tests' },
   { type: 'test_perfect',     label: 'Perfect Score',    emoji: '🎯', desc: 'Scored 100% on a weekly test' },
   { type: 'test_streak_4',    label: 'Consistent',       emoji: '📆', desc: 'Submitted 4 tests in a row' },
+  // Daily Quiz (#434) — awarded by lib/quizRewards.ts
+  { type: 'quiz_starter',     label: 'Quiz Starter',     emoji: '🧠', desc: 'Finished your first daily quiz' },
+  { type: 'quiz_streak_5',    label: '5-Day Streak',     emoji: '🔥', desc: 'Daily quiz 5 school days in a row' },
+  { type: 'quiz_streak_20',   label: '20-Day Streak',    emoji: '🚀', desc: 'Daily quiz 20 school days in a row' },
+  { type: 'quiz_streak_60',   label: '60-Day Streak',    emoji: '🏆', desc: 'Daily quiz 60 school days in a row' },
+  { type: 'sharp_shooter',    label: 'Sharp Shooter',    emoji: '🎯', desc: '10 perfect daily quizzes' },
+  { type: 'doubt_comeback',   label: 'Comeback',         emoji: '💡', desc: 'Proved you understood 5 doubts' },
 ]
 
 // ── Core: award points ────────────────────────────────────────────────────────

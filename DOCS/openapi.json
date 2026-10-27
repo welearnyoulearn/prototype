@@ -51741,6 +51741,215 @@
         ],
         "x-source-file": "app/api/cron/daily-quiz/route.ts"
       }
+    },
+    "/api/student/quiz/progress": {
+      "get": {
+        "tags": [
+          "Daily quiz"
+        ],
+        "summary": "Points, streak and leaderboard",
+        "description": "Reward points (balance and this week), working-day streak, quiz badges, this week's on-time results (accuracy only for closed quizzes, strongest and weakest subject), the class leaderboard (top 10 and own place), Most Improved and the class goal. Pays any accuracy points that are due first.\n\n**Who can call:** Student.\n\n**Checks:** getStudentSession(); daily-quiz feature on.",
+        "operationId": "getStudentQuizProgress",
+        "security": [
+          {
+            "student": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Progress",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "totalPoints": {
+                      "type": "integer"
+                    },
+                    "weekPoints": {
+                      "type": "integer"
+                    },
+                    "streak": {
+                      "type": "integer"
+                    },
+                    "badges": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "leaderboard": {
+                      "type": "object",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden, or the daily-quiz feature is off"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Student",
+            "color": "#15803d"
+          }
+        ],
+        "x-source-file": "app/api/student/quiz/progress/route.ts"
+      }
+    },
+    "/api/parent/quiz/progress": {
+      "get": {
+        "tags": [
+          "Daily quiz"
+        ],
+        "summary": "Points, streak and leaderboard",
+        "description": "The child's points, streak, badges and week, their class rank, the class average and the top 3 only (never other children's scores), their own improvement and the class goal.\n\n**Who can call:** Parent, for one of their own children.\n\n**Checks:** getParentSession(); the child must be the parent's own and in the parent's school; daily-quiz feature on.",
+        "operationId": "getParentQuizProgress",
+        "security": [
+          {
+            "parent": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "student_id",
+            "in": "query",
+            "required": true,
+            "description": "One of the parent's children",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Progress",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "totalPoints": {
+                      "type": "integer"
+                    },
+                    "weekPoints": {
+                      "type": "integer"
+                    },
+                    "streak": {
+                      "type": "integer"
+                    },
+                    "badges": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "leaderboard": {
+                      "type": "object",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden, or the daily-quiz feature is off"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Parent",
+            "color": "#b45309"
+          }
+        ],
+        "x-source-file": "app/api/parent/quiz/progress/route.ts"
+      }
+    },
+    "/api/school/quiz-report": {
+      "get": {
+        "tags": [
+          "Daily quiz"
+        ],
+        "summary": "Daily Quiz report for the school",
+        "description": "This week per class: participation against the 80% class goal, accuracy, top students and the most improved; accuracy per subject. Read-only.\n\n**Who can call:** School admin, principal or vice principal.\n\n**Checks:** requireSchoolAdmin(); the school comes from the session; daily-quiz feature on.",
+        "operationId": "getSchoolQuizReport",
+        "security": [
+          {
+            "schoolAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Report",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "weekStart": {
+                      "type": "string"
+                    },
+                    "classes": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "subjects": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden, or the daily-quiz feature is off"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
+          }
+        ],
+        "x-source-file": "app/api/school/quiz-report/route.ts"
+      }
     }
   },
   "components": {

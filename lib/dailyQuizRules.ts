@@ -161,8 +161,6 @@ export const QUIZ_POINTS = {
   perfectMinQuestions: 3,
 } as const
 
-export const STREAK_MILESTONES: Record<number, number> = { 5: 10, 20: 30, 60: 75 }
-
 export type PointAward = { action: string; points: number }
 
 /** Points for finishing (given on submit). */

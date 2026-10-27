@@ -87,7 +87,7 @@ const BOOTSTRAP_MARKER_KEY   = 'initial_schema_bootstrap'
 // silently never runs anywhere, and you will chase a "column does not exist" 500
 // that reproduces on production but never locally against a fresh DB.
 // Adding a migration statement and bumping this number is ONE change, not two.
-const SCHEMA_VERSION = 59
+const SCHEMA_VERSION = 60
 
 // Records the schema level this build finished applying, on the same row as the
 // bootstrap marker (no extra row, no extra round-trip to read it back).
@@ -4296,6 +4296,28 @@ async function runIncrementalMigrations() {
       kind VARCHAR(10) NOT NULL CHECK (kind IN ('ready', 'reminder', 'results')),
       sent_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       PRIMARY KEY (quiz_id, kind)
+    );
+  `)
+
+  // Daily Quiz rewards (#434). student_points is the points ledger (balance = sum; a future marketplace spends
+  // with negative rows). Learning awards are unique per (student, action, reference) so a retry or a second
+  // cron run never pays twice; older rows (no reference type in this list) are untouched by the index.
+  // lib/quizRewards.ts LEARNING_REFS must match the WHERE clause exactly.
+  await pool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_student_points_learning
+      ON student_points (student_id, action_type, reference_type, reference_id)
+      WHERE reference_type IN ('daily_quiz_attempt', 'daily_quiz_week', 'student_doubt');
+    CREATE INDEX IF NOT EXISTS idx_student_points_earned ON student_points (student_id, earned_at);
+
+    -- Accuracy points are paid once the answers are out; this marks an attempt as paid.
+    ALTER TABLE daily_quiz_attempts ADD COLUMN IF NOT EXISTS points_settled_at TIMESTAMPTZ;
+
+    -- The parents' weekly "learning week" report, claimed per student per week so it goes once.
+    CREATE TABLE IF NOT EXISTS quiz_weekly_reports (
+      student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+      week_start DATE NOT NULL,
+      sent_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (student_id, week_start)
     );
   `)
 }

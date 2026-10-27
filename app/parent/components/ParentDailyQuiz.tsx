@@ -1,12 +1,17 @@
 'use client'
 
+import { useState } from 'react'
 import DailyQuiz from '@/components/dailyQuiz/DailyQuiz'
+import QuizProgress from '@/components/dailyQuiz/QuizProgress'
 
 /**
  * Parent portal → Daily Quiz (#433) for the selected child: today's quiz (a parent can hand the phone to the
- * child to take it), missed quizzes, and each finished quiz's answers once they are out.
+ * child to take it), missed quizzes, each finished quiz's answers once they are out, and the child's points,
+ * streak and class rank (#434).
  */
 export default function ParentDailyQuiz({ studentId, studentName }: { studentId: number; studentName: string }) {
+  const [finished, setFinished] = useState(0)
+  const query = `?student_id=${studentId}`
   return (
     <div className="max-w-3xl space-y-5">
       <div>
@@ -17,7 +22,8 @@ export default function ParentDailyQuiz({ studentId, studentName }: { studentId:
         </p>
       </div>
       {/* key: switching children starts fresh instead of showing the previous child's screen */}
-      <DailyQuiz key={studentId} experience="parent" query={`?student_id=${studentId}`} />
+      <DailyQuiz key={studentId} experience="parent" query={query} onFinished={() => setFinished(n => n + 1)}
+        footer={<QuizProgress key={`${studentId}-${finished}`} experience="parent" query={query} />} />
     </div>
   )
 }

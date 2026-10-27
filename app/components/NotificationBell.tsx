@@ -100,6 +100,7 @@ const TYPE_NAV: Record<string, string> = {
   daily_quiz_ready: 'daily-quiz',       // student / parent: open the Daily Quiz
   daily_quiz_reminder: 'daily-quiz',
   daily_quiz_results: 'daily-quiz',
+  quiz_weekly_report: 'daily-quiz',     // parent: the child's learning week
 }
 
 export type NotificationPortal = 'teacher' | 'admin' | 'student' | 'parent'

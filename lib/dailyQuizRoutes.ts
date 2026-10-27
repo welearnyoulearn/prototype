@@ -9,6 +9,7 @@ import { getParentSession, getStudentSession, schoolHasFeature } from '@/lib/aut
 import { parentOwnsStudent } from '@/lib/examsAuth'
 import { DailyQuizError, attemptView, saveAnswer, startAttempt, submitAttempt, todayView } from '@/lib/dailyQuiz'
 import { positiveId } from '@/lib/quizBank'
+import { progressView } from '@/lib/quizRewards'
 
 export type QuizPortal = 'student' | 'parent'
 export type QuizActor = { studentId: number; schoolId: number; parentId: number | null }
@@ -86,6 +87,15 @@ export async function handleAnswer(req: NextRequest, portal: QuizPortal, rawId: 
   try {
     return NextResponse.json(await saveAnswer(actor.studentId, actor.schoolId, id, parsed.data.item_id, parsed.data.chosen_index))
   } catch (err) { return quizErrorResponse(err, 'answer') }
+}
+
+/** Points, streak, badges, this week and the leaderboard (#434), shaped for the viewer. */
+export async function handleProgress(req: NextRequest, portal: QuizPortal) {
+  const actor = await quizActor(req, portal)
+  if (actor instanceof NextResponse) return actor
+  try {
+    return NextResponse.json(await progressView(actor.studentId, actor.schoolId, portal), NO_STORE)
+  } catch (err) { return quizErrorResponse(err, 'progress') }
 }
 
 export async function handleSubmit(req: NextRequest, portal: QuizPortal, rawId: string) {
