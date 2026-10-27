@@ -223,9 +223,9 @@ export async function updateQuestion(questionId: number, patch: QuestionPatch, a
   try {
     const { rows: [updated] } = await pool.query(`
       UPDATE quiz_questions
-      SET stem = $2, options = $3, correct_index = $4, explanation = $5, difficulty = $6, status = $7,
+      SET stem = $2, options = $3, correct_index = $4, explanation = $5, difficulty = $6, status = $7::varchar,
           fingerprint = $8, updated_by = $9, updated_at = NOW(),
-          report_count = CASE WHEN $7 = 'active' AND status = 'pulled' THEN 0 ELSE report_count END
+          report_count = CASE WHEN $7::varchar = 'active' AND status = 'pulled' THEN 0 ELSE report_count END
       WHERE id = $1
       RETURNING id, stem, options, correct_index, explanation, difficulty, source, status, report_count
     `, [questionId, draft.stem, JSON.stringify(draft.options), draft.correct_index, draft.explanation, draft.difficulty, status, fingerprint(draft.stem), adminId])
