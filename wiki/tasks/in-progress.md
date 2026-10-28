@@ -4,6 +4,16 @@ Move an entry to [completed.md](completed.md) when it ships. Add new entries at 
 
 ---
 
+### Daily Newspaper + Rewards Marketplace (pilot)
+**Type:** Feature
+**Portals:** Student, Parent, School Admin, Platform Admin
+**Branch:** `feature/newspaper-rewards-foundation` (no GitHub issue yet — branch to be renamed with the issue number)
+**Summary:** A short, real, fact-checked newspaper each morning per grade band, with one question; points go into the same balance as the Daily Quiz and are spent on simple stationery supplied by WLYL and handed out by the school admin. Monthly delivery. Both feature keys are OFF at every tier.
+**Progress:**
+- [x] Foundation: feature keys (OFF), tables, starter catalog, points helper (earn / spend / refund under a per-student lock), grade-band helper, tests
+- [ ] Newspaper: feed fetch, filter, writer, blind checker, fallback, jobs, student screens, Platform Admin Pull page
+- [ ] Marketplace: ordering, monthly run, order alert email, parcel arrived / collected, Rewards pages
+- [ ] End-to-end test on a throwaway local database
 ### Push notifications via Firebase (FCM)
 **Type:** Feature
 **Branch:** `feature/fcm-push-backend` (no GitHub issue yet — branch to be renamed with the issue number)

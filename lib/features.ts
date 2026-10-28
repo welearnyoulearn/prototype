@@ -30,6 +30,11 @@ export const ALL_FEATURES: { key: string; label: string; category: string; porta
   // lib/db.ts's migration for how existing schools were carried over.
   { key: 'exam-marks',         label: 'Exam Schedule & Marks',           category: 'Scheduling', portals: ['school-admin', 'student', 'parent', 'teacher'] },
 
+  // ── Learning ─────────────────────────────────────────────────────────────────
+  // Daily Newspaper + Rewards Marketplace. Seeded OFF at every tier in lib/newspaperRewardsSchema.ts until the pilot.
+  { key: 'daily-newspaper',     label: 'Daily Newspaper',                 category: 'Learning', portals: ['school-admin', 'student'] },
+  { key: 'rewards-marketplace', label: 'Rewards Marketplace',             category: 'Learning', portals: ['school-admin', 'student', 'parent'] },
+
   // ── Analytics & Intelligence ─────────────────────────────────────────────────
 
   // ── Communication ────────────────────────────────────────────────────────────
@@ -49,7 +54,7 @@ export const ALL_FEATURES: { key: string; label: string; category: string; porta
   { key: 'year-rollover',      label: 'Year Rollover',                   category: 'Administration', portals: ['school-admin'] },
 ]
 
-export const CATEGORY_ORDER = ['Core', 'Scheduling', 'Analytics', 'Finance', 'Communication', 'Administration']
+export const CATEGORY_ORDER = ['Core', 'Scheduling', 'Learning', 'Analytics', 'Finance', 'Communication', 'Administration']
 
 // Features that can be overridden per-school via school_feature_overrides,
 // taking precedence over the tier-level plan_features setting.

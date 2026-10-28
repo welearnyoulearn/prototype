@@ -1,6 +1,7 @@
 import { Pool, types } from 'pg'
 import { matchTeacher } from './matchTeacher'
 import { buildFeedbackCategoryBackfillAllQuery } from './feedback-defaults'
+import { ensureNewspaperRewardsSchema } from './newspaperRewardsSchema'
 
 // Return DATE columns as plain "YYYY-MM-DD" strings instead of JS Date objects.
 // Without this, pg serialises dates as UTC midnight which JSON-stringifies to
@@ -87,7 +88,7 @@ const BOOTSTRAP_MARKER_KEY   = 'initial_schema_bootstrap'
 // silently never runs anywhere, and you will chase a "column does not exist" 500
 // that reproduces on production but never locally against a fresh DB.
 // Adding a migration statement and bumping this number is ONE change, not two.
-const SCHEMA_VERSION = 56
+const SCHEMA_VERSION = 57
 
 // Records the schema level this build finished applying, on the same row as the
 // bootstrap marker (no extra row, no extra round-trip to read it back).
@@ -4113,4 +4114,7 @@ async function runIncrementalMigrations() {
     ALTER TABLE saas_invoices ADD COLUMN IF NOT EXISTS bill_to_state_code VARCHAR(2);
     ALTER TABLE saas_invoices ADD COLUMN IF NOT EXISTS bill_to_gstin VARCHAR(15);
   `)
+
+  // Daily Newspaper + Rewards Marketplace (tables, ledger indexes, features seeded OFF, starter catalog).
+  await ensureNewspaperRewardsSchema(pool)
 }

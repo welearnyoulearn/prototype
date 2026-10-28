@@ -2,6 +2,15 @@
 
 All notable changes to the WLYL School prototype are documented here.
 
+## [Unreleased] - Daily Newspaper + Rewards Marketplace foundation (branch feature/newspaper-rewards-foundation)
+
+### Added
+- **Feature keys** `daily-newspaper` and `rewards-marketplace` (new *Learning* category), seeded OFF at every plan tier. No screens or routes yet.
+- **Tables** for the newspaper (`news_editions`, `news_items`, `news_questions`, `news_attempts`) and the marketplace (`reward_items`, `reward_runs`, `reward_orders`), created by `lib/newspaperRewardsSchema.ts`. The 7-item starter catalog (pencil, eraser, sharpener 150 points; blue pen 250; black pen 400; ruler and glue stick 500) is added once; WLYL owns it afterwards.
+- **Points helper** (`lib/pointsLedger.ts`) on the existing `student_points` ledger: newspaper points paid once per student per edition, an order's points held with one negative row, refunded once, a 500-points-per-month ordering limit, all under a per-student lock so two orders at once cannot spend the same points twice.
+- Grade bands for the newspaper (3-5, 6-8, 9-10).
+- Tests for bands, rules and the ledger (the ledger tests run only against a local database via `TEST_DATABASE_URL`).
+
 ## [Unreleased] - School onboarding details (branch feature/school-onboarding-details)
 
 ### Added

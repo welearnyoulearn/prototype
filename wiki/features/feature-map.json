@@ -80,6 +80,14 @@
       "app/student/components/StudentMarks.tsx"
     ]
   },
+  "daily-newspaper": {
+    "doc": "wiki/features/daily-newspaper.md",
+    "ui": []
+  },
+  "rewards-marketplace": {
+    "doc": "wiki/features/rewards-marketplace.md",
+    "ui": []
+  },
   "announcements": {
     "doc": "wiki/features/announcements.md",
     "ui": [
