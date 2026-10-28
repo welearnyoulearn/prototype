@@ -32,7 +32,7 @@ export const ALL_FEATURES: { key: string; label: string; category: string; porta
 
   // ── Learning ─────────────────────────────────────────────────────────────────
   // Daily Newspaper + Rewards Marketplace. Seeded OFF at every tier in lib/newspaperRewardsSchema.ts until the pilot.
-  { key: 'daily-newspaper',     label: 'Daily Newspaper',                 category: 'Learning', portals: ['school-admin', 'student'] },
+  { key: 'daily-newspaper',     label: 'Daily Newspaper',                 category: 'Learning', portals: ['student'] },
   { key: 'rewards-marketplace', label: 'Rewards Marketplace',             category: 'Learning', portals: ['school-admin', 'student', 'parent'] },
 
   // ── Analytics & Intelligence ─────────────────────────────────────────────────
@@ -76,4 +76,5 @@ export const PORTAL_NAV_KEY_ALIASES: Record<string, string> = {
   'exams': 'exam-marks',              // parent portal's exam-calendar nav key
   'fees': 'fee-management',           // parent portal's fees nav key for the same capability
   'academic-calendar': 'calendar',    // school-admin's nav key for the Academic Calendar feature
+  'newspaper': 'daily-newspaper',     // student portal's Daily Newspaper nav key
 }

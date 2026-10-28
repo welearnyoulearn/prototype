@@ -10,6 +10,13 @@ All notable changes to the WLYL School prototype are documented here.
 - **Points helper** (`lib/pointsLedger.ts`) on the existing `student_points` ledger: newspaper points paid once per student per edition, an order's points held with one negative row, refunded once, a 500-points-per-month ordering limit, all under a per-student lock so two orders at once cannot spend the same points twice.
 - Grade bands for the newspaper (3-5, 6-8, 9-10).
 - Tests for bands, rules and the ledger (the ledger tests run only against a local database via `TEST_DATABASE_URL`).
+- **Daily Newspaper** (feature `daily-newspaper`, OFF at every tier):
+  - A nightly job (04:00 IST) builds one edition per grade band (3-5, 6-8, 9-10) from an allow-list of real feeds (NASA, ESA, Science News Explores, ScienceDaily, WHO, PIB). A block-list removes unsuitable stories; the writer may use only the source text; a second blind model call rejects any note with a claim not in the source, an unsuitable topic or activity, or a different answer. An edition needs 3 passing notes, otherwise it is one "Today's Big Idea" from the reviewed topic bank. Nothing unchecked is published.
+  - Students see it from 06:00 to 06:00 IST: 3-4 short notes, "I've read it" (after a 20 second minimum), one question, graded on the server (the key is never sent before answering). +2 points for answering, +3 more when right, paid once per student per edition into the shared points ledger.
+  - A 07:00 IST job sends one bell + push to students who have not finished; it also builds any missing edition first.
+  - Student screen (Learning section and a dashboard card) and a Platform Admin **Newspaper** page: last 7 days of editions, Pull / Restore a note or an edition, and Build today's editions now.
+  - Cron schedules added to `vercel.json`; `CRON_SECRET` is required in production.
+- Tests for the pipeline (feed parsing, filter, writer, checker, fallback), the overnight build (idempotent, fallbacks), the student flow (reading time, once-only answers, window, pulled notes) and the reminder; they run against a local database only.
 
 ## [Unreleased] - School onboarding details (branch feature/school-onboarding-details)
 

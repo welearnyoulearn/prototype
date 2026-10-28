@@ -18,7 +18,7 @@ Every feature a school can be switched on for has exactly one doc below. "Code e
 | **Attendance Tracking** (`attendance`) | Scheduling | school-admin, student, parent, teacher | [attendance.md](attendance.md) | ✅ all routes exist |
 | **Syllabus Customizer** (`curriculum`) | Scheduling | school-admin, student, parent, teacher | [curriculum.md](curriculum.md) | ✅ all routes exist |
 | **Exam Schedule & Marks** (`exam-marks`) | Scheduling | school-admin, student, parent, teacher | [exam-marks.md](exam-marks.md) | ✅ all routes exist |
-| **Daily Newspaper** (`daily-newspaper`) | Learning | school-admin, student | [daily-newspaper.md](daily-newspaper.md) | ✅ all routes exist |
+| **Daily Newspaper** (`daily-newspaper`) | Learning | student | [daily-newspaper.md](daily-newspaper.md) | ✅ all routes exist |
 | **Rewards Marketplace** (`rewards-marketplace`) | Learning | school-admin, student, parent | [rewards-marketplace.md](rewards-marketplace.md) | ✅ all routes exist |
 | **Announcement Board** (`announcements`) | Communication | school-admin | [announcements.md](announcements.md) | ✅ all routes exist |
 | **Feedback Management** (`feedback-management`) | Communication | school-admin | [feedback-management.md](feedback-management.md) | ✅ all routes exist |

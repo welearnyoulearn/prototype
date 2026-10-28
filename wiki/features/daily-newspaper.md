@@ -1,8 +1,8 @@
 # Feature: Daily Newspaper
 
 **Platform Admin feature key:** `daily-newspaper`
-**Portal:** Student (School Admin sees participation)
-**Status:** Planned. Only the foundation exists (feature key seeded OFF at every tier, database tables, points helper, grade-band helper). There are no screens, API routes or jobs yet.
+**Portal:** Student (Platform Admin controls it; a school admin participation count is planned)
+**Status:** Partial. Built end to end (feeds, writer, blind checker, fallback, nightly and 07:00 jobs, student screens, points, Platform Admin Pull page). The goal bar needs the Rewards Marketplace (separate step) and is hidden until then. OFF at every tier until a platform admin switches it on.
 **Last updated:** 2026-10-28
 
 ---
@@ -11,7 +11,7 @@
 
 Every morning each student finds a short newspaper made for their grade band: four short notes (new technology, science, health and environment, India and world general knowledge). They read it, tap "I've read it", answer one question about it and earn reward points. It is fully automatic.
 
-## How it will work
+## How it works
 
 - **Grade bands:** Junior (grades 3-5), Middle (6-8) and Senior (9-10), taken from the student's grade on the server. One edition per band per day, shared by every school. Nursery to grade 2 get nothing yet.
 - **Content:** real stories from a short allow-list of trusted feeds, rewritten from the article text only, then checked by a second blind model call (every claim in the source, age-appropriate, one clear answer). If fewer than 3 notes pass, a one-note "Today's Big Idea" from the reviewed topic bank is published instead. Unchecked text is never published.
@@ -20,32 +20,63 @@ Every morning each student finds a short newspaper made for their grade band: fo
 - **Points:** +2 for answering, +3 more for a correct answer (max 5 a day). They go in the same points balance as the Daily Quiz and Doubts, and are spent in the [Rewards Marketplace](rewards-marketplace.md). Newspaper points are not part of the class leaderboard.
 - **Platform admin** can pull a note or a whole edition afterwards.
 
-## What exists today (foundation)
+## Key files
 
 | Piece | Where |
 |---|---|
 | Feature key `daily-newspaper`, seeded OFF at every tier | `lib/features.ts`, `lib/newspaperRewardsSchema.ts` |
 | Tables `news_editions`, `news_items`, `news_questions`, `news_attempts` | `lib/newspaperRewardsSchema.ts` |
-| Grade-band helper | `lib/newspaperBands.ts` |
-| Pay newspaper points once per student per edition | `lib/pointsLedger.ts` (`awardNewsPoints`), own unique index `uq_student_points_news` |
-| Rules and constants | `lib/rewardRules.ts` |
+| The allow-listed feeds (only these are used) | `lib/newspaper/sources.ts` |
+| Feed reading, article fetch limited to each source's own domains | `lib/newspaper/feed.ts` |
+| Block-list and candidate selection | `lib/newspaper/filter.ts` |
+| Writer (rules, validation) and blind checker | `lib/newspaper/writer.ts`, `lib/newspaper/checker.ts`, model client `lib/newspaper/model.ts` |
+| One-note fallback from the 64 reviewed topics | `lib/newspaper/bank.ts`, `lib/newspaper-topics.ts` |
+| Overnight build (idempotent) | `lib/newspaper/build.ts` |
+| What a student sees and does (view, "I've read it", answer) | `lib/newspaper/service.ts` |
+| The 07:00 reminder | `lib/newspaper/notify.ts` |
+| Points, paid once per student per edition | `lib/pointsLedger.ts` (`awardNewsPoints`), index `uq_student_points_news` |
+| Time rules (06:00 to 06:00 IST) | `lib/newspaper/time.ts` |
+| Student screen | `app/student/components/StudentNewspaper.tsx` |
+| Platform Admin page (view, Pull, Build now) | `app/platform-admin/newspaper/page.tsx` |
 
-## Planned build
+## API endpoints
 
-| Step | What |
-|---|---|
-| Newspaper | Feed fetch, filter, writer, blind checker, fallback, two jobs (build, 07:00 reminder), student API and screens, Platform Admin Pull page |
-| Tests and docs | End-to-end as student and platform admin on a throwaway local database |
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| GET | `/api/student/newspaper` | Today's newspaper for the logged-in student and their progress |
+| POST | `/api/student/newspaper/ack` | "I've read it" (after the minimum reading time) |
+| POST | `/api/student/newspaper/answer` | Grade the answer on the server, pay points once, return the answer and explanation |
+| GET/POST | `/api/cron/newspaper?run=build|notify` | Nightly build (04:00 IST) and the 07:00 reminder; protected by `CRON_SECRET` |
+| GET/POST | `/api/platform/newspaper` | Platform Admin: last 7 days of editions; build today's now |
+| POST | `/api/platform/newspaper/pull` | Platform Admin: pull or restore a note or an edition |
+
+## Database tables
+
+| Table | Role |
+|-------|------|
+| `news_editions` | One per grade band per day (published or pulled; live or fallback) |
+| `news_items` | The notes of an edition |
+| `news_questions` | One question per note, with the key (never sent before answering) |
+| `news_attempts` | A student's progress on an edition: opened, read, answered, points |
+
+## Not built yet
+
+- Streak bonuses, the parent "read today" line, the class participation count and the second reminder (parked for the pilot).
+- The goal bar ("35 points to a Pencil") shows only when `rewards-marketplace` is on for the school, so it appears with the marketplace.
 
 ## Code evidence
 
 <!-- AUTO:evidence:daily-newspaper:start (generated by scripts/product-docs.mjs — do not edit by hand) -->
 **Code evidence** — checked against the repository on every run of `node scripts/product-docs.mjs`.
 
-Screens: _none found_
+Screens: `app/student/components/StudentNewspaper.tsx`, `app/platform-admin/newspaper/page.tsx`
 
 API routes these screens call (all exist):
-- _none_
+- `GET/POST` /api/platform/newspaper
+- `POST` /api/platform/newspaper/pull
+- `GET` /api/student/newspaper
+- `POST` /api/student/newspaper/ack
+- `POST` /api/student/newspaper/answer
 
 ✅ Every API route the screens call exists.
 <!-- AUTO:evidence:daily-newspaper:end -->
@@ -60,3 +91,4 @@ API routes these screens call (all exist):
 | Date | Change | Issue |
 |------|--------|-------|
 | 2026-10-28 | Foundation: feature key (OFF), tables, points helper, grade-band helper; doc created as Planned | (no issue yet) |
+| 2026-10-28 | Newspaper built: feeds, writer, blind checker, fallback, jobs, student screen, Platform Admin Pull page | (no issue yet) |

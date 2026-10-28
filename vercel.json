@@ -5,6 +5,14 @@
   ],
   "crons": [
     {
+      "path": "/api/cron/newspaper?run=build",
+      "schedule": "30 22 * * *"
+    },
+    {
+      "path": "/api/cron/newspaper?run=notify",
+      "schedule": "30 1 * * *"
+    },
+    {
       "path": "/api/cron/usage-digest",
       "schedule": "30 3 * * 1"
     },

@@ -2,14 +2,10 @@ import test, { before, after } from 'node:test'
 import assert from 'node:assert/strict'
 import type { Pool } from 'pg'
 
-// These tests need a real Postgres, and they migrate it and write rows. They only run when TEST_DATABASE_URL points
-// at a throwaway database on this machine; they refuse any other host, so they can never touch Supabase.
-//   TEST_DATABASE_URL=postgresql://postgres@127.0.0.1:55432/wlyl_newspaper_test
-const url = process.env.TEST_DATABASE_URL
-if (url && !['127.0.0.1', 'localhost', '[::1]'].includes(new URL(url).hostname)) {
-  throw new Error('TEST_DATABASE_URL must be a local database (127.0.0.1 or localhost)')
-}
-const opts = { skip: url ? false : 'set TEST_DATABASE_URL to a throwaway local Postgres to run the ledger tests' }
+import { openTestDb, makeStudent as makeTestStudent, testDbOpts } from './newspaperTestDb'
+
+// These tests need a real Postgres (see lib/newspaperTestDb.ts): they run only against a throwaway local database.
+const opts = testDbOpts
 
 type Ledger = typeof import('./pointsLedger')
 let pool: Pool
@@ -18,33 +14,11 @@ let schema: typeof import('./newspaperRewardsSchema')
 let runId = 0
 let itemId = 0
 
-// The existing tables this feature builds on, copied from lib/db.ts (only the columns that matter here). Running the
-// whole initDB() is not used: on a completely empty database it stops at `ALTER TABLE fee_year_close`, which runs
-// before that table is created (an existing problem in the fresh-database path, not in this feature).
-const BASE_TABLES = `
-  CREATE TABLE IF NOT EXISTS app_bootstrap_state (key TEXT PRIMARY KEY, completed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), schema_version INTEGER);
-  CREATE TABLE IF NOT EXISTS schools (id SERIAL PRIMARY KEY, name VARCHAR(255) NOT NULL);
-  CREATE TABLE IF NOT EXISTS students (
-    id SERIAL PRIMARY KEY, school_id INTEGER REFERENCES schools(id) ON DELETE CASCADE, name VARCHAR(255) NOT NULL,
-    grade VARCHAR(20), section VARCHAR(10));
-  CREATE TABLE IF NOT EXISTS plan_features (
-    id SERIAL PRIMARY KEY, feature_key VARCHAR(50) NOT NULL, tier VARCHAR(20) NOT NULL,
-    enabled BOOLEAN NOT NULL DEFAULT TRUE, updated_at TIMESTAMPTZ DEFAULT NOW(), UNIQUE(feature_key, tier));
-  CREATE TABLE IF NOT EXISTS student_points (
-    id SERIAL PRIMARY KEY, student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE, school_id INTEGER NOT NULL,
-    action_type VARCHAR(50) NOT NULL, points INTEGER NOT NULL DEFAULT 0, reference_id INTEGER, reference_type VARCHAR(50),
-    earned_at TIMESTAMPTZ DEFAULT NOW(), points_type VARCHAR(20) DEFAULT 'academic');
-`
-
 before(async () => {
-  if (!url) return
-  const { Pool: PgPool } = await import('pg')
-  // Same session timezone as lib/db.ts, so the IST month maths is tested the way production runs it.
-  pool = new PgPool({ connectionString: url, max: 6, options: '-c timezone=Asia/Kolkata' })
-  await pool.query(BASE_TABLES)
+  if (opts.skip) return
+  pool = await openTestDb()
   ledger = await import('./pointsLedger')
   schema = await import('./newspaperRewardsSchema')
-  await schema.ensureNewspaperRewardsSchema(pool)
 
   const open = await pool.query<{ id: number }>('SELECT id FROM reward_runs WHERE closed_at IS NULL')
   runId = open.rows[0]?.id ?? (await pool.query<{ id: number }>(
@@ -56,15 +30,8 @@ after(async () => {
   if (pool) await pool.end()
 })
 
-let counter = 0
-async function makeStudent(): Promise<{ studentId: number; schoolId: number }> {
-  counter += 1
-  const school = await pool.query<{ id: number }>('INSERT INTO schools (name) VALUES ($1) RETURNING id', [`Ledger test school ${counter}`])
-  const schoolId = school.rows[0].id
-  const stu = await pool.query<{ id: number }>(
-    `INSERT INTO students (school_id, name, grade, section) VALUES ($1, $2, '6', 'B') RETURNING id`, [schoolId, `Ledger student ${counter}`])
-  return { studentId: stu.rows[0].id, schoolId }
-}
+const makeStudent = () => makeTestStudent(pool)
+let counter = 0 // unique edition dates for the newspaper-points test
 
 async function seedPoints(studentId: number, schoolId: number, points: number) {
   await pool.query(`INSERT INTO student_points (student_id, school_id, action_type, points) VALUES ($1, $2, 'test_seed', $3)`, [studentId, schoolId, points])
@@ -106,7 +73,7 @@ test('the schema migrates, is idempotent, seeds the 7 starter items once and lea
 test('newspaper points are paid once per child per edition, each action separately', opts, async () => {
   const s = await makeStudent()
   const ed = (await pool.query<{ id: number }>(
-    `INSERT INTO news_editions (edition_date, grade_band) VALUES (CURRENT_DATE + ($1 || ' days')::interval, '6-8') RETURNING id`, [String(1000 + counter)])).rows[0].id
+    `INSERT INTO news_editions (edition_date, grade_band) VALUES (CURRENT_DATE + ($1 || ' days')::interval, '6-8') RETURNING id`, [String(1000 + (++counter) + (Date.now() % 100000))])).rows[0].id
 
   assert.equal(await ledger.awardNewsPoints(pool, s.studentId, s.schoolId, 'news_answered', 2, ed), true)
   assert.equal(await ledger.awardNewsPoints(pool, s.studentId, s.schoolId, 'news_answered', 2, ed), false)

@@ -59,6 +59,7 @@ export async function ensureNewspaperRewardsSchema(db: Db): Promise<void> {
       student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
       school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
       question_id INTEGER REFERENCES news_questions(id) ON DELETE SET NULL,
+      opened_at TIMESTAMPTZ,
       acknowledged_at TIMESTAMPTZ,
       answered_at TIMESTAMPTZ,
       selected_index SMALLINT CHECK (selected_index BETWEEN 0 AND 3),

@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { BookOpen, Library, School, Settings2, ChartNoAxesCombined, Activity, ClipboardList, LogOut, Menu, RefreshCw, Receipt } from 'lucide-react'
+import { BookOpen, Library, Newspaper, School, Settings2, ChartNoAxesCombined, Activity, ClipboardList, LogOut, Menu, RefreshCw, Receipt } from 'lucide-react'
 import PortalSidebar from '@/components/portal/PortalSidebar'
 import { getUsageSessionId, clearUsageSessionId } from '@/lib/usageSession'
 
@@ -16,6 +16,7 @@ const NAV_SECTIONS = [
   { label: 'Content', items: [
     { key: 'curriculum', label: 'Master Syllabus', href: '/platform-admin/curriculum', icon: BookOpen },
     { key: 'library', label: 'Digital Library', href: '/platform-admin/library', icon: Library },
+    { key: 'newspaper', label: 'Newspaper', href: '/platform-admin/newspaper', icon: Newspaper },
   ] },
   { label: 'Configuration', items: [
     { key: 'plans', label: 'Plans & Pricing', href: '/platform-admin/plans', icon: Settings2 },

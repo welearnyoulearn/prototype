@@ -55,6 +55,7 @@ const StudentSyllabus  = dynamic(() => import('./components/StudentSyllabus'),  
 const DigitalLibrary    = dynamic(() => import('../components/library/DigitalLibrary'), { loading: () => <ModuleSkeleton /> })
 const StudentAiHub      = dynamic(() => import('./components/StudentAiHub'),     { loading: () => <ModuleSkeleton /> })
 const StudentClassCircle = dynamic(() => import('./components/StudentClassCircle'), { loading: () => <ModuleSkeleton /> })
+const StudentNewspaper  = dynamic(() => import('./components/StudentNewspaper'),  { loading: () => <ModuleSkeleton /> })
 
 type Student = {
   id: number; name: string; grade: string; section: string; roll_number: string
@@ -77,6 +78,7 @@ const NAV_SECTIONS: NavSection[] = [
   {
     label: 'LEARNING',
     items: [
+      { key: 'newspaper', label: 'Today’s newspaper', sticker: 'scroll' },
       { key: 'class-circle', label: 'Class circle', sticker: 'party-popper' },
     ],
   },
@@ -119,7 +121,7 @@ const SECTION_STICKERS: Record<string, StickerName> = {
 // 'attendance' has no dedicated nav item — it only gates the Dashboard's
 // engagement-score ring, so isNavItemVisible('attendance') is read directly
 // by StudentDashboard, not used for a sidebar entry.
-const RESTRICTABLE_NAV_KEYS = new Set(['syllabus', 'library', 'my-marks', 'attendance', 'calendar'])
+const RESTRICTABLE_NAV_KEYS = new Set(['syllabus', 'library', 'my-marks', 'attendance', 'calendar', 'newspaper'])
 
 const BOTTOM_NAV: { key: string; label: string; sticker: StickerName }[] = [
   { key: 'dashboard', label: 'Home', sticker: 'house' },
@@ -346,6 +348,7 @@ function StudentPortal() {
         <main id="student-content" tabIndex={-1} className="portal-main">
           <div className="mx-auto w-full max-w-5xl pb-6">
             {visitedNav.has('dashboard')   && <div hidden={activeNav !== 'dashboard'}><StudentDashboard student={student} classId={classId} schoolId={student.school_id} onNavigate={navigateTo} isNavItemVisible={isNavItemVisible} /></div>}
+            {visitedNav.has('newspaper') && isNavItemVisible('newspaper') && <div hidden={activeNav !== 'newspaper'}><StudentNewspaper /></div>}
             {visitedNav.has('class-circle') && <div hidden={activeNav !== 'class-circle'}><StudentClassCircle /></div>}
             {visitedNav.has('attendance') && isNavItemVisible('attendance') && (
               <div hidden={activeNav !== 'attendance'}>

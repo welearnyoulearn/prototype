@@ -11,7 +11,7 @@ Move an entry to [completed.md](completed.md) when it ships. Add new entries at 
 **Summary:** A short, real, fact-checked newspaper each morning per grade band, with one question; points go into the same balance as the Daily Quiz and are spent on simple stationery supplied by WLYL and handed out by the school admin. Monthly delivery. Both feature keys are OFF at every tier.
 **Progress:**
 - [x] Foundation: feature keys (OFF), tables, starter catalog, points helper (earn / spend / refund under a per-student lock), grade-band helper, tests
-- [ ] Newspaper: feed fetch, filter, writer, blind checker, fallback, jobs, student screens, Platform Admin Pull page
+- [x] Newspaper: feed fetch, filter, writer, blind checker, fallback, jobs, student screens, Platform Admin Pull page (not yet run against the real Groq API or live feeds; tested with a fake model and fake feeds)
 - [ ] Marketplace: ordering, monthly run, order alert email, parcel arrived / collected, Rewards pages
 - [ ] End-to-end test on a throwaway local database
 ### Push notifications via Firebase (FCM)

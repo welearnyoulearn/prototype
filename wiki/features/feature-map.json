@@ -82,7 +82,10 @@
   },
   "daily-newspaper": {
     "doc": "wiki/features/daily-newspaper.md",
-    "ui": []
+    "ui": [
+      "app/student/components/StudentNewspaper.tsx",
+      "app/platform-admin/newspaper/page.tsx"
+    ]
   },
   "rewards-marketplace": {
     "doc": "wiki/features/rewards-marketplace.md",
