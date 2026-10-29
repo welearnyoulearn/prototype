@@ -89,7 +89,12 @@
   },
   "rewards-marketplace": {
     "doc": "wiki/features/rewards-marketplace.md",
-    "ui": []
+    "ui": [
+      "app/components/rewards/RewardsShop.tsx",
+      "app/student/components/StudentRewards.tsx",
+      "app/school-admin/components/RewardsDelivery.tsx",
+      "app/platform-admin/rewards/page.tsx"
+    ]
   },
   "announcements": {
     "doc": "wiki/features/announcements.md",

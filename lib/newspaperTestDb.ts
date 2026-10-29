@@ -22,7 +22,11 @@ const BASE_TABLES = `
   CREATE TABLE IF NOT EXISTS schools (id SERIAL PRIMARY KEY, name VARCHAR(255) NOT NULL);
   CREATE TABLE IF NOT EXISTS students (
     id SERIAL PRIMARY KEY, school_id INTEGER REFERENCES schools(id) ON DELETE CASCADE, name VARCHAR(255) NOT NULL,
-    grade VARCHAR(20), section VARCHAR(10), status VARCHAR(20) DEFAULT 'active');
+    grade VARCHAR(20), section VARCHAR(10), status VARCHAR(20) DEFAULT 'active', school_roll_number INTEGER);
+  CREATE TABLE IF NOT EXISTS parents (id SERIAL PRIMARY KEY, school_id INTEGER REFERENCES schools(id) ON DELETE CASCADE, name VARCHAR(255));
+  CREATE TABLE IF NOT EXISTS student_parents (
+    id SERIAL PRIMARY KEY, student_id INTEGER REFERENCES students(id) ON DELETE CASCADE,
+    parent_id INTEGER REFERENCES parents(id) ON DELETE CASCADE, UNIQUE(student_id, parent_id));
   CREATE TABLE IF NOT EXISTS plan_features (
     id SERIAL PRIMARY KEY, feature_key VARCHAR(50) NOT NULL, tier VARCHAR(20) NOT NULL,
     enabled BOOLEAN NOT NULL DEFAULT TRUE, updated_at TIMESTAMPTZ DEFAULT NOW(), UNIQUE(feature_key, tier));
@@ -33,6 +37,7 @@ const BASE_TABLES = `
   CREATE TABLE IF NOT EXISTS notifications (
     id SERIAL PRIMARY KEY, school_id INTEGER REFERENCES schools(id) ON DELETE CASCADE,
     recipient_student_id INTEGER REFERENCES students(id) ON DELETE CASCADE,
+    recipient_parent_id INTEGER REFERENCES parents(id) ON DELETE CASCADE, recipient_school_id INTEGER,
     type VARCHAR(50) NOT NULL, title VARCHAR(200), message TEXT, data JSONB, is_read BOOLEAN DEFAULT FALSE);
 `
 

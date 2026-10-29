@@ -21,6 +21,7 @@ type Quest = { key: string; label: string; description: string; sticker: Sticker
 
 const QUESTS: Quest[] = [
   { key: 'newspaper', label: 'Today’s newspaper', description: 'Short new reads, one question, real points.', sticker: 'scroll', tone: 'yellow', tilt: -4 },
+  { key: 'rewards', label: 'Rewards shop', description: 'Turn your points into pencils, pens and more.', sticker: 'wrapped-gift', tone: 'pink', tilt: 6 },
   { key: 'syllabus', label: 'Syllabus', description: 'See what you’re learning in each subject.', sticker: 'graduation-cap', tone: 'blue', tilt: -10 },
   { key: 'my-marks', label: 'My marks', description: 'Check your released results.', sticker: 'trophy', tone: 'yellow', tilt: 8 },
   { key: 'library', label: 'Digital library', description: 'Open your textbooks and handbooks.', sticker: 'books', tone: 'violet', tilt: -6 },

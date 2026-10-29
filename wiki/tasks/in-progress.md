@@ -12,7 +12,7 @@ Move an entry to [completed.md](completed.md) when it ships. Add new entries at 
 **Progress:**
 - [x] Foundation: feature keys (OFF), tables, starter catalog, points helper (earn / spend / refund under a per-student lock), grade-band helper, tests
 - [x] Newspaper: feed fetch, filter, writer, blind checker, fallback, jobs, student screens, Platform Admin Pull page (not yet run against the real Groq API or live feeds; tested with a fake model and fake feeds)
-- [ ] Marketplace: ordering, monthly run, order alert email, parcel arrived / collected, Rewards pages
+- [x] Marketplace: ordering, monthly run, order alert email, parcel arrived / collected, Rewards pages
 - [ ] End-to-end test on a throwaway local database
 ### Push notifications via Firebase (FCM)
 **Type:** Feature

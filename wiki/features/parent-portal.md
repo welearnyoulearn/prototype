@@ -46,6 +46,8 @@ API routes these screens call (all exist):
 - `GET` /api/parent/auth/me
 - `GET` /api/parent/child-summary
 - `GET/POST` /api/parent/fees
+- `GET/POST` /api/parent/rewards
+- `POST` /api/parent/rewards/orders/{}/cancel
 - `GET` /api/parent/subjects
 - `GET` /api/school/enabled-features
 - `GET` /api/school/library

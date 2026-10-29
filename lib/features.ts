@@ -77,4 +77,5 @@ export const PORTAL_NAV_KEY_ALIASES: Record<string, string> = {
   'fees': 'fee-management',           // parent portal's fees nav key for the same capability
   'academic-calendar': 'calendar',    // school-admin's nav key for the Academic Calendar feature
   'newspaper': 'daily-newspaper',     // student portal's Daily Newspaper nav key
+  'rewards': 'rewards-marketplace',   // student/parent portals' and school admin's Rewards nav key
 }

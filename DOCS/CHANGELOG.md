@@ -16,6 +16,11 @@ All notable changes to the WLYL School prototype are documented here.
   - A 07:00 IST job sends one bell + push to students who have not finished; it also builds any missing edition first.
   - Student screen (Learning section and a dashboard card) and a Platform Admin **Newspaper** page: last 7 days of editions, Pull / Restore a note or an edition, and Build today's editions now.
   - Cron schedules added to `vercel.json`; `CRON_SECRET` is required in production.
+- **Rewards Marketplace** (feature `rewards-marketplace`, OFF at every tier):
+  - Students, or parents for their own child, order simple stationery with reward points. Points are held at once; up to 500 points' worth per child per month; cancel until the month's run closes.
+  - WLYL gets an email on every order with the school's running item counts. Platform Admin → **Rewards**: open run per school, shopping list with cost, Close run, CSV, Sent per school, parcel table (Ordered · Sent · At school · Collected · Waiting, late in red), totals, catalog editor.
+  - School Admin → **Rewards delivery**: Parcel arrived, then tick children Collected (one by one or the whole class); Can't deliver refunds the points.
+  - Children and parents get a bell notice at every step, telling them to collect from the school management (school office).
 - Tests for the pipeline (feed parsing, filter, writer, checker, fallback), the overnight build (idempotent, fallbacks), the student flow (reading time, once-only answers, window, pulled notes) and the reminder; they run against a local database only.
 
 ## [Unreleased] - School onboarding details (branch feature/school-onboarding-details)
