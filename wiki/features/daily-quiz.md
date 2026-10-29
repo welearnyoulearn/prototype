@@ -2,8 +2,8 @@
 
 **Platform Admin feature key:** `daily-quiz`
 **Portal:** School Admin / Teacher / Student / Parent
-**Status:** Partial. The question bank (#432), the daily quiz (#433) and points, streaks, the leaderboard and the weekly parent report (#434) are built. Ask WLYL AI / Ask Teacher comes in #435. The feature key is seeded OFF at every tier.
-**Last updated:** 2026-10-27
+**Status:** Built for the pilot: the question bank (#432, made automatically at syllabus import since #444), the daily quiz (#433), points, streaks, the leaderboard and the weekly parent report (#434), and Ask WLYL AI / Ask Teacher (#435, see [student-doubts.md](student-doubts.md)). The feature key is seeded OFF at every tier.
+**Last updated:** 2026-10-29
 
 ---
 
@@ -11,17 +11,19 @@
 
 A 5-minute daily habit. Every working day in the season (1 July – 15 March by default), each student gets one MCQ per class subject on the topics their class just covered. They finish the whole quiz, see “Your quiz is completed”, and the right answers with explanations come out after the close (21:00 by default).
 
-## Question bank (built, #432)
+## Question bank (built, #432; made at import since #444)
 
-Platform Admin → **Question Bank**: pick board and grade, then a subject.
+**Questions are made once, when the syllabus is imported.** Importing or adding topics in Master Syllabus starts preparation for those topics automatically. Nobody has to press anything.
 
-1. **Check what it will do:** imports questions already typed into Master Syllabus, optionally uploads the subject's textbook PDF to Anthropic, and shows how many topics need questions and the **maximum cost**.
-2. **Start preparation:** one Claude (Opus 5.5) Message Batches request per chapter, in the background (usually under an hour, at most 24 hours), at about 12 questions per topic, grounded in the textbook when one was chosen.
-3. **Automatic check:** Groq answers every question without seeing the key; only questions where both agree are saved. Malformed and duplicate questions are dropped and answer positions are spread evenly.
-4. **Spot-check and publish:** the admin reads, edits or retires questions, then presses **Publish**. Only published subjects ever reach students.
+1. **Questions typed into Master Syllabus** are imported first.
+2. **Claude (Opus 5.5) writes the rest:** one Message Batches request per chapter, in the background (usually under an hour), **8 per topic**, grounded in the subject's newest textbook when one is uploaded.
+3. **Groq answers every question without seeing the key;** only questions where both agree are saved. Malformed and duplicate questions are dropped and answer positions are spread evenly.
+4. **Published automatically** once checked. If Platform Admin takes a subject offline, it stays offline until they publish it again.
 
-- Collection runs while the screen is open and in a daily cron (`/api/cron/quiz-bank`), so closing the screen never loses work.
-- Questions are in English, except Telugu and Hindi subjects, which are written in their own script.
+- **Retries:** topics added while a preparation runs are prepared right after it. Topics still under **5** questions are retried automatically (up to 3 times, 6 hours apart).
+- **Progress** moves on its own: from the open Question Bank screen, the students' quiz pages and the daily-quiz cron, so nothing waits for the once-a-day job.
+- **Platform Admin → Question Bank** is now a status board: topics ready per subject, edit or retire any question, **set each subject's language** (English / Telugu / Hindi; when unset it is guessed from the name), and prepare older subjects by hand (with the cost shown first).
+- **A school's own topics** (custom subjects, chapters or topics, or a teacher's own syllabus import) get their own questions automatically, with the same Claude + Groq check, used only by that school and only when it has the daily-quiz feature. Platform Admin → Question Bank → **Schools' own topics** shows their progress.
 - Teachers see the published questions for the subjects they teach (**Quiz Questions**, read-only in the pilot).
 - Students can report a question; three reports pull it until Platform Admin restores (after fixing) or retires it.
 - Needs `ANTHROPIC_API_KEY` (Claude) and `GROQ_API_KEY` (checker) on the server.
@@ -30,12 +32,12 @@ Platform Admin → **Question Bank**: pick board and grade, then a subject.
 
 **When (Platform Admin → Daily Quiz):** one global setting with an optional override per school: season dates, open and close time (IST, default 15:30–21:00) and grades (default 3–10). Schools can't see or change it. Quizzes run only on working days (holidays and the weekly off from the school calendar have none). A posted quiz keeps its own times if the settings change later.
 
-**What is asked (per class, per day):** one question for every subject in the class's Class Management list whose bank is published:
-1. a topic the class covered in the last 5 working days, else
-2. a topic planned (`target_date`) for those days, else
-3. revision of an older covered topic (each student gets topics they got wrong first), else the subject is skipped.
+**What is asked (per class, per day, #444):** one question for every subject in the class's Class Management list (master-backed or the school's own) that has a completed topic with questions:
+1. **a topic the teacher marked completed since the last quiz** (completed in the last 14 days and not yet asked as a new topic in this class). Newest first, then syllabus order; if several were marked, the others follow on the next days.
+2. **nothing new → revision** of every completed topic. Each student gets the topics they got wrong first, then the ones they were asked least recently.
+3. **nothing ever completed** in that subject → it is skipped that day.
 
-Topics the teacher hid in Syllabus Setup are never asked. Each student draws their own question on those topics, unseen ones first.
+Only completed topics are used; a topic that is merely planned is never asked. Topics the teacher hid in Syllabus Setup are never asked. Each student draws their own question, unseen ones first.
 
 **Posting:** the quiz exists from the open time: created by the first student or parent who opens it, or by `/api/cron/daily-quiz`, which runs after the open, after the reminder time and after the close.
 
@@ -69,7 +71,8 @@ Topics the teacher hid in Syllabus Setup are never asked. Each student draws the
 
 ## Coming next
 
-- **#435:** after reading the explanation, “Ask WLYL AI”, then “Ask Teacher” (see [student-doubts.md](student-doubts.md)), and teacher WLYL Stars.
+- **Parent mobile app** (wlyl-parent-mobile#11): the quiz, pushes and the weekly report in the app.
+- **After the pilot:** escalation of overdue doubts (#436) and learning insights (#437).
 
 ## Planned build
 
@@ -99,7 +102,8 @@ API routes these screens call (all exist):
 - `POST` /api/platform/quiz-bank/advance
 - `PATCH` /api/platform/quiz-bank/questions/{}
 - `GET` /api/platform/quiz-bank/reports
-- `GET` /api/platform/quiz-bank/subjects/{}
+- `GET` /api/platform/quiz-bank/school-topics
+- `GET/PATCH` /api/platform/quiz-bank/subjects/{}
 - `POST` /api/platform/quiz-bank/subjects/{}/estimate
 - `POST` /api/platform/quiz-bank/subjects/{}/publish
 - `POST` /api/platform/quiz-bank/subjects/{}/start
@@ -136,3 +140,4 @@ API routes these screens call (all exist):
 | 2026-10-27 | Question bank: preparation (Claude + Groq check), review, publish, teacher view, student reports | #432 |
 | 2026-10-27 | Daily quiz: posting, taking it (student and parent), answers after the close, late for 7 days, notices, Platform Admin settings | #433 |
 | 2026-10-27 | Reward points ledger, working-day streak, badges, weekly leaderboard, parent view and weekly report, School Admin report | #434 |
+| 2026-10-29 | Questions made automatically at syllabus import (8 per topic, auto-published), subject language setting, schools' own topics, daily topic = completed since the last quiz else revision | #444 |

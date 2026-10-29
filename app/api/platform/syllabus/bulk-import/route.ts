@@ -1,5 +1,6 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
+import { autoPrepare } from '@/lib/quizBank'
 import { parseSyllabusBulk, normalizeBookType, normalizeAudience, normalizeBookName, defaultAudienceForBookType } from '@/lib/syllabus/bulk-import-schema'
 import { requirePlatformAdmin } from '@/lib/auth'
 
@@ -161,6 +162,8 @@ export async function POST(req: NextRequest) {
     }
 
     await client.query('COMMIT')
+    // Questions for the new topics are made right away, in the background (#444).
+    after(() => autoPrepare(Number(subject_id)))
 
     return NextResponse.json({
       ok: true,

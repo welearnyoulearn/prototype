@@ -3,10 +3,10 @@
 import { createHash } from 'node:crypto'
 import { z } from 'zod'
 
-/** Questions we aim for per topic: enough that students in one class can each get a different one. */
-export const TARGET_PER_TOPIC = 12
-/** Below this a topic is flagged in the readiness report. */
-export const MIN_READY_PER_TOPIC = 8
+/** Questions made per topic when the syllabus is imported (#444): enough variety across a class and a week. */
+export const TARGET_PER_TOPIC = 8
+/** Below this a topic is flagged in the readiness report and retried automatically. */
+export const MIN_READY_PER_TOPIC = 5
 /** A question with this many distinct student reports is pulled from use until an admin looks at it. */
 export const REPORTS_TO_PULL = 3
 /** Questions sent to the checker per call — small enough to stay well inside Groq's per-request limits. */
@@ -25,6 +25,11 @@ export type QuestionDraft = {
 
 // ── Language ─────────────────────────────────────────────────────────────────
 // Decision D7 (#430): every subject is written in English except the language subjects themselves.
+// Since #444 a subject's quiz_language setting wins; the name is only the fallback for unset subjects.
+export function subjectLanguage(setting: string | null | undefined, subjectName: string): QuizLanguage {
+  return setting === 'english' || setting === 'telugu' || setting === 'hindi' ? setting : languageForSubject(subjectName)
+}
+
 export function languageForSubject(subjectName: string): QuizLanguage {
   const n = subjectName.toLowerCase()
   if (/\btelugu\b/.test(n)) return 'telugu'
@@ -155,11 +160,13 @@ export type ChapterPromptInput = {
   language: QuizLanguage
   chapterName: string
   withTextbook: boolean
+  /** A school's own chapter (#444), not part of the board's master syllabus. */
+  custom?: boolean
   topics: { topicId: number; name: string; subtopics: string[]; notes: string | null; need: number; existingStems: string[] }[]
 }
 
 export const SYSTEM_PROMPT = `You write multiple-choice questions for a daily 5-minute quiz taken by Indian school students.
-Every question is shown to a child on its own, right after they answer they see the correct option and your explanation.
+Every question is shown to a child on its own; after the quiz closes they see the correct option and your explanation.
 What matters most, in order:
 1. Exactly one option is correct, and it is correct beyond doubt. If you are not certain of a fact, do not use it.
 2. The question tests the topic it is filed under, at the level of the stated grade and board.
@@ -178,7 +185,9 @@ export function buildChapterPrompt(p: ChapterPromptInput): string {
     : `Write the question, options and explanation in ${p.language === 'telugu' ? 'Telugu' : 'Hindi'} script, as used in that language's school textbook.`
   const source = p.withTextbook
     ? `The attached PDF is the ${p.subject} textbook for this grade. Find the chapter "${p.chapterName}" in it and base every question on what that chapter teaches.`
-    : `There is no textbook attached. Base the questions on the standard ${p.board} Grade ${p.grade} ${p.subject} syllabus for the chapter "${p.chapterName}".`
+    : p.custom
+      ? `This chapter is a school's own addition to its ${p.board} Grade ${p.grade} ${p.subject} syllabus. Base the questions on the topic names, subtopics and teacher notes below, at that grade's level.`
+      : `There is no textbook attached. Base the questions on the standard ${p.board} Grade ${p.grade} ${p.subject} syllabus for the chapter "${p.chapterName}".`
   const topics = p.topics.map(t => [
     `- topic_id ${t.topicId}: "${t.name}" — write ${t.need} new question${t.need === 1 ? '' : 's'}`,
     t.subtopics.length ? `  Subtopics: ${t.subtopics.join('; ')}` : '',

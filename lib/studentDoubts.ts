@@ -39,12 +39,12 @@ async function reviewedQuestion(studentId: number, schoolId: number, attemptId: 
   if (!view.answersVisible) throw new DailyQuizError('You can ask once the answers are out.', 409)
   const q = view.questions.find(x => x.itemId === itemId)
   if (!q || q.questionId === undefined || q.correctIndex === undefined) throw new DailyQuizError('Question not found in this quiz', 404)
-  const { rows: [ctx] } = await pool.query<{ class_id: number; grade: string; master_topic_id: number | null }>(`
-    SELECT z.class_id, c.grade, qq.master_topic_id
+  const { rows: [ctx] } = await pool.query<{ class_id: number; grade: string; school_topic_id: number | null }>(`
+    SELECT z.class_id, c.grade, a.school_topic_id
     FROM daily_quiz_attempts t JOIN daily_quizzes z ON z.id = t.quiz_id JOIN classes c ON c.id = z.class_id
-    JOIN quiz_questions qq ON qq.id = $2
+    JOIN daily_quiz_answers a ON a.attempt_id = t.id AND a.item_id = $2
     WHERE t.id = $1
-  `, [attemptId, q.questionId])
+  `, [attemptId, itemId])
   return { q, ctx }
 }
 
@@ -84,11 +84,11 @@ export async function raiseDoubt(studentId: number, schoolId: number, attemptId:
   const teacherId = await routeTeacher(ctx.class_id, q.subject)
   const { rows: [ai] } = await pool.query(`SELECT 1 FROM doubt_ai_help WHERE student_id = $1 AND question_id = $2 LIMIT 1`, [studentId, q.questionId])
   const { rows: [d] } = await pool.query<{ id: number }>(`
-    INSERT INTO student_doubts (school_id, student_id, class_id, attempt_id, question_id, master_topic_id, subject_name, chosen_index, note, ai_tried, teacher_id, created_at)
+    INSERT INTO student_doubts (school_id, student_id, class_id, attempt_id, question_id, school_topic_id, subject_name, chosen_index, note, ai_tried, teacher_id, created_at)
     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
     ON CONFLICT (student_id, question_id) DO NOTHING
     RETURNING id
-  `, [schoolId, studentId, ctx.class_id, attemptId, q.questionId, ctx.master_topic_id, q.subject, q.chosenIndex, note, !!ai, teacherId, now])
+  `, [schoolId, studentId, ctx.class_id, attemptId, q.questionId, ctx.school_topic_id, q.subject, q.chosenIndex, note, !!ai, teacherId, now])
   if (!d) throw new DailyQuizError('You have already asked your teacher about this question.', 409)
   await event(d.id, 'student', studentId, 'raised', note)
   if (teacherId) {
@@ -134,7 +134,7 @@ export async function studentDoubts(studentId: number, schoolId: number, now: Da
            d.proof_at, d.clarified_at
     FROM student_doubts d
     JOIN quiz_questions q ON q.id = d.question_id
-    LEFT JOIN master_topics mt ON mt.id = d.master_topic_id
+    LEFT JOIN school_topics mt ON mt.id = d.school_topic_id
     LEFT JOIN teachers t ON t.id = d.replied_by
     WHERE d.student_id = $1 AND d.school_id = $2
     ORDER BY d.created_at DESC
@@ -176,8 +176,13 @@ export async function attemptHelpState(studentId: number, questionIds: number[])
 }
 
 // ── Proof of understanding ───────────────────────────────────────────────────
+/** Questions on the doubt's class topic: the master topic's questions and the school's own (#444). */
+const SAME_TOPIC = `q.status = 'active' AND EXISTS (
+  SELECT 1 FROM school_topics st WHERE st.id = $1
+    AND (q.school_topic_id = st.id OR (st.master_topic_id IS NOT NULL AND q.master_topic_id = st.master_topic_id)))`
+
 async function ownDoubt(studentId: number, schoolId: number, doubtId: number) {
-  const { rows: [d] } = await pool.query<{ id: number; status: DoubtStatus; question_id: number; master_topic_id: number | null; proof_question_id: number | null; proof_at: Date | null; proof_correct: boolean | null; replied_by: number | null; created_at: Date; explained_at: Date | null; school_id: number; teacher_id: number | null }>(
+  const { rows: [d] } = await pool.query<{ id: number; status: DoubtStatus; question_id: number; school_topic_id: number | null; proof_question_id: number | null; proof_at: Date | null; proof_correct: boolean | null; replied_by: number | null; created_at: Date; explained_at: Date | null; school_id: number; teacher_id: number | null }>(
     `SELECT * FROM student_doubts WHERE id = $1 AND student_id = $2 AND school_id = $3`, [doubtId, studentId, schoolId])
   if (!d) throw new DailyQuizError('Doubt not found', 404)
   return d
@@ -191,10 +196,10 @@ export async function proofQuestion(studentId: number, schoolId: number, doubtId
   if (!qid) {
     const { rows: [q] } = await pool.query<{ id: number }>(`
       SELECT q.id FROM quiz_questions q
-      WHERE q.master_topic_id = $1 AND q.status = 'active' AND q.id <> $2 AND q.id IS DISTINCT FROM $3
+      WHERE ${SAME_TOPIC} AND q.id <> $2 AND q.id IS DISTINCT FROM $3
       ORDER BY EXISTS (SELECT 1 FROM daily_quiz_answers a JOIN daily_quiz_attempts t ON t.id = a.attempt_id WHERE t.student_id = $4 AND a.question_id = q.id), random()
       LIMIT 1
-    `, [d.master_topic_id, d.question_id, d.proof_question_id, studentId])
+    `, [d.school_topic_id, d.question_id, d.proof_question_id, studentId])
     if (!q) return { question: null }
     qid = q.id
     await pool.query(`UPDATE student_doubts SET proof_question_id = $2, proof_chosen_index = NULL, proof_correct = NULL, proof_at = NULL, updated_at = NOW() WHERE id = $1`, [doubtId, qid])
@@ -220,7 +225,7 @@ export async function answerProof(studentId: number, schoolId: number, doubtId: 
 export async function confirmUnderstood(studentId: number, schoolId: number, doubtId: number, now: Date = new Date()) {
   const d = await ownDoubt(studentId, schoolId, doubtId)
   const { rows: [{ n: proofAvailable }] } = await pool.query<{ n: number }>(
-    `SELECT COUNT(*)::int AS n FROM quiz_questions WHERE master_topic_id = $1 AND status = 'active' AND id <> $2`, [d.master_topic_id, d.question_id])
+    `SELECT COUNT(*)::int AS n FROM quiz_questions q WHERE ${SAME_TOPIC} AND q.id <> $2`, [d.school_topic_id, d.question_id])
   const proven = d.proof_correct === true && d.proof_at !== null
   // With no other question on the topic there is nothing to prove with: clarified, but no points or Stars.
   if (d.status !== 'explained' || (!proven && proofAvailable > 0)) throw new DailyQuizError('Answer a fresh question on this topic correctly first.', 409)
@@ -288,7 +293,7 @@ export async function teacherDoubts(teacherId: number, schoolId: number, now: Da
     JOIN classes c ON c.id = d.class_id
     JOIN students s ON s.id = d.student_id
     JOIN quiz_questions q ON q.id = d.question_id
-    LEFT JOIN master_topics mt ON mt.id = d.master_topic_id
+    LEFT JOIN school_topics mt ON mt.id = d.school_topic_id
     WHERE d.school_id = $2 AND ${TEACHER_SCOPE}
       AND (d.status = 'open' OR (d.status = 'explained' AND d.updated_at > NOW() - INTERVAL '30 days'))
     ORDER BY d.created_at

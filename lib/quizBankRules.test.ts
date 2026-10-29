@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   buildChapterPrompt, draftFromLegacy, draftsFromChapterOutput, estimateCostUsd, fingerprint, keepAgreeing,
-  languageForSubject, normalizeStem, spreadAnswerPosition, topicNeeds, validateDraft, TARGET_PER_TOPIC,
+  languageForSubject, normalizeStem, spreadAnswerPosition, subjectLanguage, topicNeeds, validateDraft, MIN_READY_PER_TOPIC, TARGET_PER_TOPIC,
 } from './quizBankRules'
 
 const good = {
@@ -125,4 +125,23 @@ test('cost estimate grows with the textbook and the number of questions', () => 
   assert.ok(book > small)
   // 10 chapters × 303k input tokens × $2/M + (500×450 + 10×8000) output × $10/M
   assert.equal(book, Math.ceil((10 * 303_000 / 1e6 * 2 + (500 * 450 + 10 * 8000) / 1e6 * 10) * 100) / 100)
+})
+
+test('#444: 8 questions per topic, minimum 5; the subject language setting wins over the name', () => {
+  assert.equal(TARGET_PER_TOPIC, 8)
+  assert.equal(MIN_READY_PER_TOPIC, 5)
+  assert.equal(subjectLanguage('telugu', 'First Language'), 'telugu', 'a subject named without "Telugu" is still Telugu when set')
+  assert.equal(subjectLanguage('english', 'Telugu Grammar'), 'english', 'the setting overrides the name')
+  assert.equal(subjectLanguage(null, 'Hindi'), 'hindi', 'unset falls back to the name')
+  assert.equal(subjectLanguage('french', 'Science'), 'english', 'unknown settings are ignored')
+})
+
+test('#444: a school chapter prompt uses its topics and notes, not the board syllabus', () => {
+  const p = buildChapterPrompt({
+    board: 'CBSE', grade: '7', subject: 'Science', language: 'english', chapterName: 'Our Local Pond', withTextbook: false, custom: true,
+    topics: [{ topicId: 41, name: 'Pond life', subtopics: ['Frogs'], notes: 'Visit to the school pond', need: 8, existingStems: [] }],
+  })
+  assert.match(p, /school's own addition/)
+  assert.doesNotMatch(p, /standard CBSE Grade 7 Science syllabus/)
+  assert.match(p, /topic_id 41: "Pond life" — write 8 new questions/)
 })

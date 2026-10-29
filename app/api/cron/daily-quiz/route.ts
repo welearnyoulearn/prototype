@@ -12,6 +12,7 @@
 import { NextRequest, NextResponse, after } from 'next/server'
 import { drainPendingPushes } from '@/lib/push'
 import { runDailyQuizCron } from '@/lib/dailyQuiz'
+import { advance } from '@/lib/quizBank'
 import { quizErrorResponse } from '@/lib/dailyQuizRoutes'
 
 export const maxDuration = 300
@@ -36,6 +37,8 @@ async function run(req: NextRequest) {
   try {
     const summary = await runDailyQuizCron()
     after(() => drainPendingPushes())
+    // Also move question preparation (imports, schools' own topics) forward three times a day (#444).
+    after(() => advance(120_000).catch(err => console.error('[cron/daily-quiz] question preparation', err)))
     return NextResponse.json({ success: true, ...summary })
   } catch (err) { return quizErrorResponse(err, 'cron') }
 }

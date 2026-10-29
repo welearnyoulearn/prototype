@@ -87,7 +87,7 @@ const BOOTSTRAP_MARKER_KEY   = 'initial_schema_bootstrap'
 // silently never runs anywhere, and you will chase a "column does not exist" 500
 // that reproduces on production but never locally against a fresh DB.
 // Adding a migration statement and bumping this number is ONE change, not two.
-const SCHEMA_VERSION = 61
+const SCHEMA_VERSION = 62
 
 // Records the schema level this build finished applying, on the same row as the
 // bootstrap marker (no extra row, no extra round-trip to read it back).
@@ -4240,15 +4240,17 @@ async function runIncrementalMigrations() {
     );
     CREATE INDEX IF NOT EXISTS idx_daily_quizzes_school_date ON daily_quizzes(school_id, quiz_date);
 
+    -- One item per class subject. topic_ids are the class's own school_topics rows (master-backed or the
+    -- school's custom ones): 'covered' = the one newly completed topic of the day, 'revision' = earlier ones.
     CREATE TABLE IF NOT EXISTS daily_quiz_items (
       id SERIAL PRIMARY KEY,
       quiz_id INTEGER NOT NULL REFERENCES daily_quizzes(id) ON DELETE CASCADE,
       position SMALLINT NOT NULL,
-      master_subject_id INTEGER NOT NULL REFERENCES master_subjects(id) ON DELETE CASCADE,
+      school_subject_id INTEGER NOT NULL REFERENCES school_subjects(id) ON DELETE CASCADE,
       subject_name VARCHAR(100) NOT NULL,
-      source VARCHAR(10) NOT NULL CHECK (source IN ('covered', 'planned', 'revision')),
+      source VARCHAR(10) NOT NULL CHECK (source IN ('covered', 'revision')),
       topic_ids INTEGER[] NOT NULL,
-      UNIQUE (quiz_id, master_subject_id)
+      UNIQUE (quiz_id, school_subject_id)
     );
 
     CREATE TABLE IF NOT EXISTS daily_quiz_attempts (
@@ -4272,6 +4274,8 @@ async function runIncrementalMigrations() {
       attempt_id INTEGER NOT NULL REFERENCES daily_quiz_attempts(id) ON DELETE CASCADE,
       item_id INTEGER NOT NULL REFERENCES daily_quiz_items(id) ON DELETE CASCADE,
       question_id INTEGER NOT NULL REFERENCES quiz_questions(id) ON DELETE CASCADE,
+      -- The class's topic the question was drawn for (mastery, revision order, doubts).
+      school_topic_id INTEGER REFERENCES school_topics(id) ON DELETE SET NULL,
       position SMALLINT NOT NULL,
       chosen_index SMALLINT CHECK (chosen_index BETWEEN 0 AND 3),
       is_correct BOOLEAN,
@@ -4282,12 +4286,12 @@ async function runIncrementalMigrations() {
 
     CREATE TABLE IF NOT EXISTS student_topic_mastery (
       student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
-      master_topic_id INTEGER NOT NULL REFERENCES master_topics(id) ON DELETE CASCADE,
+      school_topic_id INTEGER NOT NULL REFERENCES school_topics(id) ON DELETE CASCADE,
       attempted INTEGER NOT NULL DEFAULT 0,
       correct INTEGER NOT NULL DEFAULT 0,
       last_wrong_at TIMESTAMPTZ,
       last_seen_at TIMESTAMPTZ,
-      PRIMARY KEY (student_id, master_topic_id)
+      PRIMARY KEY (student_id, school_topic_id)
     );
 
     -- Claimed before sending, so each notice (ready / reminder / results) goes once per quiz however often the cron runs.
@@ -4333,7 +4337,7 @@ async function runIncrementalMigrations() {
       class_id INTEGER NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
       attempt_id INTEGER REFERENCES daily_quiz_attempts(id) ON DELETE SET NULL,
       question_id INTEGER NOT NULL REFERENCES quiz_questions(id) ON DELETE CASCADE,
-      master_topic_id INTEGER REFERENCES master_topics(id) ON DELETE SET NULL,
+      school_topic_id INTEGER REFERENCES school_topics(id) ON DELETE SET NULL,
       subject_name VARCHAR(100) NOT NULL,
       chosen_index SMALLINT,
       note TEXT,
@@ -4404,5 +4408,39 @@ async function runIncrementalMigrations() {
       UNIQUE (teacher_id, action, reference_type, reference_id)
     );
     CREATE INDEX IF NOT EXISTS idx_teacher_star_points_school ON teacher_star_points(school_id, earned_at);
+  `)
+
+  // Questions made at syllabus import (#444). Importing or adding Master Syllabus topics prepares that subject's
+  // bank automatically (8 per topic) and publishes it once the checks pass; a school's own custom topics get
+  // their own questions through quiz_bank_school_chapters. The quiz language is a setting on the subject.
+  await pool.query(`
+    ALTER TABLE master_subjects ADD COLUMN IF NOT EXISTS quiz_language VARCHAR(10) CHECK (quiz_language IN ('english', 'telugu', 'hindi'));
+    ALTER TABLE school_subjects ADD COLUMN IF NOT EXISTS quiz_language VARCHAR(10) CHECK (quiz_language IN ('english', 'telugu', 'hindi'));
+
+    -- auto_prepare: preparation was started by an import (not a person), so the jobs retry it themselves.
+    -- rerun_requested: topics were added while a preparation was running; prepare again when it finishes.
+    -- unpublished_at: an admin took the subject offline; automatic publishing then leaves it offline.
+    ALTER TABLE quiz_bank_subjects ADD COLUMN IF NOT EXISTS auto_prepare BOOLEAN NOT NULL DEFAULT FALSE;
+    ALTER TABLE quiz_bank_subjects ADD COLUMN IF NOT EXISTS rerun_requested BOOLEAN NOT NULL DEFAULT FALSE;
+    ALTER TABLE quiz_bank_subjects ADD COLUMN IF NOT EXISTS auto_tries INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE quiz_bank_subjects ADD COLUMN IF NOT EXISTS unpublished_at TIMESTAMPTZ;
+
+    -- A school's own (custom) chapter whose topics need questions: one Claude batch request per chapter,
+    -- then the same Groq check. Questions are stored with school_topic_id and used only by that school.
+    CREATE TABLE IF NOT EXISTS quiz_bank_school_chapters (
+      school_chapter_id INTEGER PRIMARY KEY REFERENCES school_chapters(id) ON DELETE CASCADE,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      status VARCHAR(10) NOT NULL CHECK (status IN ('queued', 'generated', 'done', 'failed')),
+      batch_id VARCHAR(120),
+      raw_output JSONB,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      generated_count INTEGER NOT NULL DEFAULT 0,
+      kept_count INTEGER NOT NULL DEFAULT 0,
+      last_error TEXT,
+      claimed_at TIMESTAMPTZ,
+      submitted_at TIMESTAMPTZ,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_quiz_bank_school_chapters_status ON quiz_bank_school_chapters(status, batch_id);
   `)
 }

@@ -2,13 +2,13 @@
 // the same handlers: a student acts for themself; a parent acts for one of their own children, named by
 // ?student_id= (checked against student_parents and the parent's school). Identity always comes from the session.
 
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
 import { z } from 'zod'
 import pool from '@/lib/db'
 import { getParentSession, getStudentSession, schoolHasFeature } from '@/lib/auth'
 import { parentOwnsStudent } from '@/lib/examsAuth'
 import { DailyQuizError, attemptView, saveAnswer, startAttempt, submitAttempt, todayView } from '@/lib/dailyQuiz'
-import { positiveId } from '@/lib/quizBank'
+import { nudgePreparation, positiveId } from '@/lib/quizBank'
 import { progressView } from '@/lib/quizRewards'
 
 export type QuizPortal = 'student' | 'parent'
@@ -54,6 +54,8 @@ export async function handleToday(req: NextRequest, portal: QuizPortal) {
   const actor = await quizActor(req, portal)
   if (actor instanceof NextResponse) return actor
   try {
+    // Students and parents open this all day: a cheap moment to move question preparation along (#444).
+    after(() => nudgePreparation())
     return NextResponse.json(await todayView(actor.studentId, actor.schoolId), NO_STORE)
   } catch (err) { return quizErrorResponse(err, 'today') }
 }

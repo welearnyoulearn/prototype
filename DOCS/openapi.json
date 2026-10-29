@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "WLYL School Management API",
-    "version": "2026-10-27",
+    "version": "2026-10-29",
     "description": "Every API route in the WLYL platform, generated from the route handlers on the `dev` branch.\n\n## How to read this\n\n- **Sections and subcategories.** The sidebar groups routes by area, such as Fees & finance, then by topic, such as Waivers.\n- **Who can call.** The coloured badges on each route show which signed-in users it accepts. A red **Public** badge means the route has no sign-in check in code.\n- **Checks.** Extra rules inside the route, such as \"parent must own this student\", are listed under Checks.\n- **Feature flag.** Routes that are switched off unless the school's plan includes a feature say which one.\n\n## Signing in\n\nEach portal has its own session cookie: `wlyl-platform`, `wlyl-auth` (school admin), `wlyl-teacher`, `wlyl-student` and `wlyl-parent`. Sign in to the app in this browser, then use **Test Request** on any route. Scheduled jobs take `Authorization: Bearer $CRON_SECRET`."
   },
   "servers": [
@@ -5492,7 +5492,7 @@
           "Master curriculum"
         ],
         "summary": "Create or update a chapter's master topic",
-        "description": "Inserts a master_topics row under the chapter, or updates the row with body.id (scoped to this chapter). Deletes and re-inserts the topic's master_resources from body.resources. An id that matches no row errors with 500.\n\n**Who can call:** Platform admin.",
+        "description": "Inserts a master_topics row under the chapter, or updates the row with body.id (scoped to this chapter). Deletes and re-inserts the topic's master_resources from body.resources. An id that matches no row errors with 500.\n\n**Who can call:** Platform admin.\n\nSince #444 this also starts question preparation for the new topics in the background (8 per topic, published automatically once checked).",
         "operationId": "postPlatformChaptersIdTopics",
         "security": [
           {
@@ -7314,7 +7314,7 @@
           "Master curriculum"
         ],
         "summary": "Bulk import syllabus JSON into a subject",
-        "description": "Parses pasted syllabus JSON (chapters -> topics -> subtopics, optional semester groups, or a book-extraction {units} shape) and writes master_chapters/master_topics under an existing subject in one transaction. append re-uses chapters matching (book_type, book_name, chapter_name) and replaces their topics; replace first deletes every chapter of the book(s) being imported.\n\n**Who can call:** Platform admin.",
+        "description": "Parses pasted syllabus JSON (chapters -> topics -> subtopics, optional semester groups, or a book-extraction {units} shape) and writes master_chapters/master_topics under an existing subject in one transaction. append re-uses chapters matching (book_type, book_name, chapter_name) and replaces their topics; replace first deletes every chapter of the book(s) being imported.\n\n**Who can call:** Platform admin.\n\nSince #444 this also starts question preparation for the new topics in the background (8 per topic, published automatically once checked).",
         "operationId": "postPlatformSyllabusBulkImport",
         "security": [
           {
@@ -7605,7 +7605,7 @@
           "Master curriculum"
         ],
         "summary": "Create or update a master topic",
-        "description": "Inserts a master_topics row, or updates the row with body.id (not scoped to chapter_id). Deletes and re-inserts the topic's master_resources from body.resources. An id that matches no row errors with 500.\n\n**Who can call:** Platform admin.",
+        "description": "Inserts a master_topics row, or updates the row with body.id (not scoped to chapter_id). Deletes and re-inserts the topic's master_resources from body.resources. An id that matches no row errors with 500.\n\n**Who can call:** Platform admin.\n\nSince #444 this also starts question preparation for the new topics in the background (8 per topic, published automatically once checked).",
         "operationId": "postPlatformTopics",
         "security": [
           {
@@ -12414,7 +12414,7 @@
           "School curriculum"
         ],
         "summary": "Create or edit school topic",
-        "description": "With id, updates an existing topic (custom or board) and, when resources is an array, replaces all its school_resources. Without id, creates a custom topic under a chapter with the given resources. Resources missing title/url/resource_type are skipped.\n\n**Who can call:** Platform admin, School admin, Teacher.\n\n**Checks:** requireSyllabusWriteAccess(owner school of the topic/chapter); students and parents are refused.",
+        "description": "With id, updates an existing topic (custom or board) and, when resources is an array, replaces all its school_resources. Without id, creates a custom topic under a chapter with the given resources. Resources missing title/url/resource_type are skipped.\n\n**Who can call:** Platform admin, School admin, Teacher.\n\n**Checks:** requireSyllabusWriteAccess(owner school of the topic/chapter); students and parents are refused.\n\nSince #444 a topic the school adds itself gets its own Daily Quiz questions in the background (when the school has the daily-quiz feature).",
         "operationId": "postSchoolCustomTopics",
         "security": [
           {
@@ -13517,7 +13517,7 @@
           "School curriculum"
         ],
         "summary": "Bulk import school syllabus from JSON",
-        "description": "Parses a pasted syllabus JSON string (chapters -> topics -> subtopics, semester-grouped, or book 'units' shape) and appends it to the school's subject for the class's grade, creating the subject if needed. A chapter matching an existing one by book type, book name and title gets its topics replaced instead of being duplicated.\n\n**Who can call:** Platform admin, School admin, Teacher.\n\n**Checks:** requireSyllabusWriteAccess(school_id); class must belong to school_id. Students and parents are refused.",
+        "description": "Parses a pasted syllabus JSON string (chapters -> topics -> subtopics, semester-grouped, or book 'units' shape) and appends it to the school's subject for the class's grade, creating the subject if needed. A chapter matching an existing one by book type, book name and title gets its topics replaced instead of being duplicated.\n\n**Who can call:** Platform admin, School admin, Teacher.\n\n**Checks:** requireSyllabusWriteAccess(school_id); class must belong to school_id. Students and parents are refused.\n\nSince #444 a topic the school adds itself gets its own Daily Quiz questions in the background (when the school has the daily-quiz feature).",
         "operationId": "postSchoolSyllabusBulkImport",
         "security": [
           {
@@ -20219,7 +20219,7 @@
           "Syllabus tracking"
         ],
         "summary": "Add custom syllabus topics",
-        "description": "Adds one topic (body is the topic) or many (body.topics[]). For each, finds or creates the school subject (linking to master_subjects when one board matches) and the chapter (appended with next order), then inserts a custom topic with next topic_order if none given.\n\n**Who can call:** Platform admin, School admin, Teacher.\n\n**Checks:** requireSyllabusWriteAccess(school_id): teacher, school_admin/principal/vice_principal of the matching school, or platform admin. Checked per topic against its own school_id.",
+        "description": "Adds one topic (body is the topic) or many (body.topics[]). For each, finds or creates the school subject (linking to master_subjects when one board matches) and the chapter (appended with next order), then inserts a custom topic with next topic_order if none given.\n\n**Who can call:** Platform admin, School admin, Teacher.\n\n**Checks:** requireSyllabusWriteAccess(school_id): teacher, school_admin/principal/vice_principal of the matching school, or platform admin. Checked per topic against its own school_id.\n\nSince #444 a topic the school adds itself gets its own Daily Quiz questions in the background (when the school has the daily-quiz feature).",
         "operationId": "postSyllabus",
         "security": [
           {
@@ -49587,6 +49587,89 @@
           }
         ],
         "x-source-file": "app/api/platform/quiz-bank/subjects/[id]/route.ts"
+      },
+      "patch": {
+        "tags": [
+          "Question bank"
+        ],
+        "summary": "Set the language of a subject's questions",
+        "description": "English, Telugu or Hindi (#444). Used for questions made from now on; existing questions keep theirs. When unset, the language is guessed from the subject name.\n\n**Who can call:** Platform admin.\n\n**Checks:** requirePlatformAdmin(); strict body; subject must be academic.",
+        "operationId": "patchPlatformQuizBankSubject",
+        "security": [
+          {
+            "platformAdmin": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Master subject id",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "language": {
+                    "type": "string",
+                    "enum": [
+                      "english",
+                      "telugu",
+                      "hindi"
+                    ]
+                  }
+                },
+                "required": [
+                  "language"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "language": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Subject not found"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          }
+        ],
+        "x-source-file": "app/api/platform/quiz-bank/subjects/[id]/route.ts"
       }
     },
     "/api/platform/quiz-bank/subjects/{id}/estimate": {
@@ -50463,7 +50546,7 @@
           "Daily quiz"
         ],
         "summary": "Today's Daily Quiz card",
-        "description": "Today's quiz and its state (upcoming / ready / holiday / out of season / grade off / no questions), the attempt's progress, missed quizzes of the last 7 days that can still be taken late, and the week's finished quizzes. Once the open time has passed, the first call creates the class's quiz. Scores are null until the answers are out.\n\n**Who can call:** Student.\n\n**Checks:** getStudentSession(); the student acts only for themself; daily-quiz feature on.",
+        "description": "Today's quiz and its state (#444: a topic the teacher marked completed since the last quiz, else revision of earlier completed topics), the attempt's progress, missed quizzes of the last 7 days that can still be taken late, and the week's finished quizzes. Once the open time has passed, the first call creates the class's quiz. Scores are null until the answers are out.\n\n**Who can call:** Student.\n\n**Checks:** getStudentSession(); the student acts only for themself; daily-quiz feature on.",
         "operationId": "getStudentQuizToday",
         "security": [
           {
@@ -52858,6 +52941,54 @@
           }
         ],
         "x-source-file": "app/api/school/doubts-report/route.ts"
+      }
+    },
+    "/api/platform/quiz-bank/school-topics": {
+      "get": {
+        "tags": [
+          "Question bank"
+        ],
+        "summary": "Schools' own topics and their questions",
+        "description": "Per school (#444): topics the school added itself, how many have enough questions, chapters still being prepared and any failures. Those questions are made automatically and used only by that school.\n\n**Who can call:** Platform admin.\n\n**Checks:** requirePlatformAdmin().",
+        "operationId": "getPlatformQuizBankSchoolTopics",
+        "security": [
+          {
+            "platformAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Schools",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "schools": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          }
+        ],
+        "x-source-file": "app/api/platform/quiz-bank/school-topics/route.ts"
       }
     }
   },

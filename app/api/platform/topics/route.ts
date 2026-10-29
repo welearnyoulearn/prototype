@@ -1,5 +1,6 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
 import pool from '@/lib/db'
+import { autoPrepareForChapter } from '@/lib/quizBank'
 import { requirePlatformAdmin } from '@/lib/auth'
 
 // POST /api/platform/topics
@@ -72,6 +73,8 @@ export async function POST(req: NextRequest) {
     topicRow.resources = finalResources
 
     await client.query('COMMIT')
+    // A new or changed topic gets its questions in the background (#444).
+    after(() => autoPrepareForChapter(Number(chapter_id)))
     return NextResponse.json({ topic: topicRow })
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {})

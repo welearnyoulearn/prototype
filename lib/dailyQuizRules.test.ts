@@ -54,11 +54,19 @@ test('recent working days skip holidays and weekly offs', () => {
   assert.deepEqual(days, ['2026-10-27', '2026-10-26', '2026-10-23', '2026-10-22', '2026-10-21'])
 })
 
-test('topic choice: covered, then planned, then revision, else skip', () => {
-  assert.deepEqual(chooseTopics([3, 1, 3], [9], [7]), { source: 'covered', topicIds: [1, 3] })
-  assert.deepEqual(chooseTopics([], [9], [7]), { source: 'planned', topicIds: [9] })
-  assert.deepEqual(chooseTopics([], [], [7, 2]), { source: 'revision', topicIds: [2, 7] })
-  assert.equal(chooseTopics([], [], []), null)
+test('topic choice: newly completed first (newest, then syllabus order), else revision, else skip', () => {
+  const t = (topicId: number, coveredDate: string | null, chapterOrder = 1, topicOrder = topicId) => ({ topicId, coveredDate, chapterOrder, topicOrder })
+  const today = '2026-10-29'
+  // Newest completed topic not yet asked as new → today's topic.
+  assert.deepEqual(chooseTopics([t(1, '2026-10-20'), t(2, '2026-10-28'), t(3, '2026-10-27')], new Set(), today), { source: 'covered', topicIds: [2] })
+  // Same day: syllabus order (chapter, then topic) decides; the rest follow on later days.
+  assert.deepEqual(chooseTopics([t(5, '2026-10-29', 2, 1), t(4, '2026-10-29', 1, 9)], new Set(), today), { source: 'covered', topicIds: [4] })
+  assert.deepEqual(chooseTopics([t(5, '2026-10-29', 2, 1), t(4, '2026-10-29', 1, 9)], new Set([4]), today), { source: 'covered', topicIds: [5] })
+  // Nothing new (all asked, or completed too long ago, or a future date) → revision of every completed topic.
+  assert.deepEqual(chooseTopics([t(2, '2026-10-28'), t(7, '2026-09-01'), t(8, null)], new Set([2]), today), { source: 'revision', topicIds: [2, 7, 8] })
+  assert.deepEqual(chooseTopics([t(9, '2026-11-02')], new Set(), today), { source: 'revision', topicIds: [9] })
+  // Nothing ever completed → skip the subject.
+  assert.equal(chooseTopics([], new Set(), today), null)
 })
 
 test('phases, late window and when answers show', () => {

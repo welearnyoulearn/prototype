@@ -25,7 +25,7 @@ export const DEFAULT_QUIZ_SETTINGS: QuizSettings = {
 export const LATE_DAYS = 7
 /** The "not done yet" reminder goes this many minutes before the close. */
 export const REMINDER_BEFORE_CLOSE_MIN = 120
-/** "Recent" coverage window, in working days including today. */
+/** Default window for "the last N working days" helpers (used by the doubt overdue rule). */
 export const RECENT_WORKING_DAYS = 5
 
 const MONTH_DAYS = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
@@ -114,18 +114,29 @@ export function recentWorkingDays(today: string, isWorking: (date: string) => bo
   return days
 }
 
-// ── Topic choice per subject ──────────────────────────────────────────────────
-export type TopicSource = 'covered' | 'planned' | 'revision'
+// ── Topic choice per subject (#444) ───────────────────────────────────────────
+export type TopicSource = 'covered' | 'revision'
+
+/** A completed topic only counts as "new" for this long; older ones that were never asked are revision. */
+export const NEW_TOPIC_DAYS = 14
+
+/** A topic the teacher marked completed in this class (it has questions). */
+export type CompletedTopic = { topicId: number; coveredDate: string | null; chapterOrder: number; topicOrder: number }
 
 /**
- * Which topics a subject's question comes from today, in order of preference:
- * covered recently → planned recently (coverage not marked) → revision of older covered topics.
- * Only topics that have questions should be passed in. Null = skip the subject today.
+ * Which topic(s) a subject's question comes from today:
+ *   1. a topic marked completed since the last quiz — i.e. completed recently and not yet asked as a new topic
+ *      in this class. Newest first (then syllabus order); the others follow, one per day.
+ *   2. none → revision of every completed topic (each student's wrong topics come first when drawing).
+ *   3. nothing ever completed → null: skip the subject today.
  */
-export function chooseTopics(recentCovered: number[], recentPlanned: number[], olderCovered: number[]): { source: TopicSource; topicIds: number[] } | null {
-  if (recentCovered.length) return { source: 'covered', topicIds: unique(recentCovered) }
-  if (recentPlanned.length) return { source: 'planned', topicIds: unique(recentPlanned) }
-  if (olderCovered.length) return { source: 'revision', topicIds: unique(olderCovered) }
+export function chooseTopics(completed: CompletedTopic[], askedAsNew: Set<number>, today: string): { source: TopicSource; topicIds: number[] } | null {
+  const since = addDays(today, -NEW_TOPIC_DAYS)
+  const fresh = completed
+    .filter(t => t.coveredDate !== null && t.coveredDate >= since && t.coveredDate <= today && !askedAsNew.has(t.topicId))
+    .sort((a, b) => (b.coveredDate ?? '').localeCompare(a.coveredDate ?? '') || a.chapterOrder - b.chapterOrder || a.topicOrder - b.topicOrder || a.topicId - b.topicId)
+  if (fresh.length) return { source: 'covered', topicIds: [fresh[0].topicId] }
+  if (completed.length) return { source: 'revision', topicIds: unique(completed.map(t => t.topicId)) }
   return null
 }
 

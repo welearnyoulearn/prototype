@@ -8,8 +8,13 @@
 //   advance() → (called by the open admin screen and by the daily cron) collects a finished batch, then
 //               checks each chapter's questions with Groq and saves only the agreeing ones.
 //   publish() → after the admin's spot-check; only published subjects ever reach students.
+// Since #444: importing or adding Master Syllabus topics calls autoPrepare(), and a finished preparation is
+// published automatically (unless an admin took the subject offline). A school's own topics are prepared by
+// prepareSchoolTopics() into questions with school_topic_id. advance() moves both forward; nudgePreparation()
+// calls it from ordinary traffic so nothing waits for the once-a-day cron.
 import { NextResponse } from 'next/server'
 import pool from './db'
+import { schoolHasFeature } from './auth'
 import { AIRetryLaterError, answerMcqsBlind } from './gemini'
 import {
   QuizBankConfigError, batchResults, batchState, countTextbookTokens, submitChapterBatch, uploadTextbook, type ChapterRequest,
@@ -17,7 +22,7 @@ import {
 import {
   CHECK_CHUNK_SIZE, MIN_READY_PER_TOPIC, REPORTS_TO_PULL, TARGET_PER_TOPIC,
   buildChapterPrompt, draftFromLegacy, draftsFromChapterOutput, estimateCostUsd, fingerprint, keepAgreeing,
-  languageForSubject, spreadAnswerPosition, topicNeeds, validateDraft,
+  spreadAnswerPosition, subjectLanguage, topicNeeds, validateDraft,
   type Difficulty, type QuestionDraft, type QuizLanguage,
 } from './quizBankRules'
 
@@ -30,15 +35,22 @@ const EXISTING_STEMS_IN_PROMPT = 30
 /** A claim older than this belongs to a caller that died (timeout, closed tab) and may be taken over. */
 const STALE_CLAIM = `INTERVAL '10 minutes'`
 
-type SubjectInfo = { id: number; board: string; grade: string; subject_name: string; category: string }
+type SubjectInfo = { id: number; board: string; grade: string; subject_name: string; category: string; language: QuizLanguage }
 
 async function subjectInfo(subjectId: number): Promise<SubjectInfo> {
-  const { rows: [s] } = await pool.query<SubjectInfo>(
-    `SELECT id, board, grade, subject_name, category FROM master_subjects WHERE id = $1`, [subjectId]
+  const { rows: [s] } = await pool.query<Omit<SubjectInfo, 'language'> & { quiz_language: string | null }>(
+    `SELECT id, board, grade, subject_name, category, quiz_language FROM master_subjects WHERE id = $1`, [subjectId]
   )
   if (!s) throw new QuizBankError('Subject not found', 404)
   if (s.category !== 'academic') throw new QuizBankError('The daily quiz covers academic subjects only.')
-  return s
+  return { id: s.id, board: s.board, grade: s.grade, subject_name: s.subject_name, category: s.category, language: subjectLanguage(s.quiz_language, s.subject_name) }
+}
+
+/** Platform Admin sets the language a subject's questions are written in (English, Telugu or Hindi). */
+export async function setSubjectLanguage(subjectId: number, language: QuizLanguage) {
+  await subjectInfo(subjectId)
+  await pool.query(`UPDATE master_subjects SET quiz_language = $2, updated_at = NOW() WHERE id = $1`, [subjectId, language])
+  return { language }
 }
 
 async function ensureBankRow(subjectId: number): Promise<void> {
@@ -128,7 +140,7 @@ export async function subjectDetail(subjectId: number) {
     byChapter.set(t.chapter_id, ch)
   }
   return {
-    subject: { id: subject.id, board: subject.board, grade: subject.grade, subject_name: subject.subject_name, language: languageForSubject(subject.subject_name) },
+    subject: { id: subject.id, board: subject.board, grade: subject.grade, subject_name: subject.subject_name, language: subject.language },
     bank: bank ?? { status: 'idle', use_textbook: false, material_id: null, textbook_tokens: null, batch_submitted_at: null, last_error: null, published_at: null },
     textbooks,
     open_reports,
@@ -275,7 +287,7 @@ async function ensureTextbookFile(subjectId: number, materialId: number): Promis
 export async function estimate(subjectId: number, materialId: number | null) {
   const subject = await subjectInfo(subjectId)
   await ensureBankRow(subjectId)
-  const language = languageForSubject(subject.subject_name)
+  const language = subject.language
   const imported = await importLegacyQuestions(subjectId, await subjectTopics(subjectId), language)
   const topics = await subjectTopics(subjectId)
   const needs = topicNeeds(topics.map(t => ({ topicId: t.topic_id, chapterId: t.chapter_id, activeCount: t.active })))
@@ -293,19 +305,20 @@ export async function estimate(subjectId: number, materialId: number | null) {
   }
 }
 
-export async function start(subjectId: number, materialId: number | null, adminId: number) {
+/** adminId is null when an import started it (autoPrepare). */
+export async function start(subjectId: number, materialId: number | null, adminId: number | null) {
   const subject = await subjectInfo(subjectId)
   await ensureBankRow(subjectId)
   // Claim: only one preparation per subject at a time.
   const { rows: [claimed] } = await pool.query(`
-    UPDATE quiz_bank_subjects SET status = 'generating', batch_id = NULL, last_error = NULL, claimed_at = NULL, updated_at = NOW()
+    UPDATE quiz_bank_subjects SET status = 'generating', batch_id = NULL, last_error = NULL, claimed_at = NULL, rerun_requested = FALSE, updated_at = NOW()
     WHERE master_subject_id = $1 AND status IN ('idle', 'ready')
     RETURNING master_subject_id
   `, [subjectId])
   if (!claimed) throw new QuizBankError('This subject is already being prepared.', 409)
 
   try {
-    const language = languageForSubject(subject.subject_name)
+    const language = subject.language
     await importLegacyQuestions(subjectId, await subjectTopics(subjectId), language)
     const topics = await subjectTopics(subjectId)
     const needs = topicNeeds(topics.map(t => ({ topicId: t.topic_id, chapterId: t.chapter_id, activeCount: t.active })))
@@ -422,10 +435,42 @@ async function collectFinishedBatches(): Promise<number> {
 
 type ClaimedChapter = { master_chapter_id: number; master_subject_id: number; raw_output: unknown }
 
-/** Check one generated chapter: validate, de-duplicate, Groq blind check, save the agreeing questions. */
+/**
+ * The shared check for one generated chapter (master or a school's own): validate, de-duplicate, Groq blind
+ * check, then save only the questions where both models agree, never more than TARGET_PER_TOPIC per topic.
+ */
+async function checkGenerated(
+  rawOutput: unknown,
+  topics: { topic_id: number; active: number }[],
+  fingerprints: string[],
+  context: { board: string; grade: string; subject: string },
+  save: (topicId: number, drafts: QuestionDraft[]) => Promise<number>,
+): Promise<{ generated: number; saved: number }> {
+  const { byTopic, generated } = draftsFromChapterOutput(rawOutput, new Set(topics.map(t => t.topic_id)), new Set(fingerprints))
+  const candidates: (QuestionDraft & { key: string; topicId: number })[] = []
+  for (const t of topics) {
+    const room = Math.max(0, TARGET_PER_TOPIC - t.active)
+    ;(byTopic.get(t.topic_id) ?? []).slice(0, room).forEach((d, i) => candidates.push({ ...d, key: `${t.topic_id}-${i}`, topicId: t.topic_id }))
+  }
+  const answers = new Map<string, number>()
+  for (let i = 0; i < candidates.length; i += CHECK_CHUNK_SIZE) {
+    const chunk = candidates.slice(i, i + CHECK_CHUNK_SIZE)
+    const checked = await answerMcqsBlind(chunk.map(c => ({ key: c.key, stem: c.stem, options: c.options })), context)
+    for (const [k, v] of checked) answers.set(k, v)
+  }
+  const kept = keepAgreeing(candidates, answers)
+  let saved = 0
+  for (const t of topics) {
+    const drafts: QuestionDraft[] = kept.filter(k => k.topicId === t.topic_id)
+      .map(k => ({ stem: k.stem, options: k.options, correct_index: k.correct_index, explanation: k.explanation, difficulty: k.difficulty }))
+    saved += await save(t.topic_id, drafts)
+  }
+  return { generated, saved }
+}
+
+/** Check one generated master chapter. */
 async function checkChapter(ch: ClaimedChapter): Promise<void> {
   const subject = await subjectInfo(ch.master_subject_id)
-  const language = languageForSubject(subject.subject_name)
   const { rows: topics } = await pool.query<{ topic_id: number; active: number }>(`
     SELECT mt.id AS topic_id, COUNT(qq.id) FILTER (WHERE qq.status = 'active')::int AS active
     FROM master_topics mt LEFT JOIN quiz_questions qq ON qq.master_topic_id = mt.id
@@ -435,30 +480,9 @@ async function checkChapter(ch: ClaimedChapter): Promise<void> {
     `SELECT q.fingerprint FROM quiz_questions q JOIN master_topics mt ON mt.id = q.master_topic_id WHERE mt.chapter_id = $1`,
     [ch.master_chapter_id]
   )
-  const { byTopic, generated } = draftsFromChapterOutput(ch.raw_output, new Set(topics.map(t => t.topic_id)), new Set(fps.map(f => f.fingerprint)))
-
-  // Never more than the target per topic, even if Claude wrote extra.
-  const candidates: (QuestionDraft & { key: string; topicId: number })[] = []
-  for (const t of topics) {
-    const room = Math.max(0, TARGET_PER_TOPIC - t.active)
-    ;(byTopic.get(t.topic_id) ?? []).slice(0, room).forEach((d, i) => candidates.push({ ...d, key: `${t.topic_id}-${i}`, topicId: t.topic_id }))
-  }
-  const answers = new Map<string, number>()
-  for (let i = 0; i < candidates.length; i += CHECK_CHUNK_SIZE) {
-    const chunk = candidates.slice(i, i + CHECK_CHUNK_SIZE)
-    const checked = await answerMcqsBlind(
-      chunk.map(c => ({ key: c.key, stem: c.stem, options: c.options })),
-      { board: subject.board, grade: subject.grade, subject: subject.subject_name },
-    )
-    for (const [k, v] of checked) answers.set(k, v)
-  }
-  const kept = keepAgreeing(candidates, answers)
-  let saved = 0
-  for (const t of topics) {
-    const drafts: QuestionDraft[] = kept.filter(k => k.topicId === t.topic_id)
-      .map(k => ({ stem: k.stem, options: k.options, correct_index: k.correct_index, explanation: k.explanation, difficulty: k.difficulty }))
-    saved += await insertDrafts(ch.master_subject_id, t.topic_id, drafts, 'ai', language)
-  }
+  const { generated, saved } = await checkGenerated(ch.raw_output, topics, fps.map(f => f.fingerprint),
+    { board: subject.board, grade: subject.grade, subject: subject.subject_name },
+    (topicId, drafts) => insertDrafts(ch.master_subject_id, topicId, drafts, 'ai', subject.language))
   await pool.query(`
     UPDATE quiz_bank_chapters
     SET status = 'done', raw_output = NULL, generated_count = $2, kept_count = $3, last_error = NULL, claimed_at = NULL, updated_at = NOW()
@@ -466,16 +490,305 @@ async function checkChapter(ch: ClaimedChapter): Promise<void> {
   `, [ch.master_chapter_id, generated, saved])
 }
 
+/**
+ * A preparation whose chapters are all checked becomes 'ready' and, by decision (#444), is published at once
+ * when it has questions — unless an admin took the subject offline (unpublished_at), which is respected.
+ */
 async function finishCheckedSubjects(): Promise<void> {
   await pool.query(`
     UPDATE quiz_bank_subjects s
     SET status = 'ready', updated_at = NOW(),
         last_error = (SELECT CASE WHEN COUNT(*) = 0 THEN NULL
-                                  ELSE COUNT(*) || ' chapter(s) failed — press Prepare again to retry them.' END
-                      FROM quiz_bank_chapters c WHERE c.master_subject_id = s.master_subject_id AND c.status = 'failed')
+                                  ELSE COUNT(*) || ' chapter(s) failed — they are retried automatically, or press Prepare again.' END
+                      FROM quiz_bank_chapters c WHERE c.master_subject_id = s.master_subject_id AND c.status = 'failed'),
+        published_at = CASE
+          WHEN s.published_at IS NULL AND s.unpublished_at IS NULL
+           AND EXISTS (SELECT 1 FROM quiz_questions q WHERE q.master_subject_id = s.master_subject_id AND q.status = 'active')
+          THEN NOW() ELSE s.published_at END
     WHERE s.status = 'checking'
       AND NOT EXISTS (SELECT 1 FROM quiz_bank_chapters c WHERE c.master_subject_id = s.master_subject_id AND c.status IN ('queued', 'generated'))
   `)
+}
+
+// ── Automatic preparation at syllabus import (#444) ─────────────────────────
+/** How many times the jobs retry an imported subject that still has topics below the minimum. */
+const AUTO_RETRIES = 3
+
+/**
+ * Called after Master Syllabus topics are imported or added. Prepares the subject's missing questions
+ * (with its newest textbook, when one is uploaded) without anyone pressing Prepare. If a preparation is
+ * already running, it runs again when that one finishes. Never throws: an import must not fail because of it.
+ */
+export async function autoPrepare(subjectId: number, opts: { retry?: boolean } = {}): Promise<'started' | 'queued' | 'nothing' | 'failed'> {
+  try {
+    const { rows: [s] } = await pool.query<{ category: string }>(`SELECT category FROM master_subjects WHERE id = $1`, [subjectId])
+    if (!s || s.category !== 'academic') return 'nothing'
+    await ensureBankRow(subjectId)
+    // New topics give the subject a fresh set of automatic retries; a retry uses one up.
+    await pool.query(
+      `UPDATE quiz_bank_subjects SET auto_prepare = TRUE, auto_tries = CASE WHEN $2 THEN auto_tries + 1 ELSE 0 END WHERE master_subject_id = $1`,
+      [subjectId, !!opts.retry],
+    )
+    const { rows: [b] } = await pool.query<{ status: string }>(`SELECT status FROM quiz_bank_subjects WHERE master_subject_id = $1`, [subjectId])
+    if (b.status === 'generating' || b.status === 'checking') {
+      await pool.query(`UPDATE quiz_bank_subjects SET rerun_requested = TRUE WHERE master_subject_id = $1`, [subjectId])
+      return 'queued'
+    }
+    const topics = await subjectTopics(subjectId)
+    if (!topics.length || topicNeeds(topics.map(t => ({ topicId: t.topic_id, chapterId: t.chapter_id, activeCount: t.active }))).length === 0) return 'nothing'
+    const { rows: [book] } = await pool.query<{ id: number }>(
+      `SELECT id FROM master_subject_materials WHERE subject_id = $1 AND material_type = 'textbook' ORDER BY created_at DESC LIMIT 1`, [subjectId])
+    await start(subjectId, book?.id ?? null, null)
+    return 'started'
+  } catch (err) {
+    if (err instanceof QuizBankError && err.status === 409) return 'queued'
+    // start() has already recorded the error on the subject (e.g. ANTHROPIC_API_KEY missing).
+    console.error(`[quiz-bank] auto-prepare subject ${subjectId}`, err)
+    return 'failed'
+  }
+}
+
+/** autoPrepare() for the subject a master chapter belongs to (a topic was added to that chapter). */
+export async function autoPrepareForChapter(chapterId: number) {
+  const { rows: [c] } = await pool.query<{ subject_id: number }>(`SELECT subject_id FROM master_chapters WHERE id = $1`, [chapterId])
+  return c ? autoPrepare(c.subject_id) : 'nothing'
+}
+
+/** Subjects an import asked for that still need work: re-run after a running preparation, or retry gaps later. */
+async function retryAutoPrepared(): Promise<number> {
+  const { rows } = await pool.query<{ master_subject_id: number; rerun: boolean }>(`
+    SELECT b.master_subject_id, b.rerun_requested AS rerun FROM quiz_bank_subjects b
+    WHERE b.auto_prepare AND b.status IN ('idle', 'ready')
+      AND (b.rerun_requested
+           OR (b.auto_tries < $1 AND b.updated_at < NOW() - INTERVAL '6 hours'
+               AND EXISTS (
+                 SELECT 1 FROM master_chapters mc JOIN master_topics mt ON mt.chapter_id = mc.id
+                 WHERE mc.subject_id = b.master_subject_id
+                   AND (SELECT COUNT(*) FROM quiz_questions q WHERE q.master_topic_id = mt.id AND q.status = 'active') < $2)))
+    ORDER BY b.updated_at LIMIT 5
+  `, [AUTO_RETRIES, MIN_READY_PER_TOPIC])
+  let started = 0
+  for (const r of rows) if (await autoPrepare(r.master_subject_id, { retry: !r.rerun }) === 'started') started++
+  return started
+}
+
+// ── A school's own topics (#444) ────────────────────────────────────────────
+// Topics a school adds itself (school_topics.master_topic_id IS NULL) get questions for that school only,
+// with the same Claude batch + Groq check. Only schools that have the daily-quiz feature are prepared.
+type SchoolTopicNeed = {
+  school_chapter_id: number; chapter_name: string; topic_id: number; topic_name: string; subtopics: unknown; content_text: string | null
+  active: number; board: string; grade: string; subject_name: string; quiz_language: string | null
+}
+
+async function schoolTopicNeeds(schoolId: number): Promise<SchoolTopicNeed[]> {
+  const { rows } = await pool.query<SchoolTopicNeed>(`
+    SELECT sc.id AS school_chapter_id, sc.chapter_name, st.id AS topic_id, st.topic_name, st.subtopics, st.content_text,
+           (SELECT COUNT(*)::int FROM quiz_questions q WHERE q.school_topic_id = st.id AND q.status = 'active') AS active,
+           COALESCE(ss.board, sch.board, 'CBSE') AS board, ss.grade, ss.subject_name, ss.quiz_language
+    FROM school_topics st
+    JOIN school_chapters sc ON sc.id = st.school_chapter_id
+    JOIN school_subjects ss ON ss.id = sc.school_subject_id
+    JOIN schools sch ON sch.id = ss.school_id
+    LEFT JOIN quiz_bank_school_chapters j ON j.school_chapter_id = sc.id
+    WHERE ss.school_id = $1 AND st.master_topic_id IS NULL AND ss.category = 'academic'
+      -- not while a run for that chapter is in flight, and at most ${AUTO_RETRIES} tries
+      AND (j.school_chapter_id IS NULL OR (j.status IN ('done', 'failed') AND j.attempts < $2))
+    ORDER BY sc.id, st.topic_order, st.id
+  `, [schoolId, AUTO_RETRIES])
+  return rows.filter(r => r.active < TARGET_PER_TOPIC)
+}
+
+/**
+ * Prepare questions for a school's own topics that don't have enough yet: one batch request per chapter.
+ * Called after a school adds topics, and by the jobs as a catch-up. Never throws.
+ */
+export async function prepareSchoolTopics(schoolId: number): Promise<{ chapters: number }> {
+  try {
+    if (!await schoolHasFeature(schoolId, 'daily-quiz')) return { chapters: 0 }
+    const needs = await schoolTopicNeeds(schoolId)
+    if (!needs.length) return { chapters: 0 }
+    const byChapter = new Map<number, SchoolTopicNeed[]>()
+    for (const n of needs) byChapter.set(n.school_chapter_id, [...(byChapter.get(n.school_chapter_id) ?? []), n])
+    const requests: ChapterRequest[] = []
+    for (const [chapterId, topics] of byChapter) {
+      const first = topics[0]
+      const { rows: stems } = await pool.query<{ school_topic_id: number; stem: string }>(
+        `SELECT school_topic_id, stem FROM quiz_questions WHERE school_topic_id = ANY($1::int[])`, [topics.map(t => t.topic_id)])
+      requests.push({
+        chapterId,
+        prompt: buildChapterPrompt({
+          board: first.board, grade: first.grade, subject: first.subject_name, language: subjectLanguage(first.quiz_language, first.subject_name),
+          chapterName: first.chapter_name, withTextbook: false, custom: true,
+          topics: topics.map(t => ({
+            topicId: t.topic_id, name: t.topic_name,
+            subtopics: Array.isArray(t.subtopics) ? t.subtopics.filter((s): s is string => typeof s === 'string') : [],
+            notes: t.content_text?.trim() ? t.content_text.trim().slice(0, NOTES_MAX_CHARS) : null,
+            need: TARGET_PER_TOPIC - t.active,
+            existingStems: stems.filter(s => s.school_topic_id === t.topic_id).map(s => s.stem).slice(0, EXISTING_STEMS_IN_PROMPT),
+          })),
+        }),
+      })
+    }
+    // Claim the chapters before calling Anthropic, so a second caller doesn't submit them too.
+    for (const r of requests) {
+      await pool.query(`
+        INSERT INTO quiz_bank_school_chapters (school_chapter_id, school_id, status, attempts, updated_at)
+        VALUES ($1, $2, 'queued', 1, NOW())
+        ON CONFLICT (school_chapter_id) DO UPDATE
+          SET status = 'queued', attempts = quiz_bank_school_chapters.attempts + 1, batch_id = NULL, raw_output = NULL,
+              last_error = NULL, claimed_at = NULL, updated_at = NOW()
+      `, [r.chapterId, schoolId])
+    }
+    try {
+      const batchId = await submitChapterBatch(requests, null)
+      await pool.query(
+        `UPDATE quiz_bank_school_chapters SET batch_id = $2, submitted_at = NOW(), updated_at = NOW() WHERE school_chapter_id = ANY($1::int[])`,
+        [requests.map(r => r.chapterId), batchId])
+    } catch (err) {
+      await pool.query(
+        `UPDATE quiz_bank_school_chapters SET status = 'failed', last_error = $2, updated_at = NOW() WHERE school_chapter_id = ANY($1::int[])`,
+        [requests.map(r => r.chapterId), (err instanceof Error ? err.message : String(err)).slice(0, 1000)])
+      throw err
+    }
+    return { chapters: requests.length }
+  } catch (err) {
+    console.error(`[quiz-bank] school ${schoolId} custom topics`, err)
+    return { chapters: 0 }
+  }
+}
+
+/** Collect finished school batches (one Anthropic look per batch per minute), then mark chapters generated/failed. */
+async function collectSchoolBatches(): Promise<number> {
+  const { rows: batches } = await pool.query<{ batch_id: string }>(`
+    SELECT DISTINCT batch_id FROM quiz_bank_school_chapters
+    WHERE status = 'queued' AND batch_id IS NOT NULL AND updated_at < NOW() - INTERVAL '1 minute'
+      AND (claimed_at IS NULL OR claimed_at < NOW() - ${STALE_CLAIM})
+    LIMIT 10
+  `)
+  let collected = 0
+  for (const { batch_id } of batches) {
+    const { rowCount } = await pool.query(
+      `UPDATE quiz_bank_school_chapters SET claimed_at = NOW() WHERE batch_id = $1 AND status = 'queued' AND (claimed_at IS NULL OR claimed_at < NOW() - ${STALE_CLAIM})`,
+      [batch_id])
+    if (!rowCount) continue
+    try {
+      if (await batchState(batch_id) !== 'ended') {
+        await pool.query(`UPDATE quiz_bank_school_chapters SET claimed_at = NULL, updated_at = NOW() WHERE batch_id = $1 AND status = 'queued'`, [batch_id])
+        continue
+      }
+      for (const r of await batchResults(batch_id)) {
+        await pool.query(
+          r.ok
+            ? `UPDATE quiz_bank_school_chapters SET status = 'generated', raw_output = $2, claimed_at = NULL, updated_at = NOW() WHERE school_chapter_id = $1 AND batch_id = $3`
+            : `UPDATE quiz_bank_school_chapters SET status = 'failed', last_error = $2, claimed_at = NULL, updated_at = NOW() WHERE school_chapter_id = $1 AND batch_id = $3`,
+          [r.chapterId, r.ok ? JSON.stringify(r.output) : r.error, batch_id])
+      }
+      await pool.query(`UPDATE quiz_bank_school_chapters SET status = 'failed', last_error = 'No result returned', claimed_at = NULL, updated_at = NOW() WHERE batch_id = $1 AND status = 'queued'`, [batch_id])
+      collected++
+    } catch (err) {
+      await pool.query(`UPDATE quiz_bank_school_chapters SET claimed_at = NULL, last_error = $2, updated_at = NOW() WHERE batch_id = $1 AND status = 'queued'`,
+        [batch_id, (err instanceof Error ? err.message : String(err)).slice(0, 1000)])
+      throw err
+    }
+  }
+  return collected
+}
+
+async function insertSchoolDrafts(schoolTopicId: number, drafts: QuestionDraft[], language: QuizLanguage): Promise<number> {
+  let saved = 0
+  for (const raw of drafts) {
+    const d = spreadAnswerPosition(raw)
+    const res = await pool.query(`
+      INSERT INTO quiz_questions (school_topic_id, language, stem, options, correct_index, explanation, difficulty, source, fingerprint)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, 'ai', $8)
+      ON CONFLICT (school_topic_id, fingerprint) WHERE school_topic_id IS NOT NULL DO NOTHING
+    `, [schoolTopicId, language, d.stem, JSON.stringify(d.options), d.correct_index, d.explanation, d.difficulty, fingerprint(d.stem)])
+    saved += res.rowCount ?? 0
+  }
+  return saved
+}
+
+/** Check one generated school chapter (its own topics only). */
+async function checkSchoolChapter(ch: { school_chapter_id: number; raw_output: unknown }): Promise<void> {
+  const { rows: topics } = await pool.query<{ topic_id: number; active: number }>(`
+    SELECT st.id AS topic_id, COUNT(q.id) FILTER (WHERE q.status = 'active')::int AS active
+    FROM school_topics st LEFT JOIN quiz_questions q ON q.school_topic_id = st.id
+    WHERE st.school_chapter_id = $1 AND st.master_topic_id IS NULL GROUP BY st.id
+  `, [ch.school_chapter_id])
+  const { rows: [ctx] } = await pool.query<{ board: string; grade: string; subject_name: string; quiz_language: string | null }>(`
+    SELECT COALESCE(ss.board, sch.board, 'CBSE') AS board, ss.grade, ss.subject_name, ss.quiz_language
+    FROM school_chapters sc JOIN school_subjects ss ON ss.id = sc.school_subject_id JOIN schools sch ON sch.id = ss.school_id
+    WHERE sc.id = $1
+  `, [ch.school_chapter_id])
+  if (!ctx) throw new Error('Chapter no longer exists')
+  const { rows: fps } = await pool.query<{ fingerprint: string }>(
+    `SELECT q.fingerprint FROM quiz_questions q JOIN school_topics st ON st.id = q.school_topic_id WHERE st.school_chapter_id = $1`, [ch.school_chapter_id])
+  const language = subjectLanguage(ctx.quiz_language, ctx.subject_name)
+  const { generated, saved } = await checkGenerated(ch.raw_output, topics, fps.map(f => f.fingerprint),
+    { board: ctx.board, grade: ctx.grade, subject: ctx.subject_name },
+    (topicId, drafts) => insertSchoolDrafts(topicId, drafts, language))
+  await pool.query(`
+    UPDATE quiz_bank_school_chapters
+    SET status = 'done', raw_output = NULL, generated_count = $2, kept_count = $3, last_error = NULL, claimed_at = NULL, updated_at = NOW()
+    WHERE school_chapter_id = $1
+  `, [ch.school_chapter_id, generated, saved])
+}
+
+/** Schools with daily-quiz whose own topics still need questions (missed trigger, or a retry after 6 hours). */
+async function catchUpSchoolTopics(): Promise<number> {
+  const { rows } = await pool.query<{ school_id: number }>(`
+    SELECT DISTINCT ss.school_id FROM school_topics st
+    JOIN school_chapters sc ON sc.id = st.school_chapter_id
+    JOIN school_subjects ss ON ss.id = sc.school_subject_id
+    LEFT JOIN quiz_bank_school_chapters j ON j.school_chapter_id = sc.id
+    WHERE st.master_topic_id IS NULL AND ss.category = 'academic'
+      AND (SELECT COUNT(*) FROM quiz_questions q WHERE q.school_topic_id = st.id AND q.status = 'active') < $1
+      AND (j.school_chapter_id IS NULL OR (j.status IN ('done', 'failed') AND j.attempts < $2 AND j.updated_at < NOW() - INTERVAL '6 hours'))
+    LIMIT 5
+  `, [MIN_READY_PER_TOPIC, AUTO_RETRIES])
+  let chapters = 0
+  for (const r of rows) chapters += (await prepareSchoolTopics(r.school_id)).chapters
+  return chapters
+}
+
+/** Platform Admin overview of schools' own topics: how many have enough questions, and any problems. */
+export async function schoolTopicsOverview() {
+  const { rows } = await pool.query(`
+    SELECT sch.id AS school_id, sch.name AS school_name,
+           COUNT(DISTINCT st.id)::int AS topics,
+           COUNT(DISTINCT st.id) FILTER (WHERE (SELECT COUNT(*) FROM quiz_questions q WHERE q.school_topic_id = st.id AND q.status = 'active') >= $1)::int AS topics_ready,
+           COUNT(DISTINCT j.school_chapter_id) FILTER (WHERE j.status IN ('queued', 'generated'))::int AS chapters_in_progress,
+           COUNT(DISTINCT j.school_chapter_id) FILTER (WHERE j.status = 'failed')::int AS chapters_failed,
+           MAX(j.last_error) FILTER (WHERE j.status = 'failed') AS last_error
+    FROM school_topics st
+    JOIN school_chapters sc ON sc.id = st.school_chapter_id
+    JOIN school_subjects ss ON ss.id = sc.school_subject_id
+    JOIN schools sch ON sch.id = ss.school_id AND sch.deleted_at IS NULL
+    LEFT JOIN quiz_bank_school_chapters j ON j.school_chapter_id = sc.id
+    WHERE st.master_topic_id IS NULL AND ss.category = 'academic'
+    GROUP BY sch.id ORDER BY sch.name
+  `, [MIN_READY_PER_TOPIC])
+  return rows
+}
+
+let lastNudge = 0
+/**
+ * Moves pending preparations forward from ordinary traffic (the daily-quiz pages and cron), at most once every
+ * two minutes per server instance, so imported topics get questions within about an hour without a fast cron.
+ * Cheap when nothing is pending; never throws.
+ */
+export async function nudgePreparation(budgetMs = 20_000): Promise<void> {
+  if (Date.now() - lastNudge < 120_000) return
+  lastNudge = Date.now()
+  try {
+    const { rows: [{ busy }] } = await pool.query<{ busy: boolean }>(`
+      SELECT EXISTS (SELECT 1 FROM quiz_bank_subjects WHERE status IN ('generating', 'checking') OR (auto_prepare AND rerun_requested))
+          OR EXISTS (SELECT 1 FROM quiz_bank_school_chapters WHERE status IN ('queued', 'generated')) AS busy
+    `)
+    if (busy) await advance(budgetMs)
+  } catch (err) {
+    console.error('[quiz-bank] nudge', err)
+  }
 }
 
 /**
@@ -524,10 +837,45 @@ export async function advance(budgetMs: number): Promise<{ collected: number; ch
     }
   }
   await finishCheckedSubjects()
-  const { rows: [{ pending }] } = await pool.query<{ pending: boolean }>(
-    `SELECT EXISTS (SELECT 1 FROM quiz_bank_subjects WHERE status IN ('generating', 'checking')) AS pending`
-  )
-  return { collected, checked, failed, retryLater, pending }
+
+  // Schools' own topics (#444): collect their batches and check them the same way.
+  const schoolCollected = await collectSchoolBatches()
+  while (!retryLater && Date.now() - startedAt < budgetMs) {
+    const { rows: [ch] } = await pool.query<{ school_chapter_id: number; raw_output: unknown }>(`
+      UPDATE quiz_bank_school_chapters SET claimed_at = NOW()
+      WHERE school_chapter_id = (
+        SELECT school_chapter_id FROM quiz_bank_school_chapters
+        WHERE status = 'generated' AND (claimed_at IS NULL OR claimed_at < NOW() - ${STALE_CLAIM})
+        ORDER BY updated_at LIMIT 1 FOR UPDATE SKIP LOCKED
+      )
+      RETURNING school_chapter_id, raw_output
+    `)
+    if (!ch) break
+    try {
+      await checkSchoolChapter(ch)
+      checked++
+    } catch (err) {
+      if (err instanceof AIRetryLaterError) {
+        await pool.query(`UPDATE quiz_bank_school_chapters SET claimed_at = NULL WHERE school_chapter_id = $1`, [ch.school_chapter_id])
+        retryLater = true
+        break
+      }
+      failed++
+      await pool.query(
+        `UPDATE quiz_bank_school_chapters SET status = 'failed', raw_output = NULL, last_error = $2, claimed_at = NULL, updated_at = NOW() WHERE school_chapter_id = $1`,
+        [ch.school_chapter_id, (err instanceof Error ? err.message : String(err)).slice(0, 1000)])
+    }
+  }
+
+  // Imports that asked for questions: re-run after a running preparation, retry gaps; catch up schools' topics.
+  if (Date.now() - startedAt < budgetMs) await retryAutoPrepared()
+  if (Date.now() - startedAt < budgetMs) await catchUpSchoolTopics()
+
+  const { rows: [{ pending }] } = await pool.query<{ pending: boolean }>(`
+    SELECT EXISTS (SELECT 1 FROM quiz_bank_subjects WHERE status IN ('generating', 'checking'))
+        OR EXISTS (SELECT 1 FROM quiz_bank_school_chapters WHERE status IN ('queued', 'generated')) AS pending
+  `)
+  return { collected: collected + schoolCollected, checked, failed, retryLater, pending }
 }
 
 // ── Publishing ───────────────────────────────────────────────────────────────
@@ -545,7 +893,9 @@ export async function setPublished(subjectId: number, publish: boolean, adminId:
   const { rows: [row] } = await pool.query(`
     UPDATE quiz_bank_subjects
     SET published_at = CASE WHEN $2 THEN COALESCE(published_at, NOW()) ELSE NULL END,
-        published_by = CASE WHEN $2 THEN $3::int ELSE NULL END, updated_at = NOW()
+        published_by = CASE WHEN $2 THEN $3::int ELSE NULL END,
+        -- Taking a subject offline is remembered, so automatic publishing never puts it back.
+        unpublished_at = CASE WHEN $2 THEN NULL ELSE NOW() END, updated_at = NOW()
     WHERE master_subject_id = $1
     RETURNING published_at
   `, [subjectId, publish, adminId])
@@ -592,11 +942,15 @@ export type ReportReason = typeof REPORT_REASONS[number]
  * Each student counts once; REPORTS_TO_PULL open reports take the question out of use until an admin acts.
  */
 export async function reportQuestion(studentId: number, schoolId: number, grade: string, questionId: number, reason: ReportReason, note: string | null) {
+  // A published master question of a subject the school uses, or a question of the school's own topic.
   const { rows: [q] } = await pool.query(`
     SELECT q.id FROM quiz_questions q
-    JOIN quiz_bank_subjects b ON b.master_subject_id = q.master_subject_id AND b.published_at IS NOT NULL
-    JOIN school_subjects ss ON ss.master_subject_id = q.master_subject_id AND ss.school_id = $2 AND ss.grade = $3
-    WHERE q.id = $1 AND q.status = 'active'
+    WHERE q.id = $1 AND q.status = 'active' AND (
+      EXISTS (SELECT 1 FROM quiz_bank_subjects b JOIN school_subjects ss ON ss.master_subject_id = b.master_subject_id
+              WHERE b.master_subject_id = q.master_subject_id AND b.published_at IS NOT NULL AND ss.school_id = $2 AND ss.grade = $3)
+      OR EXISTS (SELECT 1 FROM school_topics st JOIN school_chapters sc ON sc.id = st.school_chapter_id
+                 JOIN school_subjects ss ON ss.id = sc.school_subject_id
+                 WHERE st.id = q.school_topic_id AND ss.school_id = $2))
     LIMIT 1
   `, [questionId, schoolId, grade])
   if (!q) throw new QuizBankError('Question not found', 404)

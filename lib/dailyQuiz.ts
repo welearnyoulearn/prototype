@@ -14,13 +14,13 @@
 import pool from '@/lib/db'
 import type { PoolClient } from 'pg'
 import { resolveAcademicYear } from '@/lib/academicYear'
-import { nonWorkingDay, nonWorkingDaysMap } from '@/lib/attendance'
+import { nonWorkingDay } from '@/lib/attendance'
 import { schoolHasFeature } from '@/lib/auth'
 import { awardOnFinish, runWeeklyReports, settleAccuracy } from '@/lib/quizRewards'
 import {
   DEFAULT_QUIZ_SETTINGS, LATE_DAYS, REMINDER_BEFORE_CLOSE_MIN, addDays, answersVisible, chooseTopics, gradeNumber,
-  inSeason, istInstant, istNow, lateAllowed, quizPhase, quizSettingsSchema, recentWorkingDays, resolveSettings,
-  type QuizSettings, type QuizSettingsOverride, type TopicSource,
+  inSeason, istInstant, istNow, lateAllowed, quizPhase, quizSettingsSchema, resolveSettings,
+  type CompletedTopic, type QuizSettings, type QuizSettingsOverride, type TopicSource,
 } from '@/lib/dailyQuizRules'
 
 export class DailyQuizError extends Error {
@@ -115,57 +115,64 @@ async function studentContext(studentId: number, schoolId: number): Promise<Stud
 }
 
 // ── Posting a class's quiz ────────────────────────────────────────────────────
-type PlannedItem = { masterSubjectId: number; subjectName: string; source: TopicSource; topicIds: number[] }
+type PlannedItem = { schoolSubjectId: number; subjectName: string; source: TopicSource; topicIds: number[] }
 
-/** Today's items for a class: one per published class subject that has something to ask. */
+/**
+ * The questions usable for a class topic `st`: the master topic's questions once its subject's bank is
+ * published, plus the school's own questions for that topic (#444). Shared by planning and drawing.
+ */
+const TOPIC_QUESTION_MATCH = `q.status = 'active' AND (
+    q.school_topic_id = st.id
+    OR (q.master_topic_id = st.master_topic_id
+        AND EXISTS (SELECT 1 FROM quiz_bank_subjects b WHERE b.master_subject_id = q.master_subject_id AND b.published_at IS NOT NULL)))`
+
+/**
+ * Today's items for a class: one per class subject (master-backed or the school's own) that has a completed
+ * topic with questions. The topic is the one marked completed since the last quiz, else revision (#444).
+ */
 export async function planItems(cls: ClassRow, date: string): Promise<PlannedItem[]> {
   let year: string
   try { year = await resolveAcademicYear(cls.school_id) } catch { return [] }
 
-  const off = await nonWorkingDaysMap(cls.school_id, addDays(date, -30), date)
-  const recent = recentWorkingDays(date, d => !off.has(d))
-  const windowStart = recent[recent.length - 1] ?? date
-
-  const { rows: subjects } = await pool.query<{ school_subject_id: number; master_subject_id: number; subject_name: string }>(`
-    SELECT DISTINCT ON (ss.master_subject_id) ss.id AS school_subject_id, ss.master_subject_id, cs.subject_name
+  const { rows: subjects } = await pool.query<{ school_subject_id: number; subject_name: string }>(`
+    SELECT DISTINCT ON (ss.id) ss.id AS school_subject_id, cs.subject_name
     FROM class_subjects cs
     JOIN school_subjects ss ON ss.school_id = $1 AND ss.grade = $2 AND ss.academic_year = $3
-                           AND LOWER(ss.subject_name) = LOWER(cs.subject_name) AND ss.master_subject_id IS NOT NULL
-    JOIN quiz_bank_subjects b ON b.master_subject_id = ss.master_subject_id AND b.published_at IS NOT NULL
+                           AND LOWER(ss.subject_name) = LOWER(cs.subject_name) AND ss.category = 'academic'
     WHERE cs.class_id = $4
-    ORDER BY ss.master_subject_id, cs.id
+    ORDER BY ss.id, cs.id
   `, [cls.school_id, cls.grade, year, cls.id])
   if (!subjects.length) return []
 
-  // The class's visible topics that have at least one usable question, with their progress.
-  const { rows: topics } = await pool.query<{ school_subject_id: number; master_topic_id: number; status: string | null; covered_date: string | null; target_date: string | null }>(`
-    SELECT sc.school_subject_id, st.master_topic_id, p.status,
-           TO_CHAR(p.covered_date, 'YYYY-MM-DD') AS covered_date, TO_CHAR(p.target_date, 'YYYY-MM-DD') AS target_date
+  // The class's completed, visible topics that have at least one usable question.
+  const { rows: topics } = await pool.query<{ school_subject_id: number; topic_id: number; covered_date: string | null; chapter_order: number; topic_order: number }>(`
+    SELECT sc.school_subject_id, st.id AS topic_id, TO_CHAR(p.covered_date, 'YYYY-MM-DD') AS covered_date,
+           sc.chapter_order, st.topic_order
     FROM school_chapters sc
-    JOIN school_topics st ON st.school_chapter_id = sc.id AND st.master_topic_id IS NOT NULL
-    LEFT JOIN school_topic_progress p ON p.class_id = $1 AND p.school_topic_id = st.id
+    JOIN school_topics st ON st.school_chapter_id = sc.id
+    JOIN school_topic_progress p ON p.class_id = $1 AND p.school_topic_id = st.id AND p.status = 'covered'
     LEFT JOIN class_chapter_visibility cv ON cv.class_id = $1 AND cv.school_chapter_id = sc.id
     LEFT JOIN class_topic_visibility tv ON tv.class_id = $1 AND tv.school_topic_id = st.id
     WHERE sc.school_subject_id = ANY($2::int[])
       AND COALESCE(cv.is_active, TRUE) AND COALESCE(tv.is_active, TRUE)
-      AND EXISTS (SELECT 1 FROM quiz_questions q WHERE q.master_topic_id = st.master_topic_id AND q.status = 'active')
+      AND EXISTS (SELECT 1 FROM quiz_questions q WHERE ${TOPIC_QUESTION_MATCH})
   `, [cls.id, subjects.map(s => s.school_subject_id)])
+
+  // Topics already asked as the day's new topic in this class: they are now revision material.
+  const { rows: asked } = await pool.query<{ topic_id: number }>(`
+    SELECT DISTINCT UNNEST(i.topic_ids) AS topic_id
+    FROM daily_quiz_items i JOIN daily_quizzes z ON z.id = i.quiz_id
+    WHERE z.class_id = $1 AND z.quiz_date < $2::date AND i.source = 'covered'
+  `, [cls.id, date])
+  const askedAsNew = new Set(asked.map(a => a.topic_id))
 
   const items: PlannedItem[] = []
   for (const s of [...subjects].sort((a, b) => a.subject_name.localeCompare(b.subject_name))) {
-    const recentCovered: number[] = [], recentPlanned: number[] = [], olderCovered: number[] = []
-    for (const t of topics) {
-      if (t.school_subject_id !== s.school_subject_id) continue
-      if (t.status === 'covered') {
-        // A topic covered "in the future" (bad data) or with no date is treated as older revision material.
-        if (t.covered_date && t.covered_date >= windowStart && t.covered_date <= date) recentCovered.push(t.master_topic_id)
-        else olderCovered.push(t.master_topic_id)
-      } else if (t.target_date && t.target_date >= windowStart && t.target_date <= date) {
-        recentPlanned.push(t.master_topic_id)
-      }
-    }
-    const choice = chooseTopics(recentCovered, recentPlanned, olderCovered)
-    if (choice) items.push({ masterSubjectId: s.master_subject_id, subjectName: s.subject_name, ...choice })
+    const completed: CompletedTopic[] = topics
+      .filter(t => t.school_subject_id === s.school_subject_id)
+      .map(t => ({ topicId: t.topic_id, coveredDate: t.covered_date, chapterOrder: t.chapter_order, topicOrder: t.topic_order }))
+    const choice = chooseTopics(completed, askedAsNew, date)
+    if (choice) items.push({ schoolSubjectId: s.school_subject_id, subjectName: s.subject_name, ...choice })
   }
   return items
 }
@@ -208,9 +215,9 @@ export async function ensureQuiz(cls: ClassRow, date: string, opensAt: Date, clo
     if (created) {
       for (const [i, item] of items.entries()) {
         await client.query(`
-          INSERT INTO daily_quiz_items (quiz_id, position, master_subject_id, subject_name, source, topic_ids)
+          INSERT INTO daily_quiz_items (quiz_id, position, school_subject_id, subject_name, source, topic_ids)
           VALUES ($1, $2, $3, $4, $5, $6)
-        `, [created.id, i + 1, item.masterSubjectId, item.subjectName, item.source, item.topicIds])
+        `, [created.id, i + 1, item.schoolSubjectId, item.subjectName, item.source, item.topicIds])
       }
     }
     await client.query('COMMIT')
@@ -277,13 +284,13 @@ async function gradeAttempt(attemptId: number, now: Date): Promise<boolean> {
       FROM daily_quiz_answers a WHERE a.attempt_id = $1 AND a.question_id = q.id AND a.is_correct
     `, [attemptId])
     await client.query(`
-      INSERT INTO student_topic_mastery (student_id, master_topic_id, attempted, correct, last_wrong_at, last_seen_at)
-      SELECT $2, q.master_topic_id, COUNT(*), COUNT(*) FILTER (WHERE a.is_correct),
+      INSERT INTO student_topic_mastery (student_id, school_topic_id, attempted, correct, last_wrong_at, last_seen_at)
+      SELECT $2, a.school_topic_id, COUNT(*), COUNT(*) FILTER (WHERE a.is_correct),
              CASE WHEN bool_and(a.is_correct) THEN NULL ELSE NOW() END, NOW()
-      FROM daily_quiz_answers a JOIN quiz_questions q ON q.id = a.question_id
-      WHERE a.attempt_id = $1 AND q.master_topic_id IS NOT NULL
-      GROUP BY q.master_topic_id
-      ON CONFLICT (student_id, master_topic_id) DO UPDATE SET
+      FROM daily_quiz_answers a
+      WHERE a.attempt_id = $1 AND a.school_topic_id IS NOT NULL
+      GROUP BY a.school_topic_id
+      ON CONFLICT (student_id, school_topic_id) DO UPDATE SET
         attempted = student_topic_mastery.attempted + EXCLUDED.attempted,
         correct = student_topic_mastery.correct + EXCLUDED.correct,
         last_wrong_at = COALESCE(EXCLUDED.last_wrong_at, student_topic_mastery.last_wrong_at),
@@ -463,14 +470,14 @@ export async function startAttempt(studentId: number, schoolId: number, quizId: 
       attemptId = created.id
       let position = 0
       for (const item of items) {
-        const questionId = await drawQuestion(client, studentId, item.topic_ids, item.source === 'revision')
-        if (!questionId) continue // every question on these topics was pulled since the quiz was posted
+        const drawn = await drawQuestion(client, studentId, item.topic_ids, item.source === 'revision')
+        if (!drawn) continue // every question on these topics was pulled since the quiz was posted
         position++
         await client.query(
-          'INSERT INTO daily_quiz_answers (attempt_id, item_id, question_id, position) VALUES ($1, $2, $3, $4)',
-          [created.id, item.id, questionId, position],
+          'INSERT INTO daily_quiz_answers (attempt_id, item_id, question_id, school_topic_id, position) VALUES ($1, $2, $3, $4, $5)',
+          [created.id, item.id, drawn.questionId, drawn.topicId, position],
         )
-        await client.query('UPDATE quiz_questions SET served_count = served_count + 1 WHERE id = $1', [questionId])
+        await client.query('UPDATE quiz_questions SET served_count = served_count + 1 WHERE id = $1', [drawn.questionId])
       }
       if (position === 0) throw new DailyQuizError('No questions are available for this quiz right now.', 409)
     }
@@ -491,20 +498,26 @@ export async function startAttempt(studentId: number, schoolId: number, quizId: 
 }
 
 /** One active question from the topics: unseen by this student first; for revision, topics they got wrong first. */
-async function drawQuestion(client: PoolClient, studentId: number, topicIds: number[], revision: boolean): Promise<number | null> {
-  const { rows: [q] } = await client.query<{ id: number }>(`
-    SELECT q.id
-    FROM quiz_questions q
-    LEFT JOIN student_topic_mastery m ON m.student_id = $2 AND m.master_topic_id = q.master_topic_id
-    WHERE q.master_topic_id = ANY($1::int[]) AND q.status = 'active'
+/**
+ * One active question for the student from the class topics. Revision: topics this student got wrong first,
+ * then the topics they were asked least recently. Always: questions they haven't seen first, then random.
+ */
+async function drawQuestion(client: PoolClient, studentId: number, topicIds: number[], revision: boolean): Promise<{ questionId: number; topicId: number } | null> {
+  const { rows: [q] } = await client.query<{ id: number; topic_id: number }>(`
+    SELECT q.id, st.id AS topic_id
+    FROM school_topics st
+    JOIN quiz_questions q ON ${TOPIC_QUESTION_MATCH}
+    LEFT JOIN student_topic_mastery m ON m.student_id = $2 AND m.school_topic_id = st.id
+    WHERE st.id = ANY($1::int[])
     ORDER BY
+      CASE WHEN $3::boolean THEN m.last_wrong_at IS NULL ELSE FALSE END,
+      CASE WHEN $3::boolean THEN m.last_seen_at END ASC NULLS FIRST,
       EXISTS (SELECT 1 FROM daily_quiz_answers a JOIN daily_quiz_attempts t ON t.id = a.attempt_id
               WHERE t.student_id = $2 AND a.question_id = q.id),
-      CASE WHEN $3::boolean THEN m.last_wrong_at IS NULL ELSE FALSE END,
       random()
     LIMIT 1
   `, [topicIds, studentId, revision])
-  return q?.id ?? null
+  return q ? { questionId: q.id, topicId: q.topic_id } : null
 }
 
 async function attemptRow(studentId: number, schoolId: number, attemptId: number) {
@@ -524,12 +537,12 @@ export async function attemptView(studentId: number, schoolId: number, attemptId
   const t = await attemptRow(studentId, schoolId, attemptId)
   const visible = answersVisible(t.status === 'submitted', t.is_late, now, t.closes_at)
   const { rows } = await pool.query<{ item_id: number; position: number; subject_name: string; topic_name: string | null; stem: string; options: string[]; language: string; chosen_index: number | null; correct_index: number; explanation: string | null; is_correct: boolean | null; question_id: number }>(`
-    SELECT a.item_id, a.position, i.subject_name, mt.topic_name, q.stem, q.options, q.language, a.chosen_index,
+    SELECT a.item_id, a.position, i.subject_name, st.topic_name, q.stem, q.options, q.language, a.chosen_index,
            q.correct_index, q.explanation, a.is_correct, q.id AS question_id
     FROM daily_quiz_answers a
     JOIN daily_quiz_items i ON i.id = a.item_id
     JOIN quiz_questions q ON q.id = a.question_id
-    LEFT JOIN master_topics mt ON mt.id = q.master_topic_id
+    LEFT JOIN school_topics st ON st.id = a.school_topic_id
     WHERE a.attempt_id = $1
     ORDER BY a.position
   `, [attemptId])

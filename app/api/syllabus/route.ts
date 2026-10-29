@@ -1,5 +1,6 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
+import { prepareSchoolTopics } from '@/lib/quizBank'
 import { resolveAcademicYear } from '@/lib/academicYear'
 import { canAccessSyllabusClass, canWriteSyllabusClass, requireSyllabusAccess, requireSyllabusWriteAccess } from '@/lib/auth'
 import type { PoolClient } from 'pg'
@@ -509,6 +510,8 @@ export async function POST(req: NextRequest) {
     }
 
     await client.query('COMMIT')
+    // Topics a teacher adds themselves get the school's own quiz questions in the background (#444).
+    if (inserted.length) after(async () => { for (const schoolId of yearBySchool.keys()) await prepareSchoolTopics(Number(schoolId)) })
     return NextResponse.json({ inserted })
   } catch (err) {
     if (client) await client.query('ROLLBACK').catch(() => {})

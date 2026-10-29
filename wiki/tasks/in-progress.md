@@ -17,6 +17,7 @@ Move an entry to [completed.md](completed.md) when it ships. Add new entries at 
 - [x] P2 #433 daily quiz: posting per class, student + parent quiz screens, answers after the close, late for 7 days, ready/reminder/results notices, Platform Admin → Daily Quiz settings (`feature/433-daily-quiz`)
 - [x] P3 #434 points ledger, working-day streak, badges, weekly leaderboard, parent view + weekly report, School Admin report (`feature/434-quiz-points-leaderboard`)
 - [x] P4 #435 doubts: Ask WLYL AI → Ask Teacher, teacher Doubts (misconceptions, covered in class, replies), proof question, points + WLYL Stars, parent timeline, School Admin report (`feature/435-student-doubts`)
+- [x] #444 questions made at syllabus import (8 per topic, auto-published), subject language, schools' own topics, daily topic = completed since the last quiz else revision (`feature/444-quiz-questions-at-import`)
 - [ ] Next: P5 #436 SLA · P6 #437 insights · P7 #438 AI hook
 
 ### Push notifications via Firebase (FCM)

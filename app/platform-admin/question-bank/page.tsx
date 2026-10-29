@@ -37,7 +37,7 @@ type Question = {
   topic_name?: string; subject_name?: string; board?: string; grade?: string
 }
 
-const STATUS_TEXT: Record<Subject['status'], string> = { idle: 'Not prepared', generating: 'Claude is writing…', checking: 'Checking answers…', ready: 'Ready to review' }
+const STATUS_TEXT: Record<Subject['status'], string> = { idle: 'Not prepared', generating: 'Claude is writing…', checking: 'Checking answers…', ready: 'Ready' }
 const STATUS_BADGE: Record<Subject['status'], string> = {
   idle: 'bg-gray-100 text-gray-600 border-gray-200', generating: 'bg-blue-50 text-blue-700 border-blue-200',
   checking: 'bg-blue-50 text-blue-700 border-blue-200', ready: 'bg-amber-50 text-amber-700 border-amber-200',
@@ -56,7 +56,7 @@ const jsonPost = (body: unknown) => ({ method: 'POST', headers: { 'Content-Type'
 
 export default function QuestionBankPage() {
   const { confirm, ConfirmDialog } = useConfirm()
-  const [tab, setTab] = useState<'subjects' | 'reports'>('subjects')
+  const [tab, setTab] = useState<'subjects' | 'schools' | 'reports'>('subjects')
   const [board, setBoard] = useState('CBSE')
   const [grade, setGrade] = useState('6')
   const [subjects, setSubjects] = useState<Subject[]>([])
@@ -138,6 +138,17 @@ export default function QuestionBankPage() {
     finally { setBusy(false) }
   }
 
+  async function changeLanguage(language: string) {
+    if (!detail) return
+    setBusy(true); setError(''); setNotice('')
+    try {
+      await call(`/api/platform/quiz-bank/subjects/${detail.subject.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ language }) })
+      setNotice('Language saved. New questions for this subject are written in it; existing ones keep theirs.')
+      await loadDetail(detail.subject.id)
+    } catch (e) { setError(e instanceof Error ? e.message : 'Could not change the language') }
+    finally { setBusy(false) }
+  }
+
   async function togglePublish() {
     if (!detail) return
     const publish = !detail.bank.published_at
@@ -145,7 +156,7 @@ export default function QuestionBankPage() {
     const ok = await confirm(
       publish
         ? `Students will start getting ${detail.subject.subject_name} questions in the daily quiz.${low ? ` ${low} topic(s) have fewer than ${detail.min_ready_per_topic} questions — they will repeat sooner.` : ''} Have you spot-checked a sample?`
-        : `${detail.subject.subject_name} questions will stop appearing in the daily quiz.`,
+        : `${detail.subject.subject_name} questions will stop appearing in the daily quiz, and it stays offline until you publish it again (automatic publishing won’t bring it back).`,
       { title: publish ? 'Publish this subject?' : 'Unpublish this subject?', confirmText: publish ? 'Publish' : 'Unpublish', destructive: !publish },
     )
     if (!ok) return
@@ -166,15 +177,16 @@ export default function QuestionBankPage() {
       {ConfirmDialog}
       <h1 className="text-xl font-bold text-gray-900">Question Bank</h1>
       <p className="text-sm text-gray-500 mt-1">
-        One-time preparation of the Daily Quiz questions per subject. Claude writes them, Groq checks every answer, you spot-check and publish.
-        Only published subjects reach students.
+        Questions are made automatically when topics are imported or added in Master Syllabus: {detail?.target_per_topic ?? 8} per topic, written by Claude,
+        every answer checked by Groq, and published once they pass. Here you can watch progress, edit or retire any question, set the language,
+        and prepare older subjects. Schools’ own topics get their own questions too.
       </p>
 
       <div className="flex gap-2 mt-5" role="tablist">
-        {(['subjects', 'reports'] as const).map(t => (
+        {(['subjects', 'schools', 'reports'] as const).map(t => (
           <button key={t} role="tab" aria-selected={tab === t} data-testid={`qbank-tab-${t}`} onClick={() => setTab(t)}
             className={`px-3 py-1.5 rounded-full text-sm border ${tab === t ? 'bg-purple-600 text-white border-purple-600' : 'border-gray-300 text-gray-700 hover:bg-gray-50'}`}>
-            {t === 'subjects' ? 'Subjects' : 'Reported questions'}
+            {t === 'subjects' ? 'Subjects' : t === 'schools' ? 'Schools’ own topics' : 'Reported questions'}
           </button>
         ))}
       </div>
@@ -182,7 +194,7 @@ export default function QuestionBankPage() {
       {error && <p className="mt-4 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2" role="alert" data-testid="qbank-error">{error}</p>}
       {notice && <p className="mt-4 text-sm text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-2" data-testid="qbank-notice">{notice}</p>}
 
-      {tab === 'reports' ? <ReportsTab onError={setError} /> : (
+      {tab === 'reports' ? <ReportsTab onError={setError} /> : tab === 'schools' ? <SchoolTopicsTab onError={setError} /> : (
         <>
           <div className="flex flex-wrap gap-4 mt-5">
             <label className="text-xs text-gray-600">Board
@@ -228,7 +240,13 @@ export default function QuestionBankPage() {
                 <div>
                   <h2 className="text-lg font-semibold text-gray-900">{detail.subject.subject_name} · Grade {detail.subject.grade} · {detail.subject.board}</h2>
                   <p className="text-xs text-gray-500 mt-1">
-                    Questions in <strong className="capitalize">{detail.subject.language}</strong> · target {detail.target_per_topic} per topic ·
+                    <label className="inline-flex items-center gap-1">Questions in
+                      <select data-testid="qbank-language" value={detail.subject.language} disabled={busy} onChange={e => changeLanguage(e.target.value)}
+                        className="border border-gray-300 rounded px-1 py-0.5 text-xs bg-white">
+                        <option value="english">English</option><option value="telugu">Telugu</option><option value="hindi">Hindi</option>
+                      </select>
+                    </label>
+                    {' '}· target {detail.target_per_topic} per topic ·
                     {' '}{lowTopics} of {allTopics.length} topic(s) below {detail.min_ready_per_topic}
                     {detail.open_reports > 0 && <> · <strong className="text-red-700">{detail.open_reports} open report(s)</strong></>}
                   </p>
@@ -408,6 +426,41 @@ function QuestionCard({ q, onSaved, onError }: { q: Question; onSaved: () => voi
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+type SchoolTopicsRow = { school_id: number; school_name: string; topics: number; topics_ready: number; chapters_in_progress: number; chapters_failed: number; last_error: string | null }
+
+/** Schools' own (custom) topics: questions are made for them automatically, for that school only (#444). */
+function SchoolTopicsTab({ onError }: { onError: (m: string) => void }) {
+  const [rows, setRows] = useState<SchoolTopicsRow[] | null>(null)
+  const load = useCallback(async () => {
+    try { setRows((await call<{ schools: SchoolTopicsRow[] }>('/api/platform/quiz-bank/school-topics')).schools) }
+    catch (e) { onError(e instanceof Error ? e.message : 'Failed to load schools’ topics') }
+  }, [onError])
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { void load() }, [load])
+  if (!rows) return <p className="mt-6 text-sm text-gray-500">Loading…</p>
+  if (rows.length === 0) return <p className="mt-6 text-sm text-gray-500" data-testid="qbank-schools-empty">No school has added its own topics yet.</p>
+  return (
+    <div className="mt-5 overflow-x-auto bg-white border border-gray-200 rounded-xl" data-testid="qbank-schools">
+      <p className="px-4 pt-3 text-xs text-gray-500">Topics a school adds itself get their own questions (same Claude + Groq check), used only by that school. Failed chapters are retried automatically.</p>
+      <table className="mt-2 w-full text-sm">
+        <thead className="bg-gray-50 text-xs text-gray-500 text-left">
+          <tr><th className="px-4 py-2">School</th><th className="px-4 py-2">Own topics ready</th><th className="px-4 py-2">Being prepared</th><th className="px-4 py-2">Problems</th></tr>
+        </thead>
+        <tbody>
+          {rows.map(r => (
+            <tr key={r.school_id} className="border-t border-gray-100" data-testid={`qbank-school-${r.school_id}`}>
+              <td className="px-4 py-2 font-medium text-gray-900">{r.school_name}</td>
+              <td className="px-4 py-2">{r.topics_ready}/{r.topics}</td>
+              <td className="px-4 py-2">{r.chapters_in_progress ? `${r.chapters_in_progress} chapter(s)` : '—'}</td>
+              <td className="px-4 py-2">{r.chapters_failed ? <span className="text-amber-800" title={r.last_error ?? ''}>{r.chapters_failed} chapter(s) failed</span> : '—'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   )
 }
