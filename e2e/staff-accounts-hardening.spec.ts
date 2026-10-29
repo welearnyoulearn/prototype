@@ -244,7 +244,9 @@ test.describe.serial('Staff accounts — plan security, seat limits, deactivatio
       expect((await anon.post('/api/auth/reset-password', { data: { token, newPassword: STAFF_PASS } })).status()).toBe(400)
 
       // …and asking for a fresh reset link while deactivated does not create one.
-      expect((await anon.post('/api/auth/forgot-password', { data: { identifier: email } })).status()).toBe(200)
+      const forgot = await anon.post('/api/auth/forgot-password', { data: { identifier: email } })
+      expect(forgot.status()).toBe(200)
+      expect(await forgot.json()).toEqual({ status: 'not_found' })
       await expect(latestInviteToken(email)).rejects.toThrow()
       await anon.dispose()
     })
