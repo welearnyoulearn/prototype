@@ -1,10 +1,10 @@
 'use client'
 
 // The Daily Quiz screen (#433), shared by the student portal and the parent portal (a parent opens it for one
-// child and can hand the phone over). Home → take the quiz one question at a time → "Quiz completed" →
-// after the close, review every answer with its explanation.
+// child and can hand the phone over). Home → take the quiz one question at a time → "Quiz completed" with the
+// score → review every answer with its explanation straight away (#450).
 //
-// The server never sends correct answers before they are due, so this screen can't leak them either.
+// The server never sends correct answers before the student finishes, so this screen can't leak them either.
 
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { CheckCircle2, ChevronLeft, ChevronRight, Clock, Flag, Loader2, PartyPopper, RotateCcw, XCircle } from 'lucide-react'
@@ -76,7 +76,7 @@ function withQuery(base: string, query: string) {
   return query ? `${base}${base.includes('?') ? '&' : '?'}${query.replace(/^\?/, '')}` : base
 }
 
-type Screen = { kind: 'home' } | { kind: 'play'; attempt: AttemptView } | { kind: 'done'; attempt: AttemptView; answersAt: string | null } | { kind: 'review'; attempt: AttemptView }
+type Screen = { kind: 'home' } | { kind: 'play'; attempt: AttemptView } | { kind: 'done'; attempt: AttemptView } | { kind: 'review'; attempt: AttemptView }
 
 export default function DailyQuiz({ experience, query, renderReviewActions, footer, onFinished }: Props) {
   const [today, setToday] = useState<TodayView | null>(null)
@@ -96,7 +96,7 @@ export default function DailyQuiz({ experience, query, renderReviewActions, foot
     const t = setTimeout(() => { void loadToday() }, 0)
     return () => clearTimeout(t)
   }, [loadToday])
-  // Keep the home screen current (the quiz opens, the answers come out) without a reload.
+  // Keep the home screen current (the quiz opens or closes) without a reload.
   useEffect(() => {
     if (screen.kind !== 'home') return
     const t = setInterval(() => { if (!document.hidden) void loadToday() }, 60_000)
@@ -111,7 +111,7 @@ export default function DailyQuiz({ experience, query, renderReviewActions, foot
         : await call<AttemptView>(url('/attempts'), { method: 'POST', body: JSON.stringify({ quiz_id: card.quizId }) })
       if (attempt.status === 'in_progress') setScreen({ kind: 'play', attempt })
       else if (attempt.answersVisible) setScreen({ kind: 'review', attempt })
-      else setScreen({ kind: 'done', attempt, answersAt: attempt.closesAt })
+      else setScreen({ kind: 'done', attempt })
     } catch (e) { setError((e as Error).message); void loadToday() }
     finally { setBusy(false) }
   }
@@ -120,12 +120,12 @@ export default function DailyQuiz({ experience, query, renderReviewActions, foot
 
   if (screen.kind === 'play') {
     return <Player experience={experience} attempt={screen.attempt} url={url}
-      onFinished={(attempt, answersAt) => { onFinished?.(); setScreen({ kind: 'done', attempt, answersAt }) }}
+      onFinished={attempt => { onFinished?.(); setScreen({ kind: 'done', attempt }) }}
       onExit={backHome} />
   }
   if (screen.kind === 'done') {
-    return <Completed experience={experience} answersAt={screen.answersAt} isLate={screen.attempt.isLate}
-      onReview={async () => { try { setScreen({ kind: 'review', attempt: await call<AttemptView>(url(`/attempts/${screen.attempt.attemptId}`)) }) } catch (e) { setError((e as Error).message) } }}
+    return <Completed experience={experience} attempt={screen.attempt}
+      onReview={() => setScreen({ kind: 'review', attempt: screen.attempt })}
       onHome={backHome} />
   }
   if (screen.kind === 'review') {
@@ -139,7 +139,7 @@ export default function DailyQuiz({ experience, query, renderReviewActions, foot
         <div className="flex items-center gap-2 text-sm text-gray-500" role="status"><Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> Loading the quiz…</div>
       ) : (
         <>
-          <TodayPanel experience={experience} today={today} busy={busy} onOpen={open} />
+          <TodayPanel today={today} busy={busy} onOpen={open} />
           {today.late.length > 0 && (
             <section aria-labelledby="dq-late" className="space-y-2">
               <h3 id="dq-late" className="text-base font-extrabold">Missed quizzes — still open</h3>
@@ -168,7 +168,7 @@ export default function DailyQuiz({ experience, query, renderReviewActions, foot
                         {c.attempt.correct}/{c.attempt.total} · Review
                       </button>
                     ) : (
-                      <span className="shrink-0 text-xs font-semibold text-gray-600">Answers at {istTime(c.closesAt)}</span>
+                      <span className="shrink-0 text-xs font-semibold text-gray-600">{c.attempt?.status === 'submitted' ? 'Finished ✓' : 'Not finished'}</span>
                     )}
                   </li>
                 ))}
@@ -183,8 +183,7 @@ export default function DailyQuiz({ experience, query, renderReviewActions, foot
 }
 
 // ── Today ─────────────────────────────────────────────────────────────────────
-function TodayPanel({ experience, today, busy, onOpen }: { experience: QuizExperience; today: TodayView; busy: boolean; onOpen: (c: QuizCard) => void }) {
-  const who = experience === 'parent' ? today.studentName.split(' ')[0] : 'you'
+function TodayPanel({ today, busy, onOpen }: { today: TodayView; busy: boolean; onOpen: (c: QuizCard) => void }) {
   const message = (title: string, body: string) => (
     <div className="rounded-3xl border-2 border-gray-900 bg-white p-6" data-testid="daily-quiz-today" data-status={today.status}>
       <h2 className="text-2xl font-extrabold">{title}</h2>
@@ -209,8 +208,6 @@ function TodayPanel({ experience, today, busy, onOpen }: { experience: QuizExper
     else { title = 'Today’s quiz has closed'; body = ''; cta = null }
   } else if (a.status === 'in_progress') {
     title = 'Keep going!'; body = `${a.answered} of ${a.total} answered. ${a.isLate ? '' : `Finish before ${closes}.`}`; cta = 'Continue quiz'
-  } else if (!a.answersVisible) {
-    title = experience === 'parent' ? `${who} finished today’s quiz` : 'Quiz completed ✓'; body = `The right answers and explanations open at ${closes}.`; cta = null
   } else {
     title = `Score: ${a.correct} / ${a.total}`; body = 'See which answers were right, with an explanation for each.'; cta = 'Review answers'
   }
@@ -241,7 +238,7 @@ function TodayPanel({ experience, today, busy, onOpen }: { experience: QuizExper
 // ── Taking it ─────────────────────────────────────────────────────────────────
 function Player({ experience, attempt: initial, url, onFinished, onExit }: {
   experience: QuizExperience; attempt: AttemptView; url: (p: string) => string
-  onFinished: (a: AttemptView, answersAt: string | null) => void; onExit: () => void
+  onFinished: (a: AttemptView) => void; onExit: () => void
 }) {
   const [attempt, setAttempt] = useState(initial)
   const firstOpen = Math.max(0, initial.questions.findIndex(q => q.chosenIndex === null))
@@ -267,8 +264,9 @@ function Player({ experience, attempt: initial, url, onFinished, onExit }: {
   async function finish() {
     setFinishing(true); setError(null)
     try {
-      const res = await call<{ answersAt: string | null }>(url(`/attempts/${attempt.attemptId}/submit`), { method: 'POST', body: '{}' })
-      onFinished(attempt, res.answersAt)
+      await call<{ completed: boolean }>(url(`/attempts/${attempt.attemptId}/submit`), { method: 'POST', body: '{}' })
+      // The finished attempt comes back with the score, the right answers and the explanations.
+      onFinished(await call<AttemptView>(url(`/attempts/${attempt.attemptId}`)))
     } catch (e) { setError((e as Error).message) }
     finally { setFinishing(false) }
   }
@@ -337,22 +335,24 @@ function Player({ experience, attempt: initial, url, onFinished, onExit }: {
 }
 
 // ── Finished ──────────────────────────────────────────────────────────────────
-function Completed({ experience, answersAt, isLate, onReview, onHome }: { experience: QuizExperience; answersAt: string | null; isLate: boolean; onReview: () => void; onHome: () => void }) {
+function Completed({ experience, attempt, onReview, onHome }: { experience: QuizExperience; attempt: AttemptView; onReview: () => void; onHome: () => void }) {
+  const wrong = attempt.correct === null ? null : attempt.total - attempt.correct
   return (
     <div className="mx-auto max-w-lg rounded-3xl border-2 border-gray-900 bg-emerald-50 p-8 text-center shadow-[4px_4px_0_#111]" data-testid="daily-quiz-completed">
       <CheckCircle2 className="mx-auto h-16 w-16 text-emerald-600" aria-hidden="true" />
       <h2 className="mt-4 text-3xl font-extrabold">Your quiz is completed!</h2>
+      {attempt.correct !== null && (
+        <p className="mt-3 text-4xl font-extrabold" data-testid="daily-quiz-score">{attempt.correct} / {attempt.total}</p>
+      )}
       <p className="mt-2 text-gray-700">
-        {isLate || !answersAt
-          ? 'Well done for catching up. The answers and explanations are ready now.'
-          : `Great work${experience === 'parent' ? '' : ', see you tomorrow'}! The right answers and explanations open at ${istTime(answersAt)}.`}
+        {wrong === 0
+          ? `All correct${attempt.isLate ? '' : experience === 'parent' ? '' : ', see you tomorrow'}! See why each answer is right.`
+          : `See the right answers and why${wrong ? ` — ${wrong} to learn from` : ''}. Not convinced by an explanation? Ask your teacher from there.`}
       </p>
       <div className="mt-6 flex flex-wrap justify-center gap-3">
-        {(isLate || !answersAt) && (
-          <button type="button" onClick={onReview} className="inline-flex min-h-11 items-center gap-2 rounded-full border-2 border-gray-900 bg-yellow-300 px-5 font-extrabold" data-testid="daily-quiz-see-answers">
-            <PartyPopper className="h-4 w-4" aria-hidden="true" /> See answers
-          </button>
-        )}
+        <button type="button" onClick={onReview} className="inline-flex min-h-11 items-center gap-2 rounded-full border-2 border-gray-900 bg-yellow-300 px-5 font-extrabold" data-testid="daily-quiz-see-answers">
+          <PartyPopper className="h-4 w-4" aria-hidden="true" /> See answers & explanations
+        </button>
         <button type="button" onClick={onHome} className="inline-flex min-h-11 items-center gap-2 rounded-full border-2 border-gray-900 bg-white px-5 font-bold" data-testid="daily-quiz-home-btn">Done</button>
       </div>
     </div>
@@ -461,7 +461,6 @@ export function DailyQuizHomeCard({ query, onOpen, experience }: { query: string
   if (today.status === 'upcoming') { line = `Today’s quiz opens at ${istTime(today.opensAt!)}`; cta = 'See quiz'; tone = 'bg-white' }
   else if (today.quiz && !a && today.quiz.phase === 'open') { line = `${name ? `${name}'s` : 'Today’s'} quiz is ready · ${today.quiz.subjects.length} questions · until ${istTime(today.quiz.closesAt)}`; cta = name ? 'Open quiz' : 'Start quiz'; tone = 'bg-yellow-200' }
   else if (a?.status === 'in_progress') { line = `${a.answered} of ${a.total} answered — finish before ${istTime(today.quiz!.closesAt)}`; cta = 'Continue'; tone = 'bg-yellow-200' }
-  else if (a?.status === 'submitted' && !a.answersVisible) { line = `${name ? `${name} has` : 'You have'} finished today’s quiz ✓ · answers at ${istTime(today.quiz!.closesAt)}`; cta = 'Open'; tone = 'bg-emerald-100' }
   else if (a?.answersVisible) { line = `Today’s score: ${a.correct}/${a.total} · review the answers`; cta = 'Review'; tone = 'bg-emerald-100' }
   else if (today.late.length) { line = `${today.late.length} missed quiz${today.late.length > 1 ? 'zes' : ''} still open to catch up`; cta = 'Catch up'; tone = 'bg-amber-100' }
   else return null

@@ -1,13 +1,15 @@
 'use client'
 
 // Student Doubts (#435) on the student and parent Daily Quiz screens.
-//   DoubtHelp          under each reviewed question: Ask WLYL AI → still not clear → Ask Teacher
+//   DoubtHelp          under each reviewed question: Ask your teacher (and the AI Tutor once it takes quiz hand-offs)
 //   StudentDoubtsPanel "My doubts": the teacher's answer, then a fresh question to prove it, then "I understand now"
 //   ParentDoubtsPanel  the child's doubts and their timeline, read-only
 
 import { useCallback, useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { Bot, CheckCircle2, Loader2, MessageCircleQuestion, RotateCcw, Send, Sparkles, XCircle } from 'lucide-react'
 import type { AttemptQuestion, AttemptView } from './DailyQuiz'
+import { TUTOR_NAV_KEY, saveTutorHandoff, tutorHandoffEnabled } from '@/lib/tutorHandoff'
 
 const LETTERS = ['A', 'B', 'C', 'D']
 
@@ -48,8 +50,8 @@ export function DoubtHelp({ q, attempt, onDoubtRaised }: { q: AttemptQuestion; a
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  // If WLYL AI can't answer (busy, daily limit, not set up), the student can still go straight to the teacher.
-  const [aiFailed, setAiFailed] = useState(false)
+  const tutorReady = tutorHandoffEnabled()
+  const router = useRouter()
 
   useEffect(() => {
     let cancelled = false
@@ -59,17 +61,18 @@ export function DoubtHelp({ q, attempt, onDoubtRaised }: { q: AttemptQuestion; a
 
   if (!help) return null
   const doubt = help.doubts[qid]
+  // Replies from the earlier built-in WLYL AI stay readable on old attempts.
   const aiReply = help.ai[qid]
 
-  async function askAI() {
-    setBusy(true); setError(null)
-    try {
-      const r = await call<{ reply: string }>('/api/student/doubts/ai', { method: 'POST', body: JSON.stringify({ attempt_id: attempt.attemptId, item_id: q.itemId, message: message.trim() || undefined }) })
-      setHelp(h => h && { ...h, ai: { ...h.ai, [qid]: r.reply } })
-      void loadHelp(attempt.attemptId, true)
-      setStage('idle')
-    } catch (e) { setError((e as Error).message); setAiFailed(true); setStage('idle') }
-    finally { setBusy(false) }
+  // The AI Tutor takes it from here: the question goes with the student, nothing is asked here (#450).
+  function askTutor() {
+    const saved = saveTutorHandoff(window.sessionStorage, {
+      source: 'daily-quiz', subject: q.subject, topic: q.topic, question: q.stem, options: q.options,
+      chosenIndex: q.chosenIndex, correctIndex: q.correctIndex!, explanation: q.explanation ?? null,
+      message: message.trim() || null, createdAt: new Date().toISOString(),
+    })
+    if (!saved) { setError('Could not open the AI Tutor here. Ask your teacher instead.'); setStage('idle'); return }
+    router.push(`/student?tab=${TUTOR_NAV_KEY}`)
   }
   async function askTeacher() {
     setBusy(true); setError(null)
@@ -101,8 +104,8 @@ export function DoubtHelp({ q, attempt, onDoubtRaised }: { q: AttemptQuestion; a
           <input id={`ai-msg-${q.itemId}`} value={message} onChange={e => setMessage(e.target.value)} maxLength={300} placeholder="e.g. Why isn’t it option B?"
             className="w-full rounded-lg border px-3 py-2 text-sm" data-testid={`doubt-ai-message-${q.position}`} />
           <div className="flex gap-2">
-            <button type="button" disabled={busy} onClick={askAI} className="inline-flex items-center gap-1.5 rounded-full bg-violet-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-60" data-testid={`doubt-ai-send-${q.position}`}>
-              {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Sparkles className="h-4 w-4" aria-hidden="true" />} Ask WLYL AI
+            <button type="button" onClick={askTutor} className="inline-flex items-center gap-1.5 rounded-full bg-violet-600 px-4 py-2 text-sm font-bold text-white" data-testid={`doubt-ai-send-${q.position}`}>
+              <Sparkles className="h-4 w-4" aria-hidden="true" /> Open the AI Tutor
             </button>
             <button type="button" onClick={() => setStage('idle')} className="rounded-full px-3 py-2 text-sm font-semibold text-gray-600">Cancel</button>
           </div>
@@ -121,16 +124,14 @@ export function DoubtHelp({ q, attempt, onDoubtRaised }: { q: AttemptQuestion; a
         </div>
       ) : (
         <div className="flex flex-wrap gap-2">
-          {!aiReply && (
+          {tutorReady && (
             <button type="button" onClick={() => setStage('ask-ai')} className="inline-flex items-center gap-1.5 rounded-full border-2 border-violet-500 px-3 py-1.5 text-sm font-bold text-violet-700 hover:bg-violet-50" data-testid={`doubt-ask-ai-${q.position}`}>
-              <Sparkles className="h-4 w-4" aria-hidden="true" /> {q.isCorrect ? 'Ask WLYL AI' : 'Still confused? Ask WLYL AI'}
+              <Sparkles className="h-4 w-4" aria-hidden="true" /> {q.isCorrect ? 'Ask the AI Tutor' : 'Still confused? Ask the AI Tutor'}
             </button>
           )}
-          {(aiReply || aiFailed) && (
-            <button type="button" onClick={() => { setError(null); setStage('ask-teacher') }} className="inline-flex items-center gap-1.5 rounded-full border-2 border-sky-500 px-3 py-1.5 text-sm font-bold text-sky-700 hover:bg-sky-50" data-testid={`doubt-ask-teacher-${q.position}`}>
-              <MessageCircleQuestion className="h-4 w-4" aria-hidden="true" /> Still not clear? Ask your teacher
-            </button>
-          )}
+          <button type="button" onClick={() => { setError(null); setStage('ask-teacher') }} className="inline-flex items-center gap-1.5 rounded-full border-2 border-sky-500 px-3 py-1.5 text-sm font-bold text-sky-700 hover:bg-sky-50" data-testid={`doubt-ask-teacher-${q.position}`}>
+            <MessageCircleQuestion className="h-4 w-4" aria-hidden="true" /> {tutorReady ? 'Ask your teacher' : 'Don’t agree or still confused? Ask your teacher'}
+          </button>
         </div>
       )}
       {error && <p role="alert" className="text-sm font-semibold text-red-600">{error}</p>}

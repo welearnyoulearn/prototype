@@ -337,19 +337,18 @@ export type TodayView = {
   recent: QuizCard[]
 }
 
-async function attemptSummaries(studentId: number, quizIds: number[], now: Date): Promise<Map<number, AttemptSummary>> {
+async function attemptSummaries(studentId: number, quizIds: number[]): Promise<Map<number, AttemptSummary>> {
   if (!quizIds.length) return new Map()
-  const { rows } = await pool.query<{ id: number; quiz_id: number; status: 'in_progress' | 'submitted'; is_late: boolean; correct_count: number | null; answered: number; total: number; closes_at: Date }>(`
-    SELECT t.id, t.quiz_id, t.status, t.is_late, t.correct_count, z.closes_at,
+  const { rows } = await pool.query<{ id: number; quiz_id: number; status: 'in_progress' | 'submitted'; is_late: boolean; correct_count: number | null; answered: number; total: number }>(`
+    SELECT t.id, t.quiz_id, t.status, t.is_late, t.correct_count,
            COUNT(a.chosen_index)::int AS answered, COUNT(a.id)::int AS total
     FROM daily_quiz_attempts t
-    JOIN daily_quizzes z ON z.id = t.quiz_id
     LEFT JOIN daily_quiz_answers a ON a.attempt_id = t.id
     WHERE t.student_id = $1 AND t.quiz_id = ANY($2::int[])
-    GROUP BY t.id, z.closes_at
+    GROUP BY t.id
   `, [studentId, quizIds])
   return new Map(rows.map(r => {
-    const visible = answersVisible(r.status === 'submitted', r.is_late, now, r.closes_at)
+    const visible = answersVisible(r.status === 'submitted')
     return [r.quiz_id, { id: r.id, status: r.status, isLate: r.is_late, answered: r.answered, total: r.total, correct: visible ? r.correct_count : null, answersVisible: visible }]
   }))
 }
@@ -400,7 +399,7 @@ export async function todayView(studentId: number, schoolId: number, now: Date =
     quizzes.push(...rows)
   }
   const ids = quizzes.map(q => q.id)
-  const [attempts, subjects] = await Promise.all([attemptSummaries(studentId, ids, now), quizSubjects(ids)])
+  const [attempts, subjects] = await Promise.all([attemptSummaries(studentId, ids), quizSubjects(ids)])
   const card = (q: QuizRow): QuizCard => {
     const attempt = attempts.get(q.id) ?? null
     return {
@@ -535,7 +534,7 @@ export async function attemptView(studentId: number, schoolId: number, attemptId
   await closeOverdueAttempts({ studentId }, now)
   await settleAccuracy({ studentId }, now)
   const t = await attemptRow(studentId, schoolId, attemptId)
-  const visible = answersVisible(t.status === 'submitted', t.is_late, now, t.closes_at)
+  const visible = answersVisible(t.status === 'submitted')
   const { rows } = await pool.query<{ item_id: number; position: number; subject_name: string; topic_name: string | null; stem: string; options: string[]; language: string; chosen_index: number | null; correct_index: number; explanation: string | null; is_correct: boolean | null; question_id: number }>(`
     SELECT a.item_id, a.position, i.subject_name, st.topic_name, q.stem, q.options, q.language, a.chosen_index,
            q.correct_index, q.explanation, a.is_correct, q.id AS question_id
@@ -571,15 +570,15 @@ export async function saveAnswer(studentId: number, schoolId: number, attemptId:
   return { saved: true }
 }
 
-/** "Finish": every question must be answered. Returns when the answers will be shown. */
+/** "Finish": every question must be answered. The answers and explanations are shown straight after (#450). */
 export async function submitAttempt(studentId: number, schoolId: number, attemptId: number, now: Date = new Date()) {
   await closeOverdueAttempts({ studentId }, now)
   const t = await attemptRow(studentId, schoolId, attemptId)
-  if (t.status === 'submitted') return { completed: true, alreadyFinished: true, answersAt: t.is_late ? null : t.closes_at.toISOString() }
+  if (t.status === 'submitted') return { completed: true, alreadyFinished: true }
   const { rows: [c] } = await pool.query<{ open: number }>('SELECT COUNT(*) FILTER (WHERE chosen_index IS NULL)::int AS open FROM daily_quiz_answers WHERE attempt_id = $1', [attemptId])
   if (c.open > 0) throw new DailyQuizError(`Answer all questions before finishing (${c.open} left).`, 409)
   await gradeAttempt(attemptId, now)
-  return { completed: true, alreadyFinished: false, answersAt: t.is_late ? null : t.closes_at.toISOString() }
+  return { completed: true, alreadyFinished: false }
 }
 
 // ── Cron: post quizzes, send ready / reminder / results ──────────────────────
@@ -606,6 +605,34 @@ async function notifyStudentsAndParents(quiz: QuizRow, students: Recipient[], ty
   return students.length + parents.length
 }
 
+/** After the close: each parent hears whether their child finished today's quiz on time. */
+async function notifyParentsOfCompletion(quiz: QuizRow): Promise<number> {
+  const { rows } = await pool.query<{ parent_id: number; student_id: number; name: string; done: boolean }>(`
+    SELECT sp.parent_id, s.id AS student_id, s.name,
+           EXISTS (SELECT 1 FROM daily_quiz_attempts t WHERE t.quiz_id = $1 AND t.student_id = s.id AND t.status = 'submitted' AND NOT t.is_late) AS done
+    FROM students s
+    JOIN classes c ON c.id = $2 AND s.school_id = c.school_id AND s.grade = c.grade AND s.section = c.section
+    JOIN student_parents sp ON sp.student_id = s.id
+    JOIN parents p ON p.id = sp.parent_id AND p.school_id = s.school_id
+    WHERE s.status = 'active'
+  `, [quiz.id, quiz.class_id])
+  if (!rows.length) return 0
+  await pool.query(`
+    INSERT INTO notifications (school_id, recipient_parent_id, type, title, message, data)
+    SELECT $1, r.parent_id, 'daily_quiz_results', r.title, r.message, jsonb_build_object('quiz_id', $2::int, 'date', $3::text, 'student_id', r.student_id)
+    FROM UNNEST($4::int[], $5::int[], $6::text[], $7::text[]) AS r(parent_id, student_id, title, message)
+  `, [
+    quiz.school_id, quiz.id, quiz.quiz_date,
+    rows.map(r => r.parent_id), rows.map(r => r.student_id),
+    rows.map(r => r.done ? '✅ Daily quiz completed' : '⏳ Daily quiz missed'),
+    rows.map(r => {
+      const name = r.name.split(' ')[0]
+      return r.done ? `${name} finished today's quiz.` : `${name} didn't take today's quiz. It can still be taken within ${LATE_DAYS} days.`
+    }),
+  ])
+  return rows.length
+}
+
 async function claimNotice(quizId: number, kind: 'ready' | 'reminder' | 'results'): Promise<boolean> {
   const { rowCount } = await pool.query('INSERT INTO daily_quiz_notices (quiz_id, kind) VALUES ($1, $2) ON CONFLICT DO NOTHING', [quizId, kind])
   return (rowCount ?? 0) > 0
@@ -630,7 +657,7 @@ function hhmm(d: Date): string {
  * after the close). Posts every due quiz, then sends each notice at most once:
  *   ready    — while open and before the reminder time, to every student and their parents
  *   reminder — from 2 hours before the close, to students who haven't finished and their parents
- *   results  — after the close, to students who finished on time and their parents
+ *   results  — after the close, to parents: their child finished the quiz or missed it
  */
 export async function runDailyQuizCron(now: Date = new Date()) {
   const today = istNow(now).date
@@ -662,15 +689,8 @@ export async function runDailyQuizCron(now: Date = new Date()) {
       if (now >= quiz.closes_at) {
         await closeOverdueAttempts({ quizIds: [quiz.id] }, now)
         await settleAccuracy({ quizIds: [quiz.id] }, now)
-        if (await claimNotice(quiz.id, 'results')) {
-          const { rows } = await pool.query<Recipient>(`
-            SELECT t.student_id, t.school_id, s.name FROM daily_quiz_attempts t JOIN students s ON s.id = t.student_id
-            WHERE t.quiz_id = $1 AND t.status = 'submitted' AND NOT t.is_late AND s.status = 'active'
-          `, [quiz.id])
-          summary.results += await notifyStudentsAndParents(quiz, rows, 'daily_quiz_results', '✅ Quiz answers are out',
-            'See the right answers and explanations for today’s quiz.',
-            name => `${name}'s quiz answers and explanations are ready to review.`)
-        }
+        // Students already saw their answers on finishing (#450); parents get one note: finished or missed.
+        if (await claimNotice(quiz.id, 'results')) summary.results += await notifyParentsOfCompletion(quiz)
       } else if (quiz.quiz_date === today && now >= reminderAt) {
         if (await claimNotice(quiz.id, 'reminder')) {
           const { rows } = await pool.query<Recipient>(`

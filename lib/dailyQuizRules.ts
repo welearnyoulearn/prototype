@@ -157,9 +157,13 @@ export function lateAllowed(now: Date, quizDate: string, closesAt: Date): boolea
   return now >= closesAt && istNow(now).date <= addDays(quizDate, LATE_DAYS)
 }
 
-/** Answers and explanations are shown only after the class quiz closes (a late attempt: after its own submit). */
-export function answersVisible(submitted: boolean, isLate: boolean, now: Date, closesAt: Date): boolean {
-  return submitted && (isLate || now >= closesAt)
+/**
+ * Answers and explanations are shown as soon as the student finishes (#450): they learn from their mistakes
+ * while the quiz is fresh. Each student draws their own questions, so a finished classmate can't simply pass
+ * the answers on.
+ */
+export function answersVisible(submitted: boolean): boolean {
+  return submitted
 }
 
 // ── Points ────────────────────────────────────────────────────────────────────

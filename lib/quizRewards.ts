@@ -4,10 +4,9 @@
 // Points live in student_points, which is a ledger: one row per award, the balance is the sum, and a future
 // marketplace spends points with negative rows. Every learning award is unique on (student, action,
 // reference) through a partial unique index, so a retry or a second cron run can never pay twice.
-//   - on finishing: participation (+5 on time, +3 late), streak milestones, badges
-//   - once the answers are out (on time only): +2 per correct answer (max +10) and +5 for a perfect quiz
+//   - on finishing: participation (+5 on time, +3 late), streak milestones, badges, and (on time only)
+//     +2 per correct answer (max +10) and +5 for a perfect quiz, since the answers are shown on finishing (#450)
 //   - weekly: +10 for improving accuracy by 10 points or more
-// Scores never leak before the close: accuracy points are only paid after it.
 
 import pool from '@/lib/db'
 import type { PoolClient } from 'pg'
@@ -62,8 +61,8 @@ export async function studentStreak(classId: number, studentId: number, now: Dat
 }
 
 /**
- * Called in the same transaction that finishes an attempt: participation points, streak milestones and
- * badges. A late attempt gets no accuracy points, so it is settled straight away.
+ * Called in the same transaction that finishes an attempt: participation points, streak milestones, badges
+ * and the accuracy points (on time only). The attempt is settled straight away.
  */
 export async function awardOnFinish(client: Db, attemptId: number, now: Date = new Date()) {
   const { rows: [t] } = await client.query<{ student_id: number; school_id: number; is_late: boolean; quiz_id: number; class_id: number }>(`
@@ -81,10 +80,22 @@ export async function awardOnFinish(client: Db, attemptId: number, now: Date = n
     await awardStudentPoints(client, t.student_id, t.school_id, m.action, m.points, 'daily_quiz_attempt', attemptId, now)
     await grantBadge(client, t.student_id, t.school_id, m.badge)
   }
-  if (t.is_late) await client.query('UPDATE daily_quiz_attempts SET points_settled_at = NOW() WHERE id = $1', [attemptId])
+  // The answers are shown on submit (#450), so accuracy points (on time only) are paid now too.
+  const { rows: [score] } = await client.query<{ correct_count: number | null; total_count: number | null }>(
+    'SELECT correct_count, total_count FROM daily_quiz_attempts WHERE id = $1', [attemptId])
+  const awards = accuracyAwards(t.is_late, score?.correct_count ?? 0, score?.total_count ?? 0)
+  for (const a of awards) await awardStudentPoints(client, t.student_id, t.school_id, a.action, a.points, 'daily_quiz_attempt', attemptId, now)
+  if (awards.some(a => a.action === 'daily_quiz_perfect')) {
+    const { rows: [c] } = await client.query<{ n: number }>(`SELECT COUNT(*)::int AS n FROM student_points WHERE student_id = $1 AND action_type = 'daily_quiz_perfect'`, [t.student_id])
+    if (c.n >= SHARP_SHOOTER_PERFECTS) await grantBadge(client, t.student_id, t.school_id, 'sharp_shooter')
+  }
+  await client.query('UPDATE daily_quiz_attempts SET points_settled_at = NOW() WHERE id = $1', [attemptId])
 }
 
-/** Pays accuracy points for finished on-time attempts whose class quiz has closed. Safe to call repeatedly. */
+/**
+ * Safety net for attempts finished before #450 (accuracy then waited for the close): pays any still-unsettled
+ * on-time attempt whose quiz has closed. New attempts are settled on finishing. Safe to call repeatedly.
+ */
 export async function settleAccuracy(where: { studentId?: number; quizIds?: number[] }, now: Date = new Date()) {
   const params: unknown[] = [now]
   let filter = ''

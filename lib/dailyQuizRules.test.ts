@@ -78,10 +78,8 @@ test('phases, late window and when answers show', () => {
   assert.ok(!lateAllowed(istInstant('2026-10-27', '20:59'), '2026-10-27', closes))
   assert.ok(lateAllowed(istInstant('2026-11-03', '23:59'), '2026-10-27', closes), 'day 7 still allowed')
   assert.ok(!lateAllowed(istInstant('2026-11-04', '00:00'), '2026-10-27', closes))
-  assert.ok(!answersVisible(true, false, istInstant('2026-10-27', '20:00'), closes), 'on time: hidden until close')
-  assert.ok(answersVisible(true, false, closes, closes))
-  assert.ok(answersVisible(true, true, istInstant('2026-10-28', '10:00'), closes), 'late: right after submit')
-  assert.ok(!answersVisible(false, false, istInstant('2026-10-28', '10:00'), closes), 'never before submit')
+  assert.ok(answersVisible(true), 'right after submit, on time or late (#450)')
+  assert.ok(!answersVisible(false), 'never before submit')
 })
 
 test('points: participation on submit, accuracy only on time', () => {

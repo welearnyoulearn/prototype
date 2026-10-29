@@ -36,7 +36,7 @@ function istDayStart(now: Date): Date {
 /** The reviewed question (answers must be out) behind an attempt item, for this student. */
 async function reviewedQuestion(studentId: number, schoolId: number, attemptId: number, itemId: number, now: Date) {
   const view = await attemptView(studentId, schoolId, attemptId, now)
-  if (!view.answersVisible) throw new DailyQuizError('You can ask once the answers are out.', 409)
+  if (!view.answersVisible) throw new DailyQuizError('You can ask once you have finished the quiz.', 409)
   const q = view.questions.find(x => x.itemId === itemId)
   if (!q || q.questionId === undefined || q.correctIndex === undefined) throw new DailyQuizError('Question not found in this quiz', 404)
   const { rows: [ctx] } = await pool.query<{ class_id: number; grade: string; school_topic_id: number | null }>(`
