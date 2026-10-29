@@ -89,7 +89,7 @@
       "app/teacher/components/TeacherQuizBank.tsx",
       "components/dailyQuiz",
       "app/student/components/StudentDailyQuiz.tsx",
-      "app/parent/components/ParentDailyQuiz.tsx",
+      "app/parent/components/ParentDailyReport.tsx",
       "app/school-admin/components/SchoolDailyQuiz.tsx"
     ]
   },

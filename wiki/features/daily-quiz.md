@@ -2,14 +2,14 @@
 
 **Platform Admin feature key:** `daily-quiz`
 **Portal:** School Admin / Teacher / Student / Parent
-**Status:** Built for the pilot: the question bank (#432, made automatically at syllabus import since #444), the daily quiz (#433), points, streaks, the leaderboard and the weekly parent report (#434), and Ask WLYL AI / Ask Teacher (#435, see [student-doubts.md](student-doubts.md)). The feature key is seeded OFF at every tier.
+**Status:** Built for the pilot: the question bank (#432, made automatically at syllabus import since #444), the daily quiz (#433), points, streaks, the leaderboard and the weekly parent report (#434), Ask Teacher (#435, see [student-doubts.md](student-doubts.md)), and since #450 answers on finishing, the parent Daily Report and readiness for many students at once. The feature key is seeded OFF at every tier.
 **Last updated:** 2026-10-29
 
 ---
 
 ## What it does
 
-A 5-minute daily habit. Every working day in the season (1 July – 15 March by default), each student gets one MCQ per class subject on the topics their class just covered. They finish the whole quiz, see “Your quiz is completed”, and the right answers with explanations come out after the close (21:00 by default).
+A 5-minute daily habit. Every working day in the season (1 July – 15 March by default), each student gets one MCQ per class subject on the topics their class just covered. They finish the whole quiz, see “Your quiz is completed!” with their score, and straight away the right answers with explanations (#450). Not convinced by an explanation? They ask their teacher from there.
 
 ## Question bank (built, #432; made at import since #444)
 
@@ -21,7 +21,7 @@ A 5-minute daily habit. Every working day in the season (1 July – 15 March by 
 4. **Published automatically** once checked. If Platform Admin takes a subject offline, it stays offline until they publish it again.
 
 - **Retries:** topics added while a preparation runs are prepared right after it. Topics still under **5** questions are retried automatically (up to 3 times, 6 hours apart).
-- **Progress** moves on its own: from the open Question Bank screen, the students' quiz pages and the daily-quiz cron, so nothing waits for the once-a-day job.
+- **Progress** moves on its own: from the open Question Bank screen, teachers marking topics complete and the daily-quiz cron, so nothing waits for the once-a-day job. Student traffic never runs it, so a rush of students is never held up (#450).
 - **Platform Admin → Question Bank** is now a status board: topics ready per subject, edit or retire any question, **set each subject's language** (English / Telugu / Hindi; when unset it is guessed from the name), and prepare older subjects by hand (with the cost shown first).
 - **A school's own topics** (custom subjects, chapters or topics, or a teacher's own syllabus import) get their own questions automatically, with the same Claude + Groq check, used only by that school and only when it has the daily-quiz feature. Platform Admin → Question Bank → **Schools' own topics** shows their progress.
 - Teachers see the published questions for the subjects they teach (**Quiz Questions**, read-only in the pilot).
@@ -41,14 +41,18 @@ Only completed topics are used; a topic that is merely planned is never asked. T
 
 **Posting:** the quiz exists from the open time: created by the first student or parent who opens it, or by `/api/cron/daily-quiz`, which runs after the open, after the reminder time and after the close.
 
-**Taking it (student portal → Daily quiz, or parent portal → Daily Quiz for a child):**
-- a big card on the home screen from the open time; one question at a time; answers can change until **Finish quiz**, which needs every question answered; then **“Your quiz is completed!”**
-- the correct answers, explanations and score are sent only **after the close**; until then the server never sends them
+**Taking it (student portal → Daily quiz):**
+- a big card on the home screen from the open time; one question at a time; answers can change until **Finish quiz**, which needs every question answered; then **“Your quiz is completed!”** with the score
+- **right after finishing** (#450): the right answers and an explanation for every question, with **Ask your teacher** under each. The server never sends the answer key before the student finishes, and each student draws their own questions, so a finished classmate can't simply pass answers on
 - an unfinished attempt at the close is finished with the answers given (one with nothing answered is dropped, so the student can still take it late)
-- **missed quizzes** can be taken late for 7 days; a late quiz shows its answers right after finishing
+- **missed quizzes** can be taken late for 7 days
 - students can report a question from the review screen
 
-**Notices (bell + push, to the student and their parents):** “Today's quiz is ready” after the open; “Quiz closes soon” 2 hours before the close, only to students who haven't finished; “Quiz answers are out” after the close, to those who finished on time. Each goes once per quiz.
+**Notices (bell + push):** “Today's quiz is ready” after the open (student and parents); “Quiz closes soon” 2 hours before the close, only to students who haven't finished (and their parents); after the close, **parents only**: “Daily quiz completed” or “Daily quiz missed”. Each goes once per quiz.
+
+**Parents (#450):** the parent portal shows a **Daily Report** instead of the quiz itself: how the child's day went, in one place, for today or any of the last 30 days. Attendance, today's quiz (completed / started / not started / missed), the last few quiz days, doubts not clarified yet, and the topics taught in class that day. No points, streaks, ranks or leaderboards. Each part shows only when the school has that feature. The parent home has a small card with today's quiz status and open doubts.
+
+**Many students at once (#450):** quiz settings, holidays and feature switches are kept for a minute per server instance; quiz screens share one request per page and refresh at the next opening or closing time (spread over a minute per device) or every 5 minutes; saving an answer checks only that attempt. Stress test on the local test app: 200 students of one class opening, starting (some in two tabs), answering and finishing (some double-tapping) at the same moment gave 1 quiz, 200 attempts, 600 answers, points paid once each and no errors. See [DOCS/peak-load.md](../../DOCS/peak-load.md) for the server-side plan.
 
 ## Points, streaks and the leaderboard (built, #434)
 
@@ -58,13 +62,13 @@ Only completed topics are used; a topic that is merely planned is never asked. T
 |---|---|
 | Finishing on time | +5 |
 | Finishing late (within 7 days) | +3, and nothing for accuracy |
-| Once the answers are out (on time only) | +2 per correct answer (max +10), +5 for a perfect quiz (3+ questions) |
+| Finishing on time, with the answers shown (#450) | +2 per correct answer (max +10), +5 for a perfect quiz (3+ questions) |
 | Streak of 5 / 20 / 60 school days in a row | +10 / +30 / +75 |
 | Accuracy up 10 points or more on last week (3+ quizzes each week) | +10, on Saturday |
 
 - **Streak:** counts the class's quizzes in a row the student finished (on time or late). Holidays and weekly offs have no quiz, so they never break it; today's quiz doesn't break it while it is still open.
 - **Badges:** Quiz Starter, 5-, 20- and 60-Day Streak, Sharp Shooter (10 perfect quizzes).
-- **Leaderboard:** this week's points in the class from on-time quiz work (late catch-ups don't count). Students see the top 10 and their place, plus Most Improved; parents see their child's place, the class average and the top 3 only.
+- **Leaderboard:** this week's points in the class from on-time quiz work (late catch-ups don't count). Students see the top 10 and their place, plus Most Improved. Parents don't see points or ranks (#450).
 - **Class goal:** 80% of students finish each quiz on time.
 - **Weekly parent report** (Saturday evening, once): quizzes finished, % correct, points and class rank, strongest subject, the one needing practice, and a dinner-table question the child got wrong.
 - **School Admin → Daily Quiz:** this week per class (participation against the goal, accuracy, top students, most improved) and accuracy per subject. Read-only.
@@ -80,8 +84,9 @@ Only completed topics are used; a topic that is merely planned is never asked. T
 |---|---|
 | Feature key (this doc) | #431 |
 | Question bank (pilot grades) | #432 |
-| Daily quiz (one question per subject), answers after the close, late for 7 days, notices | #433 |
+| Daily quiz (one question per subject), late for 7 days, notices | #433 |
 | Reward points, streaks, leaderboard, weekly parent report | #434 |
+| Answers on finishing, parent Daily Report, AI Tutor hand-off, many students at once | #450 |
 | Insights (after the pilot) | #437 |
 
 Epic: #430.
@@ -91,9 +96,10 @@ Epic: #430.
 <!-- AUTO:evidence:daily-quiz:start (generated by scripts/product-docs.mjs — do not edit by hand) -->
 **Code evidence** — checked against the repository on every run of `node scripts/product-docs.mjs`.
 
-Screens: `app/platform-admin/question-bank/page.tsx`, `app/platform-admin/daily-quiz/page.tsx`, `app/teacher/components/TeacherQuizBank.tsx`, `components/dailyQuiz/DailyQuiz.tsx`, `components/dailyQuiz/Doubts.tsx`, `components/dailyQuiz/QuizProgress.tsx`, `app/student/components/StudentDailyQuiz.tsx`, `app/parent/components/ParentDailyQuiz.tsx`, `app/school-admin/components/SchoolDailyQuiz.tsx`
+Screens: `app/platform-admin/question-bank/page.tsx`, `app/platform-admin/daily-quiz/page.tsx`, `app/teacher/components/TeacherQuizBank.tsx`, `components/dailyQuiz/DailyQuiz.tsx`, `components/dailyQuiz/Doubts.tsx`, `components/dailyQuiz/QuizProgress.tsx`, `app/student/components/StudentDailyQuiz.tsx`, `app/parent/components/ParentDailyReport.tsx`, `app/school-admin/components/SchoolDailyQuiz.tsx`
 
 API routes these screens call (all exist):
+- `GET` /api/parent/daily-report
 - `GET` /api/parent/doubts
 - `POST` /api/parent/quiz/attempts
 - `GET` /api/parent/quiz/progress
@@ -112,7 +118,6 @@ API routes these screens call (all exist):
 - `GET/PUT` /api/platform/quiz-settings/schools/{}
 - `GET` /api/school/quiz-report
 - `GET/POST` /api/student/doubts
-- `POST` /api/student/doubts/ai
 - `POST` /api/student/doubts/{}/confirm
 - `POST` /api/student/doubts/{}/proof
 - `POST` /api/student/doubts/{}/proof/answer
@@ -141,3 +146,4 @@ API routes these screens call (all exist):
 | 2026-10-27 | Daily quiz: posting, taking it (student and parent), answers after the close, late for 7 days, notices, Platform Admin settings | #433 |
 | 2026-10-27 | Reward points ledger, working-day streak, badges, weekly leaderboard, parent view and weekly report, School Admin report | #434 |
 | 2026-10-29 | Questions made automatically at syllabus import (8 per topic, auto-published), subject language setting, schools' own topics, daily topic = completed since the last quiz else revision | #444 |
+| 2026-10-29 | Answers and explanations right after finishing (accuracy points then too), parents get a Daily Report and a finished/missed note instead of points and ranks, Ask WLYL AI replaced by a hand-off to the AI Tutor (off until the tutor reads it), lighter requests for many students at once | #450 |
