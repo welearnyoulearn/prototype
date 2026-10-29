@@ -2,6 +2,7 @@
 @import "tw-animate-css";
 @import "./portal.css";
 @import "./student-ui.css";
+@import "./student-dial.css";
 
 @custom-variant dark (&:is(.dark *));
 

@@ -16,6 +16,7 @@ import FeatureLauncherButton from '@/components/portal/FeatureLauncherButton'
 import { LogOut, Menu } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Sticker, type StickerName } from './components/stickers'
+import StudentDial from '@/components/dial/StudentDial'
 
 // Always-loaded (landing tab, and small enough not to be worth its own chunk)
 import StudentDashboard from './components/StudentDashboard'
@@ -349,7 +350,7 @@ function StudentPortal() {
 
         {/* ── Main Content ──────────────────────────────────────────── */}
         <main id="student-content" tabIndex={-1} className="portal-main">
-          <div className="mx-auto w-full max-w-5xl pb-6">
+          <div className="mx-auto w-full max-w-5xl pb-28">
             {visitedNav.has('dashboard')   && <div hidden={activeNav !== 'dashboard'}><StudentDashboard student={student} classId={classId} schoolId={student.school_id} onNavigate={navigateTo} isNavItemVisible={isNavItemVisible} /></div>}
             {visitedNav.has('daily-quiz') && isNavItemVisible('daily-quiz') && <div hidden={activeNav !== 'daily-quiz'}><StudentDailyQuiz doubtsEnabled={enabledFeatures?.has('student-doubts') ?? false} /></div>}
             {visitedNav.has('class-circle') && <div hidden={activeNav !== 'class-circle'}><StudentClassCircle /></div>}
@@ -381,6 +382,16 @@ function StudentPortal() {
         ))}
       </nav>
 
+      {enabledFeatures !== null && (
+        <StudentDial
+          dailyQuiz={isNavItemVisible('daily-quiz')}
+          doubts={enabledFeatures.has('student-doubts')}
+          attendance={isNavItemVisible('attendance')}
+          calendar={isNavItemVisible('calendar')}
+          suspended={sidebarOpen || launcherOpen}
+          onNavigate={navigateTo}
+        />
+      )}
     </div>
   )
 }
