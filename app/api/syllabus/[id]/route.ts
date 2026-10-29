@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 import { canWriteSyllabusClass, requireSyllabusWriteAccess } from '@/lib/auth'
+import { todayIST } from '@/lib/istDate'
 
 // PATCH /api/syllabus/[id] — update status, target dates, delay reasons, topic details
 // Body: { school_id, class_id?, status?, covered_by?, topic_name?, topic_order?,
@@ -88,7 +89,9 @@ export async function PATCH(
 
       if (status !== undefined) {
         if (status === 'covered') {
-          newCoveredDate = current.covered_date || new Date().toISOString().slice(0, 10)
+          // India date, not UTC: marked between 00:00 and 05:30 IST it would otherwise be stored as yesterday,
+          // and the Daily Quiz's "completed since the last quiz" rule reads this date (#444).
+          newCoveredDate = current.covered_date || todayIST()
           if (writeSession.role === 'teacher') {
             newCoveredBy = writeSession.actorId ?? null
           } else if (covered_by !== undefined && covered_by !== null) {
