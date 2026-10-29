@@ -147,30 +147,42 @@ async function isLockedRequest(req: NextRequest, pathname: string, origin: strin
 // ── API feature entitlements ─────────────────────────────────────────────────
 // Navigation flags are presentation only. These mappings enforce the same plan
 // decisions before a protected API reaches its handler, including direct calls.
+// A switch made in Platform Admin applies within ENTITLEMENT_TTL. Under load (#452): requests waiting on the
+// same school + feature share one lookup, a failed lookup falls back to the last known answer, and with no
+// answer at all the result is null ("unknown") so the caller can say "try again" instead of a false 403.
 const entitlementCache = new Map<string, { enabled: boolean; fetchedAt: number }>()
-const ENTITLEMENT_TTL = 2_000
+const entitlementInFlight = new Map<string, Promise<boolean | null>>()
+const ENTITLEMENT_TTL = 15_000
 
-async function schoolFeatureEnabled(origin: string, schoolId: number, feature: string): Promise<boolean> {
+async function schoolFeatureEnabled(origin: string, schoolId: number, feature: string): Promise<boolean | null> {
   const key = `${schoolId}:${feature}`
   const cached = entitlementCache.get(key)
   if (cached && Date.now() - cached.fetchedAt < ENTITLEMENT_TTL) return cached.enabled
+  const pending = entitlementInFlight.get(key)
+  if (pending) return pending
 
-  try {
-    const url = new URL('/api/internal/feature-entitlement', origin)
-    url.searchParams.set('school_id', String(schoolId))
-    url.searchParams.set('feature', feature)
-    const res = await fetch(url, { headers: { 'x-ingest-secret': INGEST_SECRET } })
-    if (!res.ok) return false
-    const body = await res.json() as { enabled?: boolean }
-    const enabled = body.enabled === true
-    entitlementCache.set(key, { enabled, fetchedAt: Date.now() })
-    return enabled
-  } catch {
-    return false
-  }
+  const lookup = (async () => {
+    try {
+      const url = new URL('/api/internal/feature-entitlement', origin)
+      url.searchParams.set('school_id', String(schoolId))
+      url.searchParams.set('feature', feature)
+      const res = await fetch(url, { headers: { 'x-ingest-secret': INGEST_SECRET } })
+      if (!res.ok) throw new Error(`entitlement lookup ${res.status}`)
+      const body = await res.json() as { enabled?: boolean }
+      const enabled = body.enabled === true
+      entitlementCache.set(key, { enabled, fetchedAt: Date.now() })
+      return enabled
+    } catch {
+      return cached ? cached.enabled : null
+    } finally {
+      entitlementInFlight.delete(key)
+    }
+  })()
+  entitlementInFlight.set(key, lookup)
+  return lookup
 }
 
-async function requestHasFeature(req: NextRequest, origin: string, feature: string): Promise<boolean> {
+async function requestHasFeature(req: NextRequest, origin: string, feature: string): Promise<boolean | null> {
   const platformToken = req.cookies.get(COOKIE_PLATFORM)?.value
   const platform = platformToken ? await getTokenPayload(platformToken) : null
   if (platform?.role === 'platform_admin') return true
@@ -241,9 +253,15 @@ async function countApiRequest(req: NextRequest, origin: string, pathname: strin
   }
 }
 
-async function requestHasAnyFeature(req: NextRequest, origin: string, features: readonly string[]): Promise<boolean> {
-  for (const feature of features) if (await requestHasFeature(req, origin, feature)) return true
-  return false
+/** True when any feature is on, false when all are off, null when that couldn't be checked right now. */
+async function requestHasAnyFeature(req: NextRequest, origin: string, features: readonly string[]): Promise<boolean | null> {
+  let unknown = false
+  for (const feature of features) {
+    const on = await requestHasFeature(req, origin, feature)
+    if (on) return true
+    if (on === null) unknown = true
+  }
+  return unknown ? null : false
 }
 
 function extractSchoolId(req: NextRequest): number | null {
@@ -317,8 +335,14 @@ export async function proxy(req: NextRequest) {
   }
 
   const requirement = featureRequirementForApiPath(pathname, req.method)
-  if (requirement && !await requestHasAnyFeature(req, origin, requirement.anyOf)) {
-    return NextResponse.json({ error: 'Feature not enabled', code: 'FEATURE_DISABLED', feature: requirement.primary }, { status: 403 })
+  if (requirement) {
+    const allowed = await requestHasAnyFeature(req, origin, requirement.anyOf)
+    if (allowed === null) {
+      return NextResponse.json({ error: 'We are very busy right now. Please try again in a moment.', code: 'FEATURE_CHECK_UNAVAILABLE' }, { status: 503, headers: { 'Retry-After': '5' } })
+    }
+    if (!allowed) {
+      return NextResponse.json({ error: 'Feature not enabled', code: 'FEATURE_DISABLED', feature: requirement.primary }, { status: 403 })
+    }
   }
 
   if (pathname.startsWith('/api/')) await countApiRequest(req, origin, pathname)
