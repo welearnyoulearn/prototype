@@ -1187,6 +1187,16 @@ export function SyllabusTracking({
             return (
               <button key={s.subject}
                 onClick={() => {
+                  // The open subject: nothing to switch (resetting below would close its Setup screen for good).
+                  if (active) return
+                  // A subject not set up yet must be checked again so its Setup screen reopens; the Setup
+                  // effect skips subjects it already has a status for (#449).
+                  setSetupStatus(prev => {
+                    if (!(s.subject in prev) || (prev[s.subject] && prev[s.subject] !== 'error')) return prev
+                    const next = { ...prev }
+                    delete next[s.subject]
+                    return next
+                  })
                   setSelectedSubject(s.subject)
                   setExpandedChapter(null)
                   setSetupMode('closed')
