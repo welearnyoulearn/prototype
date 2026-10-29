@@ -34,7 +34,7 @@ export default function TeacherDoubts() {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold text-gray-900">Doubts</h1>
-          <p className="mt-1 text-sm text-gray-600">Students ask here after reading the explanation and WLYL AI. A doubt is clarified when the student answers a fresh question correctly.</p>
+          <p className="mt-1 text-sm text-gray-600">Students ask here right after finishing the quiz, when an explanation doesn’t convince them. A doubt is clarified when the student answers a fresh question correctly.</p>
         </div>
         {data && (
           <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-2 text-sm" data-testid="teacher-stars">

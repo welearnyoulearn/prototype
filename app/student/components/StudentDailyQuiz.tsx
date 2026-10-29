@@ -8,7 +8,7 @@ import { StudentPageIntro } from './StudentExperience'
 
 /**
  * Student portal → Daily quiz (#433), with points, streak and the class leaderboard (#434) and, when the
- * school has Student Doubts, Ask WLYL AI → Ask Teacher on every reviewed question and "My doubts" (#435).
+ * school has Student Doubts, Ask your teacher on every reviewed question and "My doubts" (#435, #450).
  */
 export default function StudentDailyQuiz({ doubtsEnabled }: { doubtsEnabled: boolean }) {
   // Bumped when a quiz is finished or a doubt raised, so the panels below reload.
@@ -19,7 +19,7 @@ export default function StudentDailyQuiz({ doubtsEnabled }: { doubtsEnabled: boo
       <StudentPageIntro
         eyebrow="Every school day"
         title="Daily quiz"
-        description="One question from each subject, from what your teachers covered this week. Finish it before the quiz closes; the answers and explanations come out after."
+        description="One question from each subject, from what your teachers covered this week. Finish it before the quiz closes. You see the right answers and explanations as soon as you finish."
         sticker="brain"
         tone="mint"
       />

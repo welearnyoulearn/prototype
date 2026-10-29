@@ -33,7 +33,7 @@ type Props = {
   experience: QuizExperience
   /** '' for a student, '?student_id=N' for a parent. */
   query: string
-  /** Extra actions under a reviewed question (Ask WLYL AI / Ask Teacher, #435). */
+  /** Extra actions under a reviewed question (Ask your teacher, and the AI Tutor once ready: #435, #450). */
   renderReviewActions?: (q: AttemptQuestion, attempt: AttemptView) => ReactNode
   /** Shown under the home screen (points, leaderboard, #434). */
   footer?: ReactNode

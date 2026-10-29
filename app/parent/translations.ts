@@ -29,7 +29,7 @@ const en = {
   // Nav
   nav: {
     overview:     'Overview',
-    'daily-quiz': 'Daily Quiz',
+    'daily-quiz': 'Daily Report',
     syllabus:     'Syllabus',
     library:      'Digital Library',
     attendance:   'Attendance',
@@ -188,7 +188,7 @@ const te: typeof en = {
   // Nav
   nav: {
     overview:     'అవలోకనం',
-    'daily-quiz': 'రోజువారీ క్విజ్',
+    'daily-quiz': 'రోజువారీ నివేదిక',
     syllabus:     'పాఠ్యక్రమం',
     library:      'డిజిటల్ లైబ్రరీ',
     attendance:   'హాజరు',
