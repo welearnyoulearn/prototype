@@ -31,7 +31,8 @@
     "doc": "wiki/features/student-portal.md",
     "ui": [
       "app/student/page.tsx",
-      "app/student/components"
+      "app/student/components",
+      "components/dial"
     ]
   },
   "parent-portal": {
