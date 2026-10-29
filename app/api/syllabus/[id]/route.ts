@@ -1,7 +1,8 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 import { canWriteSyllabusClass, requireSyllabusWriteAccess } from '@/lib/auth'
 import { todayIST } from '@/lib/istDate'
+import { nudgePreparation } from '@/lib/quizBank'
 
 // PATCH /api/syllabus/[id] — update status, target dates, delay reasons, topic details
 // Body: { school_id, class_id?, status?, covered_by?, topic_name?, topic_order?,
@@ -171,6 +172,9 @@ export async function PATCH(
       return NextResponse.json({ error: 'Nothing to update' }, { status: 400 })
     }
 
+    // Teachers mark topics through the day: a quiet moment to move quiz question preparation along. Student
+    // traffic never does this, so a rush of students is never held up behind it (#450).
+    if (status === 'covered') after(() => nudgePreparation())
     return NextResponse.json({
       success: true,
       progress: progressResult,

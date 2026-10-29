@@ -183,7 +183,7 @@ export function participationAward(isLate: boolean): PointAward {
   return isLate ? { action: 'daily_quiz_late', points: QUIZ_POINTS.doneLate } : { action: 'daily_quiz_done', points: QUIZ_POINTS.done }
 }
 
-/** Points for accuracy (given once results are out, so scores never leak before the close). On time only. */
+/** Points for accuracy, paid on finishing now that answers show straight away (#450). On time only. */
 export function accuracyAwards(isLate: boolean, correct: number, total: number): PointAward[] {
   if (isLate || total === 0) return []
   const awards: PointAward[] = []
@@ -206,4 +206,22 @@ export function quizStreak(quizzesNewestFirst: { done: boolean; stillOpen: boole
     else break
   }
   return streak
+}
+
+// ── Refreshing the quiz screens (#450) ───────────────────────────────────────
+export const TODAY_REFRESH_MS = 5 * 60_000
+export const TODAY_SPREAD_MS = 60_000
+
+/**
+ * How long a quiz screen waits before asking the server again: at the next opening or closing time if that
+ * comes sooner, otherwise TODAY_REFRESH_MS. `spreadMs` (0 to TODAY_SPREAD_MS, random per device) spreads the
+ * students of a school over a minute, so they don't all arrive in the same second when the quiz opens.
+ */
+export function nextTodayRefreshMs(changesAt: (string | null | undefined)[], nowMs: number, spreadMs: number): number {
+  const next = changesAt
+    .map(t => (t ? new Date(t).getTime() : NaN))
+    .filter(t => Number.isFinite(t) && t > nowMs)
+    .sort((a, b) => a - b)[0]
+  if (next === undefined) return TODAY_REFRESH_MS
+  return Math.max(15_000, Math.min(TODAY_REFRESH_MS, next - nowMs + spreadMs))
 }

@@ -7,6 +7,7 @@
 // The server never sends correct answers before the student finishes, so this screen can't leak them either.
 
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import { TODAY_SPREAD_MS, nextTodayRefreshMs } from '@/lib/dailyQuizRules'
 import { CheckCircle2, ChevronLeft, ChevronRight, Clock, Flag, Loader2, PartyPopper, RotateCcw, XCircle } from 'lucide-react'
 
 export type QuizExperience = 'student' | 'parent'
@@ -72,6 +73,34 @@ function quizUrl(experience: QuizExperience, path: string, query: string) {
   return withQuery(path === '/today' ? api.today : `${api.attempts}${path.slice('/attempts'.length)}`, query)
 }
 
+// Every quiz widget on the page (home card, quiz screen) shares one /today request: at most one per 20 s.
+const TODAY_REUSE_MS = 20_000
+const todayRequests = new Map<string, { at: number; value: Promise<TodayView> }>()
+function fetchToday(u: string, fresh = false): Promise<TodayView> {
+  const hit = todayRequests.get(u)
+  if (!fresh && hit && Date.now() - hit.at < TODAY_REUSE_MS) return hit.value
+  const value = call<TodayView>(u)
+  todayRequests.set(u, { at: Date.now(), value })
+  value.catch(() => { if (todayRequests.get(u)?.value === value) todayRequests.delete(u) })
+  return value
+}
+
+/**
+ * Keeps a quiz widget current without hammering the server: looks again at the next opening/closing time
+ * (spread over a minute per device) or every 5 minutes, and when the student comes back to the tab.
+ */
+function useTodayRefresh(today: TodayView | null, active: boolean, reload: (fresh: boolean) => void) {
+  useEffect(() => {
+    if (!active) return
+    const changes = [today?.opensAt, today?.closesAt, today?.quiz?.opensAt, today?.quiz?.closesAt]
+    // Timed: always fresh, so the new answer re-arms this timer. Back to the tab: a just-made request will do.
+    const t = setTimeout(() => { if (!document.hidden) reload(true) }, nextTodayRefreshMs(changes, Date.now(), Math.random() * TODAY_SPREAD_MS))
+    const onVisible = () => { if (!document.hidden) reload(false) }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => { clearTimeout(t); document.removeEventListener('visibilitychange', onVisible) }
+  }, [today, active, reload])
+}
+
 function withQuery(base: string, query: string) {
   return query ? `${base}${base.includes('?') ? '&' : '?'}${query.replace(/^\?/, '')}` : base
 }
@@ -85,9 +114,9 @@ export default function DailyQuiz({ experience, query, renderReviewActions, foot
   const [busy, setBusy] = useState(false)
   const url = useCallback((path: string) => quizUrl(experience, path, query), [experience, query])
 
-  const loadToday = useCallback(async () => {
+  const loadToday = useCallback(async (fresh = false) => {
     try {
-      setToday(await call<TodayView>(url('/today')))
+      setToday(await fetchToday(url('/today'), fresh))
       setError(null)
     } catch (e) { setError((e as Error).message) }
   }, [url])
@@ -97,11 +126,8 @@ export default function DailyQuiz({ experience, query, renderReviewActions, foot
     return () => clearTimeout(t)
   }, [loadToday])
   // Keep the home screen current (the quiz opens or closes) without a reload.
-  useEffect(() => {
-    if (screen.kind !== 'home') return
-    const t = setInterval(() => { if (!document.hidden) void loadToday() }, 60_000)
-    return () => clearInterval(t)
-  }, [screen.kind, loadToday])
+  const refresh = useCallback((fresh: boolean) => { void loadToday(fresh) }, [loadToday])
+  useTodayRefresh(today, screen.kind === 'home', refresh)
 
   async function open(card: QuizCard) {
     setBusy(true); setError(null)
@@ -112,11 +138,11 @@ export default function DailyQuiz({ experience, query, renderReviewActions, foot
       if (attempt.status === 'in_progress') setScreen({ kind: 'play', attempt })
       else if (attempt.answersVisible) setScreen({ kind: 'review', attempt })
       else setScreen({ kind: 'done', attempt })
-    } catch (e) { setError((e as Error).message); void loadToday() }
+    } catch (e) { setError((e as Error).message); void loadToday(true) }
     finally { setBusy(false) }
   }
 
-  function backHome() { setScreen({ kind: 'home' }); void loadToday() }
+  function backHome() { setScreen({ kind: 'home' }); void loadToday(true) }
 
   if (screen.kind === 'play') {
     return <Player experience={experience} attempt={screen.attempt} url={url}
@@ -446,13 +472,14 @@ function ReportButton({ questionId }: { questionId: number }) {
 /** A prominent card for the portal home: what to do about today's quiz, one tap to open it. */
 export function DailyQuizHomeCard({ query, onOpen, experience }: { query: string; onOpen: () => void; experience: QuizExperience }) {
   const [today, setToday] = useState<TodayView | null>(null)
-  useEffect(() => {
-    let cancelled = false
-    const load = () => call<TodayView>(quizUrl(experience, '/today', query)).then(v => { if (!cancelled) setToday(v) }).catch(() => {})
-    void load()
-    const t = setInterval(() => { if (!document.hidden) void load() }, 60_000)
-    return () => { cancelled = true; clearInterval(t) }
+  const load = useCallback((fresh = false) => {
+    fetchToday(quizUrl(experience, '/today', query), fresh).then(setToday).catch(() => {})
   }, [experience, query])
+  useEffect(() => {
+    const t = setTimeout(() => load(), 0)
+    return () => clearTimeout(t)
+  }, [load])
+  useTodayRefresh(today, true, load)
   if (!today || !['ready', 'upcoming'].includes(today.status) && today.late.length === 0) return null
 
   const name = experience === 'parent' ? today.studentName.split(' ')[0] : null

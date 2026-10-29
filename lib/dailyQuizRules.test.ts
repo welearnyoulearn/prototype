@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import {
   DEFAULT_QUIZ_SETTINGS, quizSettingsSchema, resolveSettings, istNow, istInstant, addDays, inSeason, gradeNumber,
   recentWorkingDays, chooseTopics, quizPhase, lateAllowed, answersVisible, participationAward, accuracyAwards, quizStreak,
+  nextTodayRefreshMs, TODAY_REFRESH_MS,
 } from './dailyQuizRules'
 
 test('settings: defaults are valid; bad values are refused', () => {
@@ -97,4 +98,14 @@ test('streak counts finished class quizzes; an open one today does not break it'
   assert.equal(quizStreak([{ done: false, stillOpen: true }, { done: true, stillOpen: false }, { done: true, stillOpen: false }]), 2)
   assert.equal(quizStreak([{ done: true, stillOpen: true }, { done: true, stillOpen: false }, { done: false, stillOpen: false }, { done: true, stillOpen: false }]), 2)
   assert.equal(quizStreak([{ done: false, stillOpen: false }, { done: true, stillOpen: false }]), 0)
+})
+
+test('quiz screens refresh at the next change, spread over a minute, at most every 5 minutes', () => {
+  const now = Date.parse('2026-10-29T09:58:00Z')
+  const opens = '2026-10-29T10:00:00.000Z', closes = '2026-10-29T15:30:00.000Z'
+  assert.equal(nextTodayRefreshMs([opens, closes], now, 0), 2 * 60_000, 'at the opening')
+  assert.equal(nextTodayRefreshMs([opens, closes], now, 45_000), 2 * 60_000 + 45_000, 'spread per device')
+  assert.equal(nextTodayRefreshMs([opens, closes], Date.parse('2026-10-29T12:00:00Z'), 0), TODAY_REFRESH_MS, 'nothing soon')
+  assert.equal(nextTodayRefreshMs([null, undefined], now, 0), TODAY_REFRESH_MS)
+  assert.equal(nextTodayRefreshMs([opens], Date.parse('2026-10-29T09:59:59Z'), 0), 15_000, 'never hammer')
 })

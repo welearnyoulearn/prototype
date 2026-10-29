@@ -2,13 +2,14 @@
 // the same handlers: a student acts for themself; a parent acts for one of their own children, named by
 // ?student_id= (checked against student_parents and the parent's school). Identity always comes from the session.
 
-import { NextRequest, NextResponse, after } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import pool from '@/lib/db'
 import { getParentSession, getStudentSession, schoolHasFeature } from '@/lib/auth'
 import { parentOwnsStudent } from '@/lib/examsAuth'
 import { DailyQuizError, attemptView, saveAnswer, startAttempt, submitAttempt, todayView } from '@/lib/dailyQuiz'
-import { nudgePreparation, positiveId } from '@/lib/quizBank'
+import { positiveId } from '@/lib/quizBank'
+import { cached } from '@/lib/ttlCache'
 import { progressView } from '@/lib/quizRewards'
 
 export type QuizPortal = 'student' | 'parent'
@@ -34,7 +35,8 @@ export async function quizActor(req: NextRequest, portal: QuizPortal, feature: '
   }
   // Doubts sit on top of the quiz, so they need both features.
   for (const key of feature === 'daily-quiz' ? ['daily-quiz'] : ['daily-quiz', 'student-doubts']) {
-    if (!await schoolHasFeature(actor.schoolId, key)) return NextResponse.json({ error: 'Feature not enabled', code: 'FEATURE_DISABLED', feature: key }, { status: 403 })
+    // Checked on every quiz request; a switch made by Platform Admin reaches every instance within a minute.
+    if (!await cached(`feature:${actor.schoolId}:${key}`, 60_000, () => schoolHasFeature(actor.schoolId, key))) return NextResponse.json({ error: 'Feature not enabled', code: 'FEATURE_DISABLED', feature: key }, { status: 403 })
   }
   return actor
 }
@@ -54,8 +56,6 @@ export async function handleToday(req: NextRequest, portal: QuizPortal) {
   const actor = await quizActor(req, portal)
   if (actor instanceof NextResponse) return actor
   try {
-    // Students and parents open this all day: a cheap moment to move question preparation along (#444).
-    after(() => nudgePreparation())
     return NextResponse.json(await todayView(actor.studentId, actor.schoolId), NO_STORE)
   } catch (err) { return quizErrorResponse(err, 'today') }
 }

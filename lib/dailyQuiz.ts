@@ -16,6 +16,7 @@ import type { PoolClient } from 'pg'
 import { resolveAcademicYear } from '@/lib/academicYear'
 import { nonWorkingDay } from '@/lib/attendance'
 import { schoolHasFeature } from '@/lib/auth'
+import { cached, forget } from '@/lib/ttlCache'
 import { awardOnFinish, runWeeklyReports, settleAccuracy } from '@/lib/quizRewards'
 import {
   DEFAULT_QUIZ_SETTINGS, LATE_DAYS, REMINDER_BEFORE_CLOSE_MIN, addDays, answersVisible, chooseTopics, gradeNumber,
@@ -42,15 +43,26 @@ function rowToOverride(r: SettingsRow): QuizSettingsOverride {
   }
 }
 
+// Settings are read on every quiz request and change rarely: each instance keeps them for a minute (#450).
+const SETTINGS_TTL_MS = 60_000
+
 export async function globalSettings(db: { query: PoolClient['query'] } = pool): Promise<QuizSettings> {
-  const { rows: [r] } = await db.query<SettingsRow>('SELECT * FROM quiz_settings WHERE school_id IS NULL')
-  return r ? resolveSettings(DEFAULT_QUIZ_SETTINGS, rowToOverride(r)) : DEFAULT_QUIZ_SETTINGS
+  const read = async () => {
+    const { rows: [r] } = await db.query<SettingsRow>('SELECT * FROM quiz_settings WHERE school_id IS NULL')
+    return r ? resolveSettings(DEFAULT_QUIZ_SETTINGS, rowToOverride(r)) : DEFAULT_QUIZ_SETTINGS
+  }
+  // Inside a transaction (a different db) always read fresh.
+  return db === pool ? cached('dq:settings:global', SETTINGS_TTL_MS, read) : read()
 }
 
 export async function schoolSettings(schoolId: number): Promise<{ global: QuizSettings; override: QuizSettingsOverride | null; effective: QuizSettings }> {
-  const global = await globalSettings()
-  const { rows: [r] } = await pool.query<SettingsRow>('SELECT * FROM quiz_settings WHERE school_id = $1', [schoolId])
-  const override = r ? rowToOverride(r) : null
+  const [global, override] = await Promise.all([
+    globalSettings(),
+    cached(`dq:settings:school:${schoolId}`, SETTINGS_TTL_MS, async () => {
+      const { rows: [r] } = await pool.query<SettingsRow>('SELECT * FROM quiz_settings WHERE school_id = $1', [schoolId])
+      return r ? rowToOverride(r) : null
+    }),
+  ])
   return { global, override, effective: resolveSettings(global, override) }
 }
 
@@ -61,6 +73,7 @@ export async function saveGlobalSettings(settings: QuizSettings, adminId: number
            updated_by = $6, updated_at = NOW()
     WHERE school_id IS NULL
   `, [parsed.seasonStart, parsed.seasonEnd, parsed.openTime, parsed.closeTime, parsed.grades, adminId])
+  forget('dq:settings:*')
   return parsed
 }
 
@@ -70,6 +83,7 @@ export async function saveSchoolOverride(schoolId: number, override: QuizSetting
   if (!school) throw new DailyQuizError('School not found', 404)
   if (!override || Object.values(override).every(v => v === null)) {
     await pool.query('DELETE FROM quiz_settings WHERE school_id = $1', [schoolId])
+    forget(`dq:settings:school:${schoolId}`)
     return schoolSettings(schoolId)
   }
   // Validate the settings the school would end up with, not just the fields it changes.
@@ -83,6 +97,7 @@ export async function saveSchoolOverride(schoolId: number, override: QuizSetting
       open_time = EXCLUDED.open_time, close_time = EXCLUDED.close_time, grades = EXCLUDED.grades,
       updated_by = EXCLUDED.updated_by, updated_at = NOW()
   `, [schoolId, override.seasonStart, override.seasonEnd, override.openTime, override.closeTime, override.grades, adminId])
+  forget(`dq:settings:school:${schoolId}`)
   return schoolSettings(schoolId)
 }
 
@@ -102,16 +117,15 @@ type ClassRow = { id: number; school_id: number; grade: string; section: string 
 type StudentCtx = { id: number; name: string; schoolId: number; cls: ClassRow | null }
 
 async function studentContext(studentId: number, schoolId: number): Promise<StudentCtx> {
-  const { rows: [s] } = await pool.query<{ id: number; name: string; grade: string; section: string }>(
-    `SELECT id, name, grade, section FROM students WHERE id = $1 AND school_id = $2 AND status = 'active'`,
-    [studentId, schoolId],
-  )
+  // One round trip: the student and their class.
+  const { rows: [s] } = await pool.query<{ id: number; name: string; grade: string; section: string; class_id: number | null }>(`
+    SELECT s.id, s.name, s.grade, s.section,
+           (SELECT c.id FROM classes c WHERE c.school_id = s.school_id AND c.grade = s.grade AND c.section = s.section AND c.deleted_at IS NULL ORDER BY c.id LIMIT 1) AS class_id
+    FROM students s WHERE s.id = $1 AND s.school_id = $2 AND s.status = 'active'
+  `, [studentId, schoolId])
   if (!s) throw new DailyQuizError('Student not found', 404)
-  const { rows: [cls] } = await pool.query<ClassRow>(
-    `SELECT id, school_id, grade, section FROM classes WHERE school_id = $1 AND grade = $2 AND section = $3 AND deleted_at IS NULL`,
-    [schoolId, s.grade, s.section],
-  )
-  return { id: s.id, name: s.name, schoolId, cls: cls ?? null }
+  const cls: ClassRow | null = s.class_id === null ? null : { id: s.class_id, school_id: schoolId, grade: s.grade, section: s.section }
+  return { id: s.id, name: s.name, schoolId, cls }
 }
 
 // ── Posting a class's quiz ────────────────────────────────────────────────────
@@ -187,7 +201,8 @@ export async function dayStatus(cls: ClassRow | null, date: string, settings: Qu
   const g = gradeNumber(cls.grade)
   if (g === null || !settings.grades.includes(g)) return { kind: 'grade_off' }
   if (!inSeason(date, settings.seasonStart, settings.seasonEnd)) return { kind: 'out_of_season', seasonStart: settings.seasonStart, seasonEnd: settings.seasonEnd }
-  const off = await nonWorkingDay(cls.school_id, date)
+  // Holidays change rarely; a school admin's edit reaches every instance within 5 minutes.
+  const off = await cached(`dq:offday:${cls.school_id}:${date}`, 5 * 60_000, () => nonWorkingDay(cls.school_id, date))
   if (off) return { kind: 'holiday', reason: off.kind === 'weekly_off' ? 'Weekly off' : off.title }
   return { kind: 'quiz_day', opensAt: istInstant(date, settings.openTime), closesAt: istInstant(date, settings.closeTime) }
 }
@@ -368,7 +383,6 @@ export async function todayView(studentId: number, schoolId: number, now: Date =
   const { effective } = await schoolSettings(schoolId)
   const today = istNow(now).date
   await closeOverdueAttempts({ studentId }, now)
-  await settleAccuracy({ studentId }, now)
 
   const view: TodayView = { studentName: ctx.name, today, status: 'no_class', opensAt: null, closesAt: null, quiz: null, late: [], recent: [] }
   const day = await dayStatus(ctx.cls, today, effective)
@@ -532,7 +546,6 @@ async function attemptRow(studentId: number, schoolId: number, attemptId: number
 /** The attempt's questions. The answer key and explanations are included only once answers are visible. */
 export async function attemptView(studentId: number, schoolId: number, attemptId: number, now: Date = new Date()): Promise<AttemptView> {
   await closeOverdueAttempts({ studentId }, now)
-  await settleAccuracy({ studentId }, now)
   const t = await attemptRow(studentId, schoolId, attemptId)
   const visible = answersVisible(t.status === 'submitted')
   const { rows } = await pool.query<{ item_id: number; position: number; subject_name: string; topic_name: string | null; stem: string; options: string[]; language: string; chosen_index: number | null; correct_index: number; explanation: string | null; is_correct: boolean | null; question_id: number }>(`
@@ -559,9 +572,14 @@ export async function attemptView(studentId: number, schoolId: number, attemptId
 
 /** Saves (or changes) one answer. Only while the attempt is in progress and, on time, before the close. */
 export async function saveAnswer(studentId: number, schoolId: number, attemptId: number, itemId: number, chosenIndex: number, now: Date = new Date()) {
-  await closeOverdueAttempts({ studentId }, now)
+  // The busiest call (one per tap): check this attempt's own deadline instead of scanning all the student's.
   const t = await attemptRow(studentId, schoolId, attemptId)
   if (t.status !== 'in_progress') throw new DailyQuizError('This quiz is already finished.', 409)
+  const overdue = t.is_late ? istNow(now).date > addDays(t.quiz_date, LATE_DAYS) : now >= t.closes_at
+  if (overdue) {
+    await closeOverdueAttempts({ studentId }, now)
+    throw new DailyQuizError('This quiz has closed. The answers you gave were saved and marked.', 409)
+  }
   const { rowCount } = await pool.query(
     `UPDATE daily_quiz_answers SET chosen_index = $3, answered_at = NOW() WHERE attempt_id = $1 AND item_id = $2`,
     [attemptId, itemId, chosenIndex],
@@ -596,11 +614,14 @@ async function notifyStudentsAndParents(quiz: QuizRow, students: Recipient[], ty
     WHERE sp.student_id = ANY($1::int[]) AND p.school_id = $2
   `, [students.map(s => s.student_id), quiz.school_id])
   const nameOf = new Map(students.map(s => [s.student_id, s.name.split(' ')[0]]))
-  for (const p of parents) {
-    await pool.query(
-      `INSERT INTO notifications (school_id, recipient_parent_id, type, title, message, data) VALUES ($1, $2, $3, $4, $5, $6::jsonb)`,
-      [quiz.school_id, p.parent_id, type, title, parentMsg(nameOf.get(p.student_id) ?? 'Your child'), JSON.stringify({ quiz_id: quiz.id, date: quiz.quiz_date, student_id: p.student_id })],
-    )
+  // One statement for every parent of the class, however big it is.
+  if (parents.length) {
+    await pool.query(`
+      INSERT INTO notifications (school_id, recipient_parent_id, type, title, message, data)
+      SELECT $1, r.parent_id, $2, $3, r.message, jsonb_build_object('quiz_id', $4::int, 'date', $5::text, 'student_id', r.student_id)
+      FROM UNNEST($6::int[], $7::int[], $8::text[]) AS r(parent_id, student_id, message)
+    `, [quiz.school_id, type, title, quiz.id, quiz.quiz_date,
+      parents.map(p => p.parent_id), parents.map(p => p.student_id), parents.map(p => parentMsg(nameOf.get(p.student_id) ?? 'Your child'))])
   }
   return students.length + parents.length
 }
