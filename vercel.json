@@ -43,6 +43,22 @@
     {
       "path": "/api/cron/billing",
       "schedule": "30 0 * * *"
+    },
+    {
+      "path": "/api/cron/quiz-bank",
+      "schedule": "0 3 * * *"
+    },
+    {
+      "path": "/api/cron/daily-quiz?run=open",
+      "schedule": "0 10 * * *"
+    },
+    {
+      "path": "/api/cron/daily-quiz?run=remind",
+      "schedule": "0 14 * * *"
+    },
+    {
+      "path": "/api/cron/daily-quiz?run=close",
+      "schedule": "0 16 * * *"
     }
   ]
 }

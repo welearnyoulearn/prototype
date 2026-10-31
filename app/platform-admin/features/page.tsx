@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useConfirm } from '@/components/ui/use-confirm'
 import { overLimitSchoolsMessage } from '@/lib/planChangeMessage'
+import { CATEGORY_ORDER } from '@/lib/features'
 
 type Feature   = { key: string; label: string; category: string; portals: string[] }
 
@@ -15,8 +16,6 @@ const TIERS = [
   { key: 'standard', label: 'Standard', color: 'text-blue-700',   bg: 'bg-blue-50',   ring: 'ring-blue-400',   check: 'bg-blue-500' },
   { key: 'premium',  label: 'Premium',  color: 'text-purple-700', bg: 'bg-purple-50', ring: 'ring-purple-400', check: 'bg-purple-500' },
 ]
-
-const CATEGORY_ORDER = ['Core', 'Scheduling', 'Analytics', 'Finance', 'Communication', 'Administration']
 
 export default function FeaturePlansPage() {
   const { confirm, ConfirmDialog } = useConfirm()

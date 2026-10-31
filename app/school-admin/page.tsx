@@ -22,7 +22,7 @@ import { hueForSection } from '@/components/portal/sectionHues'
 import { Skeleton } from '@/components/ui/skeleton'
 
 // Always-loaded (small, needed immediately)
-import { BookOpen, Building2, CalendarDays, ChevronDown, ClipboardCheck, Download, GraduationCap, LayoutDashboard, Library, GripVertical, LayoutGrid, LineChart, ListChecks, Megaphone, MessageSquareText, NotebookPen, Receipt, RefreshCcw, School, SlidersHorizontal, Users, Wallet, Wrench } from 'lucide-react'
+import { Brain, BookOpen, Building2, CalendarDays, ChevronDown, ClipboardCheck, Download, GraduationCap, LayoutDashboard, Library, GripVertical, LayoutGrid, LineChart, ListChecks, Megaphone, MessageSquareText, NotebookPen, Receipt, RefreshCcw, School, SlidersHorizontal, Users, Wallet, Wrench } from 'lucide-react'
 import Overview from './components/Overview'
 import StaffProfile from './components/StaffProfile'
 import { unregisterPushDevice } from '@/lib/pushClient'
@@ -47,6 +47,8 @@ const StudentOnboarding     = dynamic(() => import('./components/StudentOnboardi
 const ClassManagement       = dynamic(() => import('./components/ClassManagement'),        { loading: () => <ModuleSkeleton /> })
 const CurriculumCustomizer   = dynamic(() => import('./components/CurriculumCustomizer'),   { loading: () => <ModuleSkeleton /> })
 const DigitalLibrary         = dynamic(() => import('@/app/components/library/DigitalLibrary'), { loading: () => <ModuleSkeleton /> })
+const SchoolDailyQuiz        = dynamic(() => import('./components/SchoolDailyQuiz'),        { loading: () => <ModuleSkeleton /> })
+const SchoolDoubts           = dynamic(() => import('./components/SchoolDoubts'),           { loading: () => <ModuleSkeleton /> })
 const AcademicAnalytics      = dynamic(() => import('./components/AcademicAnalytics'),      { loading: () => <ModuleSkeleton /> })
 const ExamSchedule          = dynamic(() => import('./components/ExamSchedule'),           { loading: () => <ModuleSkeleton /> })
 const TeachersManagement    = dynamic(() => import('./components/TeachersManagement'),     { loading: () => <ModuleSkeleton /> })
@@ -90,7 +92,7 @@ const NAV_SECTIONS: { label: string; shortLabel?: string; keys: string[]; icon: 
   { label: 'PEOPLE',        keys: ['students', 'staff', 'class-management'], icon: <Users className="w-3.5 h-3.5" aria-hidden="true" /> },
   { label: 'MONEY MANAGEMENT', shortLabel: 'MONEY', keys: ['fee-management', 'expenses'], icon: <Wallet className="w-3.5 h-3.5" aria-hidden="true" /> },
   { label: 'SCHEDULING',    keys: ['attendance', 'academic-calendar', 'exam-schedule'], icon: <CalendarDays className="w-3.5 h-3.5" aria-hidden="true" /> },
-  { label: 'ACADEMICS',     keys: ['curriculum', 'syllabus-tracking', 'library'], icon: <BookOpen className="w-3.5 h-3.5" aria-hidden="true" /> },
+  { label: 'ACADEMICS',     keys: ['curriculum', 'syllabus-tracking', 'daily-quiz', 'library'], icon: <BookOpen className="w-3.5 h-3.5" aria-hidden="true" /> },
   { label: 'COMMUNICATION', keys: ['announcements', 'feedback-management'], icon: <Megaphone className="w-3.5 h-3.5" aria-hidden="true" /> },
   { label: 'TOOLS',         keys: ['settings', 'export', 'traffic', 'year-rollover'], icon: <Wrench className="w-3.5 h-3.5" aria-hidden="true" /> },
 ]
@@ -186,6 +188,12 @@ const NAV_ITEMS: NavItem[] = [
     label: 'Syllabus Tracking',
     tier: ['basic', 'standard', 'premium'],
     icon: (<ListChecks className="w-4 h-4" aria-hidden="true" />),
+  },
+  {
+    key: 'daily-quiz',
+    label: 'Daily Quiz',
+    tier: ['basic', 'standard', 'premium'],
+    icon: (<Brain className="w-4 h-4" aria-hidden="true" />),
   },
   {
     key: 'exam-schedule',
@@ -978,6 +986,7 @@ function SchoolAdmin() {
                 {visited.has('curriculum')       && <div hidden={activeNav !== 'curriculum'}><CurriculumCustomizer schoolId={selectedSchool.id} /></div>}
                 {visited.has('library')          && <div hidden={activeNav !== 'library'}><DigitalLibrary apiUrl={`/api/school/library?school_id=${selectedSchool.id}`} /></div>}
                 {visited.has('syllabus-tracking') && <div hidden={activeNav !== 'syllabus-tracking'}><AcademicAnalytics schoolId={selectedSchool.id} /></div>}
+                {visited.has('daily-quiz') && navEnabled('daily-quiz') && <div hidden={activeNav !== 'daily-quiz'}><SchoolDailyQuiz extra={navEnabled('student-doubts') ? <SchoolDoubts /> : null} /></div>}
                 {visited.has('exam-schedule')    && <div hidden={activeNav !== 'exam-schedule'}><ExamSchedule schoolId={selectedSchool.id} /></div>}
                 {visited.has('announcements')    && <div hidden={activeNav !== 'announcements'}><AnnouncementBoard schoolId={selectedSchool.id} schoolName={selectedSchool.name} /></div>}
                 {visited.has('feedback-management') && <div hidden={activeNav !== 'feedback-management'}><FeedbackManagement schoolId={selectedSchool.id} /></div>}

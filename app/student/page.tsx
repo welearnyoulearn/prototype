@@ -16,6 +16,7 @@ import FeatureLauncherButton from '@/components/portal/FeatureLauncherButton'
 import { LogOut, Menu } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Sticker, type StickerName } from './components/stickers'
+import StudentDial from '@/components/dial/StudentDial'
 
 // Always-loaded (landing tab, and small enough not to be worth its own chunk)
 import StudentDashboard from './components/StudentDashboard'
@@ -54,6 +55,7 @@ const StudentMarks     = dynamic(() => import('./components/StudentMarks'),     
 const StudentSyllabus  = dynamic(() => import('./components/StudentSyllabus'),  { loading: () => <ModuleSkeleton /> })
 const DigitalLibrary    = dynamic(() => import('../components/library/DigitalLibrary'), { loading: () => <ModuleSkeleton /> })
 const StudentAiHub      = dynamic(() => import('./components/StudentAiHub'),     { loading: () => <ModuleSkeleton /> })
+const StudentDailyQuiz  = dynamic(() => import('./components/StudentDailyQuiz'), { loading: () => <ModuleSkeleton /> })
 const StudentClassCircle = dynamic(() => import('./components/StudentClassCircle'), { loading: () => <ModuleSkeleton /> })
 
 type Student = {
@@ -70,6 +72,7 @@ const NAV_SECTIONS: NavSection[] = [
     label: 'HOME',
     items: [
       { key: 'dashboard', label: 'Overview', sticker: 'house' },
+      { key: 'daily-quiz', label: 'Daily quiz', sticker: 'brain' },
       { key: 'syllabus', label: 'Syllabus', sticker: 'graduation-cap' },
       { key: 'library', label: 'Digital library', sticker: 'open-book' },
     ],
@@ -123,6 +126,7 @@ const RESTRICTABLE_NAV_KEYS = new Set(['syllabus', 'library', 'my-marks', 'atten
 
 const BOTTOM_NAV: { key: string; label: string; sticker: StickerName }[] = [
   { key: 'dashboard', label: 'Home', sticker: 'house' },
+  { key: 'daily-quiz', label: 'Quiz', sticker: 'brain' },
   { key: 'my-marks', label: 'Marks', sticker: 'trophy' },
   { key: 'profile', label: 'Profile', sticker: 'bust-in-silhouette' },
 ]
@@ -155,6 +159,8 @@ function StudentPortal() {
   // loading and only appears once confirmed as ai_basic/ai_pro.
   function isNavItemVisible(key: string) {
     if (key === 'ai-hub') return aiAccessTier === 'ai_basic' || aiAccessTier === 'ai_pro'
+    // Off by default for every plan, so it stays hidden until the school is confirmed to have it.
+    if (key === 'daily-quiz') return enabledFeatures?.has('daily-quiz') ?? false
     if (!RESTRICTABLE_NAV_KEYS.has(key)) return true
     if (enabledFeatures === null) return true
     return enabledFeatures.has(PORTAL_NAV_KEY_ALIASES[key] ?? key)
@@ -344,8 +350,9 @@ function StudentPortal() {
 
         {/* ── Main Content ──────────────────────────────────────────── */}
         <main id="student-content" tabIndex={-1} className="portal-main">
-          <div className="mx-auto w-full max-w-5xl pb-6">
+          <div className="mx-auto w-full max-w-5xl pb-28">
             {visitedNav.has('dashboard')   && <div hidden={activeNav !== 'dashboard'}><StudentDashboard student={student} classId={classId} schoolId={student.school_id} onNavigate={navigateTo} isNavItemVisible={isNavItemVisible} /></div>}
+            {visitedNav.has('daily-quiz') && isNavItemVisible('daily-quiz') && <div hidden={activeNav !== 'daily-quiz'}><StudentDailyQuiz doubtsEnabled={enabledFeatures?.has('student-doubts') ?? false} /></div>}
             {visitedNav.has('class-circle') && <div hidden={activeNav !== 'class-circle'}><StudentClassCircle /></div>}
             {visitedNav.has('attendance') && isNavItemVisible('attendance') && (
               <div hidden={activeNav !== 'attendance'}>
@@ -375,6 +382,16 @@ function StudentPortal() {
         ))}
       </nav>
 
+      {enabledFeatures !== null && (
+        <StudentDial
+          dailyQuiz={isNavItemVisible('daily-quiz')}
+          doubts={enabledFeatures.has('student-doubts')}
+          attendance={isNavItemVisible('attendance')}
+          calendar={isNavItemVisible('calendar')}
+          suspended={sidebarOpen || launcherOpen}
+          onNavigate={navigateTo}
+        />
+      )}
     </div>
   )
 }

@@ -10,6 +10,7 @@ Intentions, not commitments. Source: factbook section 8 and `docs/KNOWN_ISSUES.m
 | Rebuilt analytics | Year-in-Review, Parent Engagement, Class Analytics (preserved on branches) |
 | Annual report card | A per-exam printable report card exists in Export Center; a multi-exam card with remarks does not |
 | API auth guards | See in-progress.md |
+| Daily Quiz & Leaderboard + Student Doubts | Epic #430 (#431–#438). Feature keys `daily-quiz` / `student-doubts` registered OFF; new build, not the removed weekly test / Ask a Doubt |
 
 ## Later
 | Item | Notes |
