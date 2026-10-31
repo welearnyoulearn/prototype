@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type R
 import { ArrowUp, BookOpen, Check, Copy, History, Square, SquarePen, X } from 'lucide-react'
 import { Sticker } from './stickers'
 import { citedSources, isTableSeparator, tableCells } from '@/lib/tutor-text'
+import { TUTOR_HANDOFF_EVENT, readTutorHandoff, tutorPromptWithin, type TutorHandoff } from '@/lib/tutorHandoff'
 
 type Source = { n: number; title: string; page: number; url: string }
 type ChatMessage = { role: 'user' | 'assistant'; content: string; sources: Source[] }
@@ -102,6 +103,9 @@ const bareInput = { border: 'none', boxShadow: 'none', background: 'transparent'
 
 export default function StudentTutorChat() {
   const [subjects, setSubjects] = useState<string[]>([])
+  const [subjectsLoaded, setSubjectsLoaded] = useState(false)
+  // A confusing Daily Quiz question waiting to be sent to the tutor (#476).
+  const [handoff, setHandoff] = useState<TutorHandoff | null>(null)
   const [subject, setSubject] = useState('')
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [sessionId, setSessionId] = useState<number | null>(null)
@@ -126,9 +130,35 @@ export default function StudentTutorChat() {
       .then(r => r.ok ? r.json() as Promise<{ subjects?: { subject_name: string }[] }> : { subjects: [] })
       .then(d => setSubjects((d.subjects ?? []).map(s => s.subject_name)))
       .catch(() => setSubjects([]))
+      .finally(() => setSubjectsLoaded(true))
     fetchPastChats().then(setPastChats)
     return () => abortRef.current?.abort()
   }, [])
+
+  // The Daily Quiz leaves the question in sessionStorage and fires an event: take it when this chat opens, and also
+  // when it is already open (the AI Hub was visited earlier in the session).
+  useEffect(() => {
+    const take = () => {
+      try { const h = readTutorHandoff(window.sessionStorage); if (h) setHandoff(h) } catch { /* storage unavailable */ }
+    }
+    take()
+    window.addEventListener(TUTOR_HANDOFF_EVENT, take)
+    return () => window.removeEventListener(TUTOR_HANDOFF_EVENT, take)
+  }, [])
+
+  // Start a new chat in the question's subject and send the question as the first message. Waits for the subject list
+  // (to match the subject name) and for any answer still streaming.
+  useEffect(() => {
+    if (!handoff || !subjectsLoaded || streaming) return
+    const h = handoff
+    const match = subjects.find(s => s.toLowerCase() === h.subject.toLowerCase()) ?? ''
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setHandoff(null)
+    setSubject(match)
+    setSessionId(null)
+    void send(tutorPromptWithin(h), { fresh: true, subject: match })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [handoff, subjectsLoaded, streaming])
 
   // Scroll the message list, never the page — and only while the student hasn't scrolled up to read.
   useEffect(() => {
@@ -165,13 +195,13 @@ export default function StudentTutorChat() {
     setMessages(prev => prev.length ? [...prev.slice(0, -1), fn(prev[prev.length - 1])] : prev)
   }
 
-  async function send(text = input) {
+  async function send(text = input, opts: { fresh?: boolean; subject?: string } = {}) {
     const message = text.trim()
     if (!message || streaming || message.length > MAX_CHARS) return
     setError(null)
     setInput('')
     followRef.current = true
-    setMessages(prev => [...prev, { role: 'user', content: message, sources: [] }, { role: 'assistant', content: '', sources: [] }])
+    setMessages(prev => [...(opts.fresh ? [] : prev), { role: 'user', content: message, sources: [] }, { role: 'assistant', content: '', sources: [] }])
     setStreaming(true)
     const controller = new AbortController()
     abortRef.current = controller
@@ -179,7 +209,7 @@ export default function StudentTutorChat() {
       const res = await fetch('/api/student/tutor', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message, ...(sessionId ? { sessionId } : {}), ...(subject ? { subject } : {}) }),
+        body: JSON.stringify({ message, ...(sessionId && !opts.fresh ? { sessionId } : {}), ...((opts.subject ?? subject) ? { subject: opts.subject ?? subject } : {}) }),
         signal: controller.signal,
       })
       if (!res.ok || !res.body) {

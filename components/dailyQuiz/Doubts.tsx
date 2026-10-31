@@ -9,7 +9,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Bot, CheckCircle2, Loader2, MessageCircleQuestion, RotateCcw, Send, Sparkles, XCircle } from 'lucide-react'
 import type { AttemptQuestion, AttemptView } from './DailyQuiz'
-import { TUTOR_NAV_KEY, saveTutorHandoff, tutorHandoffEnabled } from '@/lib/tutorHandoff'
+import { TUTOR_NAV_KEY, saveTutorHandoff } from '@/lib/tutorHandoff'
 
 const LETTERS = ['A', 'B', 'C', 'D']
 
@@ -42,7 +42,8 @@ function loadHelp(attemptId: number, refresh = false): Promise<Help> {
 export const DOUBT_STATUS_TEXT: Record<DoubtStatus, string> = { open: 'Waiting for your teacher', explained: 'Teacher answered', clarified: 'Clarified ✓' }
 
 /** Under a reviewed question: the path from "still confused" to the AI and then to the teacher. */
-export function DoubtHelp({ q, attempt, onDoubtRaised }: { q: AttemptQuestion; attempt: AttemptView; onDoubtRaised?: () => void }) {
+/** tutorEnabled: the student has the AI Tutor (AI Pro), so a confusing question can be handed to it (#476). */
+export function DoubtHelp({ q, attempt, onDoubtRaised, tutorEnabled = false }: { q: AttemptQuestion; attempt: AttemptView; onDoubtRaised?: () => void; tutorEnabled?: boolean }) {
   const qid = q.questionId!
   const [help, setHelp] = useState<Help | null>(null)
   const [stage, setStage] = useState<'idle' | 'ask-ai' | 'ask-teacher'>('idle')
@@ -50,7 +51,7 @@ export function DoubtHelp({ q, attempt, onDoubtRaised }: { q: AttemptQuestion; a
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const tutorReady = tutorHandoffEnabled()
+  const tutorReady = tutorEnabled
   const router = useRouter()
 
   useEffect(() => {
