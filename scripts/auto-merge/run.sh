@@ -22,6 +22,10 @@ OUT=$STATE/claude-output.json
 MODEL=claude-opus-5-5
 CLAUDE_TIMEOUT=1800
 HEAD_MARKER=auto-merge-stopped
+PICK_ACCOUNT=$HOME/.claude/skills/workers/pick-account.py
+# A first-round review with no verdict is retried this many times per head, then stopped
+NO_VERDICT_LIMIT=3
+PROTECTED='(^|/)(\.git|\.github)(/|$)|(^|/)\.env|(^|/)(package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|package-lock\.json|npm-shrinkwrap\.json|yarn\.lock|bun\.lockb?|\.npmrc|\.pnpmfile\.cjs)$|^lib/db\.ts$'
 SCHEMA='{"type":"object","properties":{"verdict":{"type":"string","enum":["approve","reject"]},"findings":{"type":"string"}},"required":["verdict","findings"]}'
 
 export PATH=$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin
@@ -70,6 +74,11 @@ trap 'exit 143' TERM INT HUP
 
 if [ "$DRY_RUN" = false ] && ! security find-generic-password -s wlyl-review-bot >/dev/null 2>&1; then
   log 'The bot token is not in Keychain (service wlyl-review-bot). See wiki/tasks/in-progress.md for setup.'
+  exit 1
+fi
+
+if [ ! -f "$PICK_ACCOUNT" ]; then
+  log "The account picker $PICK_ACCOUNT is missing. See wiki/tasks/in-progress.md for setup."
   exit 1
 fi
 
@@ -146,6 +155,13 @@ push_head() {
   g push -q origin "HEAD:refs/heads/$2" || { STOP_REASON='The push failed.'; return 1; }
 }
 
+# Install and tsc run PR-controlled code, so they get a container with no token and
+# no mount. Callers push nothing if this fails.
+type_check() {
+  g archive HEAD | docker run --rm -i node:22-slim sh -c \
+    'mkdir /src && cd /src && tar -x && corepack enable && timeout 1500 sh -c "pnpm install --frozen-lockfile --ignore-scripts && pnpm exec tsc --noEmit"'
+}
+
 resolve_conflicts() {
   local pr=$1 head_ref=$2 file unexpected
   local conflicts=$WORK/conflicts.txt
@@ -153,6 +169,10 @@ resolve_conflicts() {
   g merge -q --no-edit origin/dev && return 1
   g diff --name-only --diff-filter=U > "$conflicts"
   [ -s "$conflicts" ] || return 1
+  if grep -E "$PROTECTED" "$conflicts"; then
+    STOP_REASON='A protected file conflicts, so it was not resolved automatically.'
+    return 1
+  fi
   # Binary and delete conflicts have no markers, so Claude cannot resolve them
   while IFS= read -r file; do
     grep -q '^<<<<<<< ' "$CLONE/$file" || return 1
@@ -183,6 +203,10 @@ PROMPT
   fi
   g add --pathspec-from-file="$conflicts" || return 1
   g commit -q --no-edit || return 1
+  if ! type_check; then
+    STOP_REASON='The type-check failed after resolving the conflicts, so it was not pushed.'
+    return 1
+  fi
   push_head "$pr" "$head_ref"
 }
 
@@ -240,7 +264,7 @@ PROMPT
     STOP_REASON='The fix step changed nothing.'
     return 1
   fi
-  if grep -E '(^|/)(\.git|\.github)(/|$)|(^|/)\.env|(^|/)(package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|package-lock\.json|npm-shrinkwrap\.json|yarn\.lock|bun\.lockb?|\.npmrc|\.pnpmfile\.cjs)$|^lib/db\.ts$' <<<"$changed"; then
+  if grep -E "$PROTECTED" <<<"$changed"; then
     g reset -q --hard HEAD
     g clean -ffdq
     STOP_REASON='The fix touched a protected file, so it was reverted.'
@@ -248,10 +272,7 @@ PROMPT
   fi
   g add -A && g commit -q -m "fix(auto-merge): apply review findings (#$pr)" || { STOP_REASON='Committing the fix failed.'; return 1; }
 
-  # Install and tsc run PR-controlled code, so they get a container with no token and
-  # no mount. Nothing is pushed if this fails.
-  if ! g archive HEAD | docker run --rm -i node:22-slim sh -c \
-    'mkdir /src && cd /src && tar -x && corepack enable && timeout 1500 sh -c "pnpm install --frozen-lockfile --ignore-scripts && pnpm exec tsc --noEmit"'; then
+  if ! type_check; then
     STOP_REASON='The type-check failed after the fix, so it was not pushed.'
     return 1
   fi
@@ -259,7 +280,7 @@ PROMPT
 }
 
 process_pr() {
-  local pr=$1 meta sha head_ref eligible sweep mergeable conflict=false changed round=0 reason
+  local pr=$1 meta sha head_ref eligible sweep mergeable conflict=false changed round=0 reason failures tries
   STOP_REASON=
 
   rm -rf "$WORK"
@@ -309,7 +330,7 @@ process_pr() {
     return 1
   fi
 
-  if ! ACCOUNT=$(python3 "$HOME/.claude/skills/workers/pick-account.py"); then
+  if ! ACCOUNT=$(python3 "$PICK_ACCOUNT"); then
     log 'No Claude account has headroom, skipping this run.'
     exit 0
   fi
@@ -331,7 +352,15 @@ process_pr() {
 
     if ! review; then
       if [ "$round" -eq 0 ]; then
-        log "PR #$pr: review gave no verdict, will retry"
+        failures=$STATE/no-verdict/$sha
+        tries=$(( $(cat "$failures" 2>/dev/null || echo 0) + 1 ))
+        if [ "$DRY_RUN" = true ] || [ "$tries" -lt "$NO_VERDICT_LIMIT" ]; then
+          [ "$DRY_RUN" = true ] || { mkdir -p "$STATE/no-verdict" && echo "$tries" > "$failures"; }
+          log "PR #$pr: review gave no verdict, will retry"
+        else
+          rm -f "$failures"
+          stop "$pr" "$sha" "Auto-merge stopped without merging. The review gave no verdict $tries times in a row."
+        fi
       else
         stop "$pr" "$sha" 'Auto-merge stopped without merging. The review after a fix gave no verdict.'
       fi
