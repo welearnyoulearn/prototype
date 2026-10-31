@@ -162,7 +162,7 @@ function LoginForm() {
           autoComplete="current-password"
         />
         <div className="flex justify-end">
-          <Link href="/forgot-password" className="text-sm text-muted-foreground hover:text-primary transition">
+          <Link href={isPlatform ? '/forgot-password?role=platform' : '/forgot-password'} className="text-sm text-muted-foreground hover:text-primary transition">
             Forgot password?
           </Link>
         </div>

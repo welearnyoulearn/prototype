@@ -19,6 +19,14 @@ Each portal has its own login and its own cookie. Schools are never selected by 
 
 All five have login, logout, change-password, forgot/reset-password (email link) and a date-of-birth step for teacher, student and parent. **WhatsApp OTP is not live** (draft PR #155).
 
+### Forgot password (#451)
+
+All portals use one screen (`app/components/ForgotPasswordForm.tsx`) and one response contract (`lib/forgotPassword.ts`). The API answers with a `status`: `sent` (with the **masked** email, e.g. `k****@gmail.com`), `not_found`, `no_contact` (account has no email, ask the school office), `ambiguous` (student only: the mobile/ID matches several accounts) or `rate_limited` (HTTP 429). Invalid input is 400.
+
+- Student takes Student ID, email **or mobile** in one field; parent takes email or mobile; teacher takes email; school admin and platform admin (`/forgot-password`, `?role=platform`) take School ID or email. Mobile numbers match on the last 10 digits.
+- The link always goes by email. WhatsApp is still queued as an extra channel when the account also has an email, but an account with only a phone gets `no_contact` because WhatsApp is not live.
+- **Trade-off:** saying "not registered" lets someone test which emails/IDs exist. Mitigations: 5 attempts per 15 minutes per IP and per identifier, then a 30 minute block; only a masked address is shown; nothing but registered / not registered is revealed; deactivated and removed accounts look like "not found" and never get a link.
+
 ## Flow
 
 ```
