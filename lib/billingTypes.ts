@@ -47,6 +47,7 @@ export type UsageSchoolRow = {
   charged: Record<string, MeterUsage | null>   // billable meters; null = not in plan
   counted: Record<string, number>              // track-only meters: raw quantity
   extra: number                                // ₹ total extra so far
+  ourCost: number                              // ₹ what this school's usage cost us (meters with a cost)
 }
 export type UsageResponse = {
   month: string
