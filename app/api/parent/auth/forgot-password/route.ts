@@ -32,13 +32,14 @@ export async function POST(req: NextRequest) {
       const token = await issueResetToken('parent', parent.id)
       const url = `${process.env.APP_URL || 'http://localhost:3000'}/parent/reset-password?token=${token}`
       const name = parent.name || start.identifier
-      sendPasswordResetEmail({ to: parent.email, name, resetUrl: url, role: 'parent', schoolId: parent.school_id }).catch(console.error)
-      if (parent.phone) {
-        sendWhatsappMessage({
+      // Awaited: on Vercel the function is frozen once the response is sent, which dropped the email.
+      await Promise.allSettled([
+        sendPasswordResetEmail({ to: parent.email, name, resetUrl: url, role: 'parent', schoolId: parent.school_id }),
+        parent.phone ? sendWhatsappMessage({
           schoolId: parent.school_id, to: parent.phone, templateName: 'password_reset', recipientName: name,
           templateParams: { name, reset_url: url },
-        }).catch(console.error)
-      }
+        }) : Promise.resolve(),
+      ]).then(rs => rs.forEach(r => { if (r.status === 'rejected') console.error(r.reason) }))
     }
     return forgotPasswordResponse({ status: 'sent', sentTo: reachable.map(p => maskEmail(p.email)) })
   } catch (error) {
