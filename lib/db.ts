@@ -87,7 +87,7 @@ const BOOTSTRAP_MARKER_KEY   = 'initial_schema_bootstrap'
 // silently never runs anywhere, and you will chase a "column does not exist" 500
 // that reproduces on production but never locally against a fresh DB.
 // Adding a migration statement and bumping this number is ONE change, not two.
-const SCHEMA_VERSION = 61
+const SCHEMA_VERSION = 65
 
 // Records the schema level this build finished applying, on the same row as the
 // bootstrap marker (no extra row, no extra round-trip to read it back).
@@ -4084,6 +4084,60 @@ async function runIncrementalMigrations() {
       created INTEGER NOT NULL DEFAULT 0,
       failed JSONB NOT NULL DEFAULT '[]'
     );
+  `)
+
+  // ── Student AI tutor: textbook/handbook chunks for RAG (#407) ──────────────
+  // indexed_at/chunk_count/index_error are written by scripts/index-materials.ts.
+  await pool.query(`
+    ALTER TABLE master_subject_materials ADD COLUMN IF NOT EXISTS indexed_at TIMESTAMPTZ;
+    ALTER TABLE master_subject_materials ADD COLUMN IF NOT EXISTS chunk_count INTEGER;
+    ALTER TABLE master_subject_materials ADD COLUMN IF NOT EXISTS index_error TEXT;
+  `)
+  // pgvector may be unavailable (e.g. a plain local Postgres). The tutor is optional,
+  // so a missing extension must not abort initDB for the whole app.
+  try {
+    await pool.query(`
+      CREATE EXTENSION IF NOT EXISTS vector;
+      CREATE TABLE IF NOT EXISTS material_chunks (
+        id BIGSERIAL PRIMARY KEY,
+        material_id INTEGER NOT NULL REFERENCES master_subject_materials(id) ON DELETE CASCADE,
+        board VARCHAR(20) NOT NULL,
+        grade VARCHAR(10) NOT NULL,
+        subject VARCHAR(100) NOT NULL,
+        page INTEGER NOT NULL,
+        chunk_index INTEGER NOT NULL,
+        content TEXT NOT NULL,
+        embedding vector(1024) NOT NULL,
+        tsv tsvector GENERATED ALWAYS AS (to_tsvector('simple', content)) STORED,
+        UNIQUE (material_id, chunk_index)
+      );
+      CREATE INDEX IF NOT EXISTS idx_material_chunks_scope ON material_chunks(board, grade, subject);
+      CREATE INDEX IF NOT EXISTS idx_material_chunks_tsv ON material_chunks USING GIN (tsv);
+      CREATE INDEX IF NOT EXISTS idx_material_chunks_embedding ON material_chunks USING hnsw (embedding vector_cosine_ops);
+    `)
+  } catch (err) {
+    console.warn('[db] pgvector unavailable — material_chunks not created; AI tutor retrieval disabled:', err)
+  }
+  // Chunks indexed without an embedding provider keep embedding NULL (keyword search only).
+  try {
+    await pool.query(`ALTER TABLE material_chunks ALTER COLUMN embedding DROP NOT NULL`)
+  } catch (err) {
+    console.warn('[db] material_chunks.embedding DROP NOT NULL skipped:', err)
+  }
+  // Student AI tutor metering (#441). Questions carry the limit (what schools think in); tokens carry
+  // our cost — ₹0.013 per 1,000 tokens is Claude Haiku at $0.10 in / $0.50 out per million, ~3,000 in
+  // + 400 out per question, ₹88/$ (see DOCS/ai-tutor-cost-deck.html); editable in Plans & Pricing.
+  // Defaults: 10,000 questions a month per school, no extra charge.
+  await pool.query(`
+    INSERT INTO usage_meters (key, name, unit_label, unit_size, category, our_cost_per_unit, is_billable, sort_order) VALUES
+      ('tutor.question', 'AI tutor questions', 'question', 1, 'ai', NULL, TRUE, 8),
+      ('tutor.tokens', 'AI tutor tokens', '1,000 tokens', 1000, 'ai', 0.013, FALSE, 9)
+    ON CONFLICT (key) DO NOTHING;
+    INSERT INTO usage_prices (meter_key, tier, effective_month, in_plan, included_per_month, unit_price, monthly_cap, at_cap) VALUES
+      ('tutor.question', 'basic',    '2026-01-01', TRUE, 10000, 0, 10000, 'block'),
+      ('tutor.question', 'standard', '2026-01-01', TRUE, 10000, 0, 10000, 'block'),
+      ('tutor.question', 'premium',  '2026-01-01', TRUE, 10000, 0, 10000, 'block')
+    ON CONFLICT DO NOTHING;
   `)
 
   // What we know about a school (DOCS/SCHOOL-ONBOARDING.md): legal entity and GST details for the invoice
