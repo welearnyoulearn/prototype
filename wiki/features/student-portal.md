@@ -29,7 +29,7 @@ Students (own data only).
 **What it does:** AI Pro students ask questions in AI Hub and get answers drawn only from their school's board and grade textbooks, citing book and page. Limit is 60 questions per student per day, and the school has a monthly question limit (default 10,000, set in Platform admin → Plans & Pricing / Billing); once it's used, students see "Your school has used this month's AI tutor questions. The tutor will be back on the 1st." (#441). Chats are saved in `ai_chat_sessions`.
 
 **How it works:**
-- `POST /api/student/tutor` streams the answer (NDJSON). Retrieval is hybrid — vector plus keyword search fused with RRF — scoped by board, grade and subject (falling back to the whole grade; if `schools.board` is unset, all boards for the grade).
+- `POST /api/student/tutor` streams the answer (NDJSON). Retrieval is hybrid — vector plus keyword search fused with RRF — scoped by board, grade and subject (falling back to the whole grade; a school with no subscribed subjects searches its board's books, and with no `schools.board` either it gets no retrieval).
 - Textbook chunks live in `material_chunks`, built offline by `scripts/index-materials.ts`. Embeddings are Cloudflare `@cf/baai/bge-m3` (1024 dims); the answer comes from OmniRoute (`ddgw/claude-haiku-4-5`, then `ddgw/gpt-5.4-mini`). Key files: `lib/rag/`, `lib/tutor.ts`, `app/student/components/StudentTutorChat.tsx`.
 - See `DOCS/DECISIONS.md` (2026-10-20, amended 2026-10-24).
 

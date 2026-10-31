@@ -3,12 +3,13 @@ import { z } from 'zod'
 import pool from '@/lib/db'
 import { resolveAcademicYear } from '@/lib/academicYear'
 import { getStudentSession } from '@/lib/auth'
-import { checkAllowance, recordUsage } from '@/lib/usage'
+import { releaseCount, reserveCount } from '@/lib/authRateLimit'
+import { recordUsage, releaseAllowance, reserveAllowance } from '@/lib/usage'
 import { searchChunks } from '@/lib/rag/rewrite'
 import { formatSyllabus, streamTutorAnswer, tutorConfigured, TutorError, wantsSyllabus, type SyllabusRow, type TutorTurn, type TutorUsage } from '@/lib/tutor'
 
 // Student AI tutor (AI Pro). Answers stream back as NDJSON lines:
-//   {"type":"sources",...} → {"type":"delta","text":...}… → {"type":"done","sessionId":N}  (or {"type":"error"})
+//   {"type":"session","sessionId":N} → {"type":"sources",...} → {"type":"delta","text":...}… → {"type":"done","sessionId":N}  (or {"type":"error"})
 // Chats are stored in ai_chat_sessions, which parents can read — the UI says so.
 
 const DAILY_LIMIT = 60
@@ -40,11 +41,12 @@ async function loadOwnSession(id: number, studentId: number, schoolId: number) {
 // Teacher-only handbook units are left out; workbook rows sort last so textbook names win the dedupe.
 async function loadSyllabus(schoolId: number, board: string | null, grade: string): Promise<SyllabusRow[]> {
   const order = `ORDER BY s.subject_name, c.book_type = 'workbook', c.chapter_order, c.id`
+  const academicYear = await resolveAcademicYear(schoolId)
   const own = await pool.query<SyllabusRow>(
     `SELECT s.subject_name AS subject, c.book_name AS book, c.chapter_name AS chapter
      FROM school_subjects s JOIN school_chapters c ON c.school_subject_id = s.id
-     WHERE s.school_id = $1 AND s.grade = $2 AND c.audience IS DISTINCT FROM 'teacher' ${order}`,
-    [schoolId, grade])
+     WHERE s.school_id = $1 AND s.grade = $2 AND s.academic_year = $3 AND c.audience IS DISTINCT FROM 'teacher' ${order}`,
+    [schoolId, grade, academicYear])
   if (own.rows.length || !board) return own.rows
   const master = await pool.query<SyllabusRow>(
     `SELECT s.subject_name AS subject, c.book_name AS book, c.chapter_name AS chapter
@@ -82,7 +84,7 @@ export async function GET(req: NextRequest) {
 
     const { rows } = await pool.query<{ id: number; subject: string | null; updated_at: string; preview: string | null }>(
       `SELECT id, subject, updated_at, LEFT(messages->0->>'content', 80) AS preview
-       FROM ai_chat_sessions WHERE student_id = $1 AND school_id = $2
+       FROM ai_chat_sessions WHERE student_id = $1 AND school_id = $2 AND messages <> '[]'::jsonb
        ORDER BY updated_at DESC LIMIT 20`,
       [session.studentId, session.schoolId]
     )
@@ -95,6 +97,7 @@ export async function GET(req: NextRequest) {
 
 // POST — ask a question; streams the answer and saves both turns to the chat.
 export async function POST(req: NextRequest) {
+  let releaseQuota = async () => {}
   try {
     const session = await getStudentSession()
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -105,35 +108,37 @@ export async function POST(req: NextRequest) {
     const subject = parsed.data.subject || null
 
     if (!(await hasAiPro(session.schoolId))) return NextResponse.json({ error: 'AI Pro is not enabled for your school' }, { status: 403 })
-    // The school's monthly question limit (#441), set in Platform admin → Plans & Pricing / Billing.
-    const allowance = await checkAllowance(session.schoolId, 'tutor.question', 1)
-    if (!allowance.allowed) {
-      return allowance.reason === 'limit_reached'
-        ? NextResponse.json({ error: "Your school has used this month's AI tutor questions. The tutor will be back on the 1st." }, { status: 429 })
-        : NextResponse.json({ error: 'The AI tutor is not included in your school\'s plan.' }, { status: 403 })
-    }
 
     const chat = sessionId ? await loadOwnSession(sessionId, session.studentId, session.schoolId) : null
     if (sessionId && !chat) return NextResponse.json({ error: 'Chat not found' }, { status: 404 })
 
-    const { rows: [{ count }] } = await pool.query<{ count: number }>(
-      `SELECT COUNT(*)::int AS count
-       FROM ai_chat_sessions s, jsonb_array_elements(s.messages) m
-       WHERE s.student_id = $1 AND s.school_id = $2
-         AND s.updated_at >= NOW() - INTERVAL '2 days'
-         AND m->>'role' = 'user'
-         AND ((m->>'at')::timestamptz AT TIME ZONE 'Asia/Kolkata')::date = (NOW() AT TIME ZONE 'Asia/Kolkata')::date`,
-      [session.studentId, session.schoolId]
-    )
-    if (count >= DAILY_LIMIT) {
+    if (!tutorConfigured()) return NextResponse.json({ error: 'AI tutor is not configured yet' }, { status: 503 })
+
+    // Both limits are reserved before any model call, so parallel requests can't all pass; released if no answer comes back.
+    const dayKey = `tutor-day:${session.studentId}:${new Date(Date.now() + 330 * 60 * 1000).toISOString().slice(0, 10)}`
+    if (!(await reserveCount(dayKey, DAILY_LIMIT))) {
       return NextResponse.json({ error: `You've asked ${DAILY_LIMIT} questions today — great effort! The tutor will be back tomorrow.` }, { status: 429 })
     }
-
-    if (!tutorConfigured()) return NextResponse.json({ error: 'AI tutor is not configured yet' }, { status: 503 })
+    // The school's monthly question limit (#441), set in Platform admin → Plans & Pricing / Billing.
+    const allowance = await reserveAllowance(session.schoolId, 'tutor.question', 1)
+    if (!allowance.allowed) {
+      await releaseCount(dayKey)
+      return allowance.reason === 'limit_reached'
+        ? NextResponse.json({ error: "Your school has used this month's AI tutor questions. The tutor will be back on the 1st." }, { status: 429 })
+        : NextResponse.json({ error: 'The AI tutor is not included in your school\'s plan.' }, { status: 403 })
+    }
+    releaseQuota = async () => {
+      await releaseCount(dayKey)
+      if (allowance.reserved) await releaseAllowance(session.schoolId, 'tutor.question', 1)
+    }
 
     const { rows: [school] } = await pool.query<{ board: string | null }>(`SELECT board FROM schools WHERE id = $1`, [session.schoolId])
     const board = school?.board ?? null
     const masterSubjectIds = await loadMasterSubjectIds(session.schoolId, session.grade)
+    // Created up front and sent first, so a student who stops this answer still continues the same chat.
+    const chatId = chat?.id ?? (await pool.query<{ id: number }>(
+      `INSERT INTO ai_chat_sessions (school_id, student_id, subject) VALUES ($1, $2, $3) RETURNING id`,
+      [session.schoolId, session.studentId, subject])).rows[0].id
     const previousQuestion = chat?.messages.filter(m => m.role === 'user').at(-1)?.content
     const syllabusLoad = loadSyllabus(session.schoolId, board, session.grade).catch((err: unknown) => {
       console.error('[student/tutor syllabus]', err)
@@ -144,15 +149,13 @@ export async function POST(req: NextRequest) {
     // searchChunks maps class subjects ("Biology") to book subjects ("Biological Science"), rewrites
     // Telugu/Hindi/short questions into English search terms, and falls back to the whole grade
     // for a subject with no books (e.g. "sports"). Only a school with no subscribed books falls back to its board's master list.
-    const [{ chunks }, syllabusRows] = await Promise.all([
+    const retrieval = Promise.all([
       searchChunks({
         board, grade: session.grade, masterSubjectIds, subject, message, previousQuestion, limit: 6, onUsage,
         gradeSubjects: syllabusLoad.then(rows => [...new Set(rows.map(r => r.subject))]),
       }),
       syllabusLoad,
     ])
-    // The chapter list only helps course-content questions; elsewhere it is noise and cost.
-    const syllabus = wantsSyllabus(message, previousQuestion) ? formatSyllabus(syllabusRows, subject) : ''
     const history: TutorTurn[] = (chat?.messages ?? []).filter(m => m.content.trim()).slice(-6).map(m => ({ role: m.role, content: m.content }))
     const userAt = new Date().toISOString()
 
@@ -165,6 +168,11 @@ export async function POST(req: NextRequest) {
         const send = (line: object) => controller.enqueue(encoder.encode(JSON.stringify(line) + '\n'))
         let answer = ''
         try {
+          send({ type: 'session', sessionId: chatId })
+          const [{ chunks }, syllabusRows] = await retrieval
+          if (cancelled) return
+          // The chapter list only helps course-content questions; elsewhere it is noise and cost.
+          const syllabus = wantsSyllabus(message, previousQuestion) ? formatSyllabus(syllabusRows, subject) : ''
           send({
             type: 'sources',
             sources: chunks.map((c, i) => ({ n: i + 1, title: c.title, materialType: c.materialType, subject: c.subject, page: c.page, url: `${c.fileUrl}#page=${c.page}` })),
@@ -179,14 +187,10 @@ export async function POST(req: NextRequest) {
             { role: 'user', content: message, at: userAt },
             { role: 'assistant', content: answer, sources: chunks.map(c => ({ title: c.title, page: c.page, fileUrl: c.fileUrl })), at: new Date().toISOString() },
           ]
-          const saved = chat
-            ? await pool.query<{ id: number }>(
-                `UPDATE ai_chat_sessions SET messages = messages || $1::jsonb, updated_at = NOW() WHERE id = $2 RETURNING id`,
-                [JSON.stringify(turns), chat.id])
-            : await pool.query<{ id: number }>(
-                `INSERT INTO ai_chat_sessions (school_id, student_id, subject, messages) VALUES ($1, $2, $3, $4::jsonb) RETURNING id`,
-                [session.schoolId, session.studentId, subject, JSON.stringify(turns)])
-          if (!cancelled) send({ type: 'done', sessionId: saved.rows[0].id })
+          await pool.query(
+            `UPDATE ai_chat_sessions SET messages = messages || $1::jsonb, updated_at = NOW() WHERE id = $2`,
+            [JSON.stringify(turns), chatId])
+          if (!cancelled) send({ type: 'done', sessionId: chatId })
         } catch (err) {
           if (!(err instanceof TutorError)) console.error('[student/tutor stream]', err)
           if (!cancelled) send({ type: 'error', message: err instanceof TutorError ? err.message : 'Something went wrong. Please try again.' })
@@ -195,12 +199,14 @@ export async function POST(req: NextRequest) {
           // Metered once an answer came back, also when the student stopped it midway (the tokens were spent).
           // After close, so limit-alert emails never hold the student's stream open.
           // ponytail: rewrite tokens spent on a question that then failed go unrecorded; meter them if that ever adds up.
-          if (answer) {
+          if (answer || cancelled) {
             const usage = { schoolId: session.schoolId, source: 'student.tutor', actor: { role: 'student', id: session.studentId } }
             await Promise.all([
-              recordUsage({ ...usage, meterKey: 'tutor.question', quantity: 1 }),
+              recordUsage({ ...usage, meterKey: 'tutor.question', quantity: 1, reserved: allowance.reserved }),
               tokens > 0 && recordUsage({ ...usage, meterKey: 'tutor.tokens', quantity: tokens }),
             ])
+          } else {
+            await releaseQuota()
           }
           metered()
         }
@@ -213,6 +219,7 @@ export async function POST(req: NextRequest) {
     return new Response(stream, { headers: { 'Content-Type': 'text/x-ndjson; charset=utf-8', 'Cache-Control': 'no-store' } })
   } catch (err) {
     console.error('[student/tutor POST]', err)
+    await releaseQuota()
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }

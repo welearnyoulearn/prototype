@@ -10,6 +10,7 @@ type ChatMessage = { role: 'user' | 'assistant'; content: string; sources: Sourc
 type PastChat = { id: number; subject: string | null; updated_at: string; preview: string | null }
 type StoredMessage = { role: 'user' | 'assistant'; content: string; sources?: { title: string; page: number; fileUrl: string }[] }
 type StreamLine =
+  | { type: 'session'; sessionId: number }
   | { type: 'sources'; sources: Source[] }
   | { type: 'delta'; text: string }
   | { type: 'done'; sessionId: number }
@@ -198,7 +199,7 @@ export default function StudentTutorChat() {
         const line = JSON.parse(raw) as StreamLine
         if (line.type === 'sources') updateLast(m => ({ ...m, sources: line.sources }))
         else if (line.type === 'delta') updateLast(m => ({ ...m, content: m.content + line.text }))
-        else if (line.type === 'done') setSessionId(line.sessionId)
+        else if (line.type === 'session' || line.type === 'done') setSessionId(line.sessionId)
         else if (line.type === 'error') setError(line.message)
       }
       for (;;) {

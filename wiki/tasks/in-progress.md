@@ -22,7 +22,7 @@ Move an entry to [completed.md](completed.md) when it ships. Add new entries at 
 - [ ] `OMNIROUTE_BASE_URL` / `OMNIROUTE_API_KEYS` (and `EMBEDDINGS_*`) in the deploy env
 - [ ] Run `e2e/student-tutor.spec.ts` against a non-production DB
 - [ ] Open the PR
-- [ ] Set `schools.board` for schools (231 of 234 are NULL → search falls back to all boards for the grade)
+- [ ] Set `schools.board` for schools (231 of 234 are NULL → those schools get no retrieval unless they have subscribed subjects)
 
 ### Push notifications via Firebase (FCM)
 **Type:** Feature
