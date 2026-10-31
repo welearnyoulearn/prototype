@@ -43,6 +43,7 @@ export function featureRequirementForApiPath(pathname: string, method = 'GET'): 
   if (pathname.startsWith('/api/school/subjects/materials')) return any('curriculum', ['curriculum', 'library'])
   if (pathname.startsWith('/api/syllabus') || pathname.startsWith('/api/school/custom/') || pathname.startsWith('/api/school/subjects')) return one('curriculum')
   if (pathname.startsWith('/api/school/library') || pathname.startsWith('/api/textbooks')) return one('library')
+  if (pathname === '/api/materials/file') return null // checks library or AI Pro itself: tutor source chips need only AI Pro
   if (pathname.startsWith('/api/materials/')) return any('library', ['library', 'feedback-management'])
   if (pathname.startsWith('/api/school-calendar')) return one('calendar')
   if (pathname.startsWith('/api/data-export')) return one('export')

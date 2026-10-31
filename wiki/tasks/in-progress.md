@@ -16,6 +16,26 @@ Move an entry to [completed.md](completed.md) when it ships. Add new entries at 
 - [x] P1 #432 question bank: Platform Admin → Question Bank (Claude batch + Groq check, review, publish), teacher Quiz Questions view, student report endpoint (`feature/432-quiz-question-bank`)
 - [ ] P2 #433 daily quiz · P3 #434 leaderboard/parents · P4 #435 doubts · P5 #436 SLA · P6 #437 insights · P7 #438 AI hook
 
+### Student AI tutor — RAG over board textbooks (#407)
+**Type:** Feature
+**Branch:** `feature/407-student-rag-tutor`
+**Portals:** Student (AI Hub, AI Pro tier)
+**Summary:** Students ask questions in AI Hub and get answers (via OmniRoute: `ddgw/claude-haiku-4-5` → `ddgw/gpt-5.4-mini` fallback) grounded in their board + grade textbooks/handbooks (`master_subject_materials`, PDFs in R2), cited by book and page. Chats saved to `ai_chat_sessions` (parent-visible). 60 questions/student/IST day.
+**Progress:**
+- [x] pgvector + `material_chunks`; `scripts/index-materials.ts` (R2 → pages → chunks → embeddings); dry run on 2 PDFs OK
+- [x] Hybrid retrieval (vector + keyword, RRF) in `lib/rag/retrieve.ts`
+- [x] `/api/student/tutor` (NDJSON stream) and `StudentTutorChat` in the AI Pro branch of AI Hub
+- [x] Tutor LLM via OmniRoute with ordered key × model fallback (`lib/tutor.ts`); Anthropic SDK removed
+- [x] Embeddings optional — keyword-only retrieval and NULL-embedding indexing when `EMBEDDINGS_*` is unset (schema v58)
+- [x] Embeddings via Cloudflare Workers AI `@cf/baai/bge-m3` (1024 dims), superseding Gemini; fail-fast on the daily quota (`EmbeddingQuotaError`), resumable index script
+- [x] Garbled legacy-font text filtered in the chunker (`dropLegacyFontWords`, `wordShare`)
+- [x] Full index run and embeddings backfilled; `material_chunks` recreated and re-indexed after the 2026-10-24 drop
+- [x] OmniRoute gateway verified locally (`ddgw/claude-haiku-4-5` → `ddgw/gpt-5.4-mini`)
+- [ ] `OMNIROUTE_BASE_URL` / `OMNIROUTE_API_KEYS` (and `EMBEDDINGS_*`) in the deploy env
+- [ ] Run `e2e/student-tutor.spec.ts` against a non-production DB
+- [ ] Open the PR
+- [ ] Set `schools.board` for schools (231 of 234 are NULL → those schools get no retrieval unless they have subscribed subjects)
+
 ### Push notifications via Firebase (FCM)
 **Type:** Feature
 **Branch:** `feature/fcm-push-backend` (no GitHub issue yet — branch to be renamed with the issue number)
