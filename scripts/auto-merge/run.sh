@@ -251,7 +251,7 @@ PROMPT
   # Install and tsc run PR-controlled code, so they get a container with no token and
   # no mount. Nothing is pushed if this fails.
   if ! g archive HEAD | docker run --rm -i node:22-slim sh -c \
-    'mkdir /src && cd /src && tar -x && corepack enable && timeout 1500 sh -c "pnpm install --frozen-lockfile && pnpm exec tsc --noEmit"'; then
+    'mkdir /src && cd /src && tar -x && corepack enable && timeout 1500 sh -c "pnpm install --frozen-lockfile --ignore-scripts && pnpm exec tsc --noEmit"'; then
     STOP_REASON='The type-check failed after the fix, so it was not pushed.'
     return 1
   fi
