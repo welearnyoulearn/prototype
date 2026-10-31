@@ -1777,8 +1777,6 @@ const SYLLABUS_SCHEMA: string[] = [
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       PRIMARY KEY (school_id, academic_year, kind)
     )`,
-    // Why a year was closed with students still on Leave Open.
-    `ALTER TABLE fee_year_close ADD COLUMN IF NOT EXISTS close_reason TEXT`,
 ]
 
 async function runIncrementalMigrations() {
@@ -1956,6 +1954,9 @@ async function runIncrementalMigrations() {
       UNIQUE(school_id, academic_year)
     )
   `)
+  // Why a year was closed with students still on Leave Open. Runs after the CREATE above: in
+  // SYLLABUS_SCHEMA (which runs first) it broke setting up a brand-new database (#459).
+  await pool.query(`ALTER TABLE fee_year_close ADD COLUMN IF NOT EXISTS close_reason TEXT`)
   // Only ever created inline in category-assignments/route.ts, but categories/route.ts's
   // DELETE unconditionally deletes from it — so deleting a fee category on any database
   // where category-assignments had never been hit 500s with "relation does not exist".
