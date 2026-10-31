@@ -130,6 +130,8 @@ export type QueryExpansion = { queries: string[]; subjectHint: string | null }
 export async function retrieveChunks(opts: {
   board: string | null
   grade: string
+  // The school's subscribed master subjects; when empty, board is the fallback scope, and with neither there is nothing to search.
+  masterSubjectIds?: number[]
   subject?: string | null
   query: string
   // Fused with the original query. May still be pending: the original query's searches start right away.
@@ -141,11 +143,17 @@ export async function retrieveChunks(opts: {
   if (!query) return []
   const limit = opts.limit ?? 6
 
-  const params: (string | string[])[] = [opts.grade]
-  const where = ['c.grade = $1']
-  if (opts.board) {
+  const params: (string | string[] | number[])[] = [opts.grade]
+  // Handbooks are staff-only, so they never take a candidate slot here.
+  const where = ['c.grade = $1', `m.material_type = 'textbook'`]
+  if (opts.masterSubjectIds?.length) {
+    params.push(opts.masterSubjectIds)
+    where.push(`m.subject_id = ANY($${params.length}::int[])`)
+  } else if (opts.board) {
     params.push(opts.board)
     where.push(`c.board = $${params.length}`)
+  } else {
+    return []
   }
   if (opts.subject) {
     params.push(bookSubjects(opts.subject))
@@ -162,6 +170,7 @@ export async function retrieveChunks(opts: {
       ? pool
           .query<{ id: string }>(
             `SELECT c.id FROM material_chunks c
+               JOIN master_subject_materials m ON m.id = c.material_id
               WHERE ${filter} AND c.tsv @@ to_tsquery('simple', $${n})
               ORDER BY ts_rank(c.tsv, to_tsquery('simple', $${n})) DESC
               LIMIT ${CANDIDATES}`,
@@ -180,6 +189,7 @@ export async function retrieveChunks(opts: {
       await client.query(`SET LOCAL hnsw.iterative_scan = strict_order`)
       const r = await client.query<{ id: string }>(
         `SELECT c.id FROM material_chunks c
+           JOIN master_subject_materials m ON m.id = c.material_id
           WHERE ${filter} AND c.embedding IS NOT NULL
           ORDER BY c.embedding <=> $${n}::vector
           LIMIT ${CANDIDATES}`,

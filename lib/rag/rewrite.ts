@@ -68,6 +68,7 @@ export async function rewriteQuery(opts: { message: string; grade: string; grade
 export async function searchChunks(opts: {
   board: string | null
   grade: string
+  masterSubjectIds: number[]
   subject: string | null
   message: string
   previousQuestion?: string
@@ -81,7 +82,7 @@ export async function searchChunks(opts: {
     ? opts.gradeSubjects.then((gradeSubjects) => rewriteQuery({ ...opts, gradeSubjects }), () => null)
     : Promise.resolve(null)
   const expansion: Promise<QueryExpansion | null> = rewriting.then((r) => r && { queries: [r.query, r.keywords.join(' ')], subjectHint: r.subject })
-  const scope = { board: opts.board, grade: opts.grade, query: retrievalQuery(opts.message, opts.previousQuestion), expansion, limit: opts.limit }
+  const scope = { board: opts.board, grade: opts.grade, masterSubjectIds: opts.masterSubjectIds, query: retrievalQuery(opts.message, opts.previousQuestion), expansion, limit: opts.limit }
   const found = await retrieveChunks({ ...scope, subject: opts.subject })
   return { chunks: opts.subject && found.length === 0 ? await retrieveChunks(scope) : found, rewrite: await rewriting }
 }

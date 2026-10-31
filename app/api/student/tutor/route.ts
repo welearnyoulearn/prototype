@@ -1,6 +1,7 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
 import { z } from 'zod'
 import pool from '@/lib/db'
+import { resolveAcademicYear } from '@/lib/academicYear'
 import { getStudentSession } from '@/lib/auth'
 import { checkAllowance, recordUsage } from '@/lib/usage'
 import { searchChunks } from '@/lib/rag/rewrite'
@@ -51,6 +52,16 @@ async function loadSyllabus(schoolId: number, board: string | null, grade: strin
      WHERE s.board = $1 AND s.grade = $2 AND c.audience IS DISTINCT FROM 'teacher' ${order}`,
     [board, grade])
   return master.rows
+}
+
+// The master subjects the school subscribes to for this grade: the same books its library shows.
+async function loadMasterSubjectIds(schoolId: number, grade: string): Promise<number[]> {
+  const academicYear = await resolveAcademicYear(schoolId)
+  const { rows } = await pool.query<{ master_subject_id: number }>(
+    `SELECT DISTINCT master_subject_id FROM school_subjects
+     WHERE school_id = $1 AND grade = $2 AND academic_year = $3 AND master_subject_id IS NOT NULL`,
+    [schoolId, grade, academicYear])
+  return rows.map(r => r.master_subject_id)
 }
 
 // GET — this student's last 20 chats, or one chat's messages with ?sessionId=
@@ -122,6 +133,7 @@ export async function POST(req: NextRequest) {
 
     const { rows: [school] } = await pool.query<{ board: string | null }>(`SELECT board FROM schools WHERE id = $1`, [session.schoolId])
     const board = school?.board ?? null
+    const masterSubjectIds = await loadMasterSubjectIds(session.schoolId, session.grade)
     const previousQuestion = chat?.messages.filter(m => m.role === 'user').at(-1)?.content
     const syllabusLoad = loadSyllabus(session.schoolId, board, session.grade).catch((err: unknown) => {
       console.error('[student/tutor syllabus]', err)
@@ -131,10 +143,10 @@ export async function POST(req: NextRequest) {
     const onUsage = (u: TutorUsage) => { tokens += u.input + u.output }
     // searchChunks maps class subjects ("Biology") to book subjects ("Biological Science"), rewrites
     // Telugu/Hindi/short questions into English search terms, and falls back to the whole grade
-    // for a subject with no books (e.g. "sports").
+    // for a subject with no books (e.g. "sports"). Only a school with no subscribed books falls back to its board's master list.
     const [{ chunks }, syllabusRows] = await Promise.all([
       searchChunks({
-        board, grade: session.grade, subject, message, previousQuestion, limit: 6, onUsage,
+        board, grade: session.grade, masterSubjectIds, subject, message, previousQuestion, limit: 6, onUsage,
         gradeSubjects: syllabusLoad.then(rows => [...new Set(rows.map(r => r.subject))]),
       }),
       syllabusLoad,
@@ -146,6 +158,8 @@ export async function POST(req: NextRequest) {
 
     const encoder = new TextEncoder()
     let cancelled = false
+    let metered = () => {}
+    const metering = new Promise<void>(resolve => { metered = resolve })
     const stream = new ReadableStream<Uint8Array>({
       async start(controller) {
         const send = (line: object) => controller.enqueue(encoder.encode(JSON.stringify(line) + '\n'))
@@ -156,8 +170,8 @@ export async function POST(req: NextRequest) {
             sources: chunks.map((c, i) => ({ n: i + 1, title: c.title, materialType: c.materialType, subject: c.subject, page: c.page, url: `${c.fileUrl}#page=${c.page}` })),
           })
           for await (const text of streamTutorAnswer({ excerpts: chunks, question: message, history, syllabus, onUsage })) {
-            if (cancelled) break
             answer += text
+            if (cancelled) break
             send({ type: 'delta', text })
           }
 
@@ -188,10 +202,13 @@ export async function POST(req: NextRequest) {
               tokens > 0 && recordUsage({ ...usage, meterKey: 'tutor.tokens', quantity: tokens }),
             ])
           }
+          metered()
         }
       },
       cancel() { cancelled = true },
     })
+    // Registered here, while the request is live: it keeps the function running until the writes above land.
+    after(() => metering)
 
     return new Response(stream, { headers: { 'Content-Type': 'text/x-ndjson; charset=utf-8', 'Cache-Control': 'no-store' } })
   } catch (err) {

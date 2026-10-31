@@ -216,6 +216,18 @@ test('streamTutorAnswer estimates usage when the stream carries none', async () 
   assert.ok(seen[0].input > 500, String(seen[0].input)) // the system prompt alone is ~2,500 chars
 })
 
+test('streamTutorAnswer still reports usage when the caller stops midway', async () => {
+  stubFetch([() => new Response(`${delta('12345678')}${delta(' never read')}data: [DONE]\n\n`)])
+  const seen: TutorUsage[] = []
+  for await (const t of streamTutorAnswer({ ...ask, onUsage: u => seen.push(u) })) {
+    assert.equal(t, '12345678')
+    break
+  }
+  assert.equal(seen.length, 1)
+  assert.equal(seen[0].output, 2)
+  assert.ok(seen[0].input > 500, String(seen[0].input))
+})
+
 test('completeOnce reports usage to onUsage when the response has it', async () => {
   stubFetch([
     () => new Response(JSON.stringify({ choices: [{ message: { content: 'x' } }], usage: { prompt_tokens: 300, completion_tokens: 40 } })),
