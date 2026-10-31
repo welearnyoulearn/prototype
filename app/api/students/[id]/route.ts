@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
-import { requireSchoolAdmin } from '@/lib/auth'
+import { requireSchoolAdmin, revokePortalSessions } from '@/lib/auth'
+import { parentLoginChanged, removeParentDevices } from '@/lib/portalSessionPolicy'
 import { sendStudentRemovedEmail, sendParentStudentRemovedEmail } from '@/lib/email'
 import { sendWhatsappMessage } from '@/lib/whatsapp'
 import { parsePositiveInteger, validateOptionalStudentUpdate } from '@/lib/studentValidation'
@@ -103,7 +104,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     const parentFields = entries.filter(([field]) => ['parent_name', 'parent_phone', 'parent_email'].includes(field))
     if (parentFields.length > 0) {
       const linkedParents = await client.query(
-        `SELECT p.id FROM parents p
+        `SELECT p.id, p.email, p.phone FROM parents p
          JOIN student_parents sp ON sp.parent_id = p.id
          WHERE sp.student_id = $1 AND p.school_id = $2 FOR UPDATE`,
         [studentId, admin.schoolId],
@@ -116,6 +117,10 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         })
         parentValues.push(parent.id)
         await client.query(`UPDATE parents SET ${parentAssignments.join(', ')} WHERE id = $${parentValues.length}`, parentValues)
+        if (parentLoginChanged(parent, parentFields)) {
+          await revokePortalSessions('parent', parent.id, undefined, client)
+          await removeParentDevices(client, parent.id)
+        }
         await client.query(
           `UPDATE students s
            SET parent_name = p.name, parent_phone = p.phone, parent_email = p.email

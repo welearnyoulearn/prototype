@@ -175,3 +175,5 @@ All finished features and bug fixes. Most recent first.
 **Summary:** Built the fee management module with categories, structures, payments, and waivers.
 **PR:** #45
 -->
+
+- 2026-10-31: Parent sessions are revoked when a school changes the parent's email or phone (#468)
