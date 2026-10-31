@@ -2,6 +2,11 @@
 
 All notable changes to the WLYL School prototype are documented here.
 
+## [Unreleased] - Auto-merge into dev (#466)
+
+### Added
+- **Auto-merge script**: every 15 minutes while the Mac is awake, `scripts/auto-merge/run.sh` resolves conflicts on PRs into `dev`, has Claude review them, and squash-merges on approval. The `no-auto-merge` label opts a PR out.
+
 ## [Unreleased] - Parent session revoke (#468)
 
 ### Fixed
