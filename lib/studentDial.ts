@@ -91,10 +91,8 @@ function quizTask(today: DialToday): DialTask | null {
   if (quiz && a?.status === 'in_progress') {
     return { ...base, title: 'Finish today’s quiz', detail: `${a.total - a.answered} of ${a.total} left · closes ${istTime(quiz.closesAt)}${lateNote}`, urgent: true }
   }
-  if (quiz && a?.status === 'submitted' && !a.answersVisible) {
-    return { ...base, title: 'Quiz done', detail: `Answers come out at ${istTime(quiz.closesAt)}${lateNote}`, urgent: late > 0 }
-  }
-  if (a?.status === 'submitted' && a.answersVisible) {
+  // Answers show as soon as the quiz is finished (#450), so a finished quiz always links to them.
+  if (a?.status === 'submitted') {
     return { ...base, title: `Quiz done: ${a.correct ?? 0} of ${a.total}`, detail: `See the answers${lateNote}`, urgent: late > 0 }
   }
   if (late > 0) return { ...base, title: 'Catch up on a quiz', detail: `${plural(late, 'missed quiz', 'missed quizzes')} still open`, urgent: true }
