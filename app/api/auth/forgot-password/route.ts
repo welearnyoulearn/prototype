@@ -2,41 +2,39 @@ import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 import { sendPasswordResetEmail } from '@/lib/email'
 import { issueResetToken } from '@/lib/passwordReset'
-import { checkAuthRateLimit, RECOVERY_LIMIT } from '@/lib/authRateLimit'
+import { forgotPasswordResponse, startForgotPassword } from '@/lib/forgotPassword'
+import { maskEmail } from '@/lib/maskContact'
 
+interface StaffRow { id: number; email: string | null; school_id: number | null; full_name: string | null; school_name: string | null }
+
+// Serves both the school admin and platform admin portals.
 export async function POST(req: NextRequest) {
   try {
     await ensureDB()
-    const { identifier } = await req.json()
-    if (!identifier) return NextResponse.json({ error: 'Email or School ID required' }, { status: 400 })
+    const start = await startForgotPassword(req, 'staff-recovery')
+    if ('response' in start) return start.response
 
-    const id = identifier.trim().toLowerCase()
-    if (!await checkAuthRateLimit(req, 'staff-recovery', id, RECOVERY_LIMIT)) return NextResponse.json({ success: true })
-    const result = await pool.query(
+    const id = start.identifier.toLowerCase()
+    const result = await pool.query<StaffRow>(
       `SELECT u.id, u.email, u.school_id, up.full_name, s.name AS school_name
        FROM users u
        LEFT JOIN user_profiles up ON up.user_id = u.id
        LEFT JOIN schools s ON s.id = u.school_id
        WHERE (LOWER(u.email) = $1 OR LOWER(u.school_code) = $1)
          AND COALESCE(u.status, 'active') <> 'inactive'`,
-      [id]
+      [id],
     )
-
-    // Always return success to prevent user enumeration
-    if (result.rows.length === 0) return NextResponse.json({ success: true })
+    // Deactivated accounts look the same as unknown ones: no link is issued.
+    if (result.rows.length === 0) return forgotPasswordResponse({ status: 'not_found' })
 
     const user = result.rows[0]
-    const token = await issueResetToken('user', user.id)
+    if (!user.email) return forgotPasswordResponse({ status: 'no_contact' })
 
+    const token = await issueResetToken('user', user.id)
     const resetUrl = `${process.env.APP_URL || 'http://localhost:3000'}/reset-password?token=${token}`
     const name = user.full_name || user.school_name || 'User'
-    const emailTo = user.email
-
-    if (emailTo) {
-      await sendPasswordResetEmail({ to: emailTo, name, resetUrl, schoolId: user.school_id }).catch(console.error)
-    }
-
-    return NextResponse.json({ success: true })
+    sendPasswordResetEmail({ to: user.email, name, resetUrl, schoolId: user.school_id }).catch(console.error)
+    return forgotPasswordResponse({ status: 'sent', sentTo: [maskEmail(user.email)] })
   } catch (error) {
     console.error('[auth/forgot-password]', error)
     return NextResponse.json({ error: 'Failed to process request' }, { status: 500 })
