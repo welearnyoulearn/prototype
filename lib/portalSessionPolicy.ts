@@ -29,3 +29,13 @@ export function parentSessionLimits(mobile: boolean | undefined): SessionLimits 
 export function isMobileClient(headerValue: string | null): boolean {
   return headerValue === 'mobile'
 }
+
+// A parent logs in with their email or phone, so changing either hands the login to someone
+// else: their sessions must not survive it. `fields` are the parent_* entries being saved.
+export function parentLoginChanged(
+  current: { email: string | null; phone: string | null },
+  fields: ReadonlyArray<readonly [string, unknown]>,
+): boolean {
+  return fields.some(([field, value]) =>
+    (field === 'parent_email' && value !== current.email) || (field === 'parent_phone' && value !== current.phone))
+}

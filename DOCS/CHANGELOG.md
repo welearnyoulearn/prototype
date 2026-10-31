@@ -2,6 +2,11 @@
 
 All notable changes to the WLYL School prototype are documented here.
 
+## [Unreleased] - Parent session revoke (#468)
+
+### Fixed
+- **Parent login change**: changing a parent's email or phone on the student record now ends that parent's sessions, so the old contact cannot stay signed in.
+
 ## [Unreleased] - School onboarding details (branch feature/school-onboarding-details)
 
 ### Added
