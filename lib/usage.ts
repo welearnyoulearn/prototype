@@ -1,5 +1,6 @@
 // Usage tracking, prices and limits for paid services (#358).
 // Months are IST calendar months ('YYYY-MM'). Usage rows hold ids and counts only.
+import type { Pool as PgPool, PoolClient } from 'pg'
 import pool from './db'
 import { sendMail, escapeHtml } from './email'
 import type { AtCap, MeterUsage, TierPrice } from './billingTypes'
@@ -80,9 +81,9 @@ export async function getMonthUsage(month: string, schoolId?: number): Promise<{
   return rows.map(r => ({ schoolId: Number(r.school_id), meterKey: r.meter_key, quantity: Number(r.quantity) }))
 }
 
-async function usedThisMonth(schoolId: number, meterKey: string, month?: string): Promise<number> {
+async function usedThisMonth(schoolId: number, meterKey: string, month?: string, db: PgPool | PoolClient = pool): Promise<number> {
   const { start, end } = monthBoundsIST(month)
-  const { rows: [r] } = await pool.query(
+  const { rows: [r] } = await db.query(
     `SELECT COALESCE(SUM(quantity), 0) AS used FROM usage_daily
      WHERE school_id = $1 AND meter_key = $2 AND day >= $3::date AND day < $4::date`,
     [schoolId, meterKey, start, end]
@@ -123,10 +124,59 @@ export async function checkAllowance(
   }
 }
 
+// checkAllowance for spend that happens before it can be recorded: counts the quantity into usage_daily
+// under a per-school lock, so concurrent requests can't all pass the cap. Finish with
+// recordUsage({ reserved: true }), or releaseAllowance if nothing was spent. `reserved` is false when
+// metering failed and the request was let through, so there is nothing to release.
+export async function reserveAllowance(
+  schoolId: number, meterKey: string, quantity = 1
+): Promise<{ allowed: boolean; reason?: 'limit_reached' | 'not_in_plan'; reserved: boolean }> {
+  try {
+    const price = await getEffectivePrice(schoolId, meterKey)
+    if (!price) return { allowed: false, reason: 'not_in_plan', reserved: false }
+    const client = await pool.connect()
+    try {
+      await client.query('BEGIN')
+      await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`usage:${schoolId}:${meterKey}`])
+      const used = await usedThisMonth(schoolId, meterKey, undefined, client)
+      if (price.cap != null && used + quantity > price.cap && price.atCap === 'block') {
+        await client.query('ROLLBACK')
+        return { allowed: false, reason: 'limit_reached', reserved: false }
+      }
+      await client.query(
+        `INSERT INTO usage_daily (school_id, day, meter_key, quantity)
+         VALUES ($1, (NOW() AT TIME ZONE 'Asia/Kolkata')::date, $2, $3)
+         ON CONFLICT (school_id, day, meter_key) DO UPDATE SET quantity = usage_daily.quantity + EXCLUDED.quantity`,
+        [schoolId, meterKey, quantity]
+      )
+      await client.query('COMMIT')
+      return { allowed: true, reserved: true }
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {})
+      throw err
+    } finally {
+      client.release()
+    }
+  } catch (err) {
+    // Metering must never break sending.
+    console.error('[usage] reserveAllowance failed', err)
+    return { allowed: true, reserved: false }
+  }
+}
+
+export async function releaseAllowance(schoolId: number, meterKey: string, quantity = 1): Promise<void> {
+  await pool.query(
+    `UPDATE usage_daily SET quantity = GREATEST(quantity - $3, 0)
+     WHERE school_id = $1 AND meter_key = $2 AND day = (NOW() AT TIME ZONE 'Asia/Kolkata')::date`,
+    [schoolId, meterKey, quantity]
+  ).catch(err => console.error('[usage] releaseAllowance failed', meterKey, err))
+}
+
 export async function recordUsage(input: {
   schoolId: number | null; meterKey: string; quantity: number; source: string
   actor?: { role: string; id: number }; ref?: { type: string; id: number }
   idempotencyKey?: string; meta?: Record<string, unknown>
+  reserved?: boolean // already counted in usage_daily by reserveAllowance
 }): Promise<void> {
   if (!(input.quantity > 0)) return
   let billable = false
@@ -146,7 +196,7 @@ export async function recordUsage(input: {
       )
       if (rows.length > 0) {
         billable = rows[0].is_billable === true
-        await client.query(
+        if (!input.reserved) await client.query(
           `INSERT INTO usage_daily (school_id, day, meter_key, quantity)
            VALUES ($1, (NOW() AT TIME ZONE 'Asia/Kolkata')::date, $2, $3)
            ON CONFLICT (school_id, day, meter_key) DO UPDATE SET quantity = usage_daily.quantity + EXCLUDED.quantity`,
