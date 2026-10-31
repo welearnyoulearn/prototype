@@ -39,8 +39,9 @@ test('quiz in progress: says how many are left', () => {
 })
 
 test('quiz finished: shown as done, not a to-do, and the headline is calm', () => {
-  const done = buildDialModel(input({ today: ready({ status: 'submitted', answered: 5, total: 5, correct: null, answersVisible: false }) }))
-  assert.equal(done.tasks[0].title, 'Quiz done')
+  // Answers show on finishing (#450): a finished quiz goes straight to its score.
+  const done = buildDialModel(input({ today: ready({ status: 'submitted', answered: 5, total: 5, correct: 3, answersVisible: true }) }))
+  assert.equal(done.tasks[0].title, 'Quiz done: 3 of 5')
   assert.equal(done.tasks[0].urgent, false)
   assert.equal(done.badge, 0)
   assert.equal(done.headline, 'All done for today')
