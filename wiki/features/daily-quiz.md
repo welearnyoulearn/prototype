@@ -16,14 +16,14 @@ A 5-minute daily habit. Every working day in the season (1 July – 15 March by 
 **Questions are made once, when the syllabus is imported.** Importing or adding topics in Master Syllabus starts preparation for those topics automatically. Nobody has to press anything.
 
 1. **Questions typed into Master Syllabus** are imported first.
-2. **Claude (Opus 5.5) writes the rest:** one Message Batches request per chapter, in the background (usually under an hour), **8 per topic**, grounded in the subject's newest textbook when one is uploaded.
+2. **Claude (Haiku 4.5, #463) writes the rest:** one Message Batches request per chapter, in the background (usually under an hour), **8 per topic**, grounded in the subject's newest textbook when one is uploaded (up to 150,000 tokens; a longer book is skipped for automatic runs and refused with a message for a manual one). Batch prices are $0.50 / $2.50 per million input / output tokens: about **5 cents per chapter** and under **$1 for a 15-chapter subject**. The tokens each chapter really used are recorded and shown on the subject (Platform Admin → Question Bank).
 3. **Groq answers every question without seeing the key;** only questions where both agree are saved. Malformed and duplicate questions are dropped and answer positions are spread evenly.
 4. **Published automatically** once checked. If Platform Admin takes a subject offline, it stays offline until they publish it again.
 
 - **Retries:** topics added while a preparation runs are prepared right after it. Topics still under **5** questions are retried automatically (up to 3 times, 6 hours apart).
 - **Progress** moves on its own: from the open Question Bank screen, teachers marking topics complete and the daily-quiz cron, so nothing waits for the once-a-day job. Student traffic never runs it, so a rush of students is never held up (#450).
-- **Platform Admin → Question Bank** is now a status board: topics ready per subject, edit or retire any question, **set each subject's language** (English / Telugu / Hindi; when unset it is guessed from the name), and prepare older subjects by hand (with the cost shown first).
-- **A school's own topics** (custom subjects, chapters or topics, or a teacher's own syllabus import) get their own questions automatically, with the same Claude + Groq check, used only by that school and only when it has the daily-quiz feature. Platform Admin → Question Bank → **Schools' own topics** shows their progress.
+- **Platform Admin → Question Bank** is now a status board: topics ready per subject, edit or retire any question, **set each subject's language** (English / Telugu / Hindi; when unset it is guessed from the name), and prepare older subjects by hand (with the cost shown first). The **Needs questions** tab lists every subject, on any board or class, whose topics don't have enough questions yet (older syllabus or a failed run); click one to check the cost and start it.
+- **A school's own topics** (custom subjects, chapters or topics, or a teacher's own syllabus import) get questions automatically, only when the school has the daily-quiz feature. **Same topic, no second bill (#463):** before calling Claude, the topic is matched (same subject name, same topic wording ignoring case and punctuation, same language, any class, any school or the master syllabus) with a topic that already has at least 5 questions, and those questions are copied. Only genuinely new topics are written by Claude and checked by Groq. Platform Admin → Question Bank → **Schools' own topics** shows their progress.
 - Teachers see the published questions for the subjects they teach (**Quiz Questions**, read-only in the pilot).
 - Students can report a question; three reports pull it until Platform Admin restores (after fixing) or retires it.
 - Needs `ANTHROPIC_API_KEY` (Claude) and `GROQ_API_KEY` (checker) on the server.
@@ -106,6 +106,7 @@ API routes these screens call (all exist):
 - `GET` /api/parent/quiz/today
 - `GET` /api/platform/quiz-bank
 - `POST` /api/platform/quiz-bank/advance
+- `GET` /api/platform/quiz-bank/needs
 - `PATCH` /api/platform/quiz-bank/questions/{}
 - `GET` /api/platform/quiz-bank/reports
 - `GET` /api/platform/quiz-bank/school-topics

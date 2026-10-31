@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  MAX_TEXTBOOK_TOKENS, PRICE_INPUT_PER_M, PRICE_OUTPUT_PER_M, actualCostUsd, topicKey,
   buildChapterPrompt, draftFromLegacy, draftsFromChapterOutput, estimateCostUsd, fingerprint, keepAgreeing,
   languageForSubject, normalizeStem, spreadAnswerPosition, subjectLanguage, topicNeeds, validateDraft, MIN_READY_PER_TOPIC, TARGET_PER_TOPIC,
 } from './quizBankRules'
@@ -123,8 +124,27 @@ test('cost estimate grows with the textbook and the number of questions', () => 
   const book = estimateCostUsd({ chapters: 10, questionsNeeded: 500, textbookTokens: 300_000 })
   assert.ok(small > 0)
   assert.ok(book > small)
-  // 10 chapters × 303k input tokens × $2/M + (500×450 + 10×8000) output × $10/M
-  assert.equal(book, Math.ceil((10 * 303_000 / 1e6 * 2 + (500 * 450 + 10 * 8000) / 1e6 * 10) * 100) / 100)
+  // Haiku 4.5 batch prices: $0.50 in / $2.50 out per million. 10 chapters × 303k input + 500 questions × 450 output.
+  assert.equal(book, Math.ceil((10 * 303_000 / 1e6 * 0.5 + 500 * 450 / 1e6 * 2.5) * 100) / 100)
+})
+
+test('#463: Haiku 4.5 prices, and a sample chapter / subject costs cents', () => {
+  assert.equal(PRICE_INPUT_PER_M, 0.5)
+  assert.equal(PRICE_OUTPUT_PER_M, 2.5)
+  // A chapter of 5 topics × 8 questions, no textbook: ~3k tokens in, ~18k out → under 5 cents.
+  const chapter = actualCostUsd(3_000, 5 * 8 * 450)
+  assert.ok(chapter > 0.04 && chapter < 0.05, String(chapter))
+  // A 15-chapter subject without a textbook stays under a dollar (the admin sees this before starting).
+  assert.ok(estimateCostUsd({ chapters: 15, questionsNeeded: 15 * 40, textbookTokens: null }) < 1)
+  assert.equal(MAX_TEXTBOOK_TOKENS, 150_000)
+})
+
+test('#463: the same topic matches across casing, spacing and punctuation, but not different topics', () => {
+  assert.equal(topicKey('Photosynthesis'), topicKey('  photosynthesis! '))
+  assert.equal(topicKey('Laws of Motion'), topicKey('laws-of-motion'))
+  assert.notEqual(topicKey('Photosynthesis'), topicKey('Respiration'))
+  assert.equal(topicKey('కాంతి సంశ్లేషణ'), topicKey('కాంతి  సంశ్లేషణ'), 'Telugu keeps its vowel signs')
+  assert.equal(topicKey('!!!'), '', 'nothing left to match on')
 })
 
 test('#444: 8 questions per topic, minimum 5; the subject language setting wins over the name', () => {

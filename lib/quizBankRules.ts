@@ -205,18 +205,29 @@ Return JSON only, matching the schema: one entry per topic_id above, with exactl
 }
 
 // ── Cost estimate (shown to the admin before starting) ────────────────────────
-// Claude Opus 5.5 list prices (USD per million tokens, 2026-10) with the Batches API 50% discount.
-// An upper estimate: it assumes the textbook is read in full for every chapter with no cache hit,
-// and generous output (thinking + questions). Real cost is usually well below it.
-export const PRICE_INPUT_PER_M = 4 / 2
-export const PRICE_OUTPUT_PER_M = 20 / 2
+// Claude Haiku 4.5 list prices (USD per million tokens: $1 in / $5 out) with the Batches API 50% discount.
+// An upper estimate: it assumes the textbook is read in full for every chapter with no cache hit.
+// Haiku 4.5 writes without extended thinking here, so output is only the questions themselves.
+export const PRICE_INPUT_PER_M = 1 / 2
+export const PRICE_OUTPUT_PER_M = 5 / 2
 const PROMPT_TOKENS_PER_CHAPTER = 3_000
 const OUTPUT_TOKENS_PER_QUESTION = 450
-const THINKING_TOKENS_PER_CHAPTER = 8_000
+
+/** Haiku 4.5's context window is 200K tokens; leave room for the prompt and the answer. A longer book can't be read. */
+export const MAX_TEXTBOOK_TOKENS = 150_000
+
+/** What a run really cost, from the tokens it used (batch prices). */
+export function actualCostUsd(inputTokens: number, outputTokens: number): number {
+  return inputTokens / 1e6 * PRICE_INPUT_PER_M + outputTokens / 1e6 * PRICE_OUTPUT_PER_M
+}
+
+/** Same topic in different words/casing/punctuation ("Photosynthesis", "photosynthesis!") → same key. */
+export function topicKey(name: string): string {
+  return name.normalize('NFC').toLowerCase().replace(/[^\p{L}\p{M}\p{N}]+/gu, '')
+}
 
 export function estimateCostUsd(input: { chapters: number; questionsNeeded: number; textbookTokens: number | null }): number {
   const inputTokens = input.chapters * (PROMPT_TOKENS_PER_CHAPTER + (input.textbookTokens ?? 0))
-  const outputTokens = input.questionsNeeded * OUTPUT_TOKENS_PER_QUESTION + input.chapters * THINKING_TOKENS_PER_CHAPTER
-  const usd = inputTokens / 1e6 * PRICE_INPUT_PER_M + outputTokens / 1e6 * PRICE_OUTPUT_PER_M
-  return Math.ceil(usd * 100) / 100
+  const outputTokens = input.questionsNeeded * OUTPUT_TOKENS_PER_QUESTION
+  return Math.ceil(actualCostUsd(inputTokens, outputTokens) * 100) / 100
 }

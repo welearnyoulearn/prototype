@@ -52990,6 +52990,54 @@
         ],
         "x-source-file": "app/api/platform/quiz-bank/school-topics/route.ts"
       }
+    },
+    "/api/platform/quiz-bank/needs": {
+      "get": {
+        "tags": [
+          "Question bank"
+        ],
+        "summary": "Subjects that still need questions",
+        "description": "Every academic master subject, on any board and class, with topics that do not have enough questions yet (older syllabus or a failed run), so Platform Admin can start them by hand (#463).\n\n**Who can call:** Platform admin.\n\n**Checks:** requirePlatformAdmin().",
+        "operationId": "getPlatformQuizBankNeeds",
+        "security": [
+          {
+            "platformAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Subjects",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "subjects": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          }
+        ],
+        "x-source-file": "app/api/platform/quiz-bank/needs/route.ts"
+      }
     }
   },
   "components": {

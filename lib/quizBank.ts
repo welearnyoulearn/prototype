@@ -20,9 +20,9 @@ import {
   QuizBankConfigError, batchResults, batchState, countTextbookTokens, submitChapterBatch, uploadTextbook, type ChapterRequest,
 } from './quizBankAI'
 import {
-  CHECK_CHUNK_SIZE, MIN_READY_PER_TOPIC, REPORTS_TO_PULL, TARGET_PER_TOPIC,
-  buildChapterPrompt, draftFromLegacy, draftsFromChapterOutput, estimateCostUsd, fingerprint, keepAgreeing,
-  spreadAnswerPosition, subjectLanguage, topicNeeds, validateDraft,
+  CHECK_CHUNK_SIZE, MAX_TEXTBOOK_TOKENS, MIN_READY_PER_TOPIC, REPORTS_TO_PULL, TARGET_PER_TOPIC,
+  actualCostUsd, buildChapterPrompt, draftFromLegacy, draftsFromChapterOutput, estimateCostUsd, fingerprint, keepAgreeing,
+  spreadAnswerPosition, subjectLanguage, topicKey, topicNeeds, validateDraft,
   type Difficulty, type QuestionDraft, type QuizLanguage,
 } from './quizBankRules'
 
@@ -94,6 +94,28 @@ export async function listSubjects(board: string, grade: string): Promise<Subjec
   return rows
 }
 
+export type NeedsQuestions = { id: number; board: string; grade: string; subject_name: string; topics: number; topics_ready: number; status: string }
+
+/** Every academic master subject (any board/class) with topics below the minimum, so the admin can start them by hand. */
+export async function subjectsNeedingQuestions(): Promise<NeedsQuestions[]> {
+  const { rows } = await pool.query<NeedsQuestions>(`
+    SELECT ms.id, ms.board, ms.grade, ms.subject_name,
+           COUNT(mt.id)::int AS topics,
+           COUNT(mt.id) FILTER (WHERE (SELECT COUNT(*) FROM quiz_questions q WHERE q.master_topic_id = mt.id AND q.status = 'active') >= $1)::int AS topics_ready,
+           COALESCE(qbs.status, 'idle') AS status
+    FROM master_subjects ms
+    JOIN master_chapters mc ON mc.subject_id = ms.id
+    JOIN master_topics mt ON mt.chapter_id = mc.id
+    LEFT JOIN quiz_bank_subjects qbs ON qbs.master_subject_id = ms.id
+    WHERE ms.category = 'academic'
+    GROUP BY ms.id, qbs.master_subject_id
+    HAVING COUNT(mt.id) FILTER (WHERE (SELECT COUNT(*) FROM quiz_questions q WHERE q.master_topic_id = mt.id AND q.status = 'active') >= $1) < COUNT(mt.id)
+    ORDER BY ms.board, ms.grade::text, ms.subject_name
+    LIMIT 300
+  `, [MIN_READY_PER_TOPIC])
+  return rows
+}
+
 type TopicRow = {
   topic_id: number; chapter_id: number; chapter_name: string; chapter_order: number
   topic_name: string; topic_order: number; subtopics: unknown; content_text: string | null; legacy_questions: unknown
@@ -119,7 +141,7 @@ async function subjectTopics(subjectId: number): Promise<TopicRow[]> {
 
 export async function subjectDetail(subjectId: number) {
   const subject = await subjectInfo(subjectId)
-  const [topics, { rows: [bank] }, { rows: chapters }, { rows: textbooks }, { rows: [{ open_reports }] }] = await Promise.all([
+  const [topics, { rows: [bank] }, { rows: chapters }, { rows: textbooks }, { rows: [{ open_reports }] }, { rows: [used] }] = await Promise.all([
     subjectTopics(subjectId),
     pool.query(`SELECT status, use_textbook, material_id, textbook_tokens, batch_submitted_at, last_error, published_at
                 FROM quiz_bank_subjects WHERE master_subject_id = $1`, [subjectId]),
@@ -129,6 +151,8 @@ export async function subjectDetail(subjectId: number) {
     pool.query(`SELECT COUNT(*)::int AS open_reports FROM quiz_question_reports r
                 JOIN quiz_questions q ON q.id = r.question_id
                 WHERE q.master_subject_id = $1 AND r.resolved_at IS NULL`, [subjectId]),
+    pool.query(`SELECT COALESCE(SUM(input_tokens), 0)::bigint AS input_tokens, COALESCE(SUM(output_tokens), 0)::bigint AS output_tokens
+                FROM quiz_bank_chapters WHERE master_subject_id = $1`, [subjectId]),
   ])
   const jobs = new Map(chapters.map(c => [c.chapter_id as number, c]))
   type TopicCount = { topic_id: number; topic_name: string; active: number; retired: number; pulled: number }
@@ -144,6 +168,7 @@ export async function subjectDetail(subjectId: number) {
     bank: bank ?? { status: 'idle', use_textbook: false, material_id: null, textbook_tokens: null, batch_submitted_at: null, last_error: null, published_at: null },
     textbooks,
     open_reports,
+    usage: { input_tokens: Number(used.input_tokens), output_tokens: Number(used.output_tokens), usd: Math.round(actualCostUsd(Number(used.input_tokens), Number(used.output_tokens)) * 100) / 100 },
     target_per_topic: TARGET_PER_TOPIC,
     min_ready_per_topic: MIN_READY_PER_TOPIC,
     chapters: [...byChapter.values()],
@@ -301,6 +326,8 @@ export async function estimate(subjectId: number, materialId: number | null) {
     chapters,
     questions_needed: questionsNeeded,
     textbook_tokens: book?.tokens ?? null,
+    textbook_too_long: (book?.tokens ?? 0) > MAX_TEXTBOOK_TOKENS,
+    max_textbook_tokens: MAX_TEXTBOOK_TOKENS,
     estimated_max_usd: chapters > 0 ? estimateCostUsd({ chapters, questionsNeeded, textbookTokens: book?.tokens ?? null }) : 0,
   }
 }
@@ -324,7 +351,13 @@ export async function start(subjectId: number, materialId: number | null, adminI
     const needs = topicNeeds(topics.map(t => ({ topicId: t.topic_id, chapterId: t.chapter_id, activeCount: t.active })))
     if (needs.length === 0) throw new QuizBankError(`Every topic already has ${TARGET_PER_TOPIC} questions.`, 409)
 
-    const book = materialId ? await ensureTextbookFile(subjectId, materialId) : null
+    let book = materialId ? await ensureTextbookFile(subjectId, materialId) : null
+    if (book && (book.tokens ?? 0) > MAX_TEXTBOOK_TOKENS) {
+      // Haiku 4.5 can read about 150K tokens. An admin is told; an automatic run goes on without the book.
+      if (adminId !== null) throw new QuizBankError(`This textbook is too long to read (${book.tokens} tokens; the limit is ${MAX_TEXTBOOK_TOKENS}). Prepare without it, or upload a shorter one.`, 400)
+      console.warn(`[quiz-bank] subject ${subjectId}: textbook too long (${book.tokens} tokens), preparing without it`)
+      book = null
+    }
     const needByTopic = new Map(needs.map(n => [n.topicId, n.need]))
     const { rows: stems } = await pool.query<{ master_topic_id: number; stem: string }>(`
       SELECT master_topic_id, stem FROM (
@@ -408,13 +441,13 @@ async function collectFinishedBatches(): Promise<number> {
       for (const r of await batchResults(s.batch_id)) {
         if (r.ok) {
           await pool.query(
-            `UPDATE quiz_bank_chapters SET status = 'generated', raw_output = $2, updated_at = NOW() WHERE master_chapter_id = $1 AND master_subject_id = $3`,
-            [r.chapterId, JSON.stringify(r.output), s.master_subject_id]
+            `UPDATE quiz_bank_chapters SET status = 'generated', raw_output = $2, input_tokens = $4, output_tokens = $5, updated_at = NOW() WHERE master_chapter_id = $1 AND master_subject_id = $3`,
+            [r.chapterId, JSON.stringify(r.output), s.master_subject_id, r.usage.input, r.usage.output]
           )
         } else {
           await pool.query(
-            `UPDATE quiz_bank_chapters SET status = 'failed', last_error = $2, updated_at = NOW() WHERE master_chapter_id = $1 AND master_subject_id = $3`,
-            [r.chapterId, r.error, s.master_subject_id]
+            `UPDATE quiz_bank_chapters SET status = 'failed', last_error = $2, input_tokens = $4, output_tokens = $5, updated_at = NOW() WHERE master_chapter_id = $1 AND master_subject_id = $3`,
+            [r.chapterId, r.error, s.master_subject_id, r.usage.input, r.usage.output]
           )
         }
       }
@@ -598,6 +631,69 @@ async function schoolTopicNeeds(schoolId: number): Promise<SchoolTopicNeed[]> {
   return rows.filter(r => r.active < TARGET_PER_TOPIC)
 }
 
+type Donor = { school_topic_id: number | null; master_topic_id: number | null; topic_name: string; grade: string; active: number }
+
+/**
+ * Copy the questions another school's topic (or a master topic) already has for the same topic: same subject
+ * name, same topic wording (case/punctuation ignored), same language, any class or school (#463). Returns the
+ * topics that now have enough to be used, so nothing is generated for them. `active` is updated in place for
+ * topics that got some but not enough, so the rest is generated.
+ */
+export async function reuseQuestions(needs: SchoolTopicNeed[]): Promise<Set<number>> {
+  const enough = new Set<number>()
+  const groups = new Map<string, SchoolTopicNeed[]>()
+  for (const n of needs) {
+    const k = `${n.subject_name.trim().toLowerCase()}|${subjectLanguage(n.quiz_language, n.subject_name)}`
+    groups.set(k, [...(groups.get(k) ?? []), n])
+  }
+  for (const group of groups.values()) {
+    const subjectKey = group[0].subject_name.trim().toLowerCase()
+    const language = subjectLanguage(group[0].quiz_language, group[0].subject_name)
+    const { rows: donors } = await pool.query<Donor>(`
+      SELECT q.school_topic_id, NULL::int AS master_topic_id, st.topic_name, ss.grade, COUNT(*)::int AS active
+      FROM quiz_questions q
+      JOIN school_topics st ON st.id = q.school_topic_id
+      JOIN school_chapters sc ON sc.id = st.school_chapter_id
+      JOIN school_subjects ss ON ss.id = sc.school_subject_id
+      WHERE q.status = 'active' AND q.language = $2 AND LOWER(BTRIM(ss.subject_name)) = $1
+        AND NOT (q.school_topic_id = ANY($3::int[]))
+      GROUP BY q.school_topic_id, st.topic_name, ss.grade HAVING COUNT(*) >= $4
+      UNION ALL
+      SELECT NULL::int, q.master_topic_id, mt.topic_name, ms.grade, COUNT(*)::int
+      FROM quiz_questions q
+      JOIN master_topics mt ON mt.id = q.master_topic_id
+      JOIN master_chapters mc ON mc.id = mt.chapter_id
+      JOIN master_subjects ms ON ms.id = mc.subject_id
+      WHERE q.status = 'active' AND q.language = $2 AND LOWER(BTRIM(ms.subject_name)) = $1
+      GROUP BY q.master_topic_id, mt.topic_name, ms.grade HAVING COUNT(*) >= $4
+    `, [subjectKey, language, group.map(g => g.topic_id), MIN_READY_PER_TOPIC])
+    for (const n of group) {
+      const key = topicKey(n.topic_name)
+      if (!key) continue
+      // Prefer the same class, then the topic with the most questions.
+      const best = donors.filter(d => topicKey(d.topic_name) === key)
+        .sort((a, b) => Number(b.grade === n.grade) - Number(a.grade === n.grade) || b.active - a.active)[0]
+      if (!best) continue
+      const from = best.master_topic_id !== null ? 'master_topic_id' : 'school_topic_id'
+      await pool.query(`
+        INSERT INTO quiz_questions (school_topic_id, language, stem, options, correct_index, explanation, difficulty, source, fingerprint)
+        SELECT $1, language, stem, options, correct_index, explanation, difficulty, source, fingerprint
+        FROM quiz_questions
+        WHERE status = 'active' AND ${from} = $2
+          AND fingerprint NOT IN (SELECT fingerprint FROM quiz_questions WHERE school_topic_id = $1)
+        ORDER BY id LIMIT $3
+        ON CONFLICT (school_topic_id, fingerprint) WHERE school_topic_id IS NOT NULL DO NOTHING
+      `, [n.topic_id, best.master_topic_id ?? best.school_topic_id, Math.max(0, TARGET_PER_TOPIC - n.active)])
+      // What the topic really has now (it may have had some already), not just what this call added.
+      const { rows: [now] } = await pool.query<{ n: number }>(
+        `SELECT COUNT(*)::int AS n FROM quiz_questions WHERE school_topic_id = $1 AND status = 'active'`, [n.topic_id])
+      n.active = now.n
+      if (n.active >= MIN_READY_PER_TOPIC) enough.add(n.topic_id)
+    }
+  }
+  return enough
+}
+
 /**
  * Prepare questions for a school's own topics that don't have enough yet: one batch request per chapter.
  * Called after a school adds topics, and by the jobs as a catch-up. Never throws.
@@ -605,7 +701,10 @@ async function schoolTopicNeeds(schoolId: number): Promise<SchoolTopicNeed[]> {
 export async function prepareSchoolTopics(schoolId: number): Promise<{ chapters: number }> {
   try {
     if (!await schoolHasFeature(schoolId, 'daily-quiz')) return { chapters: 0 }
-    const needs = await schoolTopicNeeds(schoolId)
+    const all = await schoolTopicNeeds(schoolId)
+    // The same topic may already have questions (another school, or the master syllabus): copy them, no Claude call (#463).
+    const reused = await reuseQuestions(all)
+    const needs = all.filter(n => !reused.has(n.topic_id))
     if (!needs.length) return { chapters: 0 }
     const byChapter = new Map<number, SchoolTopicNeed[]>()
     for (const n of needs) byChapter.set(n.school_chapter_id, [...(byChapter.get(n.school_chapter_id) ?? []), n])
@@ -679,9 +778,9 @@ async function collectSchoolBatches(): Promise<number> {
       for (const r of await batchResults(batch_id)) {
         await pool.query(
           r.ok
-            ? `UPDATE quiz_bank_school_chapters SET status = 'generated', raw_output = $2, claimed_at = NULL, updated_at = NOW() WHERE school_chapter_id = $1 AND batch_id = $3`
-            : `UPDATE quiz_bank_school_chapters SET status = 'failed', last_error = $2, claimed_at = NULL, updated_at = NOW() WHERE school_chapter_id = $1 AND batch_id = $3`,
-          [r.chapterId, r.ok ? JSON.stringify(r.output) : r.error, batch_id])
+            ? `UPDATE quiz_bank_school_chapters SET status = 'generated', raw_output = $2, input_tokens = $4, output_tokens = $5, claimed_at = NULL, updated_at = NOW() WHERE school_chapter_id = $1 AND batch_id = $3`
+            : `UPDATE quiz_bank_school_chapters SET status = 'failed', last_error = $2, input_tokens = $4, output_tokens = $5, claimed_at = NULL, updated_at = NOW() WHERE school_chapter_id = $1 AND batch_id = $3`,
+          [r.chapterId, r.ok ? JSON.stringify(r.output) : r.error, batch_id, r.usage.input, r.usage.output])
       }
       await pool.query(`UPDATE quiz_bank_school_chapters SET status = 'failed', last_error = 'No result returned', claimed_at = NULL, updated_at = NOW() WHERE batch_id = $1 AND status = 'queued'`, [batch_id])
       collected++

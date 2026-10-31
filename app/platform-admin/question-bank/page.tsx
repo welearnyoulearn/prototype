@@ -7,6 +7,7 @@ import { useConfirm } from '@/components/ui/use-confirm'
 // Pick board + grade → a subject → Prepare (optionally from its textbook; the cost is shown first) →
 // Claude writes in the background and Groq checks every answer → spot-check here → Publish.
 // Only published subjects ever reach students. Student reports land in "Reported questions".
+// "Needs questions" lists older syllabus that was never prepared, across every board and class (#463).
 
 const BOARDS = [
   { key: 'CBSE', label: 'CBSE' }, { key: 'AP_SSC', label: 'AP SSC' }, { key: 'TS_SSC', label: 'TS SSC' },
@@ -25,11 +26,13 @@ type Detail = {
   bank: { status: Subject['status']; use_textbook: boolean; material_id: number | null; textbook_tokens: number | null; batch_submitted_at: string | null; last_error: string | null; published_at: string | null }
   textbooks: { id: number; title: string }[]
   open_reports: number
+  usage: { input_tokens: number; output_tokens: number; usd: number }
   target_per_topic: number
   min_ready_per_topic: number
   chapters: { chapter_id: number; chapter_name: string; job: ChapterJob | null; topics: TopicCount[] }[]
 }
-type Estimate = { imported: number; topics: number; topics_needing: number; chapters: number; questions_needed: number; textbook_tokens: number | null; estimated_max_usd: number }
+type Estimate = { imported: number; topics: number; topics_needing: number; chapters: number; questions_needed: number; textbook_tokens: number | null; textbook_too_long: boolean; max_textbook_tokens: number; estimated_max_usd: number }
+type NeedsRow = { id: number; board: string; grade: string; subject_name: string; topics: number; topics_ready: number; status: Subject['status'] }
 type Question = {
   id: number; stem: string; options: string[]; correct_index: number; explanation: string | null
   difficulty: 'easy' | 'medium' | 'hard'; source: 'ai' | 'import' | 'admin'; status: 'active' | 'retired' | 'pulled'
@@ -56,7 +59,7 @@ const jsonPost = (body: unknown) => ({ method: 'POST', headers: { 'Content-Type'
 
 export default function QuestionBankPage() {
   const { confirm, ConfirmDialog } = useConfirm()
-  const [tab, setTab] = useState<'subjects' | 'schools' | 'reports'>('subjects')
+  const [tab, setTab] = useState<'subjects' | 'needs' | 'schools' | 'reports'>('subjects')
   const [board, setBoard] = useState('CBSE')
   const [grade, setGrade] = useState('6')
   const [subjects, setSubjects] = useState<Subject[]>([])
@@ -69,6 +72,8 @@ export default function QuestionBankPage() {
   const [materialId, setMaterialId] = useState<number | null>(null)
   const [est, setEst] = useState<Estimate | null>(null)
   const [openTopic, setOpenTopic] = useState<number | null>(null)
+  // A subject picked on the "Needs questions" tab: open it as soon as its board/grade list has loaded.
+  const pendingOpen = useRef<number | null>(null)
 
   const loadSubjects = useCallback(async () => {
     try {
@@ -85,6 +90,20 @@ export default function QuestionBankPage() {
 
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { setLoading(true); setSelected(null); setDetail(null); void loadSubjects() }, [loadSubjects])
+
+  useEffect(() => {
+    if (pendingOpen.current === null) return
+    const s = subjects.find(x => x.id === pendingOpen.current)
+    if (!s) return
+    pendingOpen.current = null
+    openSubject(s)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [subjects])
+
+  function openNeeded(r: NeedsRow) {
+    pendingOpen.current = r.id
+    setBoard(r.board); setGrade(r.grade); setTab('subjects')
+  }
 
   function openSubject(s: Subject) {
     setSelected(s.id); setDetail(null); setEst(null); setOpenTopic(null); setNotice(''); setError('')
@@ -183,10 +202,10 @@ export default function QuestionBankPage() {
       </p>
 
       <div className="flex gap-2 mt-5" role="tablist">
-        {(['subjects', 'schools', 'reports'] as const).map(t => (
+        {(['subjects', 'needs', 'schools', 'reports'] as const).map(t => (
           <button key={t} role="tab" aria-selected={tab === t} data-testid={`qbank-tab-${t}`} onClick={() => setTab(t)}
             className={`px-3 py-1.5 rounded-full text-sm border ${tab === t ? 'bg-purple-600 text-white border-purple-600' : 'border-gray-300 text-gray-700 hover:bg-gray-50'}`}>
-            {t === 'subjects' ? 'Subjects' : t === 'schools' ? 'Schools’ own topics' : 'Reported questions'}
+            {t === 'subjects' ? 'Subjects' : t === 'needs' ? 'Needs questions' : t === 'schools' ? 'Schools’ own topics' : 'Reported questions'}
           </button>
         ))}
       </div>
@@ -194,7 +213,7 @@ export default function QuestionBankPage() {
       {error && <p className="mt-4 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2" role="alert" data-testid="qbank-error">{error}</p>}
       {notice && <p className="mt-4 text-sm text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-2" data-testid="qbank-notice">{notice}</p>}
 
-      {tab === 'reports' ? <ReportsTab onError={setError} /> : tab === 'schools' ? <SchoolTopicsTab onError={setError} /> : (
+      {tab === 'reports' ? <ReportsTab onError={setError} /> : tab === 'needs' ? <NeedsTab onError={setError} onOpen={openNeeded} /> : tab === 'schools' ? <SchoolTopicsTab onError={setError} /> : (
         <>
           <div className="flex flex-wrap gap-4 mt-5">
             <label className="text-xs text-gray-600">Board
@@ -259,6 +278,12 @@ export default function QuestionBankPage() {
                   </button>
                 </div>
               </div>
+              {detail.usage.output_tokens > 0 && (
+                <p className="mt-2 text-xs text-gray-500" data-testid="qbank-usage">
+                  Claude has used {detail.usage.input_tokens.toLocaleString('en-IN')} input and {detail.usage.output_tokens.toLocaleString('en-IN')} output tokens
+                  for this subject so far (about ${detail.usage.usd.toFixed(2)}).
+                </p>
+              )}
               {detail.bank.last_error && <p className="mt-3 text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2" data-testid="qbank-last-error">{detail.bank.last_error}</p>}
 
               {!running(detail.bank.status) && (
@@ -285,6 +310,7 @@ export default function QuestionBankPage() {
                         <>
                           <p>{est.topics_needing} of {est.topics} topics need questions · {est.chapters} chapters · about {est.questions_needed} questions to write.</p>
                           {est.textbook_tokens && <p className="text-xs text-gray-500">Textbook size: {est.textbook_tokens.toLocaleString('en-IN')} tokens.</p>}
+                          {est.textbook_too_long && <p className="text-xs text-red-700" data-testid="qbank-textbook-too-long">This textbook is longer than the {est.max_textbook_tokens.toLocaleString('en-IN')} tokens Claude can read here. Choose “Syllabus topics only”, or upload a shorter book.</p>}
                           <p>Maximum cost: <strong>${est.estimated_max_usd.toFixed(2)}</strong> <span className="text-xs text-gray-500">(upper estimate; usually much less)</span></p>
                           <button data-testid="qbank-start" onClick={startPrep} disabled={busy}
                             className="mt-2 px-4 py-2 rounded-lg text-sm bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-60">Start preparation</button>
@@ -433,6 +459,39 @@ function QuestionCard({ q, onSaved, onError }: { q: Question; onSaved: () => voi
 type SchoolTopicsRow = { school_id: number; school_name: string; topics: number; topics_ready: number; chapters_in_progress: number; chapters_failed: number; last_error: string | null }
 
 /** Schools' own (custom) topics: questions are made for them automatically, for that school only (#444). */
+function NeedsTab({ onError, onOpen }: { onError: (m: string) => void; onOpen: (r: NeedsRow) => void }) {
+  const [rows, setRows] = useState<NeedsRow[] | null>(null)
+  const load = useCallback(async () => {
+    try { setRows((await call<{ subjects: NeedsRow[] }>('/api/platform/quiz-bank/needs')).subjects) }
+    catch (e) { onError(e instanceof Error ? e.message : 'Failed to load subjects') }
+  }, [onError])
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { void load() }, [load])
+  if (!rows) return <p className="mt-6 text-sm text-gray-500">Loading…</p>
+  if (rows.length === 0) return <p className="mt-6 text-sm text-gray-500" data-testid="qbank-needs-empty">Every subject in Master Syllabus has questions.</p>
+  return (
+    <div className="mt-5 overflow-x-auto bg-white border border-gray-200 rounded-xl" data-testid="qbank-needs">
+      <p className="px-4 pt-3 text-xs text-gray-500">Subjects whose topics don’t have enough questions yet (older syllabus, or a run that failed). Pick one to check the cost and start it.</p>
+      <table className="w-full text-sm mt-2">
+        <thead className="bg-gray-50 text-xs text-gray-500 text-left">
+          <tr><th className="px-4 py-2">Subject</th><th className="px-4 py-2">Board</th><th className="px-4 py-2">Grade</th><th className="px-4 py-2">Topics ready</th><th className="px-4 py-2">Status</th></tr>
+        </thead>
+        <tbody>
+          {rows.map(r => (
+            <tr key={r.id} data-testid={`qbank-needs-${r.id}`} onClick={() => onOpen(r)} className="border-t border-gray-100 cursor-pointer hover:bg-purple-50/40">
+              <td className="px-4 py-2 font-medium text-gray-900">{r.subject_name}</td>
+              <td className="px-4 py-2">{BOARDS.find(b => b.key === r.board)?.label ?? r.board}</td>
+              <td className="px-4 py-2">{r.grade}</td>
+              <td className="px-4 py-2">{r.topics_ready}/{r.topics}</td>
+              <td className="px-4 py-2"><span className={`text-xs px-2 py-0.5 rounded-full border ${STATUS_BADGE[r.status]}`}>{STATUS_TEXT[r.status]}</span></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
 function SchoolTopicsTab({ onError }: { onError: (m: string) => void }) {
   const [rows, setRows] = useState<SchoolTopicsRow[] | null>(null)
   const load = useCallback(async () => {
