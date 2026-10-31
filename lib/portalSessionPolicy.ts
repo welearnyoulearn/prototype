@@ -39,3 +39,12 @@ export function parentLoginChanged(
   return fields.some(([field, value]) =>
     (field === 'parent_email' && value !== current.email) || (field === 'parent_phone' && value !== current.phone))
 }
+
+// lib/push.ts sends to device_tokens without checking for a live session, and a revoked app can
+// no longer unregister itself, so a login handed to someone else must take the phones with it.
+export async function removeParentDevices(
+  db: { query: (sql: string, params: unknown[]) => Promise<unknown> },
+  parentId: number,
+): Promise<void> {
+  await db.query(`DELETE FROM device_tokens WHERE recipient_role = 'parent' AND recipient_id = $1`, [parentId])
+}

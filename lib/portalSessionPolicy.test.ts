@@ -7,6 +7,7 @@ import {
   isMobileClient,
   parentLoginChanged,
   parentSessionLimits,
+  removeParentDevices,
 } from './portalSessionPolicy'
 
 test('web parents keep the short session: 20 min idle, 12 h cap, browser-session cookie', () => {
@@ -47,4 +48,12 @@ test('a new parent email or phone changes the login; the name or the same values
   assert.equal(parentLoginChanged(current, fields({ parent_name: 'New Name' })), false)
   assert.equal(parentLoginChanged(current, fields({ parent_email: 'old@example.com', parent_phone: '9000000001' })), false)
   assert.equal(parentLoginChanged({ email: null, phone: null }, fields({ parent_email: null })), false)
+})
+
+test('removing a parent\'s devices deletes only that parent\'s device_tokens, on the given client', async () => {
+  const calls: { sql: string; params: unknown[] }[] = []
+  await removeParentDevices({ query: async (sql, params) => { calls.push({ sql, params }) } }, 42)
+  assert.equal(calls.length, 1)
+  assert.match(calls[0].sql, /^DELETE FROM device_tokens WHERE recipient_role = 'parent' AND recipient_id = \$1$/)
+  assert.deepEqual(calls[0].params, [42])
 })

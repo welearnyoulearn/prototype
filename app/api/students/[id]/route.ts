@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
 import { requireSchoolAdmin, revokePortalSessions } from '@/lib/auth'
-import { parentLoginChanged } from '@/lib/portalSessionPolicy'
+import { parentLoginChanged, removeParentDevices } from '@/lib/portalSessionPolicy'
 import { sendStudentRemovedEmail, sendParentStudentRemovedEmail } from '@/lib/email'
 import { sendWhatsappMessage } from '@/lib/whatsapp'
 import { parsePositiveInteger, validateOptionalStudentUpdate } from '@/lib/studentValidation'
@@ -117,7 +117,10 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         })
         parentValues.push(parent.id)
         await client.query(`UPDATE parents SET ${parentAssignments.join(', ')} WHERE id = $${parentValues.length}`, parentValues)
-        if (parentLoginChanged(parent, parentFields)) await revokePortalSessions('parent', parent.id, undefined, client)
+        if (parentLoginChanged(parent, parentFields)) {
+          await revokePortalSessions('parent', parent.id, undefined, client)
+          await removeParentDevices(client, parent.id)
+        }
         await client.query(
           `UPDATE students s
            SET parent_name = p.name, parent_phone = p.phone, parent_email = p.email
