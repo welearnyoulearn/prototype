@@ -4,10 +4,11 @@
 export const SESSION_IDLE_MINUTES = 20   // no authenticated activity for this long → logged out
 export const SESSION_MAX_HOURS    = 12   // hard cap, however active the user is
 
-// The parent mobile app (login sent with `x-wlyl-client: mobile`) stays signed in until the
-// parent logs out, like a chat app. Logout and password change still revoke it server-side;
-// this is only the safety-net lifetime for a phone that is never used again.
-export const MOBILE_SESSION_DAYS  = 365
+// The parent mobile app (login sent with `x-wlyl-client: mobile`) stays signed in for life,
+// like a chat app: only logout or a password change (both revoke it server-side) end it.
+// 50 years rather than "never" so every expiry stays a real date; it also keeps the cookie
+// max-age under 2^31 seconds, which phone cookie stores handle safely.
+export const MOBILE_SESSION_DAYS  = 50 * 365
 
 export const MOBILE_CLIENT_HEADER = 'x-wlyl-client'
 
