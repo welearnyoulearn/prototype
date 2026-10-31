@@ -9,7 +9,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Bot, CheckCircle2, Loader2, MessageCircleQuestion, RotateCcw, Send, Sparkles, XCircle } from 'lucide-react'
 import type { AttemptQuestion, AttemptView } from './DailyQuiz'
-import { TUTOR_NAV_KEY, saveTutorHandoff, tutorHandoffEnabled } from '@/lib/tutorHandoff'
+import { TUTOR_NAV_KEY, saveTutorHandoff } from '@/lib/tutorHandoff'
 
 const LETTERS = ['A', 'B', 'C', 'D']
 
@@ -42,15 +42,15 @@ function loadHelp(attemptId: number, refresh = false): Promise<Help> {
 export const DOUBT_STATUS_TEXT: Record<DoubtStatus, string> = { open: 'Waiting for your teacher', explained: 'Teacher answered', clarified: 'Clarified ✓' }
 
 /** Under a reviewed question: the path from "still confused" to the AI and then to the teacher. */
-export function DoubtHelp({ q, attempt, onDoubtRaised }: { q: AttemptQuestion; attempt: AttemptView; onDoubtRaised?: () => void }) {
+/** tutorEnabled: the student has the AI Tutor (AI Pro), so a confusing question can be handed to it (#476). */
+export function DoubtHelp({ q, attempt, onDoubtRaised, tutorEnabled = false }: { q: AttemptQuestion; attempt: AttemptView; onDoubtRaised?: () => void; tutorEnabled?: boolean }) {
   const qid = q.questionId!
   const [help, setHelp] = useState<Help | null>(null)
-  const [stage, setStage] = useState<'idle' | 'ask-ai' | 'ask-teacher'>('idle')
-  const [message, setMessage] = useState('')
+  const [stage, setStage] = useState<'idle' | 'ask-teacher'>('idle')
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const tutorReady = tutorHandoffEnabled()
+  const tutorReady = tutorEnabled
   const router = useRouter()
 
   useEffect(() => {
@@ -69,9 +69,9 @@ export function DoubtHelp({ q, attempt, onDoubtRaised }: { q: AttemptQuestion; a
     const saved = saveTutorHandoff(window.sessionStorage, {
       source: 'daily-quiz', subject: q.subject, topic: q.topic, question: q.stem, options: q.options,
       chosenIndex: q.chosenIndex, correctIndex: q.correctIndex!, explanation: q.explanation ?? null,
-      message: message.trim() || null, createdAt: new Date().toISOString(),
+      message: null, createdAt: new Date().toISOString(),
     })
-    if (!saved) { setError('Could not open the AI Tutor here. Ask your teacher instead.'); setStage('idle'); return }
+    if (!saved) { setError('Could not open the AI Tutor here. Ask your teacher instead.'); return }
     router.push(`/student?tab=${TUTOR_NAV_KEY}`)
   }
   async function askTeacher() {
@@ -98,18 +98,6 @@ export function DoubtHelp({ q, attempt, onDoubtRaised }: { q: AttemptQuestion; a
         <p className="inline-flex items-center gap-1.5 rounded-full bg-sky-100 px-3 py-1 text-xs font-bold text-sky-800" data-testid={`doubt-status-${q.position}`}>
           <MessageCircleQuestion className="h-3.5 w-3.5" aria-hidden="true" /> Asked your teacher · {DOUBT_STATUS_TEXT[doubt.status]} — follow it in My doubts on the Daily quiz page
         </p>
-      ) : stage === 'ask-ai' ? (
-        <div className="space-y-2 rounded-xl border p-3">
-          <label className="block text-sm font-bold" htmlFor={`ai-msg-${q.itemId}`}>What is confusing? (optional)</label>
-          <input id={`ai-msg-${q.itemId}`} value={message} onChange={e => setMessage(e.target.value)} maxLength={300} placeholder="e.g. Why isn’t it option B?"
-            className="w-full rounded-lg border px-3 py-2 text-sm" data-testid={`doubt-ai-message-${q.position}`} />
-          <div className="flex gap-2">
-            <button type="button" onClick={askTutor} className="inline-flex items-center gap-1.5 rounded-full bg-violet-600 px-4 py-2 text-sm font-bold text-white" data-testid={`doubt-ai-send-${q.position}`}>
-              <Sparkles className="h-4 w-4" aria-hidden="true" /> Open the AI Tutor
-            </button>
-            <button type="button" onClick={() => setStage('idle')} className="rounded-full px-3 py-2 text-sm font-semibold text-gray-600">Cancel</button>
-          </div>
-        </div>
       ) : stage === 'ask-teacher' ? (
         <div className="space-y-2 rounded-xl border p-3">
           <label className="block text-sm font-bold" htmlFor={`t-note-${q.itemId}`}>Tell your teacher what you don’t understand (optional)</label>
@@ -125,7 +113,7 @@ export function DoubtHelp({ q, attempt, onDoubtRaised }: { q: AttemptQuestion; a
       ) : (
         <div className="flex flex-wrap gap-2">
           {tutorReady && (
-            <button type="button" onClick={() => setStage('ask-ai')} className="inline-flex items-center gap-1.5 rounded-full border-2 border-violet-500 px-3 py-1.5 text-sm font-bold text-violet-700 hover:bg-violet-50" data-testid={`doubt-ask-ai-${q.position}`}>
+            <button type="button" onClick={askTutor} className="inline-flex items-center gap-1.5 rounded-full border-2 border-violet-500 px-3 py-1.5 text-sm font-bold text-violet-700 hover:bg-violet-50" data-testid={`doubt-ask-ai-${q.position}`}>
               <Sparkles className="h-4 w-4" aria-hidden="true" /> {q.isCorrect ? 'Ask the AI Tutor' : 'Still confused? Ask the AI Tutor'}
             </button>
           )}

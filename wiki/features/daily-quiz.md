@@ -88,6 +88,7 @@ Only completed topics are used; a topic that is merely planned is never asked. T
 | Daily quiz (one question per subject), late for 7 days, notices | #433 |
 | Reward points, streaks, leaderboard, weekly parent report | #434 |
 | Answers on finishing, parent Daily Report, AI Tutor hand-off, many students at once | #450 |
+| Confusing question opens the AI Tutor chat in that subject (tutor is live; AI Pro students) | #476 |
 | Insights (after the pilot) | #437 |
 
 Epic: #430.

@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { TUTOR_HANDOFF_KEY, readTutorHandoff, saveTutorHandoff, tutorPrompt, type TutorHandoff } from './tutorHandoff'
+import { TUTOR_HANDOFF_KEY, readTutorHandoff, saveTutorHandoff, tutorPrompt, type TutorHandoff, tutorPromptWithin, TUTOR_MESSAGE_MAX_CHARS } from './tutorHandoff'
 
 const h: TutorHandoff = {
   source: 'daily-quiz', subject: 'Science', topic: 'Photosynthesis', question: 'Plants take in which gas?',
@@ -34,4 +34,20 @@ test('hand-off is read once and only while fresh', () => {
   s.setItem(TUTOR_HANDOFF_KEY, '{broken')
   assert.equal(readTutorHandoff(s), null, 'bad data ignored')
   assert.equal(saveTutorHandoff({ setItem: () => { throw new Error('private mode') } }, h), false)
+})
+
+test('#476: a long question still fits the tutor message limit, dropping the explanation first', () => {
+  const base: TutorHandoff = {
+    source: 'daily-quiz', subject: 'Science', topic: 'Light', question: 'Why does a spoon look bent in a glass of water?',
+    options: ['Refraction', 'Reflection', 'Dispersion', 'Absorption'], chosenIndex: 1, correctIndex: 0,
+    explanation: null, message: 'Why not B?', createdAt: '2026-10-29T13:00:00.000Z',
+  }
+  assert.equal(tutorPromptWithin(base), tutorPrompt(base), 'short enough: unchanged')
+  const withLongExplanation = { ...base, explanation: 'Because light bends. '.repeat(80) }
+  const p1 = tutorPromptWithin(withLongExplanation)
+  assert.ok(p1.length <= TUTOR_MESSAGE_MAX_CHARS && !p1.includes('The explanation says'), 'explanation dropped')
+  assert.ok(p1.includes('Why not B?') && p1.includes('Refraction'), 'what confuses the student and the options are kept')
+  const hugeQuestion = { ...base, question: 'A very long question. '.repeat(100) }
+  const p2 = tutorPromptWithin(hugeQuestion)
+  assert.ok(p2.length <= TUTOR_MESSAGE_MAX_CHARS && p2.includes('Why not B?') && p2.includes('…'), 'question shortened as a last resort')
 })

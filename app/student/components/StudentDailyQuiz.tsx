@@ -10,7 +10,7 @@ import { StudentPageIntro } from './StudentExperience'
  * Student portal → Daily quiz (#433), with points, streak and the class leaderboard (#434) and, when the
  * school has Student Doubts, Ask your teacher on every reviewed question and "My doubts" (#435, #450).
  */
-export default function StudentDailyQuiz({ doubtsEnabled }: { doubtsEnabled: boolean }) {
+export default function StudentDailyQuiz({ doubtsEnabled, tutorEnabled = false }: { doubtsEnabled: boolean; tutorEnabled?: boolean }) {
   // Bumped when a quiz is finished or a doubt raised, so the panels below reload.
   const [finished, setFinished] = useState(0)
   const [doubtsChanged, setDoubtsChanged] = useState(0)
@@ -27,7 +27,7 @@ export default function StudentDailyQuiz({ doubtsEnabled }: { doubtsEnabled: boo
         experience="student"
         query=""
         onFinished={() => setFinished(n => n + 1)}
-        renderReviewActions={doubtsEnabled ? (q, attempt) => <DoubtHelp q={q} attempt={attempt} onDoubtRaised={() => setDoubtsChanged(n => n + 1)} /> : undefined}
+        renderReviewActions={doubtsEnabled ? (q, attempt) => <DoubtHelp q={q} attempt={attempt} tutorEnabled={tutorEnabled} onDoubtRaised={() => setDoubtsChanged(n => n + 1)} /> : undefined}
         footer={
           <>
             {doubtsEnabled && <StudentDoubtsPanel refreshKey={doubtsChanged} onClarified={() => setFinished(n => n + 1)} />}
