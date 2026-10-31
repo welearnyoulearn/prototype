@@ -1,0 +1,58 @@
+npm warn Unknown project config "node-linker". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+
+> welearnyoulearn@0.1.0 dev
+> next dev --webpack -p 3101
+
+▲ Next.js 16.3.6 (webpack)
+- Local:         http://localhost:3101
+- Network:       http://192.168.0.8:3101
+- Environments: .env.local
+✓ Ready in 661ms
+✓ Running next.config.mjs took 23ms
+
+○ Compiling /student/forgot-password ...
+ GET /student/forgot-password 200 in 7.8s (next.js: 6.4s, proxy.ts: 694ms, application-code: 727ms)
+ GET /api/plan/status 401 in 1714ms (next.js: 1574ms, proxy.ts: 58ms, application-code: 81ms)
+ GET /api/plan/status 401 in 1721ms (next.js: 1579ms, proxy.ts: 58ms, application-code: 84ms)
+ GET /student/forgot-password 200 in 86ms (next.js: 40ms, proxy.ts: 6ms, application-code: 39ms)
+ POST /api/student/auth/forgot-password 429 in 1941ms (next.js: 1190ms, proxy.ts: 9ms, application-code: 743ms)
+ GET /student/forgot-password 200 in 294ms (next.js: 62ms, proxy.ts: 7ms, application-code: 225ms)
+ GET /student/forgot-password? 200 in 55ms (next.js: 4ms, proxy.ts: 6ms, application-code: 44ms)
+ GET /api/plan/status 401 in 34ms (next.js: 12ms, proxy.ts: 10ms, application-code: 11ms)
+ GET /api/plan/status 401 in 41ms (next.js: 2ms, proxy.ts: 27ms, application-code: 11ms)
+ GET /student/forgot-password 200 in 79ms (next.js: 5ms, proxy.ts: 12ms, application-code: 61ms)
+ GET /api/plan/status 401 in 30ms (next.js: 6ms, proxy.ts: 12ms, application-code: 13ms)
+ GET /api/plan/status 401 in 33ms (next.js: 1.9ms, proxy.ts: 25ms, application-code: 6ms)
+[email] RESEND_API_KEY not set — skipping
+ POST /api/student/auth/forgot-password 200 in 661ms (next.js: 9ms, proxy.ts: 17ms, application-code: 634ms)
+ GET /student/forgot-password 200 in 60ms (next.js: 4ms, proxy.ts: 16ms, application-code: 40ms)
+ GET /api/plan/status 401 in 23ms (next.js: 7ms, proxy.ts: 10ms, application-code: 6ms)
+ GET /api/plan/status 401 in 26ms (next.js: 12ms, proxy.ts: 8ms, application-code: 7ms)
+ POST /api/student/auth/forgot-password 200 in 218ms (next.js: 3ms, proxy.ts: 8ms, application-code: 207ms)
+ GET /student/forgot-password 200 in 377ms (next.js: 179ms, proxy.ts: 150ms, application-code: 48ms)
+ GET /student/forgot-password 200 in 37ms (next.js: 5ms, proxy.ts: 5ms, application-code: 27ms)
+ GET /student/forgot-password 200 in 37ms (next.js: 4ms, proxy.ts: 5ms, application-code: 27ms)
+ GET /student/forgot-password 200 in 43ms (next.js: 5ms, proxy.ts: 6ms, application-code: 31ms)
+ GET /student/forgot-password 200 in 55ms (next.js: 5ms, proxy.ts: 6ms, application-code: 44ms)
+ GET /student/forgot-password 200 in 26ms (next.js: 4ms, proxy.ts: 6ms, application-code: 15ms)
+ GET /student/forgot-password 200 in 68ms (next.js: 4ms, proxy.ts: 7ms, application-code: 57ms)
+ GET /student/forgot-password 200 in 38ms (next.js: 4ms, proxy.ts: 6ms, application-code: 28ms)
+ GET /student/forgot-password 200 in 29ms (next.js: 5ms, proxy.ts: 6ms, application-code: 18ms)
+ GET /student/forgot-password 200 in 309ms (next.js: 9ms, proxy.ts: 11ms, application-code: 289ms)
+ GET /student/forgot-password 200 in 29ms (next.js: 5ms, proxy.ts: 7ms, application-code: 17ms)
+ GET /student/forgot-password 200 in 27ms (next.js: 5ms, proxy.ts: 5ms, application-code: 17ms)
+ GET /api/plan/status 401 in 253ms (next.js: 57ms, proxy.ts: 29ms, application-code: 167ms)
+ GET /api/plan/status 401 in 44ms (next.js: 5ms, proxy.ts: 11ms, application-code: 28ms)
+ GET /api/plan/status 401 in 37ms (next.js: 4ms, proxy.ts: 13ms, application-code: 20ms)
+ GET /api/plan/status 401 in 52ms (next.js: 10ms, proxy.ts: 16ms, application-code: 27ms)
+ GET /student/forgot-password 200 in 1049ms (next.js: 22ms, proxy.ts: 15ms, application-code: 1012ms)
+ GET /api/plan/status 401 in 42ms (next.js: 8ms, proxy.ts: 12ms, application-code: 23ms)
+ GET /api/plan/status 401 in 64ms (next.js: 10ms, proxy.ts: 37ms, application-code: 17ms)
+ GET /api/plan/status 401 in 79ms (next.js: 8ms, proxy.ts: 18ms, application-code: 53ms)
+ GET /api/plan/status 401 in 62ms (next.js: 12ms, proxy.ts: 23ms, application-code: 28ms)
+ GET /api/plan/status 401 in 66ms (next.js: 12ms, proxy.ts: 23ms, application-code: 31ms)
+ GET /api/plan/status 401 in 45ms (next.js: 9ms, proxy.ts: 10ms, application-code: 25ms)
+ GET /api/plan/status 401 in 42ms (next.js: 5ms, proxy.ts: 15ms, application-code: 22ms)
+ GET /api/plan/status 401 in 60ms (next.js: 22ms, proxy.ts: 16ms, application-code: 22ms)
+ GET /api/plan/status 401 in 52ms (next.js: 9ms, proxy.ts: 18ms, application-code: 24ms)
+ GET /api/plan/status 401 in 69ms (next.js: 12ms, proxy.ts: 18ms, application-code: 39ms)
