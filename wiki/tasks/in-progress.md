@@ -7,11 +7,27 @@ Move an entry to [completed.md](completed.md) when it ships. Add new entries at 
 ### Auto-merge flow for dev (#466)
 **Type:** Chore
 **Branch:** `feature/466-auto-merge-flow`
-**Summary:** `.github/workflows/auto-merge.yml` resolves conflicts, reviews with Claude and squash-merges PRs into `dev`. Pilot on this repo only.
+**Summary:** `scripts/auto-merge/run.sh` resolves conflicts, reviews with Claude and squash-merges PRs into `dev`. It runs from launchd on one Mac every 15 minutes, so it only runs while that Mac is awake. Pilot on this repo only.
 **Progress:**
-- [x] Workflow, git-workflow doc, ADR, changelog
-- [ ] `CLAUDE_CODE_OAUTH_TOKEN` secret, Actions PR-approval setting, `no-auto-merge` label
+- [x] Script, launchd plist, git-workflow doc, ADR, changelog
+- [ ] Bot account, Keychain token, plist installed, `no-auto-merge` label
 - [ ] First real run on a test PR, including a conflict
+
+**Setup on the Mac:**
+1. Create a GitHub bot account, `wlyl-review-bot`, and give it write access to `welearnyoulearn/prototype`.
+2. Create a token for the bot that can review pull requests, then save it in Keychain. The command prompts for the token, so it stays out of shell history:
+   `security add-generic-password -s wlyl-review-bot -a wlyl-review-bot -w`
+3. Create the `no-auto-merge` label if it is missing, and start Docker.
+4. Install the script and the plist from a reviewed checkout. Never point launchd at a checkout, because a checked-out PR could replace the script:
+   ```bash
+   mkdir -p ~/.wlyl-auto-merge
+   install -m 755 scripts/auto-merge/run.sh ~/.wlyl-auto-merge/run.sh
+   cp scripts/auto-merge/com.wlyl.auto-merge.plist ~/Library/LaunchAgents/
+   launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.wlyl.auto-merge.plist
+   ```
+5. Try `~/.wlyl-auto-merge/run.sh --dry-run`, then read `~/Library/Logs/wlyl-auto-merge/run.log`.
+
+Reinstall `run.sh` after every change to it. To turn the flow off: `launchctl bootout gui/$(id -u)/com.wlyl.auto-merge`.
 
 ### Push notifications via Firebase (FCM)
 **Type:** Feature

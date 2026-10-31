@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.wlyl.auto-merge</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>-c</string>
+    <!-- launchd expands no ~ in StandardOutPath, so the shell opens the log -->
+    <string>mkdir -p "$HOME/Library/Logs/wlyl-auto-merge" &amp;&amp; exec /bin/bash "$HOME/.wlyl-auto-merge/run.sh" &gt;&gt; "$HOME/Library/Logs/wlyl-auto-merge/run.log" 2&gt;&amp;1</string>
+  </array>
+  <key>StartInterval</key>
+  <integer>900</integer>
+</dict>
+</plist>
