@@ -31,6 +31,18 @@ test: add Playwright tests for checkout
 3. Human reviewer checks correctness, security, and architecture
 4. Address all "Request Changes" before merge — no force-merging over objections
 
+### Auto-merge into `dev`
+`.github/workflows/auto-merge.yml` replaces step 3 for PRs into `dev`: no human reviewer is needed there. PRs into any other branch still follow the workflow above.
+
+1. Runs on every PR into `dev`, on every push to `dev` (re-checks all open PRs), and by hand with a `pr_number`.
+2. Skips forks, drafts, PRs labelled `no-auto-merge`, `[Preserved]` PRs, and PRs that change `.github/workflows/`. Those need a human.
+3. On a conflict, merges `dev` into the PR branch and has Claude fix only the conflicted files. If it can't, it comments and stops.
+4. Claude reviews the full diff read-only. Anything but an explicit approve from the last review means no merge.
+5. On reject, a separate Claude step fixes only the findings, the workflow type-checks and pushes the fix, and a new review runs on the new diff. After two fix rounds it posts the remaining findings and stops. A failed type-check or a fix touching `.github/`, lockfiles, `package.json`, `.env` files or `lib/db.ts` also comments and stops.
+6. On approve, it approves the PR and squash-merges that exact commit.
+
+Add the `no-auto-merge` label to keep a PR out of this flow. After it stops, push a fix to run it again.
+
 ### Review Priority (what to check first)
 1. **Security** — auth, injection, data exposure
 2. **Correctness** — does it do what the ticket says?

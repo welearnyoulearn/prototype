@@ -4,6 +4,15 @@ Move an entry to [completed.md](completed.md) when it ships. Add new entries at 
 
 ---
 
+### Auto-merge flow for dev (#466)
+**Type:** Chore
+**Branch:** `feature/466-auto-merge-flow`
+**Summary:** `.github/workflows/auto-merge.yml` resolves conflicts, reviews with Claude and squash-merges PRs into `dev`. Pilot on this repo only.
+**Progress:**
+- [x] Workflow, git-workflow doc, ADR, changelog
+- [ ] `CLAUDE_CODE_OAUTH_TOKEN` secret, Actions PR-approval setting, `no-auto-merge` label
+- [ ] First real run on a test PR, including a conflict
+
 ### Push notifications via Firebase (FCM)
 **Type:** Feature
 **Branch:** `feature/fcm-push-backend` (no GitHub issue yet — branch to be renamed with the issue number)
