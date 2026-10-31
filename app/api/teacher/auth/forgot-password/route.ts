@@ -27,14 +27,15 @@ export async function POST(req: NextRequest) {
 
     const token = await issueResetToken('teacher', teacher.id)
     const resetUrl = `${process.env.APP_URL || 'http://localhost:3000'}/teacher/reset-password?token=${token}`
-    sendPasswordResetEmail({ to: teacher.email, name: teacher.name, resetUrl, role: 'teacher', schoolId: teacher.school_id }).catch(console.error)
+    // Awaited: on Vercel the function is frozen once the response is sent, which dropped the email.
     // WhatsApp is a second channel when a phone is on file (scaffold: queued until live).
-    if (teacher.phone) {
-      sendWhatsappMessage({
+    await Promise.allSettled([
+      sendPasswordResetEmail({ to: teacher.email, name: teacher.name, resetUrl, role: 'teacher', schoolId: teacher.school_id }),
+      teacher.phone ? sendWhatsappMessage({
         schoolId: teacher.school_id, to: teacher.phone, templateName: 'password_reset', recipientName: teacher.name,
         templateParams: { name: teacher.name, reset_url: resetUrl },
-      }).catch(console.error)
-    }
+      }) : Promise.resolve(),
+    ]).then(rs => rs.forEach(r => { if (r.status === 'rejected') console.error(r.reason) }))
     return forgotPasswordResponse({ status: 'sent', sentTo: [maskEmail(teacher.email)] })
   } catch (error) {
     console.error('[teacher/auth/forgot-password]', error)
