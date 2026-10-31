@@ -2,7 +2,8 @@
 
 import { motion, useReducedMotion } from 'framer-motion'
 import { ArrowUpRight } from 'lucide-react'
-import { StudentEmptyState, StudentPageIntro, studentReveal } from './StudentExperience'
+import { StudentPageIntro, studentReveal } from './StudentExperience'
+import StudentTutorChat from './StudentTutorChat'
 import { Sticker, type StickerName, type Tone } from './stickers'
 
 type AiTool = {
@@ -27,9 +28,14 @@ export default function StudentAiHub({ tier }: { tier: 'ai_basic' | 'ai_pro' | '
 
   if (tier === 'ai_pro') {
     return (
-      <div className="mx-auto max-w-3xl space-y-7">
-        <StudentPageIntro {...INTRO} description="Your school controls which assisted-learning tools are available in this workspace." />
-        <StudentEmptyState sticker="sparkles" tone="violet" title="AI Pro is being prepared" description="Your school has assigned AI Pro. The full doubt-clearing experience is not available yet, so there is nothing you need to set up." />
+      <div className="mx-auto max-w-5xl">
+        {/* One compact line, only on desktop — on mobile the portal header already says AI Hub and the chat needs the height. */}
+        <div className="mb-2 flex items-center gap-2 max-lg:sr-only">
+          <Sticker name="robot" size="sm" />
+          <h1 className="sb-display text-xl">AI Tutor</h1>
+          <span className="sb-chip" data-tone="violet"><Sticker name="sparkles" size="xs" />AI Pro</span>
+        </div>
+        <StudentTutorChat />
       </div>
     )
   }
