@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import TestCalendar from '../../components/TestCalendar'
 import NotificationBell from '../../components/NotificationBell'
+import ParentAckTracker from '@/app/components/ParentAckTracker'
 
 type ClassOption = { id: number; grade: string; section: string }
 type ClassSubject = { id: number; subject_name: string; teacher_name: string | null }
@@ -31,7 +32,6 @@ type MarksData = {
   students: StudentResult[]; subject_stats: SubjectStat[]
   pass_count: number; fail_count: number; total_max: number
 }
-type AckRow = { student_id: number; student_name: string; roll_number: string; acknowledged_at: string | null; parent_name: string | null; last_nudged_at: string | null }
 
 const EXAM_TYPE_LABELS: Record<string, string> = {
   unit_test: 'Unit Test', mid_term: 'Mid Term', final_exam: 'Final Exam', practical: 'Practical'
@@ -1518,89 +1518,13 @@ function ResultsAndRelease({ schoolId }: { schoolId: number }) {
               </div>
             )}
             {releaseError && <div className="bg-red-50 border border-red-200 rounded-md px-4 py-3 text-sm text-red-600">{releaseError}</div>}
-            {marksData.exam.status === 'released' && <AckTracker examId={marksData.exam.id} schoolId={schoolId} />}
+            {marksData.exam.status === 'released' && <ParentAckTracker examId={marksData.exam.id} schoolId={schoolId} />}
             <ExamAnalysisPanel data={marksData} />
           </div>
         )}
       </div>
     </div>
   )
-}
-
-// ─── Parent acknowledgement tracker ─────────────────────────────────────────
-function AckTracker({ examId, schoolId }: { examId: number; schoolId: number }) {
-  const [data, setData] = useState<{ total: number; acknowledged: number; unacknowledged: number; students: AckRow[] } | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [nudging, setNudging] = useState<number | null>(null)
-
-  async function load() {
-    setLoading(true)
-    try {
-      const d = await fetch(`/api/exams/${examId}/acknowledgements?school_id=${schoolId}`).then(r => r.json())
-      if (d.students) setData(d)
-    } finally { setLoading(false) }
-  }
-
-  useEffect(() => {
-    const initial = setTimeout(() => { void load() }, 0)
-    return () => clearTimeout(initial)
-  }, [examId]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  async function nudge(studentId: number) {
-    setNudging(studentId)
-    try {
-      await fetch(`/api/exams/${examId}/nudge-parent`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ school_id: schoolId, student_id: studentId }),
-      })
-      await load()
-    } finally { setNudging(null) }
-  }
-
-  if (loading) return <div className="bg-white rounded-md border border-gray-200 py-8 text-center text-sm text-muted-foreground">Loading acknowledgements…</div>
-  if (!data) return null
-
-  const pct = data.total > 0 ? Math.round((data.acknowledged / data.total) * 100) : 0
-
-  return (
-    <div className="bg-white rounded-md border border-gray-200 overflow-hidden">
-      <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
-        <p className="font-bold text-gray-800 text-sm">Parent Acknowledgements</p>
-        <span className={`text-xs font-bold px-2 py-1 rounded-full ${pct === 100 ? 'bg-emerald-100 text-emerald-700' : pct >= 50 ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-600'}`}>
-          {data.acknowledged}/{data.total} acknowledged ({pct}%)
-        </span>
-      </div>
-      {data.unacknowledged > 0 && (
-        <div className="max-h-64 overflow-y-auto divide-y divide-gray-50">
-          {data.students.filter(s => !s.acknowledged_at).map(s => (
-            <div key={s.student_id} className="px-5 py-2.5 flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2 min-w-0">
-                <span className="w-2 h-2 bg-red-400 rounded-full flex-shrink-0" />
-                <div className="min-w-0">
-                  <p className="text-xs font-semibold text-gray-800 truncate">{s.student_name}</p>
-                  <p className="text-xs text-muted-foreground">{s.roll_number}{s.last_nudged_at ? ` · nudged ${timeAgo(s.last_nudged_at)}` : ''}</p>
-                </div>
-              </div>
-              <button onClick={() => nudge(s.student_id)} disabled={nudging === s.student_id} data-testid={`nudge-parent-${s.student_id}`}
-                className="text-xs font-semibold text-amber-700 bg-amber-50 border border-amber-200 px-3 py-1.5 rounded-lg hover:bg-amber-100 disabled:opacity-50 flex-shrink-0">
-                {nudging === s.student_id ? 'Nudging…' : 'Nudge'}
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-      {data.unacknowledged === 0 && (
-        <div className="px-5 py-6 text-center text-sm text-emerald-600 font-medium">Every parent has acknowledged this result 🎉</div>
-      )}
-    </div>
-  )
-}
-
-function timeAgo(dateStr: string): string {
-  const days = Math.floor((Date.now() - new Date(dateStr).getTime()) / 86400000)
-  if (days <= 0) return 'today'
-  if (days === 1) return '1 day ago'
-  return `${days} days ago`
 }
 
 // ─── Exam Analysis Panel ──────────────────────────────────────────────────────

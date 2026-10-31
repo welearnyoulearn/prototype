@@ -66,7 +66,7 @@ export async function PUT(req: NextRequest, { params }: RouteContext) {
   let body: Record<string, unknown>
   try { body = await req.json() }
   catch { return NextResponse.json({ error: 'Request body must be valid JSON' }, { status: 400 }) }
-  const unsupported = Object.keys(body).filter(key => key !== 'class_teacher_id')
+  const unsupported = Object.keys(body).filter(key => key !== 'class_teacher_id' && key !== 'add_grade_to_teacher')
   if (unsupported.length) return NextResponse.json({ error: `Unsupported fields: ${unsupported.join(', ')}` }, { status: 400 })
   if (!Object.hasOwn(body, 'class_teacher_id')) return NextResponse.json({ error: 'class_teacher_id is required' }, { status: 400 })
   const teacherId = parseOptionalTeacherId(body.class_teacher_id)
@@ -88,10 +88,14 @@ export async function PUT(req: NextRequest, { params }: RouteContext) {
       await client.query('ROLLBACK')
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
+    let teacherGrades: { teacher_id: number; teaches_grades: string } | null = null
     if (teacherId.value) {
-      await validateTeacherForClass(client, {
+      const validated = await validateTeacherForClass(client, {
         teacherId: teacherId.value, schoolId: existing.school_id, grade: existing.grade,
+        // Only set when the admin explicitly picks a teacher who doesn't teach this grade yet.
+        addGradeIfMissing: body.add_grade_to_teacher === true,
       })
+      if (validated.grades_added && validated.teaches_grades) teacherGrades = { teacher_id: validated.id, teaches_grades: validated.teaches_grades }
     }
     const result = await client.query(
       'UPDATE classes SET class_teacher_id = $1 WHERE id = $2 RETURNING *',
@@ -100,7 +104,12 @@ export async function PUT(req: NextRequest, { params }: RouteContext) {
     await client.query('COMMIT')
     invalidateCache(`classes:${existing.school_id}`)
     invalidateCache(`health:${existing.school_id}`)
-    return NextResponse.json(result.rows[0])
+    if (teacherGrades) {
+      invalidateCache(`teachers:${existing.school_id}:all`)
+      invalidateCache(`teachers:${existing.school_id}:teaching`)
+      invalidateCache(`teachers:${existing.school_id}:non_teaching`)
+    }
+    return NextResponse.json({ ...result.rows[0], teacher_grades_updated: teacherGrades })
   } catch (error) {
     await client.query('ROLLBACK').catch(() => {})
     if (error instanceof ClassWorkflowError) {

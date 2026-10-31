@@ -6,6 +6,16 @@ import pool from './db'
 import { sendMail, escapeHtml } from './email'
 import { computeCharge, getEffectivePrice, getMonthUsage, monthBoundsIST, nextMonth } from './usage'
 import type { Bill, BillAction, BillLine, BillPayment, BillStatus } from './billingTypes'
+import { gstLines, gstSplit, stateName } from './gst'
+
+// WLYL's GST state: the first 2 digits of BILLING_GSTIN (or BILLING_STATE_CODE before registration).
+export const sellerStateCode = () => process.env.BILLING_GSTIN?.trim().slice(0, 2) || process.env.BILLING_STATE_CODE?.trim() || null
+// The bill's "bill to" comes from the school's details when the bill is made and is kept on the bill, so a
+// later edit never changes it (DOCS/SCHOOL-ONBOARDING.md §3).
+const SNAPSHOT_BILL_TO = `UPDATE saas_invoices i SET bill_to_name = COALESCE(NULLIF(s.legal_name, ''), s.name),
+    bill_to_address = concat_ws(', ', NULLIF(s.address, ''), NULLIF(s.city, ''), NULLIF(s.pin, '')),
+    bill_to_state_code = s.state_code, bill_to_gstin = s.gstin
+  FROM schools s WHERE i.id = $1 AND s.id = i.school_id`
 
 const DUE_DAYS = 15
 const REMINDER_DAYS = 7
@@ -43,6 +53,7 @@ export function gstFor(subtotal: number): number {
 type InvoiceRow = {
   id: number; invoice_number: string; school_id: number; school_name: string; kind: 'usage' | 'plan'; notes: string | null
   bill_month: string | null; invoice_date: string; due_date: string; subtotal: number; gst: number; total: number; paid: number
+  bill_to_name: string | null; bill_to_address: string | null; bill_to_state_code: string | null; bill_to_gstin: string | null
 }
 
 async function loadBills(where: string, params: unknown[], db: PoolClient | typeof pool = pool): Promise<Bill[]> {
@@ -50,7 +61,11 @@ async function loadBills(where: string, params: unknown[], db: PoolClient | type
     `SELECT i.id, i.invoice_number, i.school_id, s.name AS school_name, i.kind, i.notes,
             to_char(i.bill_month, 'YYYY-MM') AS bill_month, to_char(i.invoice_date, 'YYYY-MM-DD') AS invoice_date,
             to_char(i.due_date, 'YYYY-MM-DD') AS due_date, i.subtotal::float8 AS subtotal, i.gst_amount::float8 AS gst,
-            i.total_amount::float8 AS total, i.paid_amount::float8 AS paid
+            i.total_amount::float8 AS total, i.paid_amount::float8 AS paid,
+            -- Bills made before school details existed fall back to the school's current details.
+            COALESCE(i.bill_to_name, NULLIF(s.legal_name, ''), s.name) AS bill_to_name,
+            COALESCE(i.bill_to_address, concat_ws(', ', NULLIF(s.address, ''), NULLIF(s.city, ''), NULLIF(s.pin, ''))) AS bill_to_address,
+            COALESCE(i.bill_to_state_code, s.state_code) AS bill_to_state_code, COALESCE(i.bill_to_gstin, s.gstin) AS bill_to_gstin
      FROM saas_invoices i JOIN schools s ON s.id = i.school_id
      WHERE i.kind IN ('usage', 'plan') AND (${where})
      ORDER BY i.invoice_date DESC, s.name, i.id`,
@@ -85,6 +100,8 @@ async function loadBills(where: string, params: unknown[], db: PoolClient | type
     status: billStatus(r.total, r.paid, r.due_date),
     lines: items.rows.filter(i => i.invoiceId === r.id).map(l => ({ id: l.id, type: l.type, meterKey: l.meterKey, description: l.description, quantity: l.quantity, unitRate: l.unitRate, amount: l.amount })),
     payments: payments.rows.filter(p => p.invoiceId === r.id).map(p => ({ id: p.id, amount: p.amount, method: p.method, reference: p.reference, paidOn: p.paidOn, recordedBy: p.recordedBy })),
+    billTo: { name: r.bill_to_name ?? r.school_name, address: r.bill_to_address ?? '', stateCode: r.bill_to_state_code, gstin: r.bill_to_gstin },
+    gstLines: gstLines(gstSplit(r.gst, r.bill_to_state_code, sellerStateCode())),
   }))
 }
 
@@ -112,9 +129,12 @@ export async function getBills(filter: { schoolId?: number; month?: string }): P
 
 async function emailBill(bill: Bill, reminder = false): Promise<number> {
   const { rows: recipients } = await pool.query<{ email: string }>(
-    `SELECT DISTINCT email FROM users
+    `SELECT DISTINCT lower(email) AS email FROM users
      WHERE school_id = $1 AND role IN ('school_admin', 'principal')
-       AND COALESCE(status, 'active') = 'active' AND email IS NOT NULL AND email <> ''`,
+       AND COALESCE(status, 'active') = 'active' AND email IS NOT NULL AND email <> ''
+     UNION
+     -- The school's accountant (onboarding contact) pays the bills, so gets them too.
+     SELECT lower(email) FROM school_contacts WHERE school_id = $1 AND role = 'accountant' AND email IS NOT NULL AND email <> ''`,
     [bill.schoolId],
   )
   if (!recipients.length || !process.env.RESEND_API_KEY) return 0 // sendMail skips silently without a key: don't mark it sent
@@ -134,11 +154,12 @@ async function emailBill(bill: Bill, reminder = false): Promise<number> {
 <table style="border-collapse:collapse;font-size:14px">
 ${bill.lines.map(l => row(escapeHtml(l.description), inr(l.amount))).join('\n')}
 ${row('Subtotal', inr(bill.subtotal))}
-${row('GST 18%', inr(bill.gst))}
+${bill.gstLines.map(g => row(g.label, inr(g.amount))).join('\n')}
 ${row('Total', inr(bill.total), true)}
 ${bill.paid > 0 ? row('Received', inr(bill.paid)) + row('Left to pay', inr(left), true) : ''}
 </table>
 <p>See Plan &amp; Billing in your school admin dashboard for details.</p>
+<p style="font-size:12px;color:#6b7280">Bill to: ${escapeHtml(bill.billTo.name)}${bill.billTo.address ? `, ${escapeHtml(bill.billTo.address)}` : ''}${bill.billTo.gstin ? ` · GSTIN ${escapeHtml(bill.billTo.gstin)}` : ''}${bill.billTo.stateCode ? ` · Place of supply: ${escapeHtml(stateName(bill.billTo.stateCode) ?? '')} (${bill.billTo.stateCode})` : ''}</p>
 <p style="font-size:12px;color:#6b7280">${from}</p>`
   let sent = 0
   for (const { email } of recipients) {
@@ -177,6 +198,7 @@ async function insertInvoice(c: PoolClient, inv: {
      inv.planTermId, inv.notes, planFee, subtotal, gst, total, inv.createdBy],
   )
   if (!rowCount) return false
+  await c.query(SNAPSHOT_BILL_TO, [inv.id])
   for (const l of inv.lines) {
     await c.query(
       `INSERT INTO saas_invoice_items (invoice_id, school_id, item_type, description, quantity, unit_rate, amount, meter_key, used, included, created_by)

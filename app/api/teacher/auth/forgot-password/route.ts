@@ -3,39 +3,40 @@ import pool, { ensureDB } from '@/lib/db'
 import { sendPasswordResetEmail } from '@/lib/email'
 import { sendWhatsappMessage } from '@/lib/whatsapp'
 import { issueResetToken } from '@/lib/passwordReset'
-import { checkAuthRateLimit, RECOVERY_LIMIT } from '@/lib/authRateLimit'
+import { forgotPasswordResponse, startForgotPassword } from '@/lib/forgotPassword'
+import { maskEmail } from '@/lib/maskContact'
+
+interface TeacherRow { id: number; school_id: number; name: string; email: string | null; phone: string | null }
 
 export async function POST(req: NextRequest) {
   try {
     await ensureDB()
-    const { email } = await req.json()
-    if (!email) return NextResponse.json({ success: true }) // prevent enumeration
-    if (!await checkAuthRateLimit(req, 'teacher-recovery', String(email), RECOVERY_LIMIT)) return NextResponse.json({ success: true })
+    const start = await startForgotPassword(req, 'teacher-recovery')
+    if ('response' in start) return start.response
 
-    const result = await pool.query(
+    // Teacher login is email-only, so recovery is too.
+    const result = await pool.query<TeacherRow>(
       `SELECT t.id, t.school_id, t.name, t.email, t.phone FROM teachers t
        WHERE LOWER(t.email) = LOWER($1) AND t.removed_at IS NULL LIMIT 1`,
-      [email.trim()]
+      [start.identifier],
     )
-
-    if (result.rows.length === 0) return NextResponse.json({ success: true })
+    if (result.rows.length === 0) return forgotPasswordResponse({ status: 'not_found' })
 
     const teacher = result.rows[0]
-    const token = await issueResetToken('teacher', teacher.id)
+    if (!teacher.email) return forgotPasswordResponse({ status: 'no_contact' })
 
+    const token = await issueResetToken('teacher', teacher.id)
     const resetUrl = `${process.env.APP_URL || 'http://localhost:3000'}/teacher/reset-password?token=${token}`
-    sendPasswordResetEmail({ to: teacher.email, name: teacher.name, resetUrl, role: 'teacher', schoolId: teacher.school_id }).catch(console.error)
-    // Login stays email-only (lookup above), but WhatsApp is still a useful
-    // second channel for actually receiving the link if their inbox is
-    // slow/unchecked — same reasoning as student/parent onboarding delivery.
-    if (teacher.phone) {
-      sendWhatsappMessage({
+    // Awaited: on Vercel the function is frozen once the response is sent, which dropped the email.
+    // WhatsApp is a second channel when a phone is on file (scaffold: queued until live).
+    await Promise.allSettled([
+      sendPasswordResetEmail({ to: teacher.email, name: teacher.name, resetUrl, role: 'teacher', schoolId: teacher.school_id }),
+      teacher.phone ? sendWhatsappMessage({
         schoolId: teacher.school_id, to: teacher.phone, templateName: 'password_reset', recipientName: teacher.name,
         templateParams: { name: teacher.name, reset_url: resetUrl },
-      }).catch(console.error)
-    }
-
-    return NextResponse.json({ success: true })
+      }) : Promise.resolve(),
+    ]).then(rs => rs.forEach(r => { if (r.status === 'rejected') console.error(r.reason) }))
+    return forgotPasswordResponse({ status: 'sent', sentTo: [maskEmail(teacher.email)] })
   } catch (error) {
     console.error('[teacher/auth/forgot-password]', error)
     return NextResponse.json({ error: 'Failed' }, { status: 500 })

@@ -114,6 +114,8 @@ export type Bill = {
   status: BillStatus
   lines: BillLine[]
   payments: BillPayment[]
+  billTo: { name: string; address: string; stateCode: string | null; gstin: string | null }
+  gstLines: { label: string; amount: number }[]   // CGST+SGST (same state as WLYL), IGST, or one GST line if the state is unknown
 }
 // GET /api/platform/billing?month=YYYY-MM  (bills dated in that month, plus every unpaid older bill)
 export type BillsResponse = {

@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "WLYL School Management API",
-    "version": "2026-10-20",
+    "version": "2026-10-24",
     "description": "Every API route in the WLYL platform, generated from the route handlers on the `dev` branch.\n\n## How to read this\n\n- **Sections and subcategories.** The sidebar groups routes by area, such as Fees & finance, then by topic, such as Waivers.\n- **Who can call.** The coloured badges on each route show which signed-in users it accepts. A red **Public** badge means the route has no sign-in check in code.\n- **Checks.** Extra rules inside the route, such as \"parent must own this student\", are listed under Checks.\n- **Feature flag.** Routes that are switched off unless the school's plan includes a feature say which one.\n\n## Signing in\n\nEach portal has its own session cookie: `wlyl-platform`, `wlyl-auth` (school admin), `wlyl-teacher`, `wlyl-student` and `wlyl-parent`. Sign in to the app in this browser, then use **Test Request** on any route. Scheduled jobs take `Authorization: Bearer $CRON_SECRET`."
   },
   "servers": [
@@ -167,6 +167,14 @@
     {
       "name": "Export data",
       "description": "Download school records as CSV or Excel; full backup; export log"
+    },
+    {
+      "name": "Plan & billing",
+      "description": "A school's own plan, usage, bills, data export and renewal request."
+    },
+    {
+      "name": "Platform billing",
+      "description": "Platform admin: bills, plan and service prices, usage, renewals and per-school price overrides."
     }
   ],
   "x-tagGroups": [
@@ -186,7 +194,8 @@
         "Schools & admins",
         "Master curriculum",
         "Plans & features",
-        "Usage & monitoring"
+        "Usage & monitoring",
+        "Platform billing"
       ]
     },
     {
@@ -196,7 +205,8 @@
         "School settings",
         "Academic years",
         "Classes",
-        "School curriculum"
+        "School curriculum",
+        "Plan & billing"
       ]
     },
     {
@@ -9558,11 +9568,11 @@
           "401": {
             "description": "Not a school admin/principal/vice principal"
           },
-          "500": {
-            "description": "Overview fetch failed / internal error"
-          },
           "403": {
             "description": "Forbidden"
+          },
+          "500": {
+            "description": "Overview fetch failed / internal error"
           }
         },
         "x-badges": [
@@ -10054,14 +10064,14 @@
           "400": {
             "description": "Missing fields or invalid/too-short date span"
           },
+          "403": {
+            "description": "Forbidden"
+          },
           "409": {
             "description": "Year label already exists, or set_current requested while a current year already exists"
           },
           "500": {
             "description": "Failed to create academic year / Internal server error"
-          },
-          "403": {
-            "description": "Forbidden"
           }
         },
         "x-badges": [
@@ -10148,14 +10158,14 @@
           "400": {
             "description": "id and school_id required"
           },
-          "500": {
-            "description": "Failed to set current year / Internal server error"
-          },
           "403": {
             "description": "Forbidden"
           },
           "409": {
             "description": "The school already has a current year; use Year Rollover"
+          },
+          "500": {
+            "description": "Failed to set current year / Internal server error"
           }
         },
         "x-badges": [
@@ -11311,7 +11321,7 @@
           "Classes"
         ],
         "summary": "Set class teacher",
-        "description": "Updates the class's class_teacher_id (falsy clears it) and invalidates the school's classes cache.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(class.school_id).",
+        "description": "Updates the class's class_teacher_id (falsy clears it) and invalidates the school's classes cache.\n\nAny teaching staff member can be picked. When `add_grade_to_teacher` is true, a teacher who does not teach this grade has it added to their details; without it such a teacher is refused (422).\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(class.school_id).",
         "operationId": "putClassesId",
         "security": [
           {
@@ -11345,6 +11355,19 @@
                     "class_teacher_id": {
                       "type": "integer",
                       "nullable": true
+                    },
+                    "teacher_grades_updated": {
+                      "type": "object",
+                      "nullable": true,
+                      "description": "Set when the grade was added to the teacher's details",
+                      "properties": {
+                        "teacher_id": {
+                          "type": "integer"
+                        },
+                        "teaches_grades": {
+                          "type": "string"
+                        }
+                      }
                     }
                   }
                 }
@@ -11393,6 +11416,10 @@
                   "class_teacher_id": {
                     "type": "integer",
                     "nullable": true
+                  },
+                  "add_grade_to_teacher": {
+                    "type": "boolean",
+                    "description": "Add this class's grade to the teacher's grades when missing"
                   }
                 }
               }
@@ -11714,7 +11741,7 @@
           "Classes"
         ],
         "summary": "Edit class subject",
-        "description": "Updates a class subject's name, teacher and/or periods_per_week. Renames must match a subscribed subject when any exist and are applied to the class's timetable slots; a new teacher is propagated to timetable slots where it causes no clash.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(class.school_id); subject_id must belong to the class.",
+        "description": "Updates a class subject's name, teacher and/or periods_per_week. Renames must match a subscribed subject when any exist and are applied to the class's timetable slots; a new teacher is propagated to timetable slots where it causes no clash.\n\nAny teaching staff member can be assigned. A teacher who does not teach this grade has it added to their details. When `add_subject_to_teacher` is true, a teacher whose subject does not cover this one also has it appended to their subject (comma-separated, 100 characters at most). Exams already scheduled for the class that are still scheduled or collecting marks (and whose subject is not yet submitted) are moved to the new teacher, who is notified if marks entry is already open.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(class.school_id); subject_id must belong to the class.",
         "operationId": "patchClassesIdSubjects",
         "security": [
           {
@@ -11745,6 +11772,36 @@
                     },
                     "subject_name": {
                       "type": "string"
+                    },
+                    "teacher_grades_updated": {
+                      "type": "object",
+                      "nullable": true,
+                      "description": "Set when the grade was added to the teacher's details",
+                      "properties": {
+                        "teacher_id": {
+                          "type": "integer"
+                        },
+                        "teaches_grades": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "teacher_subject_updated": {
+                      "type": "object",
+                      "nullable": true,
+                      "description": "Set when the subject was appended to the teacher's details",
+                      "properties": {
+                        "teacher_id": {
+                          "type": "integer"
+                        },
+                        "subject": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "exams_updated": {
+                      "type": "integer",
+                      "description": "Upcoming exams that now list this teacher for the subject"
                     }
                   }
                 }
@@ -11759,6 +11816,9 @@
           },
           "404": {
             "description": "Subject not found"
+          },
+          "422": {
+            "description": "Teacher is not allowed (inactive, not teaching staff, grade or subject mismatch, subject list too long)"
           },
           "500": {
             "description": "Failed to update subject / Internal server error"
@@ -11811,6 +11871,10 @@
                     "type": "integer",
                     "minimum": 1,
                     "maximum": 12
+                  },
+                  "add_subject_to_teacher": {
+                    "type": "boolean",
+                    "description": "Append this subject to the teacher's subject when it does not match. Without it a non-matching teacher is refused (422)."
                   }
                 }
               }
@@ -17455,7 +17519,7 @@
           "Teachers & staff"
         ],
         "summary": "Update teacher",
-        "description": "Partially updates a teacher. Reactivation issues a new temp password sent by email/WhatsApp; deactivation unlinks the teacher from class subjects, timetable and class-teacher roles; email/phone changes notify old and new contacts. Re-runs subject auto-assignment when subject or teaches_grades changes, and invalidates teacher caches.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess against the teacher's own school.",
+        "description": "Partially updates a teacher. Reactivation issues a new temp password sent by email/WhatsApp; deactivation unlinks the teacher from class subjects, timetable and class-teacher roles; email/phone changes notify old and new contacts. Re-runs subject auto-assignment when subject or teaches_grades changes, and invalidates teacher caches.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess against the teacher's own school.\n\n**Subject:** a teacher's subject may be a comma-separated list of catalog subjects (Class Management appends one when an admin assigns a teacher outside their subject). Sending the stored value back unchanged is always accepted; a changed value must be made of master-syllabus or custom subjects.",
         "operationId": "putTeachersId",
         "security": [
           {
@@ -23033,7 +23097,7 @@
           "Exams & marks"
         ],
         "summary": "Parent acknowledges released result",
-        "description": "Upserts a parent_mark_acks row for the exam/student using the parent's own name and phone, then notifies the class teacher (ack_completed).\n\n**Who can call:** Parent.\n\n**Checks:** requireExamsAccess(school_id) must resolve to a parent; parent must be linked to student_id via student_parents; exam must be released.",
+        "description": "Upserts a parent_mark_acks row for the exam/student using the parent's own name and phone, then notifies the class teacher (ack_completed).\n\n**Who can call:** Parent.\n\n**Checks:** requireExamsParent(school_id): only the parent login is read, so other portal logins in the same browser cannot interfere; the parent must be linked to student_id via student_parents; the exam must be released.",
         "operationId": "postExamsIdAcknowledge",
         "security": [
           {
@@ -23072,7 +23136,7 @@
         "x-badges": [
           {
             "name": "Parent",
-            "color": "#be185d"
+            "color": "#a16207"
           }
         ],
         "x-source-file": "app/api/exams/[id]/acknowledge/route.ts",
@@ -23116,7 +23180,7 @@
           "Exams & marks"
         ],
         "summary": "Get parent acknowledgement roster",
-        "description": "For a released exam, lists active students of the class with acknowledged_at, parent_name and last nudge time, plus totals.\n\n**Who can call:** Platform admin, School admin, Teacher.\n\n**Checks:** requireExamsAccess(school_id) restricted to admin or teacher; a teacher must be the class teacher (classes.class_teacher_id).",
+        "description": "For a released exam, lists every active student of the class, ordered by class roll number, with school_roll_number, acknowledged_at, parent_name (whoever acknowledged, else the linked parent, else the name on the student record) and last nudge time, plus totals. The Teacher portal (class teacher) and School Admin both show this.\n\n**Who can call:** Platform admin, School admin, Teacher.\n\n**Checks:** requireExamsAccess(school_id) restricted to admin or teacher; a teacher must be the class teacher (classes.class_teacher_id).",
         "operationId": "getExamsIdAcknowledgements",
         "security": [
           {
@@ -23174,6 +23238,11 @@
                             "type": "string",
                             "format": "date-time",
                             "nullable": true
+                          },
+                          "school_roll_number": {
+                            "type": "integer",
+                            "nullable": true,
+                            "description": "Class roll number"
                           }
                         }
                       }
@@ -35061,11 +35130,11 @@
           "400": {
             "description": "Invalid title, content, type, priority, audience, status, template, classes, translations, dates, or card_data without a template_key"
           },
-          "500": {
-            "description": "Internal server error"
-          },
           "403": {
             "description": "Not school staff for this school_id"
+          },
+          "500": {
+            "description": "Internal server error"
           }
         },
         "x-badges": [
@@ -35270,17 +35339,17 @@
               }
             }
           },
+          "400": {
+            "description": "Invalid id; invalid or empty change"
+          },
+          "403": {
+            "description": "Not school staff for the notice's school (also returned to signed-out callers, so ids cannot be probed)"
+          },
           "404": {
             "description": "Not found"
           },
           "500": {
             "description": "Internal server error"
-          },
-          "403": {
-            "description": "Not school staff for the notice's school (also returned to signed-out callers, so ids cannot be probed)"
-          },
-          "400": {
-            "description": "Invalid id; invalid or empty change"
           }
         },
         "x-badges": [
@@ -35427,17 +35496,17 @@
               }
             }
           },
+          "400": {
+            "description": "Invalid id"
+          },
+          "403": {
+            "description": "Not school staff for the notice's school (also returned to signed-out callers, so ids cannot be probed)"
+          },
           "404": {
             "description": "Not found"
           },
           "500": {
             "description": "Internal server error"
-          },
-          "403": {
-            "description": "Not school staff for the notice's school (also returned to signed-out callers, so ids cannot be probed)"
-          },
-          "400": {
-            "description": "Invalid id"
           }
         },
         "x-badges": [
@@ -37899,11 +37968,11 @@
           "404": {
             "description": "not_found"
           },
-          "500": {
-            "description": "Internal server error"
-          },
           "410": {
             "description": "Closed: an event/place QR paused or past closes_on, or the school-wide QR paused (paused: true). Body: { error: 'closed', school_name, title, paused }"
+          },
+          "500": {
+            "description": "Internal server error"
           }
         },
         "x-badges": [
@@ -39114,23 +39183,11 @@
           "Parent portal"
         ],
         "summary": "Get child dashboard summary",
-        "description": "Returns upcoming exams (next 60 days) for the student's grade/section, last 5 released results with totals and parent ack flag, count of unacknowledged released exams, and this month's morning attendance percentage. Sub-query failures fall back to empty/null.\n\n**Who can call:** Platform admin, Teacher, Student, Parent, School admin.\n\n**Checks:** requireExamsAccess: school_id must match session school (platform admin may pass any). Parent must own student_id via student_parents. No ownership check for teacher/student roles. Returns 403 (not 401) when unauthenticated.\n\n**Attendance:** the child's attendance % is the shared calculation (this month, present + late ÷ marked sessions, holidays excluded), identical to GET /api/parent/attendance.",
+        "description": "Returns upcoming exams (next 60 days) for the student's grade/section, last 5 released results with totals and parent ack flag, count of unacknowledged released exams, and this month's morning attendance percentage. Sub-query failures fall back to empty/null.\n\n**Who can call:** Parent.\n\n**Checks:** requireExamsParent(school_id): only the parent login is read; school_id must match the parent's school; the parent must own student_id via student_parents.\n\n**Attendance:** the child's attendance % is the shared calculation (this month, present + late ÷ marked sessions, holidays excluded), identical to GET /api/parent/attendance.",
         "operationId": "getParentChildSummary",
         "security": [
           {
-            "platformAdmin": []
-          },
-          {
-            "teacher": []
-          },
-          {
-            "student": []
-          },
-          {
             "parent": []
-          },
-          {
-            "schoolAdmin": []
           }
         ],
         "responses": {
@@ -39246,24 +39303,8 @@
         },
         "x-badges": [
           {
-            "name": "Platform admin",
-            "color": "#6d28d9"
-          },
-          {
-            "name": "Teacher",
-            "color": "#b45309"
-          },
-          {
-            "name": "Student",
-            "color": "#047857"
-          },
-          {
             "name": "Parent",
-            "color": "#be185d"
-          },
-          {
-            "name": "School admin",
-            "color": "#1d4ed8"
+            "color": "#a16207"
           }
         ],
         "x-source-file": "app/api/parent/child-summary/route.ts",
@@ -39304,20 +39345,11 @@
           "Parent portal"
         ],
         "summary": "Get student fee ledger and payments",
-        "description": "Returns a student's fee ledger for an academic year with balances, all payments and non-revoked waivers, plus totals. Side effect: flips this student's pending bills to overdue (or back to pending) based on academic year end_date.\n\n**Who can call:** Teacher, Student, Parent, School admin.\n\n**Checks:** getAnySession; school_id must equal session schoolId. Parent must be linked to student_id via student_parents. No ownership check for teacher/student/admin roles.",
+        "description": "Returns a student's fee ledger for an academic year with balances, all payments and non-revoked waivers, plus totals. Side effect: flips this student's pending bills to overdue (or back to pending) based on academic year end_date.\n\n**Who can call:** Parent.\n\n**Checks:** getParentSession(): only the parent login is read (a school-admin login in the same browser no longer makes this a 403); school_id must equal the parent's school; the parent must be linked to student_id via student_parents.",
         "operationId": "getParentFees",
         "security": [
           {
-            "teacher": []
-          },
-          {
-            "student": []
-          },
-          {
             "parent": []
-          },
-          {
-            "schoolAdmin": []
           }
         ],
         "responses": {
@@ -39516,20 +39548,8 @@
         },
         "x-badges": [
           {
-            "name": "Teacher",
-            "color": "#b45309"
-          },
-          {
-            "name": "Student",
-            "color": "#047857"
-          },
-          {
             "name": "Parent",
-            "color": "#be185d"
-          },
-          {
-            "name": "School admin",
-            "color": "#1d4ed8"
+            "color": "#a16207"
           }
         ],
         "x-source-file": "app/api/parent/fees/route.ts",
@@ -39568,20 +39588,11 @@
           "Parent portal"
         ],
         "summary": "Submit parent online fee payment",
-        "description": "Records a self-reported online payment as fee_payments rows with payment_status 'pending_verification' for admin review. Single-entry pays one ledger row; multi-entry allocates total_amount FIFO by due date across ledger_ids. Rejects amounts exceeding balance minus already-pending payments.\n\n**Who can call:** Teacher, Student, Parent, School admin.\n\n**Checks:** getAnySession only: no check that school_id matches the session or that the caller owns student_id (ledger rows must belong to school_id + student_id).",
+        "description": "Records a self-reported online payment as fee_payments rows with payment_status 'pending_verification' for admin review. Single-entry pays one ledger row; multi-entry allocates total_amount FIFO by due date across ledger_ids. Rejects amounts exceeding balance minus already-pending payments.\n\n**Who can call:** Parent.\n\n**Checks:** getParentSession(): only the parent login is read (a school-admin login in the same browser no longer makes this a 403); school_id must equal the parent's school; the parent must be linked to student_id via student_parents. The school must have the online-payments feature.",
         "operationId": "postParentFees",
         "security": [
           {
-            "teacher": []
-          },
-          {
-            "student": []
-          },
-          {
             "parent": []
-          },
-          {
-            "schoolAdmin": []
           }
         ],
         "responses": {
@@ -39624,20 +39635,8 @@
         },
         "x-badges": [
           {
-            "name": "Teacher",
-            "color": "#b45309"
-          },
-          {
-            "name": "Student",
-            "color": "#047857"
-          },
-          {
             "name": "Parent",
-            "color": "#be185d"
-          },
-          {
-            "name": "School admin",
-            "color": "#1d4ed8"
+            "color": "#a16207"
           }
         ],
         "x-source-file": "app/api/parent/fees/route.ts",
@@ -44333,6 +44332,9 @@
               }
             }
           },
+          "400": {
+            "description": "This announcement does not ask for acknowledgement"
+          },
           "401": {
             "description": "Not signed in"
           },
@@ -44344,9 +44346,6 @@
           },
           "500": {
             "description": "Internal server error"
-          },
-          "400": {
-            "description": "This announcement does not ask for acknowledgement"
           }
         },
         "parameters": [
@@ -44569,6 +44568,9 @@
               }
             }
           },
+          "400": {
+            "description": "Invalid audience or classes"
+          },
           "401": {
             "description": "Not signed in"
           },
@@ -44580,9 +44582,6 @@
           },
           "500": {
             "description": "Internal server error"
-          },
-          "400": {
-            "description": "Invalid audience or classes"
           }
         },
         "parameters": [
@@ -44900,14 +44899,11 @@
               }
             }
           },
-          "403": {
-            "description": "Forbidden"
-          },
-          "500": {
-            "description": "Internal server error"
-          },
           "400": {
             "description": "Missing or invalid filter, or format not offered for this export"
+          },
+          "403": {
+            "description": "Forbidden"
           },
           "404": {
             "description": "Unknown export, class or exam not found"
@@ -44917,6 +44913,9 @@
           },
           "413": {
             "description": "Too many rows — narrow the filters"
+          },
+          "500": {
+            "description": "Internal server error"
           }
         },
         "x-source-file": "app/api/data-export/[key]/route.ts"
@@ -45336,11 +45335,11 @@
           "400": {
             "description": "Invalid body or category scope"
           },
-          "404": {
-            "description": "Not found"
-          },
           "401": {
             "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
           },
           "500": {
             "description": "Internal server error"
@@ -45488,11 +45487,11 @@
               }
             }
           },
-          "404": {
-            "description": "Not found"
-          },
           "401": {
             "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
           },
           "500": {
             "description": "Internal server error"
@@ -45781,6 +45780,3661 @@
                   "school_id",
                   "action",
                   "source"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/billing/plan": {
+      "get": {
+        "tags": [
+          "Plan & billing"
+        ],
+        "summary": "Get my school's plan",
+        "description": "The signed-in school administrator / principal's own plan and the plan term that covers today.\n\n**Who can call:** School admin.\n\n**Checks:** getSession(); 403 unless the caller is the school administrator or principal; always scoped to the caller's own school.",
+        "operationId": "getBillingPlan",
+        "security": [
+          {
+            "schoolAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Plan and current term",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {}
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Not the school administrator or principal"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
+          }
+        ],
+        "x-source-file": "app/api/billing/plan/route.ts"
+      }
+    },
+    "/api/billing/usage": {
+      "get": {
+        "tags": [
+          "Plan & billing"
+        ],
+        "summary": "Get this month's usage and extra charges",
+        "description": "This month's usage per service (WhatsApp, AI, email, exports, API requests) against the plan's included amount, and the extra charges so far. Our provider cost is never returned.\n\n**Who can call:** School admin.\n\n**Checks:** getSession(); 403 unless the caller is the school administrator or principal; always scoped to the caller's own school.",
+        "operationId": "getBillingUsage",
+        "security": [
+          {
+            "schoolAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Usage and charges for the current month",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {}
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Not the school administrator or principal"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
+          }
+        ],
+        "x-source-file": "app/api/billing/usage/route.ts"
+      }
+    },
+    "/api/billing/invoices": {
+      "get": {
+        "tags": [
+          "Plan & billing"
+        ],
+        "summary": "List my school's bills",
+        "description": "Every bill of the signed-in school administrator / principal's own school. A bill carries no provider cost, so nothing needs stripping.\n\n**Who can call:** School admin.\n\n**Checks:** getSession(); 403 unless the caller is the school administrator or principal; always scoped to the caller's own school.",
+        "operationId": "getBillingInvoices",
+        "security": [
+          {
+            "schoolAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Bills, newest first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {}
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Not the school administrator or principal"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
+          }
+        ],
+        "x-source-file": "app/api/billing/invoices/route.ts"
+      }
+    },
+    "/api/plan/status": {
+      "get": {
+        "tags": [
+          "Plan & billing"
+        ],
+        "summary": "Get my school's plan state",
+        "description": "The signed-in user's school plan state, for the plan banner and the login reminder shown in every portal. `locked` is what the server actually enforces (plan expired past grace AND PLAN_EXPIRY_ENFORCED), so screens never claim a lock that is not there.\n\n**Who can call:** School admin, Teacher, Student, Parent.\n\n**Checks:** Any school-side session (staff, teacher, student or parent); the school comes from the session, never from the request.",
+        "operationId": "getPlanStatus",
+        "security": [
+          {
+            "schoolAdmin": []
+          },
+          {
+            "teacher": []
+          },
+          {
+            "student": []
+          },
+          {
+            "parent": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Plan state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "locked": {
+                      "type": "boolean",
+                      "description": "The server is blocking the school's requests (expired past grace and enforcement is on)"
+                    },
+                    "can_manage": {
+                      "type": "boolean",
+                      "description": "The caller may request a renewal and export the school's data"
+                    },
+                    "renewal_requested_at": {
+                      "type": "string",
+                      "description": "When a waiting renewal request was raised, if any",
+                      "format": "date-time",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
+          },
+          {
+            "name": "Teacher",
+            "color": "#0f766e"
+          },
+          {
+            "name": "Student",
+            "color": "#15803d"
+          },
+          {
+            "name": "Parent",
+            "color": "#a16207"
+          }
+        ],
+        "x-source-file": "app/api/plan/status/route.ts"
+      }
+    },
+    "/api/plan/export": {
+      "get": {
+        "tags": [
+          "Plan & billing"
+        ],
+        "summary": "Export my school's data as Excel",
+        "description": "The school's own data as an Excel workbook. This is still available to a school whose plan has ended (the proxy exempts /api/plan/), so it never depends on a plan feature. Password hashes, tokens and secrets are never included, and every export is written to the platform audit log.\n\n**Who can call:** School admin.\n\n**Checks:** getSession(); school administrator or principal only; always the caller's own school.",
+        "operationId": "getPlanExport",
+        "security": [
+          {
+            "schoolAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Excel workbook",
+            "content": {
+              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unknown dataset"
+          },
+          "403": {
+            "description": "Only the school administrator or principal can export school data"
+          },
+          "500": {
+            "description": "Export failed"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
+          }
+        ],
+        "x-source-file": "app/api/plan/export/route.ts",
+        "parameters": [
+          {
+            "name": "dataset",
+            "in": "query",
+            "required": true,
+            "description": "Which data to export",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "students",
+                "parents",
+                "teachers",
+                "staff",
+                "classes",
+                "fees",
+                "attendance",
+                "marks",
+                "all"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "/api/plan/renewal-request": {
+      "post": {
+        "tags": [
+          "Plan & billing"
+        ],
+        "summary": "Ask WLYL to renew or change the plan",
+        "description": "The school administrator asks WLYL to renew (or change) the plan. Allowed while the school is locked. The request lands in Platform Admin → Renewals. A school has at most one waiting request.\n\n**Who can call:** School admin.\n\n**Checks:** getSession(); school administrator or principal only. A second request while one is waiting returns 429 with code ALREADY_REQUESTED and sends nothing.",
+        "operationId": "postPlanRenewalRequest",
+        "security": [
+          {
+            "schoolAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Request recorded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {}
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Only the school administrator or principal can request a renewal"
+          },
+          "404": {
+            "description": "School not found"
+          },
+          "429": {
+            "description": "A renewal request is already with us (code ALREADY_REQUESTED)"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
+          }
+        ],
+        "x-source-file": "app/api/plan/renewal-request/route.ts"
+      }
+    },
+    "/api/plans/public": {
+      "get": {
+        "tags": [
+          "Plans & features"
+        ],
+        "summary": "List the plans shown on the website",
+        "description": "The plans shown on the public website, with public fields only.\n\n**Who can call:** Public (no sign-in).\n\n**Checks:** None — no sign-in.",
+        "operationId": "getPlansPublic",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Public plans",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {}
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Public",
+            "color": "#dc2626"
+          }
+        ],
+        "x-source-file": "app/api/plans/public/route.ts"
+      }
+    },
+    "/api/school-admin/traffic": {
+      "get": {
+        "tags": [
+          "Usage tracking"
+        ],
+        "summary": "Get my school's traffic",
+        "description": "Logins, time spent, busiest hours and most-opened features for the signed-in school administrator / principal's own school.\n\n**Who can call:** School admin.\n\n**Checks:** getSession(); 403 unless the caller is the school administrator or principal; always scoped to the caller's own school.",
+        "operationId": "getSchoolAdminTraffic",
+        "security": [
+          {
+            "schoolAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Traffic summary",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {}
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "days must be 7 or 30"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "500": {
+            "description": "Failed to load traffic"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
+          }
+        ],
+        "x-source-file": "app/api/school-admin/traffic/route.ts",
+        "parameters": [
+          {
+            "name": "days",
+            "in": "query",
+            "required": false,
+            "description": "Window in days",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "7",
+                "30"
+              ],
+              "default": "7"
+            }
+          }
+        ]
+      }
+    },
+    "/api/platform/billing": {
+      "get": {
+        "tags": [
+          "Platform billing"
+        ],
+        "summary": "List bills for a month",
+        "description": "Bills dated in the chosen month plus every unpaid older bill, and the last automatic billing run.\n\n**Who can call:** Platform admin.\n\n**Checks:** requirePlatformAdmin().",
+        "operationId": "getPlatformBilling",
+        "security": [
+          {
+            "platformAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Bills and last run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {}
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "month must be YYYY-MM"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          }
+        ],
+        "x-source-file": "app/api/platform/billing/route.ts",
+        "parameters": [
+          {
+            "name": "month",
+            "in": "query",
+            "required": false,
+            "description": "IST calendar month, YYYY-MM (defaults to the current month)",
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}$"
+            }
+          }
+        ]
+      }
+    },
+    "/api/platform/billing/{billId}": {
+      "post": {
+        "tags": [
+          "Platform billing"
+        ],
+        "summary": "Act on a bill",
+        "description": "Record a payment, add an adjustment that is applied to the next bill, or resend the bill email. The body's `action` picks which.\n\n**Who can call:** Platform admin.\n\n**Checks:** requirePlatformAdmin(). The body is validated strictly; a payment date cannot be in the future.",
+        "operationId": "postPlatformBillingBillId",
+        "security": [
+          {
+            "platformAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Updated bill",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {}
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid bill id or body"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          }
+        ],
+        "x-source-file": "app/api/platform/billing/[billId]/route.ts",
+        "parameters": [
+          {
+            "name": "billId",
+            "in": "path",
+            "required": true,
+            "description": "Bill id",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "action": {
+                        "type": "string",
+                        "enum": [
+                          "record_payment"
+                        ]
+                      },
+                      "amount": {
+                        "type": "number",
+                        "description": "More than 0, at most 2 decimals"
+                      },
+                      "paidOn": {
+                        "type": "string",
+                        "description": "YYYY-MM-DD, not in the future"
+                      },
+                      "method": {
+                        "type": "string",
+                        "enum": [
+                          "bank_transfer",
+                          "upi",
+                          "cheque",
+                          "cash"
+                        ]
+                      },
+                      "reference": {
+                        "type": "string",
+                        "description": "Up to 100 characters"
+                      }
+                    },
+                    "required": [
+                      "action",
+                      "amount",
+                      "paidOn",
+                      "method"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "action": {
+                        "type": "string",
+                        "enum": [
+                          "add_adjustment"
+                        ]
+                      },
+                      "amount": {
+                        "type": "number",
+                        "description": "Non-zero, within ±₹10,00,000, at most 2 decimals"
+                      },
+                      "description": {
+                        "type": "string",
+                        "description": "3–200 characters"
+                      }
+                    },
+                    "required": [
+                      "action",
+                      "amount",
+                      "description"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "action": {
+                        "type": "string",
+                        "enum": [
+                          "resend"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "action"
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/platform/plans": {
+      "get": {
+        "tags": [
+          "Platform billing"
+        ],
+        "summary": "List paid plans",
+        "description": "Every paid plan (basic, standard, premium) with its monthly and yearly price, staff limit, website visibility and how many schools are on it.\n\n**Who can call:** Platform admin.\n\n**Checks:** requirePlatformAdmin().",
+        "operationId": "getPlatformPlans",
+        "security": [
+          {
+            "platformAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Plans",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "tier": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "description": {
+                        "type": "string"
+                      },
+                      "monthly": {
+                        "type": "number"
+                      },
+                      "yearly": {
+                        "type": "number",
+                        "nullable": true
+                      },
+                      "staffLimit": {
+                        "type": "integer",
+                        "nullable": true
+                      },
+                      "schools": {
+                        "type": "integer",
+                        "description": "Schools on this plan"
+                      },
+                      "shownOnWebsite": {
+                        "type": "boolean"
+                      },
+                      "retired": {
+                        "type": "boolean"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          }
+        ],
+        "x-source-file": "app/api/platform/plans/route.ts"
+      },
+      "put": {
+        "tags": [
+          "Platform billing"
+        ],
+        "summary": "Update a plan's prices and website text",
+        "description": "Prices, website text and visibility of one plan. Schools already on it keep their agreed price (school_plan_terms) until they renew. Staff limits are saved through POST /api/platform/features, not here.\n\n**Who can call:** Platform admin.\n\n**Checks:** requirePlatformAdmin(). A ₹0 monthly price needs `free: true`.",
+        "operationId": "putPlatformPlans",
+        "security": [
+          {
+            "platformAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Updated plan",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {}
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid body"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Plan not found"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          }
+        ],
+        "x-source-file": "app/api/platform/plans/route.ts",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "tier": {
+                    "type": "string",
+                    "enum": [
+                      "basic",
+                      "standard",
+                      "premium"
+                    ]
+                  },
+                  "monthly": {
+                    "type": "number",
+                    "description": "0 to 1,000,000"
+                  },
+                  "yearly": {
+                    "type": "number",
+                    "nullable": true,
+                    "description": "0 to 10,000,000, or null"
+                  },
+                  "description": {
+                    "type": "string",
+                    "description": "Up to 300 characters"
+                  },
+                  "shownOnWebsite": {
+                    "type": "boolean"
+                  },
+                  "retired": {
+                    "type": "boolean"
+                  },
+                  "free": {
+                    "type": "boolean",
+                    "description": "Required when monthly is 0"
+                  }
+                },
+                "required": [
+                  "tier",
+                  "monthly",
+                  "yearly",
+                  "description",
+                  "shownOnWebsite",
+                  "retired"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/platform/pricing": {
+      "get": {
+        "tags": [
+          "Platform billing"
+        ],
+        "summary": "Get service prices",
+        "description": "Prices per service and plan in force this month, plus the changes scheduled for next month.\n\n**Who can call:** Platform admin.\n\n**Checks:** requirePlatformAdmin().",
+        "operationId": "getPlatformPricing",
+        "security": [
+          {
+            "platformAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Prices",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {}
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          }
+        ],
+        "x-source-file": "app/api/platform/pricing/route.ts"
+      },
+      "put": {
+        "tags": [
+          "Platform billing"
+        ],
+        "summary": "Set a service price for a plan",
+        "description": "Sets (inPlan: true) or removes (inPlan: false) a service from a plan. A price change always lands on next month, and a month's price never changes once it has started.\n\n**Who can call:** Platform admin.\n\n**Checks:** requirePlatformAdmin(). The service must exist and be billable; cap must be at least the included amount.",
+        "operationId": "putPlatformPricing",
+        "security": [
+          {
+            "platformAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {}
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid body, or the service is counted only and has no price"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Service not found"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          }
+        ],
+        "x-source-file": "app/api/platform/pricing/route.ts",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "meterKey": {
+                        "type": "string"
+                      },
+                      "tier": {
+                        "type": "string",
+                        "enum": [
+                          "basic",
+                          "standard",
+                          "premium"
+                        ]
+                      },
+                      "inPlan": {
+                        "type": "boolean",
+                        "enum": [
+                          true
+                        ]
+                      },
+                      "included": {
+                        "type": "number",
+                        "description": "Included per month"
+                      },
+                      "unitPrice": {
+                        "type": "number",
+                        "description": "Price per unit after the included amount"
+                      },
+                      "cap": {
+                        "type": "number",
+                        "nullable": true,
+                        "description": "Monthly cap, or null"
+                      },
+                      "atCap": {
+                        "type": "string",
+                        "enum": [
+                          "block",
+                          "allow",
+                          "notify"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "meterKey",
+                      "tier",
+                      "inPlan",
+                      "included",
+                      "unitPrice",
+                      "atCap"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "meterKey": {
+                        "type": "string"
+                      },
+                      "tier": {
+                        "type": "string",
+                        "enum": [
+                          "basic",
+                          "standard",
+                          "premium"
+                        ]
+                      },
+                      "inPlan": {
+                        "type": "boolean",
+                        "enum": [
+                          false
+                        ]
+                      }
+                    },
+                    "required": [
+                      "meterKey",
+                      "tier",
+                      "inPlan"
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/platform/renewals": {
+      "get": {
+        "tags": [
+          "Platform billing"
+        ],
+        "summary": "List renewal requests",
+        "description": "The renewal-request queue. \"active\" means open plus contacted. Also returns `open_count`, which drives the badge on the navigation item.\n\n**Who can call:** Platform admin.\n\n**Checks:** requirePlatformAdmin().",
+        "operationId": "getPlatformRenewals",
+        "security": [
+          {
+            "platformAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Requests and open count",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "open_count": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          }
+        ],
+        "x-source-file": "app/api/platform/renewals/route.ts",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "description": "Which requests to list",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "active",
+                "renewed",
+                "dismissed",
+                "all"
+              ],
+              "default": "active"
+            }
+          }
+        ]
+      }
+    },
+    "/api/platform/renewals/{id}": {
+      "patch": {
+        "tags": [
+          "Platform billing"
+        ],
+        "summary": "Work a renewal request",
+        "description": "Mark a request contacted, dismiss it, reopen it, or keep a note about the conversation. \"renewed\" is never set here; it happens when the plan is actually renewed (PUT /api/schools/{id}/subscription).\n\n**Who can call:** Platform admin.\n\n**Checks:** requirePlatformAdmin(). A renewed request cannot be changed; reopening is refused if the school already has another waiting request.",
+        "operationId": "patchPlatformRenewalsId",
+        "security": [
+          {
+            "platformAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Updated request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {}
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid id, status or note, or nothing to update"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Request not found"
+          },
+          "409": {
+            "description": "Already renewed, or the school already has another waiting request"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          }
+        ],
+        "x-source-file": "app/api/platform/renewals/[id]/route.ts",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Renewal request id",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "open",
+                      "contacted",
+                      "dismissed"
+                    ]
+                  },
+                  "note": {
+                    "type": "string",
+                    "description": "Up to 2000 characters"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/platform/usage": {
+      "get": {
+        "tags": [
+          "Platform billing"
+        ],
+        "summary": "Every school's usage for a month",
+        "description": "Every school's usage and extra charges for one IST month.\n\n**Who can call:** Platform admin.\n\n**Checks:** requirePlatformAdmin().",
+        "operationId": "getPlatformUsage",
+        "security": [
+          {
+            "platformAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Usage per school",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {}
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "month must be YYYY-MM"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          }
+        ],
+        "x-source-file": "app/api/platform/usage/route.ts",
+        "parameters": [
+          {
+            "name": "month",
+            "in": "query",
+            "required": false,
+            "description": "IST calendar month, YYYY-MM (defaults to the current month)",
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}$"
+            }
+          }
+        ]
+      }
+    },
+    "/api/platform/usage/{schoolId}": {
+      "get": {
+        "tags": [
+          "Platform billing"
+        ],
+        "summary": "One school's usage for a month",
+        "description": "One school's month: daily counts, charges and price overrides.\n\n**Who can call:** Platform admin.\n\n**Checks:** requirePlatformAdmin().",
+        "operationId": "getPlatformUsageSchoolId",
+        "security": [
+          {
+            "platformAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "School usage",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {}
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid school id or month"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "School not found"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          }
+        ],
+        "x-source-file": "app/api/platform/usage/[schoolId]/route.ts",
+        "parameters": [
+          {
+            "name": "schoolId",
+            "in": "path",
+            "required": true,
+            "description": "School id",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "month",
+            "in": "query",
+            "required": false,
+            "description": "IST calendar month, YYYY-MM (defaults to the current month)",
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}$"
+            }
+          }
+        ]
+      }
+    },
+    "/api/platform/usage-meters": {
+      "get": {
+        "tags": [
+          "Platform billing"
+        ],
+        "summary": "List the services we count",
+        "description": "Every service that usage is counted for, with its unit, our cost per unit and whether it is billable and active.\n\n**Who can call:** Platform admin.\n\n**Checks:** requirePlatformAdmin().",
+        "operationId": "getPlatformUsageMeters",
+        "security": [
+          {
+            "platformAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Services",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {}
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          }
+        ],
+        "x-source-file": "app/api/platform/usage-meters/route.ts"
+      },
+      "patch": {
+        "tags": [
+          "Platform billing"
+        ],
+        "summary": "Edit a counted service",
+        "description": "Rename a service, change its unit label or our cost per unit, or switch billing or the service itself off. There is no delete: a service with history is switched off (isActive=false), never removed.\n\n**Who can call:** Platform admin.\n\n**Checks:** requirePlatformAdmin().",
+        "operationId": "patchPlatformUsageMeters",
+        "security": [
+          {
+            "platformAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Updated service",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {}
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid body, or nothing to change"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Service not found"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          }
+        ],
+        "x-source-file": "app/api/platform/usage-meters/route.ts",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "key": {
+                    "type": "string",
+                    "description": "Service key"
+                  },
+                  "name": {
+                    "type": "string",
+                    "description": "1–80 characters"
+                  },
+                  "unitLabel": {
+                    "type": "string",
+                    "description": "1–80 characters"
+                  },
+                  "ourCostPerUnit": {
+                    "type": "number",
+                    "nullable": true,
+                    "minimum": 0,
+                    "maximum": 1000
+                  },
+                  "isBillable": {
+                    "type": "boolean"
+                  },
+                  "isActive": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "key"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/platform/schools/{id}/usage-overrides": {
+      "get": {
+        "tags": [
+          "Platform billing"
+        ],
+        "summary": "List a school's price overrides",
+        "description": "A school's own prices and limits per service. A field that is not set uses the plan's value.\n\n**Who can call:** Platform admin.\n\n**Checks:** requirePlatformAdmin().",
+        "operationId": "getPlatformSchoolsIdUsageOverrides",
+        "security": [
+          {
+            "platformAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Overrides",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "meterKey": {
+                        "type": "string"
+                      },
+                      "included": {
+                        "type": "number",
+                        "nullable": true
+                      },
+                      "unitPrice": {
+                        "type": "number",
+                        "nullable": true
+                      },
+                      "cap": {
+                        "type": "number",
+                        "nullable": true
+                      },
+                      "atCap": {
+                        "type": "string",
+                        "nullable": true,
+                        "enum": [
+                          "block",
+                          "allow",
+                          "notify"
+                        ]
+                      },
+                      "note": {
+                        "type": "string"
+                      },
+                      "updatedBy": {
+                        "type": "string"
+                      },
+                      "updatedAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid school id"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "School not found"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          }
+        ],
+        "x-source-file": "app/api/platform/schools/[id]/usage-overrides/route.ts",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "School id",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "Platform billing"
+        ],
+        "summary": "Set a school's price override",
+        "description": "Sets a school's own included amount, unit price, cap or at-cap behaviour for one service. A null or omitted field uses the plan's value. Applies immediately, including the current month.\n\n**Who can call:** Platform admin.\n\n**Checks:** requirePlatformAdmin(). The school and the service must exist; the service must be billable. At least one value must be set; cap must be at least the included amount; a note of 3–200 characters is required.",
+        "operationId": "putPlatformSchoolsIdUsageOverrides",
+        "security": [
+          {
+            "platformAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Saved override",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {}
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid body, or the service is counted only and has no price"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "School or service not found"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          }
+        ],
+        "x-source-file": "app/api/platform/schools/[id]/usage-overrides/route.ts",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "School id",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "meterKey": {
+                    "type": "string"
+                  },
+                  "included": {
+                    "type": "number",
+                    "nullable": true
+                  },
+                  "unitPrice": {
+                    "type": "number",
+                    "nullable": true
+                  },
+                  "cap": {
+                    "type": "number",
+                    "nullable": true
+                  },
+                  "atCap": {
+                    "type": "string",
+                    "nullable": true,
+                    "enum": [
+                      "block",
+                      "allow",
+                      "notify"
+                    ]
+                  },
+                  "note": {
+                    "type": "string",
+                    "description": "3–200 characters"
+                  }
+                },
+                "required": [
+                  "meterKey",
+                  "note"
+                ]
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Platform billing"
+        ],
+        "summary": "Remove a school's price override",
+        "description": "Removes the school's override for one service, so the plan's values apply again.\n\n**Who can call:** Platform admin.\n\n**Checks:** requirePlatformAdmin().",
+        "operationId": "deletePlatformSchoolsIdUsageOverrides",
+        "security": [
+          {
+            "platformAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Removed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {}
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid school id, or meter is required"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "School not found, or no override for this service"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          }
+        ],
+        "x-source-file": "app/api/platform/schools/[id]/usage-overrides/route.ts",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "School id",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "meter",
+            "in": "query",
+            "required": true,
+            "description": "Service key",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/cron/billing": {
+      "get": {
+        "tags": [
+          "Scheduled jobs"
+        ],
+        "summary": "Run billing",
+        "description": "Daily at 06:00 IST (00:30 UTC). On IST days 1–3 it creates last month's usage bills (safe to repeat; days 2–3 retry any school that failed). Every day it starts plan terms saved for later (downgrades at renewal) and sends overdue-bill reminders.\n\n**Who can call:** Cron.\n\n**Checks:** Authorization: Bearer $CRON_SECRET. A plain POST works for manual runs.",
+        "operationId": "getCronBilling",
+        "security": [
+          {
+            "cron": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Billing run summary",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {}
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Bad bearer token"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Cron",
+            "color": "#475569"
+          }
+        ],
+        "x-source-file": "app/api/cron/billing/route.ts"
+      },
+      "post": {
+        "tags": [
+          "Scheduled jobs"
+        ],
+        "summary": "Run billing (manual)",
+        "description": "Same run as the GET, triggered by hand.\n\n**Who can call:** Cron.\n\n**Checks:** Authorization: Bearer $CRON_SECRET. A plain POST works for manual runs.",
+        "operationId": "postCronBilling",
+        "security": [
+          {
+            "cron": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Billing run summary",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {}
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Bad bearer token"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Cron",
+            "color": "#475569"
+          }
+        ],
+        "x-source-file": "app/api/cron/billing/route.ts"
+      }
+    },
+    "/api/cron/exam-reminders": {
+      "get": {
+        "tags": [
+          "Scheduled jobs"
+        ],
+        "summary": "Send exam reminders",
+        "description": "Sends the 7-day-before, 1-day-before and exam-day reminders to every applicable student and linked parent. Never changes exam records. Each reminder type is sent once per exam however often this runs, and a school can switch each one off in exam notification settings.\n\n**Who can call:** Cron.\n\n**Checks:** Authorization: Bearer $CRON_SECRET. A plain POST works for manual runs. Returns 503 if CRON_SECRET is not configured.",
+        "operationId": "getCronExamReminders",
+        "security": [
+          {
+            "cron": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Reminders sent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {}
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Bad bearer token"
+          },
+          "500": {
+            "description": "Internal server error"
+          },
+          "503": {
+            "description": "CRON_SECRET is not configured"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Cron",
+            "color": "#475569"
+          }
+        ],
+        "x-source-file": "app/api/cron/exam-reminders/route.ts"
+      },
+      "post": {
+        "tags": [
+          "Scheduled jobs"
+        ],
+        "summary": "Send exam reminders (manual)",
+        "description": "Same run as the GET, triggered by hand.\n\n**Who can call:** Cron.\n\n**Checks:** Authorization: Bearer $CRON_SECRET. A plain POST works for manual runs. Returns 503 if CRON_SECRET is not configured.",
+        "operationId": "postCronExamReminders",
+        "security": [
+          {
+            "cron": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Reminders sent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {}
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Bad bearer token"
+          },
+          "500": {
+            "description": "Internal server error"
+          },
+          "503": {
+            "description": "CRON_SECRET is not configured"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Cron",
+            "color": "#475569"
+          }
+        ],
+        "x-source-file": "app/api/cron/exam-reminders/route.ts"
+      }
+    },
+    "/api/cron/fee-year-end-reminders": {
+      "get": {
+        "tags": [
+          "Scheduled jobs"
+        ],
+        "summary": "Send fee year-end reminders",
+        "description": "Daily. Raises in-app notifications for the fee year-end process: 60, 30 and 7 days before the academic year ends, once if it ends without being closed, and when a Leave-Open follow-up deadline passes with money still owing. Each reminder is raised once per school, year and kind.\n\n**Who can call:** Cron.\n\n**Checks:** Authorization: Bearer $CRON_SECRET.",
+        "operationId": "getCronFeeYearEndReminders",
+        "security": [
+          {
+            "cron": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Reminders raised",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {}
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Bad bearer token"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Cron",
+            "color": "#475569"
+          }
+        ],
+        "x-source-file": "app/api/cron/fee-year-end-reminders/route.ts"
+      }
+    },
+    "/api/cron/plan-expiry": {
+      "get": {
+        "tags": [
+          "Scheduled jobs"
+        ],
+        "summary": "Send plan-expiry emails",
+        "description": "Daily. Emails each school's administrators about a plan that is about to end, has ended, or whose grace period is over. Each reminder is sent once per school and end date; a renewal starts a fresh set. If days were missed only the most urgent reminder is sent, and schools whose grace ended over a week ago are skipped.\n\n**Who can call:** Cron.\n\n**Checks:** Authorization: Bearer $CRON_SECRET. A plain POST works for manual runs.",
+        "operationId": "getCronPlanExpiry",
+        "security": [
+          {
+            "cron": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Emails sent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {}
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Bad bearer token"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Cron",
+            "color": "#475569"
+          }
+        ],
+        "x-source-file": "app/api/cron/plan-expiry/route.ts"
+      },
+      "post": {
+        "tags": [
+          "Scheduled jobs"
+        ],
+        "summary": "Send plan-expiry emails (manual)",
+        "description": "Same run as the GET, triggered by hand.\n\n**Who can call:** Cron.\n\n**Checks:** Authorization: Bearer $CRON_SECRET. A plain POST works for manual runs.",
+        "operationId": "postCronPlanExpiry",
+        "security": [
+          {
+            "cron": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Emails sent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {}
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Bad bearer token"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Cron",
+            "color": "#475569"
+          }
+        ],
+        "x-source-file": "app/api/cron/plan-expiry/route.ts"
+      }
+    },
+    "/api/internal/feature-entitlement": {
+      "get": {
+        "tags": [
+          "Operations"
+        ],
+        "summary": "Is a feature enabled for a school (proxy only)",
+        "description": "Called by the edge proxy before every feature-gated API request, because the proxy cannot reach PostgreSQL itself. Returns whether the school's plan (or a per-school override) includes the feature.\n\n**Who can call:** Cron.\n\n**Checks:** Header `x-ingest-secret` must equal the INGEST_SECRET environment variable. If INGEST_SECRET is not set in production every call is rejected — and because the proxy fails closed, every feature-gated API then returns 403.",
+        "operationId": "getInternalFeatureEntitlement",
+        "security": [
+          {
+            "cron": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Entitlement",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid entitlement request"
+          },
+          "403": {
+            "description": "Bad or missing x-ingest-secret"
+          },
+          "503": {
+            "description": "Entitlement unavailable (database error)"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Cron",
+            "color": "#475569"
+          }
+        ],
+        "x-source-file": "app/api/internal/feature-entitlement/route.ts",
+        "parameters": [
+          {
+            "name": "school_id",
+            "in": "query",
+            "required": true,
+            "description": "School id",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "feature",
+            "in": "query",
+            "required": true,
+            "description": "Feature key from lib/features.ts",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/internal/plan-locked": {
+      "get": {
+        "tags": [
+          "Operations"
+        ],
+        "summary": "Schools whose plan is locked (proxy only)",
+        "description": "Ids of schools whose plan expired past its grace period. The proxy refreshes its in-memory set from this every few seconds. The list is empty unless PLAN_EXPIRY_ENFORCED=true.\n\n**Who can call:** Cron.\n\n**Checks:** Header `x-ingest-secret` must equal the INGEST_SECRET environment variable. If INGEST_SECRET is not set in production every call is rejected — and because the proxy fails closed, every feature-gated API then returns 403.",
+        "operationId": "getInternalPlanLocked",
+        "security": [
+          {
+            "cron": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Locked school ids",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {}
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Bad or missing x-ingest-secret"
+          },
+          "500": {
+            "description": "Failed"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Cron",
+            "color": "#475569"
+          }
+        ],
+        "x-source-file": "app/api/internal/plan-locked/route.ts"
+      }
+    },
+    "/api/internal/usage-ingest": {
+      "post": {
+        "tags": [
+          "Operations"
+        ],
+        "summary": "Receive API request counts (proxy only)",
+        "description": "API request counts per school, flushed by the edge proxy in batches of up to 1000.\n\n**Who can call:** Cron.\n\n**Checks:** Header `x-ingest-secret` must equal the INGEST_SECRET environment variable. If INGEST_SECRET is not set in production every call is rejected — and because the proxy fails closed, every feature-gated API then returns 403.",
+        "operationId": "postInternalUsageIngest",
+        "security": [
+          {
+            "cron": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Counted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {}
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Bad or missing x-ingest-secret"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Cron",
+            "color": "#475569"
+          }
+        ],
+        "x-source-file": "app/api/internal/usage-ingest/route.ts",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "counts": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "schoolId": {
+                          "type": "integer"
+                        },
+                        "requests": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "schoolId",
+                        "requests"
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "counts"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/whatsapp/webhook": {
+      "get": {
+        "tags": [
+          "Operations"
+        ],
+        "summary": "WhatsApp webhook verification",
+        "description": "Meta's subscription handshake. Echoes `hub.challenge` as plain text when `hub.verify_token` matches WHATSAPP_VERIFY_TOKEN.\n\n**Who can call:** Public (no sign-in).\n\n**Checks:** Public route; the verify token is the only check.",
+        "operationId": "getWhatsappWebhook",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "The challenge, as plain text",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Verify token does not match"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Public",
+            "color": "#dc2626"
+          }
+        ],
+        "x-source-file": "app/api/whatsapp/webhook/route.ts",
+        "parameters": [
+          {
+            "name": "hub.mode",
+            "in": "query",
+            "required": false,
+            "description": "Always \"subscribe\"",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "hub.verify_token",
+            "in": "query",
+            "required": false,
+            "description": "Must equal WHATSAPP_VERIFY_TOKEN",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "hub.challenge",
+            "in": "query",
+            "required": false,
+            "description": "Value to echo back",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Operations"
+        ],
+        "summary": "WhatsApp delivery-status webhook",
+        "description": "Meta posts delivery and read status updates for messages we sent. Usage is counted when a message is sent, never here.\n\n**Who can call:** Public (no sign-in).\n\n**Checks:** Public route; authenticated by Meta's HMAC signature (WHATSAPP_APP_SECRET) over the raw body.",
+        "operationId": "postWhatsappWebhook",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Processed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {}
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid JSON or payload"
+          },
+          "401": {
+            "description": "Bad signature"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Public",
+            "color": "#dc2626"
+          }
+        ],
+        "x-source-file": "app/api/whatsapp/webhook/route.ts",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "entry": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "changes": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "value": {
+                                "type": "object",
+                                "properties": {
+                                  "statuses": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "properties": {}
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/exam-notification-settings": {
+      "get": {
+        "tags": [
+          "Exams & marks"
+        ],
+        "summary": "Get exam reminder settings",
+        "description": "The school's exam reminder and notification toggles. One row per school, created with everything on the first time it is read.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireExamsAdmin(school_id): school administrator, principal / vice principal, or platform admin.",
+        "operationId": "getExamNotificationSettings",
+        "security": [
+          {
+            "platformAdmin": []
+          },
+          {
+            "schoolAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "remind_7_day": {
+                      "type": "boolean"
+                    },
+                    "remind_1_day": {
+                      "type": "boolean"
+                    },
+                    "remind_exam_day": {
+                      "type": "boolean"
+                    },
+                    "notify_schedule_change": {
+                      "type": "boolean"
+                    },
+                    "notify_cancelled": {
+                      "type": "boolean"
+                    },
+                    "notify_marks_published": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          },
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
+          }
+        ],
+        "x-source-file": "app/api/exam-notification-settings/route.ts",
+        "parameters": [
+          {
+            "name": "school_id",
+            "in": "query",
+            "required": false,
+            "description": "School id",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "Exams & marks"
+        ],
+        "summary": "Update exam reminder settings",
+        "description": "Switches individual reminders and notifications on or off. Only boolean fields that are sent are changed.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireExamsAdmin(school_id): school administrator, principal / vice principal, or platform admin.",
+        "operationId": "putExamNotificationSettings",
+        "security": [
+          {
+            "platformAdmin": []
+          },
+          {
+            "schoolAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Updated settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "remind_7_day": {
+                      "type": "boolean"
+                    },
+                    "remind_1_day": {
+                      "type": "boolean"
+                    },
+                    "remind_exam_day": {
+                      "type": "boolean"
+                    },
+                    "notify_schedule_change": {
+                      "type": "boolean"
+                    },
+                    "notify_cancelled": {
+                      "type": "boolean"
+                    },
+                    "notify_marks_published": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "No valid fields to update"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          },
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
+          }
+        ],
+        "x-source-file": "app/api/exam-notification-settings/route.ts",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "school_id": {
+                    "type": "integer"
+                  },
+                  "remind_7_day": {
+                    "type": "boolean"
+                  },
+                  "remind_1_day": {
+                    "type": "boolean"
+                  },
+                  "remind_exam_day": {
+                    "type": "boolean"
+                  },
+                  "notify_schedule_change": {
+                    "type": "boolean"
+                  },
+                  "notify_cancelled": {
+                    "type": "boolean"
+                  },
+                  "notify_marks_published": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "school_id"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/exams/{id}/cancel": {
+      "post": {
+        "tags": [
+          "Exams & marks"
+        ],
+        "summary": "Cancel an exam",
+        "description": "Cancels an exam people have already seen on their calendar. Unlike DELETE it keeps the row (status \"cancelled\", excluded from the calendar and conflict checks) and notifies every affected student, parent and teacher. Use DELETE only for a mistaken entry nobody was told about.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireExamsAdmin(school_id): school administrator, principal / vice principal, or platform admin. Refused if results are already released or the exam is already cancelled.",
+        "operationId": "postExamsIdCancel",
+        "security": [
+          {
+            "platformAdmin": []
+          },
+          {
+            "schoolAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Cancelled exam and how many people were notified",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "notified": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Results already released, or already cancelled"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Exam not found"
+          },
+          "409": {
+            "description": "Exam was already cancelled or released"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          },
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
+          }
+        ],
+        "x-source-file": "app/api/exams/[id]/cancel/route.ts",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Exam id",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "school_id": {
+                    "type": "integer"
+                  },
+                  "reason": {
+                    "type": "string",
+                    "nullable": true
+                  }
+                },
+                "required": [
+                  "school_id"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/exams/{id}/subjects/{subjectId}": {
+      "patch": {
+        "tags": [
+          "Exams & marks"
+        ],
+        "summary": "Set a subject's max and pass marks",
+        "description": "Lets the subject teacher (or the class teacher, on any subject) set max marks and pass marks for one exam subject before entering marks. Locked once the subject is submitted. Once marks exist, max marks cannot go below a mark already entered.\n\n**Who can call:** Teacher.\n\n**Checks:** requireExamsTeacher(school_id); the caller must be the class teacher or the subject's own teacher; marks entry must be open.",
+        "operationId": "patchExamsIdSubjectsSubjectId",
+        "security": [
+          {
+            "teacher": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "max_marks": {
+                      "type": "integer"
+                    },
+                    "pass_marks": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid marks, entry not open, subject already submitted, or marks already entered above the new max"
+          },
+          "403": {
+            "description": "Not assigned to this subject"
+          },
+          "404": {
+            "description": "Exam or subject not found"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Teacher",
+            "color": "#0f766e"
+          }
+        ],
+        "x-source-file": "app/api/exams/[id]/subjects/[subjectId]/route.ts",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Exam id",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "subjectId",
+            "in": "path",
+            "required": true,
+            "description": "Exam subject id",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "school_id": {
+                    "type": "integer"
+                  },
+                  "max_marks": {
+                    "type": "integer",
+                    "description": "Whole number above 0"
+                  },
+                  "pass_marks": {
+                    "type": "integer",
+                    "description": "Whole number from 0 to max_marks"
+                  }
+                },
+                "required": [
+                  "school_id",
+                  "max_marks",
+                  "pass_marks"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/exams/{id}/subjects/{subjectId}/nudge": {
+      "post": {
+        "tags": [
+          "Exams & marks"
+        ],
+        "summary": "Remind a subject teacher to enter marks",
+        "description": "The class teacher's reminder to the subject teacher of a subject that is still pending. Sends a one-off in-app notification.\n\n**Who can call:** Teacher.\n\n**Checks:** requireExamsTeacher(school_id); the caller must be this class's class teacher. Refused if the subject is already submitted, has no teacher, or is the caller's own.",
+        "operationId": "postExamsIdSubjectsSubjectIdNudge",
+        "security": [
+          {
+            "teacher": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Reminder sent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {}
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Already submitted, no teacher assigned, or your own subject"
+          },
+          "403": {
+            "description": "Only the class teacher can nudge"
+          },
+          "404": {
+            "description": "Exam or subject not found"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Teacher",
+            "color": "#0f766e"
+          }
+        ],
+        "x-source-file": "app/api/exams/[id]/subjects/[subjectId]/nudge/route.ts",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Exam id",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "subjectId",
+            "in": "path",
+            "required": true,
+            "description": "Exam subject id",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "school_id": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "school_id"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/classes/{id}/broadcast": {
+      "post": {
+        "tags": [
+          "Classes"
+        ],
+        "summary": "Message a class",
+        "description": "A teacher sends a message to one class's students, parents or both. Delivered as a plain notification (and push), not a noticeboard post.\n\n**Who can call:** Teacher.\n\n**Checks:** getTeacherSession(); the teacher must be linked to the class (class teacher or teaches one of its subjects).",
+        "operationId": "postClassesIdBroadcast",
+        "security": [
+          {
+            "teacher": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "students_notified": {
+                      "type": "integer"
+                    },
+                    "parents_notified": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid audience, or title and message missing"
+          },
+          "403": {
+            "description": "Not a teacher, or not linked to this class"
+          },
+          "404": {
+            "description": "Class not found"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Teacher",
+            "color": "#0f766e"
+          }
+        ],
+        "x-source-file": "app/api/classes/[id]/broadcast/route.ts",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Class id",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "school_id": {
+                    "type": "integer"
+                  },
+                  "audience": {
+                    "type": "string",
+                    "enum": [
+                      "students",
+                      "parents",
+                      "both"
+                    ]
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "message": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "school_id",
+                  "audience",
+                  "title",
+                  "message"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/classes/{id}/restore": {
+      "post": {
+        "tags": [
+          "Classes"
+        ],
+        "summary": "Restore a removed class",
+        "description": "Brings back a class that was removed (soft-deleted).\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(class.school_id).",
+        "operationId": "postClassesIdRestore",
+        "security": [
+          {
+            "platformAdmin": []
+          },
+          {
+            "schoolAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Restored class",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {}
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid class ID"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Class not found"
+          },
+          "409": {
+            "description": "Class is already active"
+          },
+          "500": {
+            "description": "Failed to restore class"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          },
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
+          }
+        ],
+        "x-source-file": "app/api/classes/[id]/restore/route.ts",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Class id",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ]
+      }
+    },
+    "/api/teachers/subject-options": {
+      "get": {
+        "tags": [
+          "Teachers & staff"
+        ],
+        "summary": "List subjects a teacher can be given",
+        "description": "The subject choices for a teaching staff member: the master syllabus plus the school's own custom subjects.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(school_id); the school must have Staff Management (feature \"staff\") unless the caller is a platform admin.",
+        "operationId": "getTeachersSubjectOptions",
+        "security": [
+          {
+            "platformAdmin": []
+          },
+          {
+            "schoolAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Subject options",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "subjects": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {}
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A valid school_id is required"
+          },
+          "403": {
+            "description": "Forbidden, or FEATURE_DISABLED"
+          },
+          "500": {
+            "description": "Failed to load staff subject options"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          },
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
+          }
+        ],
+        "x-source-file": "app/api/teachers/subject-options/route.ts",
+        "parameters": [
+          {
+            "name": "school_id",
+            "in": "query",
+            "required": true,
+            "description": "School id",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ]
+      }
+    },
+    "/api/fees/open-dues": {
+      "get": {
+        "tags": [
+          "Fee year-end"
+        ],
+        "summary": "List the open-dues register",
+        "description": "Students left on \"Leave Open\" when a year was closed, each with a follow-up owner, promised date and note. The amount shown is what they still owe now, so a later payment, carry-forward or write-off makes the row resolve itself.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(school_id): school administrator, principal / vice principal, or platform admin.",
+        "operationId": "getFeesOpenDues",
+        "security": [
+          {
+            "platformAdmin": []
+          },
+          {
+            "schoolAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Register",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "rows": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {}
+                      }
+                    },
+                    "staff": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {}
+                      }
+                    },
+                    "summary": {
+                      "type": "object",
+                      "properties": {
+                        "open": {
+                          "type": "integer"
+                        },
+                        "overdue": {
+                          "type": "integer"
+                        },
+                        "total": {
+                          "type": "number"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "school_id required"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          },
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
+          }
+        ],
+        "x-source-file": "app/api/fees/open-dues/route.ts",
+        "parameters": [
+          {
+            "name": "school_id",
+            "in": "query",
+            "required": true,
+            "description": "School id",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "academic_year",
+            "in": "query",
+            "required": false,
+            "description": "Academic year label",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "include_resolved",
+            "in": "query",
+            "required": false,
+            "description": "Pass 1 to include rows that are fully resolved",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "Fee year-end"
+        ],
+        "summary": "Update an open-dues row",
+        "description": "Sets the follow-up owner, promised date or note on one row of the open-dues register.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(school_id): school administrator, principal / vice principal, or platform admin. The owner must be an active staff login of this school; promised_date must be YYYY-MM-DD.",
+        "operationId": "patchFeesOpenDues",
+        "security": [
+          {
+            "platformAdmin": []
+          },
+          {
+            "schoolAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {}
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "id required, invalid owner or date, or nothing to update"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          },
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
+          }
+        ],
+        "x-source-file": "app/api/fees/open-dues/route.ts",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "school_id": {
+                    "type": "integer"
+                  },
+                  "id": {
+                    "type": "integer",
+                    "description": "Open-dues row id"
+                  },
+                  "owner_user_id": {
+                    "type": "integer",
+                    "nullable": true
+                  },
+                  "promised_date": {
+                    "type": "string",
+                    "description": "YYYY-MM-DD"
+                  },
+                  "note": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "school_id",
+                  "id"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/fees/year-end/pack": {
+      "get": {
+        "tags": [
+          "Fee year-end"
+        ],
+        "summary": "Download the year-end pack",
+        "description": "One Excel workbook with everything the school keeps from a year-end: Summary (figures, live reconciliation, who closed it and why), Carried dues, Write-offs (who asked and who signed off), Pass-out moves, and the Left-open register.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(school_id): school administrator, principal / vice principal, or platform admin.",
+        "operationId": "getFeesYearEndPack",
+        "security": [
+          {
+            "platformAdmin": []
+          },
+          {
+            "schoolAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Excel workbook",
+            "content": {
+              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "school_id and academic_year required"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "500": {
+            "description": "Failed to build the year-end pack"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          },
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
+          }
+        ],
+        "x-source-file": "app/api/fees/year-end/pack/route.ts",
+        "parameters": [
+          {
+            "name": "school_id",
+            "in": "query",
+            "required": true,
+            "description": "School id",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "academic_year",
+            "in": "query",
+            "required": true,
+            "description": "Academic year label",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/fees/year-end/settings": {
+      "get": {
+        "tags": [
+          "Fee year-end"
+        ],
+        "summary": "Get year-end settings",
+        "description": "Who owns the year-end close, who approves write-offs, the write-off limit and the Leave-Open follow-up days, plus the staff logins that can be chosen.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(school_id): school administrator, principal / vice principal, or platform admin.",
+        "operationId": "getFeesYearEndSettings",
+        "security": [
+          {
+            "platformAdmin": []
+          },
+          {
+            "schoolAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "settings": {
+                      "type": "object",
+                      "properties": {
+                        "owner_user_id": {
+                          "type": "integer",
+                          "nullable": true
+                        },
+                        "approver_user_id": {
+                          "type": "integer",
+                          "nullable": true
+                        },
+                        "writeoff_limit": {
+                          "type": "number"
+                        },
+                        "leave_open_days": {
+                          "type": "integer"
+                        }
+                      }
+                    },
+                    "staff": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {}
+                      }
+                    },
+                    "approval_required": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "school_id required"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          },
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
+          }
+        ],
+        "x-source-file": "app/api/fees/year-end/settings/route.ts",
+        "parameters": [
+          {
+            "name": "school_id",
+            "in": "query",
+            "required": true,
+            "description": "School id",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "Fee year-end"
+        ],
+        "summary": "Set year-end owner and approver",
+        "description": "Chooses the year-end owner and the write-off approver and sets the write-off limit above which a write-off needs sign-off.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(school_id): school administrator, principal / vice principal, or platform admin. Only a school administrator (or platform admin) may change this, the same rule as adding or deactivating a staff login. The owner and approver must be active staff logins of the school.",
+        "operationId": "putFeesYearEndSettings",
+        "security": [
+          {
+            "platformAdmin": []
+          },
+          {
+            "schoolAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {}
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid owner, approver or limit"
+          },
+          "403": {
+            "description": "Forbidden, or only a school administrator can change this"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          },
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
+          }
+        ],
+        "x-source-file": "app/api/fees/year-end/settings/route.ts",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "school_id": {
+                    "type": "integer"
+                  },
+                  "owner_user_id": {
+                    "type": "integer",
+                    "nullable": true
+                  },
+                  "approver_user_id": {
+                    "type": "integer",
+                    "nullable": true
+                  },
+                  "writeoff_limit": {
+                    "type": "number",
+                    "description": "Default 0"
+                  },
+                  "leave_open_days": {
+                    "type": "integer",
+                    "description": "Default 30"
+                  }
+                },
+                "required": [
+                  "school_id"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/fees/year-end/writeoff-requests": {
+      "get": {
+        "tags": [
+          "Fee year-end"
+        ],
+        "summary": "List write-off sign-off requests",
+        "description": "The newest write-off request per student for a year, with whether the school has a sign-off step and whether the caller can approve.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(school_id): school administrator, principal / vice principal, or platform admin.",
+        "operationId": "getFeesYearEndWriteoffRequests",
+        "security": [
+          {
+            "platformAdmin": []
+          },
+          {
+            "schoolAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "approval_required": {
+                      "type": "boolean"
+                    },
+                    "settings": {
+                      "type": "object",
+                      "properties": {}
+                    },
+                    "can_approve": {
+                      "type": "boolean"
+                    },
+                    "requests": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {}
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "school_id and academic_year required"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          },
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
+          }
+        ],
+        "x-source-file": "app/api/fees/year-end/writeoff-requests/route.ts",
+        "parameters": [
+          {
+            "name": "school_id",
+            "in": "query",
+            "required": true,
+            "description": "School id",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "academic_year",
+            "in": "query",
+            "required": true,
+            "description": "Academic year label",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Fee year-end"
+        ],
+        "summary": "Ask for write-offs to be signed off",
+        "description": "Asks the approver to sign off the write-offs that are above the limit. Does nothing (and says so) when the school has no sign-off step.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(school_id): school administrator, principal / vice principal, or platform admin. Every item needs a reason of at least 3 characters.",
+        "operationId": "postFeesYearEndWriteoffRequests",
+        "security": [
+          {
+            "platformAdmin": []
+          },
+          {
+            "schoolAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Requests raised",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {}
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "academic_year and items required, or a reason is missing"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          },
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
+          }
+        ],
+        "x-source-file": "app/api/fees/year-end/writeoff-requests/route.ts",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "school_id": {
+                    "type": "integer"
+                  },
+                  "academic_year": {
+                    "type": "string"
+                  },
+                  "items": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "student_id": {
+                          "type": "integer"
+                        },
+                        "reason": {
+                          "type": "string",
+                          "description": "At least 3 characters"
+                        }
+                      },
+                      "required": [
+                        "student_id",
+                        "reason"
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "school_id",
+                  "academic_year",
+                  "items"
+                ]
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Fee year-end"
+        ],
+        "summary": "Approve or reject a write-off request",
+        "description": "The chosen approver approves or rejects a pending request. Never for a request they raised themselves.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(school_id): school administrator, principal / vice principal, or platform admin. Only the chosen write-off approver may act; a rejection needs a note of at least 3 characters; the school must have a sign-off step; the request must still be pending.",
+        "operationId": "patchFeesYearEndWriteoffRequests",
+        "security": [
+          {
+            "platformAdmin": []
+          },
+          {
+            "schoolAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Decision recorded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {}
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "id and action required, or a rejection reason is missing"
+          },
+          "403": {
+            "description": "Not the approver, or approving your own request"
+          },
+          "404": {
+            "description": "Request not found"
+          },
+          "409": {
+            "description": "No sign-off step, or the request is no longer pending"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          },
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
+          }
+        ],
+        "x-source-file": "app/api/fees/year-end/writeoff-requests/route.ts",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "school_id": {
+                    "type": "integer"
+                  },
+                  "id": {
+                    "type": "integer",
+                    "description": "Request id"
+                  },
+                  "action": {
+                    "type": "string",
+                    "enum": [
+                      "approve",
+                      "reject"
+                    ]
+                  },
+                  "note": {
+                    "type": "string",
+                    "description": "Required when rejecting"
+                  }
+                },
+                "required": [
+                  "school_id",
+                  "id",
+                  "action"
                 ]
               }
             }

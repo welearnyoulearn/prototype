@@ -2,6 +2,25 @@
 
 All notable changes to the WLYL School prototype are documented here.
 
+## [Unreleased] - School onboarding details (branch feature/school-onboarding-details)
+
+### Added
+- **Add School wizard**: School → Tax → Profile → Contacts → Size & needs → Plan → Review. It collects:
+  - the legal entity, State and PIN, GSTIN and PAN;
+  - board, medium, classes run and the academic year start month (default June → 1 June – 31 May), UDISE+ code, affiliation no.;
+  - the admin's name and mobile, plus principal, correspondent and accountant;
+  - size, WLYL contact, referral, go-live date and needs.
+
+  Each step is checked before moving on. The classes run (section A) and the academic year are created with the school.
+- **School details** on Platform Admin's school page: edit everything above (needed for older schools) and see the setup checklist.
+- **Setup checklist** on the school's Overview: logo and receipt header, classes, staff, students, fee structure. It ticks itself and disappears when done.
+- **GST on bills**: CGST 9% + SGST 9% in WLYL's state, IGST 18% elsewhere. Each bill keeps its own "bill to" (legal name, address, State, GSTIN), and later edits never change it.
+- **Accountant copies**: bill emails and reminders also go to the school's accountant.
+- **Public policy pages** (Terms, Privacy, Refund & Cancellation, Contact, Pricing), linked from the home page footer.
+
+### Changed
+- `POST /api/schools` accepts `admin_name`, `admin_mobile` and `details`. Callers that send only the old fields work as before (April–March year, no details).
+
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 <!-- 

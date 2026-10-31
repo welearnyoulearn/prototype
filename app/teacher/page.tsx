@@ -13,6 +13,8 @@ import { useSectionNav } from '@/lib/useSectionNav'
 import { getUsageSessionId, clearUsageSessionId } from '@/lib/usageSession'
 import PortalSidebar from '@/components/portal/PortalSidebar'
 import FeatureLauncher, { type LauncherSection } from '@/components/portal/FeatureLauncher'
+import FeatureLauncherButton from '@/components/portal/FeatureLauncherButton'
+import { hueForSection } from '@/components/portal/sectionHues'
 import { CalendarDays, Eye, Home, LayoutGrid, LogOut, Menu, School, UserRound } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 
@@ -324,17 +326,7 @@ function TeacherPortal() {
           <nav className="flex-1 overflow-y-auto px-3 py-3" aria-label="Teacher sections">
             {/* All-features window: every icon + name, grouped by section, one click to open */}
             <div className="pb-3">
-              <button
-                type="button"
-                onClick={() => setLauncherOpen(true)}
-                data-testid="nav-launcher"
-                aria-haspopup="dialog"
-                className="flex h-10 w-full items-center gap-2.5 rounded-lg border border-[#c5d8c8] bg-[#dce9dc] px-3 text-[14px] font-semibold text-[#173e2f] transition-colors hover:bg-[#cfe1d0] focus-visible:outline-2 focus-visible:outline-[#235b46]"
-              >
-                <LayoutGrid className="h-5 w-5 flex-shrink-0" aria-hidden="true" />
-                <span className="flex-1 text-left">All features</span>
-                <NavBadge navKey="launcher" count={totalUnread} className="!ml-0" />
-              </button>
+              <FeatureLauncherButton label="All features" unread={totalUnread} onClick={() => setLauncherOpen(true)} />
               <FeatureLauncher
                 open={launcherOpen}
                 onOpenChange={setLauncherOpen}
@@ -345,7 +337,8 @@ function TeacherPortal() {
                 onSelect={navigateTo}
               />
             </div>
-            {NAV_SECTIONS.map(section => {
+            {NAV_SECTIONS.map((section, sIdx) => {
+              const hue = hueForSection(section.label, sIdx)
               const visibleItems = section.items.filter(item => {
                 const featureKey = NAV_KEY_TO_FEATURE[item.key]
                 return !featureKey || enabledFeatures === null || enabledFeatures.has(featureKey)
@@ -353,10 +346,10 @@ function TeacherPortal() {
               if (visibleItems.length === 0) return null
               return (
                 <div key={section.label} className="mb-4">
-                  <p className="portal-nav-label">{section.label}</p>
+                  <p className={`portal-nav-label ${hue.head}`}>{section.label}</p>
                   {visibleItems.map(item => (
                     <button key={item.key} onClick={() => { if (!item.comingSoon) navigateTo(item.key) }} className="portal-nav-item" aria-current={activeNav === item.key ? 'page' : undefined} disabled={item.comingSoon}>
-                      <span className="shrink-0" aria-hidden="true">{item.icon}</span>
+                      <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md ${activeNav === item.key ? hue.solid : hue.icon}`} aria-hidden="true">{item.icon}</span>
                       <span className="flex-1">{item.label}</span>
                       <NavBadge count={navCounts[item.key]} navKey={item.key} />
                       {item.comingSoon && <span className="text-xs">Soon</span>}

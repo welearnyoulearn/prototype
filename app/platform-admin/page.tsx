@@ -1,5 +1,6 @@
 'use client'
 
+import AddSchoolWizard from './components/AddSchoolWizard'
 import { useEffect, useState, useCallback, useMemo } from 'react'
 import Link from 'next/link'
 import { useUsageHeartbeat } from '@/lib/useUsageHeartbeat'
@@ -41,10 +42,6 @@ type PlatformStats = {
   growth:        { this_month: number; last_month: number }
 }
 
-type FormData = {
-  name: string; type: string; city: string; country: string
-  phone: string; email: string; address: string
-}
 
 const TIER_BADGE: Record<string, string> = {
   basic:    'bg-green-100 text-green-700 border-green-200',
@@ -81,7 +78,6 @@ export default function PlatformAdmin() {
   const [loading, setLoading]             = useState(true)
   const [error, setError]                 = useState('')
   const [showModal, setShowModal]         = useState(false)
-  const [submitting, setSubmitting]       = useState(false)
   const [search, setSearch]               = useState('')
   const [filterTier, setFilterTier]       = useState<string>('all')
   const [highlightId, setHighlightId]     = useState<number | null>(null)
@@ -98,10 +94,6 @@ export default function PlatformAdmin() {
   const [adminError, setAdminError]           = useState('')
   const [resetResult, setResetResult]         = useState<{ name: string; email: string; emailSent: boolean } | null>(null)
   const [resettingId, setResettingId]         = useState<number | null>(null)
-
-  const [form, setForm] = useState<FormData>({
-    name: '', type: 'Private', city: '', country: '', phone: '', email: '', address: '',
-  })
 
   const scopeForTab: Record<Tab, string> = { active: 'active', inactive: 'inactive', deleted: 'deleted' }
 
@@ -216,28 +208,6 @@ export default function PlatformAdmin() {
     finally   { setResettingId(null) }
   }
 
-  async function handleCreate(e: React.FormEvent) {
-    e.preventDefault()
-    setSubmitting(true); setError('')
-    try {
-      const res  = await fetch('/api/schools', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form),
-      })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error)
-      setShowModal(false)
-      setForm({ name: '', type: 'Private', city: '', country: '', phone: '', email: '', address: '' })
-      setCreatedSchool({ id: data.id, name: data.name, email: data.email, emailSent: data.setup_email_sent === true })
-      setTab('active')
-      fetchSchools('active')
-      fetchStats()
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Failed to create school')
-    } finally { setSubmitting(false) }
-  }
-
   function handleCredentialsDismiss() {
     if (createdSchool) setHighlightId(createdSchool.id)
     setCreatedSchool(null)
@@ -322,7 +292,6 @@ export default function PlatformAdmin() {
   const paidCount      = stats ? stats.subscriptions.basic + stats.subscriptions.standard + stats.subscriptions.premium : 0
   const conversionPct  = stats?.schools.active ? Math.round((paidCount / stats.schools.active) * 100) : 0
 
-  const inputCls = 'w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-purple-300'
   const tabCls = (t: Tab) =>
     `min-h-11 whitespace-nowrap border-b-2 px-4 py-2 text-sm font-medium transition-colors ${
       tab === t ? 'border-[#235b46] text-[#235b46]' : 'border-transparent text-gray-600 hover:text-gray-900'
@@ -898,92 +867,12 @@ export default function PlatformAdmin() {
         )}
       </div>
 
-      {/* ── Add School Modal ── */}
+      {/* ── Add School: step by step with everything we need to manage the school (DOCS/SCHOOL-ONBOARDING.md) ── */}
       {showModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg w-full max-w-lg shadow-xl max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 sticky top-0 bg-white rounded-t-2xl">
-              <div>
-                <h3 className="font-semibold text-gray-900">Add New School</h3>
-                <p className="text-xs text-muted-foreground mt-0.5">Admin credentials will be generated and emailed automatically</p>
-              </div>
-              <button onClick={() => setShowModal(false)} className="text-muted-foreground hover:text-gray-600 text-xl leading-none">✕</button>
-            </div>
-            <form onSubmit={handleCreate} className="px-6 py-5 space-y-4">
-              {error && <p className="text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</p>}
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">School Name <span className="text-red-500">*</span></label>
-                <input type="text" required value={form.name}
-                  onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
-                  placeholder="e.g. Greenwood High School" className={inputCls} />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Type</label>
-                  <select value={form.type} onChange={e => setForm(f => ({ ...f, type: e.target.value }))} className={inputCls}>
-                    <option>Private</option><option>Public</option><option>Charter</option><option>International</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">City <span className="text-red-500">*</span></label>
-                  <input type="text" required value={form.city}
-                    onChange={e => setForm(f => ({ ...f, city: e.target.value }))}
-                    placeholder="Mumbai" className={inputCls} />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Country <span className="text-red-500">*</span></label>
-                <select required value={form.country} onChange={e => setForm(f => ({ ...f, country: e.target.value }))} className={inputCls}>
-                  <option value="">— Select country —</option>
-                  <option value="India">India</option>
-                  <option disabled>──────────</option>
-                  {['Afghanistan','Australia','Bangladesh','Bhutan','Brazil','Canada','China','Egypt','Ethiopia','France','Germany','Ghana','Indonesia','Iran','Iraq','Japan','Jordan','Kenya','Malaysia','Maldives','Mexico','Morocco','Myanmar','Nepal','Nigeria','Pakistan','Philippines','Qatar','Russia','Saudi Arabia','Singapore','South Africa','South Korea','Sri Lanka','Tanzania','Thailand','Turkey','Uganda','Ukraine','United Arab Emirates','United Kingdom','United States','Vietnam','Zimbabwe'].map(c => (
-                    <option key={c} value={c}>{c}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  School Email <span className="text-red-500">*</span>
-                  <span className="text-muted-foreground font-normal text-xs ml-1">(login credentials sent here)</span>
-                </label>
-                <input type="email" required value={form.email}
-                  onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
-                  placeholder="admin@schoolname.edu" className={inputCls} />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Phone Number <span className="text-red-500">*</span></label>
-                <input type="tel" required value={form.phone}
-                  onChange={e => setForm(f => ({ ...f, phone: e.target.value }))}
-                  placeholder="+91 98765 43210" className={inputCls} />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Full Address <span className="text-red-500">*</span></label>
-                <textarea required value={form.address}
-                  onChange={e => setForm(f => ({ ...f, address: e.target.value }))}
-                  rows={2} placeholder="Street, Area, City, State, PIN"
-                  className={`${inputCls} resize-none`} />
-              </div>
-
-              <div className="flex gap-3 pt-2">
-                <button type="button" onClick={() => setShowModal(false)}
-                  className="flex-1 border border-gray-200 text-gray-600 py-2.5 rounded-lg text-sm hover:bg-gray-50 transition-colors">
-                  Cancel
-                </button>
-                <button type="submit" disabled={submitting}
-                  className="flex-1 bg-primary hover:bg-primary/90 text-white py-2.5 rounded-lg text-sm font-medium transition-colors disabled:opacity-50">
-                  {submitting ? 'Creating…' : 'Create School'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+        <AddSchoolWizard
+          onClose={() => setShowModal(false)}
+          onCreated={c => { setShowModal(false); setCreatedSchool(c); setTab('active'); fetchSchools('active'); fetchStats() }}
+        />
       )}
 
       {/* ── School Created — Credentials Modal ── */}

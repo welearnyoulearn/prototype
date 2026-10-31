@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback, useRef, ChangeEvent } from 'react'
 import { Skeleton } from '@/components/ui/skeleton'
 import { BarChart3, CheckCircle2, Eye } from 'lucide-react'
 import NotificationBell from '../../components/NotificationBell'
+import ParentAckTracker from '@/app/components/ParentAckTracker'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 type Teacher = { id: number; name: string; subject: string; department: string }
@@ -715,6 +716,13 @@ export default function ExamMarks({ classId, schoolId, grade, section, teacher, 
                   </div>
                 )
               })}
+            </div>
+          )}
+
+          {/* Class teacher: once results are released, which parents have signed off. */}
+          {isClassTeacher && selectedExam.status === 'released' && (
+            <div className="p-4">
+              <ParentAckTracker examId={selectedExam.id} schoolId={schoolId} />
             </div>
           )}
 

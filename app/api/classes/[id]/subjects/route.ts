@@ -1,9 +1,10 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
+import { dispatchPendingPushes } from '@/lib/push'
 import pool from '@/lib/db'
 import { matchTeacher } from '@/lib/matchTeacher'
 import { getCache, setCache, invalidateCache } from '@/lib/responseCache'
 import { requireFeeAccess } from '@/lib/auth'
-import { ClassWorkflowError, validateTeacherForClass } from '@/lib/classManagement'
+import { ClassWorkflowError, syncOpenExamSubjectTeachers, validateTeacherForClass } from '@/lib/classManagement'
 import { parseOptionalTeacherId, parsePeriodsPerWeek } from '@/lib/classValidation'
 import type { Pool, PoolClient } from 'pg'
 import { getSubjectsForGrade } from '@/lib/curricula'
@@ -156,7 +157,7 @@ export async function PATCH(req: NextRequest, { params }: RouteContext) {
   catch { return NextResponse.json({ error: 'Request body must be valid JSON' }, { status: 400 }) }
   const subjectId = Number(body.subject_id)
   if (!Number.isInteger(subjectId) || subjectId <= 0) return NextResponse.json({ error: 'Valid subject_id is required' }, { status: 400 })
-  const allowed = new Set(['subject_id', 'subject_name', 'teacher_id', 'periods_per_week'])
+  const allowed = new Set(['subject_id', 'subject_name', 'teacher_id', 'periods_per_week', 'add_subject_to_teacher'])
   const unsupported = Object.keys(body).filter(key => !allowed.has(key))
   if (unsupported.length) return NextResponse.json({ error: `Unsupported fields: ${unsupported.join(', ')}` }, { status: 400 })
   if (!Object.hasOwn(body, 'subject_name') && !Object.hasOwn(body, 'teacher_id') && !Object.hasOwn(body, 'periods_per_week')) {
@@ -197,11 +198,15 @@ export async function PATCH(req: NextRequest, { params }: RouteContext) {
       return NextResponse.json({ error: teacherId.error ?? periods.error }, { status: 422 })
     }
     let teacherGrades: { teacher_id: number; teaches_grades: string } | null = null
+    let teacherSubject: { teacher_id: number; subject: string } | null = null
     if (teacherId.value) {
       const validated = await validateTeacherForClass(client, {
         teacherId: teacherId.value, schoolId: sub.school_id, grade: sub.grade, subjectName, addGradeIfMissing: true,
+        // Only set by the admin explicitly picking a teacher outside the subject in Class Management.
+        addSubjectIfMissing: body.add_subject_to_teacher === true,
       })
       if (validated.grades_added && validated.teaches_grades) teacherGrades = { teacher_id: validated.id, teaches_grades: validated.teaches_grades }
+      if (validated.subject_added && validated.subject) teacherSubject = { teacher_id: validated.id, subject: validated.subject }
     }
     const { rows: [updated] } = await client.query(
       `UPDATE class_subjects SET subject_name = $1, teacher_id = $2, periods_per_week = $3
@@ -211,15 +216,18 @@ export async function PATCH(req: NextRequest, { params }: RouteContext) {
     const teacherName = teacherId.value
       ? (await client.query('SELECT name FROM teachers WHERE id = $1', [teacherId.value])).rows[0]?.name ?? null
       : null
+    // Exams already scheduled for this class copied the old teacher; move the open ones across.
+    const examsUpdated = Object.hasOwn(body, 'teacher_id') ? await syncOpenExamSubjectTeachers(client, [subjectId]) : 0
     await client.query('COMMIT')
+    if (examsUpdated > 0) after(() => dispatchPendingPushes())
     invalidateCache(`subjects:class:${id}`)
     invalidateCache(`health:${sub.school_id}`)
-    if (teacherGrades) {
+    if (teacherGrades || teacherSubject) {
       invalidateCache(`teachers:${sub.school_id}:all`)
       invalidateCache(`teachers:${sub.school_id}:teaching`)
       invalidateCache(`teachers:${sub.school_id}:non_teaching`)
     }
-    return NextResponse.json({ ...updated, teacher_name: teacherName, teacher_grades_updated: teacherGrades })
+    return NextResponse.json({ ...updated, teacher_name: teacherName, teacher_grades_updated: teacherGrades, teacher_subject_updated: teacherSubject, exams_updated: examsUpdated })
   } catch (error) {
     await client.query('ROLLBACK').catch(() => {})
     if (error instanceof ClassWorkflowError) return NextResponse.json({ error: error.message, code: error.code }, { status: error.status })

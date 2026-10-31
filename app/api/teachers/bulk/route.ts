@@ -5,6 +5,7 @@ import { sendTeacherWelcomeEmail } from '@/lib/email'
 import { sendWhatsappMessage } from '@/lib/whatsapp'
 import { findAutoAssignableSubjects, type ClassSubjectRow } from '@/lib/matchTeacher'
 import { invalidateCache } from '@/lib/responseCache'
+import { syncOpenExamSubjectTeachers } from '@/lib/classManagement'
 import { MAX_STAFF_BATCH, normalizeStaffInput, type NormalizedStaffInput } from '@/lib/staffValidation'
 import { canonicalStaffSubject, getStaffSubjectOptions } from '@/lib/staffSubjectOptions'
 
@@ -151,7 +152,10 @@ export async function POST(req: NextRequest) {
           await client.query('UPDATE class_subjects SET teacher_id = $1 WHERE id = $2 AND teacher_id IS NULL', [teacher.id, match.id])
           invalidateCache(`subjects:class:${match.class_id}`)
         }
-        if (matches.length) invalidateCache(`health:${schoolId}`)
+        if (matches.length) {
+          await syncOpenExamSubjectTeachers(client, matches.map(match => match.id))
+          invalidateCache(`health:${schoolId}`)
+        }
       }
     }
     await client.query('COMMIT')
