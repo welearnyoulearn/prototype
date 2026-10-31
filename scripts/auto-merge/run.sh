@@ -155,16 +155,24 @@ push_head() {
   g push -q origin "HEAD:refs/heads/$2" || { STOP_REASON='The push failed.'; return 1; }
 }
 
-# Install and tsc run PR-controlled code, so they get a container with no token and
-# no mount. Callers push nothing if this fails.
+# Install and tsc run PR-controlled code, so they get containers with no token and only
+# a scratch volume; tsc, which runs the installed code, also gets no network. Callers
+# push nothing if this fails.
 type_check() {
-  g archive HEAD | docker run --rm -i node:22-slim sh -c \
-    'mkdir /src && cd /src && tar -x && corepack enable && timeout 1500 sh -c "pnpm install --frozen-lockfile --ignore-scripts && pnpm exec tsc --noEmit"'
+  local vol rc=0
+  vol=$(docker volume create) || return 1
+  g archive HEAD | docker run --rm -i -v "$vol:/src" -w /src node:22-slim sh -c \
+    'tar -x && corepack enable && timeout 1200 pnpm install --frozen-lockfile --ignore-scripts --ignore-pnpmfile' \
+    && docker run --rm --network none -v "$vol:/src" -w /src node:22-slim timeout 600 node_modules/.bin/tsc --noEmit \
+    || rc=1
+  docker volume rm -f "$vol" >/dev/null
+  return "$rc"
 }
 
 resolve_conflicts() {
   local pr=$1 head_ref=$2 file unexpected
-  local conflicts=$WORK/conflicts.txt
+  # The trusted list stays out of Claude's reach; it gets a copy in $WORK
+  local conflicts=$STATE/conflicts.txt
   # A clean merge here means GitHub's answer was stale: stop rather than guess
   g merge -q --no-edit origin/dev && return 1
   g diff --name-only --diff-filter=U > "$conflicts"
@@ -177,6 +185,7 @@ resolve_conflicts() {
   while IFS= read -r file; do
     grep -q '^<<<<<<< ' "$CLONE/$file" || return 1
   done < "$conflicts"
+  cp "$conflicts" "$WORK/conflicts.txt" || return 1
 
   run_claude Read,Edit,Grep,Glob <<PROMPT || return 1
 A merge of dev into a pull request branch stopped on conflicts. The branch is
@@ -280,7 +289,7 @@ PROMPT
 }
 
 process_pr() {
-  local pr=$1 meta sha head_ref eligible sweep mergeable conflict=false changed round=0 reason failures tries
+  local pr=$1 meta sha head_ref eligible sweep mergeable conflict=false changed round=0 reason failures tries review_id
   STOP_REASON=
 
   rm -rf "$WORK"
@@ -396,13 +405,19 @@ $(cat "$WORK/findings.txt")"
     log "PR #$pr: became a draft or got no-auto-merge, not merged"
     return 0
   fi
-  if ! GH_TOKEN=$(security find-generic-password -s wlyl-review-bot -w) \
-    gh pr review "$pr" -R "$REPO" --approve --body "Claude reviewed $sha and approved it."; then
+  # commit_id pins the approval to the reviewed SHA, not whatever the head is now
+  if ! review_id=$(GH_TOKEN=$(security find-generic-password -s wlyl-review-bot -w) \
+    gh api "repos/$REPO/pulls/$pr/reviews" -f event=APPROVE -f commit_id="$sha" \
+      -f body="Claude reviewed $sha and approved it." --jq .id); then
     stop "$pr" "$sha" 'Claude approved this PR but the bot could not submit the approval, so it was not merged.'
     return 1
   fi
   # The SHA match refuses to merge anything pushed after the review
   if ! gh pr merge "$pr" -R "$REPO" --squash --match-head-commit "$sha"; then
+    # A leftover approval could let later pushes merge without review
+    gh api -X PUT "repos/$REPO/pulls/$pr/reviews/$review_id/dismissals" \
+      -f message='The merge failed, so this approval no longer applies.' -f event=DISMISS >/dev/null \
+      || log "PR #$pr: could not dismiss the bot's approval $review_id"
     stop "$pr" "$sha" 'Claude approved this PR but the merge failed, so it was not merged.'
     return 1
   fi
