@@ -61,6 +61,25 @@ export async function checkAuthRateLimit(
   return ipAllowed && identityAllowed
 }
 
+// Atomic counter for quotas that must hold under concurrent requests. False once the key reaches max.
+export async function reserveCount(key: string, max: number): Promise<boolean> {
+  const { rows } = await pool.query(
+    `INSERT INTO auth_rate_limits (key_hash, attempts) VALUES ($1, 1)
+     ON CONFLICT (key_hash) DO UPDATE SET attempts = auth_rate_limits.attempts + 1, updated_at = NOW()
+     WHERE auth_rate_limits.attempts < $2
+     RETURNING attempts`,
+    [digest(key), max],
+  )
+  return rows.length > 0
+}
+
+export async function releaseCount(key: string): Promise<void> {
+  await pool.query(
+    `UPDATE auth_rate_limits SET attempts = GREATEST(attempts - 1, 0), updated_at = NOW() WHERE key_hash = $1`,
+    [digest(key)],
+  ).catch(err => console.error('[rate-limit] releaseCount failed', err))
+}
+
 export async function clearAuthRateLimit(req: NextRequest, scope: string, identifier: string): Promise<void> {
   const normalized = identifier.trim().toLowerCase().slice(0, 320)
   const ip = clientAddress(req)
