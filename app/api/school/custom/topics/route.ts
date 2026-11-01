@@ -1,5 +1,6 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
 import pool from '@/lib/db'
+import { prepareSchoolTopics } from '@/lib/quizBank'
 import { requireFeeAccess } from '@/lib/auth'
 
 async function schoolIdForChapter(chapterId: number): Promise<number | null> {
@@ -96,6 +97,8 @@ export async function POST(req: NextRequest) {
 
       const { rows: finalResources } = await pool.query('SELECT * FROM school_resources WHERE school_topic_id = $1', [topicId])
       topicRow.resources = finalResources
+      // The school's own topic gets its own quiz questions in the background (#444).
+      if (ownerSchoolId) after(() => prepareSchoolTopics(ownerSchoolId))
 
       return NextResponse.json({ topic: topicRow })
     }

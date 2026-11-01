@@ -29,6 +29,8 @@ const en = {
   // Nav
   nav: {
     overview:     'Overview',
+    'daily-quiz': 'Daily Report',
+    announcements: 'Announcements',
     syllabus:     'Syllabus',
     library:      'Digital Library',
     rewards:      'Rewards',
@@ -188,6 +190,8 @@ const te: typeof en = {
   // Nav
   nav: {
     overview:     'అవలోకనం',
+    'daily-quiz': 'రోజువారీ నివేదిక',
+    announcements: 'ప్రకటనలు',
     syllabus:     'పాఠ్యక్రమం',
     library:      'డిజిటల్ లైబ్రరీ',
     rewards:      'బహుమతులు',

@@ -7,15 +7,53 @@ Move an entry to [completed.md](completed.md) when it ships. Add new entries at 
 ### Daily Newspaper + Rewards Marketplace (pilot)
 **Type:** Feature
 **Portals:** Student, Parent, School Admin, Platform Admin
-**Branch:** `feature/newspaper-rewards-foundation` (no GitHub issue yet — branch to be renamed with the issue number)
+**Branch:** `feature/484-newspaper-rewards-marketplace` (issue #484, PR #485)
 **Summary:** A short, real, fact-checked newspaper each morning per grade band, with one question; points go into the same balance as the Daily Quiz and are spent on simple stationery supplied by WLYL and handed out by the school admin. Monthly delivery. Both feature keys are OFF at every tier.
 **Progress:**
 - [x] Foundation: feature keys (OFF), tables, starter catalog, points helper (earn / spend / refund under a per-student lock), grade-band helper, tests
 - [x] Newspaper: feed fetch, filter, writer, blind checker, fallback, jobs, student screens, Platform Admin Pull page (not yet run against the real Groq API or live feeds; tested with a fake model and fake feeds)
 - [x] Marketplace: ordering, monthly run, order alert email, parcel arrived / collected, Rewards pages
 - [x] End-to-end test on a throwaway local database (e2e/newspaper-rewards.spec.ts, 7 steps, all four portals)
-- [ ] GitHub issues, branch rename, review, merge (SCHEMA_VERSION renumbering against the quiz branches)
+- [x] Issue #484, draft PR #485; merged with dev after the Daily Quiz landed (SCHEMA_VERSION 73)
+- [ ] Review and merge
 - [ ] Live dry run with GROQ_API_KEY and the real feeds; set CRON_SECRET, REWARDS_ALERT_EMAIL in production
+
+### Daily Quiz + Student Doubts (#430)
+**Type:** Feature (epic)
+**Portals:** School Admin, Teacher, Student, Parent
+**Branch:** `feature/431-learning-feature-keys` (P0)
+**Started:** 2026-10-27
+**Summary:** Daily MCQ quiz per class from covered topics (bank prepared once), class leaderboard, parent summaries; wrong answers become tracked doubts that only the student can mark clarified, escalated after 2 working days. Plan: issues #431–#438.
+**Progress:**
+- [x] Issues created (#430 epic, #431–#438)
+- [x] P0 #431: feature keys `daily-quiz` / `student-doubts` (OFF), Learning category, docs (PR #439)
+- [x] P1 #432 question bank: Platform Admin → Question Bank (Claude batch + Groq check, review, publish), teacher Quiz Questions view, student report endpoint (`feature/432-quiz-question-bank`)
+- [x] P2 #433 daily quiz: posting per class, student + parent quiz screens, answers after the close, late for 7 days, ready/reminder/results notices, Platform Admin → Daily Quiz settings (`feature/433-daily-quiz`)
+- [x] P3 #434 points ledger, working-day streak, badges, weekly leaderboard, parent view + weekly report, School Admin report (`feature/434-quiz-points-leaderboard`)
+- [x] P4 #435 doubts: Ask WLYL AI → Ask Teacher, teacher Doubts (misconceptions, covered in class, replies), proof question, points + WLYL Stars, parent timeline, School Admin report (`feature/435-student-doubts`)
+- [x] #444 questions made at syllabus import (8 per topic, auto-published), subject language, schools' own topics, daily topic = completed since the last quiz else revision (`feature/444-quiz-questions-at-import`)
+- [ ] Next: P5 #436 SLA · P6 #437 insights · P7 #438 AI hook
+
+### Student AI tutor — RAG over board textbooks (#407)
+**Type:** Feature
+**Branch:** `feature/407-student-rag-tutor`
+**Portals:** Student (AI Hub, AI Pro tier)
+**Summary:** Students ask questions in AI Hub and get answers (via OmniRoute: `ddgw/claude-haiku-4-5` → `ddgw/gpt-5.4-mini` fallback) grounded in their board + grade textbooks/handbooks (`master_subject_materials`, PDFs in R2), cited by book and page. Chats saved to `ai_chat_sessions` (parent-visible). 60 questions/student/IST day.
+**Progress:**
+- [x] pgvector + `material_chunks`; `scripts/index-materials.ts` (R2 → pages → chunks → embeddings); dry run on 2 PDFs OK
+- [x] Hybrid retrieval (vector + keyword, RRF) in `lib/rag/retrieve.ts`
+- [x] `/api/student/tutor` (NDJSON stream) and `StudentTutorChat` in the AI Pro branch of AI Hub
+- [x] Tutor LLM via OmniRoute with ordered key × model fallback (`lib/tutor.ts`); Anthropic SDK removed
+- [x] Embeddings optional — keyword-only retrieval and NULL-embedding indexing when `EMBEDDINGS_*` is unset (schema v58)
+- [x] Embeddings via Cloudflare Workers AI `@cf/baai/bge-m3` (1024 dims), superseding Gemini; fail-fast on the daily quota (`EmbeddingQuotaError`), resumable index script
+- [x] Garbled legacy-font text filtered in the chunker (`dropLegacyFontWords`, `wordShare`)
+- [x] Full index run and embeddings backfilled; `material_chunks` recreated and re-indexed after the 2026-10-24 drop
+- [x] OmniRoute gateway verified locally (`ddgw/claude-haiku-4-5` → `ddgw/gpt-5.4-mini`)
+- [ ] `OMNIROUTE_BASE_URL` / `OMNIROUTE_API_KEYS` (and `EMBEDDINGS_*`) in the deploy env
+- [ ] Run `e2e/student-tutor.spec.ts` against a non-production DB
+- [ ] Open the PR
+- [ ] Set `schools.board` for schools (231 of 234 are NULL → those schools get no retrieval unless they have subscribed subjects)
+
 ### Push notifications via Firebase (FCM)
 **Type:** Feature
 **Branch:** `feature/fcm-push-backend` (no GitHub issue yet — branch to be renamed with the issue number)

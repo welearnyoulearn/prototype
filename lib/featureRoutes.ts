@@ -45,12 +45,15 @@ export function featureRequirementForApiPath(pathname: string, method = 'GET'): 
   if (pathname.startsWith('/api/school/subjects/materials')) return any('curriculum', ['curriculum', 'library'])
   if (pathname.startsWith('/api/syllabus') || pathname.startsWith('/api/school/custom/') || pathname.startsWith('/api/school/subjects')) return one('curriculum')
   if (pathname.startsWith('/api/school/library') || pathname.startsWith('/api/textbooks')) return one('library')
+  if (pathname === '/api/materials/file') return null // checks library or AI Pro itself: tutor source chips need only AI Pro
   if (pathname.startsWith('/api/materials/')) return any('library', ['library', 'feedback-management'])
   if (pathname.startsWith('/api/school-calendar')) return one('calendar')
   if (pathname.startsWith('/api/data-export')) return one('export')
   if (pathname.startsWith('/api/feedback/') && !pathname.startsWith('/api/feedback/resolve') && !pathname.startsWith('/api/feedback/submit') && !pathname.startsWith('/api/feedback/voice-upload-url')) return one('feedback-management')
   if (pathname.startsWith('/api/announcements')) return one('announcements')
   if (pathname.startsWith('/api/academic-years/rollover')) return one('year-rollover')
+  if (pathname.startsWith('/api/teacher/quiz-bank') || pathname.startsWith('/api/student/quiz') || pathname.startsWith('/api/parent/quiz') || pathname.startsWith('/api/school/quiz-report')) return one('daily-quiz')
+  if (pathname.startsWith('/api/student/doubts') || pathname.startsWith('/api/parent/doubts') || pathname.startsWith('/api/teacher/doubts') || pathname.startsWith('/api/school/doubts-report')) return one('student-doubts')
   return null
 }
 
@@ -61,5 +64,5 @@ export function featureForApiPath(pathname: string): string | null {
 export const GATED_FEATURE_KEYS = [
   'staff', 'students', 'class-management', 'attendance', 'curriculum', 'exam-marks',
   'library', 'announcements', 'export', 'year-rollover', 'fee-management',
-  'expenses', 'calendar', 'feedback-management',
+  'expenses', 'calendar', 'feedback-management', 'daily-quiz', 'student-doubts',
 ] as const

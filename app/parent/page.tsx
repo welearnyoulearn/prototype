@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useCallback, useRef, Suspense } from 'react'
 import NoticeCenter from '@/components/announcements/NoticeCenter'
+import AnnouncementPopup from '@/components/announcements/AnnouncementPopup'
+import { useUnreadAnnouncements } from '@/components/announcements/useUnreadAnnouncements'
 import { useRouter } from 'next/navigation'
 import { FullPageLoader } from '@/components/loaders'
 import Link from 'next/link'
@@ -27,6 +29,7 @@ import { HUES } from '@/components/portal/sectionHues'
 import { CalendarDays, Home, GraduationCap, Phone, School, UserRound } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import { unregisterPushDevice } from '@/lib/pushClient'
+import ParentDailyReport, { ParentDailyReportCard } from './components/ParentDailyReport'
 
 // Used by printParentReceipt below — fee category names (admin-set),
 // transaction references (parent-typed, directly attacker-controlled) and
@@ -122,7 +125,9 @@ const STATUS_COLOR: Record<string, string> = {
 }
 
 const NAV = [
+  { key: 'announcements', label: 'Announcements', icon: 'M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z' },
   { key: 'overview',   label: 'Overview',          icon: 'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6' },
+  { key: 'daily-quiz', label: 'Daily Report',         icon: 'M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z' },
   { key: 'attendance', label: 'Attendance',         icon: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4' },
   { key: 'calendar',   label: 'School Calendar',    icon: 'M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z' },
   { key: 'fees',       label: 'Fees',               icon: 'M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z' },
@@ -181,6 +186,8 @@ function ParentDashboard() {
   // enabled for this portal — null (still loading) means "show everything"
   // so the sidebar doesn't flash empty before the fetch resolves.
   function isNavItemVisible(key: string) {
+    // Off by default for every plan, so it stays hidden until the school is confirmed to have it.
+    if (key === 'daily-quiz') return enabledFeatures?.has('daily-quiz') ?? false
     if (!RESTRICTABLE_NAV_KEYS.has(key)) return true
     if (enabledFeatures === null) return true
     return enabledFeatures.has(PORTAL_NAV_KEY_ALIASES[key] ?? key)
@@ -250,7 +257,9 @@ function ParentDashboard() {
   }
 
   const [sidebarOpen, setSidebarOpen] = useState(false)
-  const { counts: navCounts, latest: navLatest } = useNavNotifications('parent')
+  const { counts: baseNavCounts, latest: navLatest } = useNavNotifications('parent')
+  const unreadAnnouncements = useUnreadAnnouncements(student?.school_id)
+  const navCounts: Record<string, number> = { ...baseNavCounts, announcements: unreadAnnouncements }
   const [launcherOpen, setLauncherOpen] = useState(false)
 
   const [lang, setLang] = useState<Lang>('en')
@@ -889,8 +898,27 @@ function ParentDashboard() {
             })}
 
 
+            {isNavItemVisible('daily-quiz') && (
+              <ParentDailyReportCard key={student.id} studentId={student.id} studentName={student.name} onOpen={() => navigateTo('daily-quiz')} />
+            )}
+
             {/* Notices: unread marks, animated greeting cards, acknowledgement (Telugu supported) */}
             <NoticeCenter schoolId={student.school_id} lang={lang} schoolName={parentInfo?.school_name} />
+          </div>
+          )}
+
+          {/* ── DAILY REPORT (the nav key stays 'daily-quiz') ─────────────────────────────────────────────────── */}
+          {visited.has('daily-quiz') && isNavItemVisible('daily-quiz') && (
+          <div hidden={activeNav !== 'daily-quiz'}>
+            <ParentDailyReport key={student.id} studentId={student.id} studentName={student.name} />
+          </div>
+          )}
+
+          {/* ── ANNOUNCEMENTS: popup once per notice, full list in this tab ── */}
+          <AnnouncementPopup schoolId={student.school_id} lang={lang} schoolName={parentInfo?.school_name} />
+          {visited.has('announcements') && (
+          <div hidden={activeNav !== 'announcements'}>
+            <NoticeCenter schoolId={student.school_id} lang={lang} schoolName={parentInfo?.school_name} mode="page" />
           </div>
           )}
 

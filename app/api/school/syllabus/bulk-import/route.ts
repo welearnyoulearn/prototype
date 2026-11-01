@@ -1,5 +1,6 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
+import { prepareSchoolTopics } from '@/lib/quizBank'
 import { resolveAcademicYear } from '@/lib/academicYear'
 import { canWriteSyllabusClass, requireSyllabusWriteAccess } from '@/lib/auth'
 import { parseSyllabusBulk, normalizeBookType, normalizeAudience, normalizeBookName, defaultAudienceForBookType } from '@/lib/syllabus/bulk-import-schema'
@@ -179,6 +180,8 @@ export async function POST(req: NextRequest) {
     }
 
     await client.query('COMMIT')
+    // The school's own topics get their own quiz questions in the background (#444).
+    after(() => prepareSchoolTopics(Number(school_id)))
 
     return NextResponse.json({
       ok: true,

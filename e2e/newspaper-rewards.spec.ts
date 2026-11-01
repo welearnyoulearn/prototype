@@ -11,9 +11,12 @@
 //     npx playwright test e2e/newspaper-rewards.spec.ts
 // The app under test must use the same database. Without GROQ_API_KEY the build uses the reviewed topic bank
 // (the one-note fallback), which is exactly what a failed night looks like.
-import { test, expect, type Page } from '@playwright/test'
+import { test, expect as baseExpect, type Page } from '@playwright/test'
 import { Pool } from 'pg'
 import bcrypt from 'bcryptjs'
+
+// In dev mode every route compiles on its first request (often 5-10 s), so assertions wait up to 30 s.
+const expect = baseExpect.configure({ timeout: 30_000 })
 
 const DB_URL = process.env.E2E_LOCAL_DATABASE_URL
 const isLocal = !!DB_URL && ['127.0.0.1', 'localhost'].includes(new URL(DB_URL).hostname)
@@ -84,7 +87,7 @@ test('student reads, says "I\'ve read it", answers and earns points', async ({ p
   test.skip(hourIST < 6, 'before 06:00 IST students still see yesterday\'s edition')
   await login(page, '/api/student/auth/login', { rollNumber: who.roll, password: PASSWORD })
   await page.goto('/student?tab=newspaper')
-  await expect(page.getByTestId('newspaper-item-1')).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByTestId('newspaper-item-1')).toBeVisible({ timeout: 90_000 })
   const ack = page.getByTestId('newspaper-ack')
   await expect(ack).toBeDisabled()
   await expect(ack).toBeEnabled({ timeout: 30_000 })
@@ -111,7 +114,9 @@ test('parent orders an eraser for the child', async ({ page }) => {
   await login(page, '/api/parent/auth/login', { identifier: who.parent, password: PASSWORD })
   await page.goto('/parent')
   // Choosing the child resets the parent portal to Overview, so open Rewards from the menu as a parent would.
-  await page.getByText('Rewards', { exact: true }).first().click({ timeout: 60_000 })
+  // Wait for the child's dashboard first: clicking earlier is undone when the portal selects the child.
+  await expect(page.getByText('Your Child')).toBeVisible({ timeout: 90_000 })
+  await page.getByText('Rewards', { exact: true }).first().click()
   const eraser = page.locator('[data-testid^="rewards-item-"]', { hasText: 'Eraser' })
   await eraser.getByRole('button', { name: 'Get it' }).click({ timeout: 30_000 })
   await eraser.getByRole('button', { name: /Use 150 points/ }).click()
@@ -139,7 +144,7 @@ test('WLYL sees the item counts, closes the run and marks the parcel sent', asyn
 test('school admin: parcel arrived, one collected, one cannot be delivered', async ({ page }) => {
   await login(page, '/api/auth/login', { email: who.admin, password: PASSWORD })
   await page.goto('/school-admin?tab=rewards')
-  await page.locator('[data-testid^="rewards-arrived-"]').click({ timeout: 30_000 })
+  await page.locator('[data-testid^="rewards-arrived-"]').click({ timeout: 90_000 })
   await expect(page.locator('[data-testid^="rewards-arrived-"]')).toHaveCount(0)
   const orders = (await pool.query<{ id: number; item_name: string }>(`SELECT id, item_name FROM reward_orders WHERE student_id = $1 ORDER BY id`, [ids.student])).rows
   const pencil = orders.find(o => o.item_name === 'Pencil')!

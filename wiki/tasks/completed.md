@@ -6,6 +6,11 @@ All finished features and bug fixes. Most recent first.
 
 <!-- Add new entries at the top -->
 
+### 2026-10-31 — Parent mobile app stays signed in for life (#424)
+**Type:** Bug fix
+**Portal:** Parent (mobile app)
+**Summary:** Mobile parent sessions now last 50 years instead of 365 days, so only logout or a password change ends them. The web portal keeps its 20-minute idle timeout and 12-hour cap.
+
 ### 2026-10-18 — Paginate Platform Admin Billing and Traffic tables (#400)
 **Type:** Enhancement
 **Portal:** Platform Admin
@@ -170,3 +175,5 @@ All finished features and bug fixes. Most recent first.
 **Summary:** Built the fee management module with categories, structures, payments, and waivers.
 **PR:** #45
 -->
+
+- 2026-10-31: Parent sessions are revoked when a school changes the parent's email or phone (#468)

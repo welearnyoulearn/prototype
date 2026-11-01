@@ -88,7 +88,7 @@ const BOOTSTRAP_MARKER_KEY   = 'initial_schema_bootstrap'
 // silently never runs anywhere, and you will chase a "column does not exist" 500
 // that reproduces on production but never locally against a fresh DB.
 // Adding a migration statement and bumping this number is ONE change, not two.
-const SCHEMA_VERSION = 57
+const SCHEMA_VERSION = 73
 
 // Records the schema level this build finished applying, on the same row as the
 // bootstrap marker (no extra row, no extra round-trip to read it back).
@@ -1955,8 +1955,8 @@ async function runIncrementalMigrations() {
       UNIQUE(school_id, academic_year)
     )
   `)
-  // Why a year was closed with students still on Leave Open. Runs after the CREATE above: it used to sit in
-  // SYLLABUS_SCHEMA, which runs first, so a completely empty database failed here before the table existed.
+  // Why a year was closed with students still on Leave Open. Runs after the CREATE above: in
+  // SYLLABUS_SCHEMA (which runs first) it broke setting up a brand-new database (#459).
   await pool.query(`ALTER TABLE fee_year_close ADD COLUMN IF NOT EXISTS close_reason TEXT`)
   // Only ever created inline in category-assignments/route.ts, but categories/route.ts's
   // DELETE unconditionally deletes from it — so deleting a fee category on any database
@@ -2380,6 +2380,18 @@ async function runIncrementalMigrations() {
     INSERT INTO plan_features (feature_key, tier, enabled)
     VALUES
       ('online-payments', 'basic', false), ('online-payments', 'standard', false), ('online-payments', 'premium', false)
+    ON CONFLICT (feature_key, tier) DO NOTHING
+  `).catch(() => {})
+
+  // Daily Quiz + Student Doubts (#430/#431) — new Learning features. OFF at every tier
+  // until they launch: a platform admin switches them on in the features matrix. Without
+  // a row here /api/platform/features would show them unconfigured, and an explicit OFF
+  // row keeps a later default change from silently enabling an unfinished feature.
+  await pool.query(`
+    INSERT INTO plan_features (feature_key, tier, enabled)
+    VALUES
+      ('daily-quiz',     'basic', false), ('daily-quiz',     'standard', false), ('daily-quiz',     'premium', false),
+      ('student-doubts', 'basic', false), ('student-doubts', 'standard', false), ('student-doubts', 'premium', false)
     ON CONFLICT (feature_key, tier) DO NOTHING
   `).catch(() => {})
 
@@ -4076,6 +4088,60 @@ async function runIncrementalMigrations() {
     );
   `)
 
+  // ── Student AI tutor: textbook/handbook chunks for RAG (#407) ──────────────
+  // indexed_at/chunk_count/index_error are written by scripts/index-materials.ts.
+  await pool.query(`
+    ALTER TABLE master_subject_materials ADD COLUMN IF NOT EXISTS indexed_at TIMESTAMPTZ;
+    ALTER TABLE master_subject_materials ADD COLUMN IF NOT EXISTS chunk_count INTEGER;
+    ALTER TABLE master_subject_materials ADD COLUMN IF NOT EXISTS index_error TEXT;
+  `)
+  // pgvector may be unavailable (e.g. a plain local Postgres). The tutor is optional,
+  // so a missing extension must not abort initDB for the whole app.
+  try {
+    await pool.query(`
+      CREATE EXTENSION IF NOT EXISTS vector;
+      CREATE TABLE IF NOT EXISTS material_chunks (
+        id BIGSERIAL PRIMARY KEY,
+        material_id INTEGER NOT NULL REFERENCES master_subject_materials(id) ON DELETE CASCADE,
+        board VARCHAR(20) NOT NULL,
+        grade VARCHAR(10) NOT NULL,
+        subject VARCHAR(100) NOT NULL,
+        page INTEGER NOT NULL,
+        chunk_index INTEGER NOT NULL,
+        content TEXT NOT NULL,
+        embedding vector(1024) NOT NULL,
+        tsv tsvector GENERATED ALWAYS AS (to_tsvector('simple', content)) STORED,
+        UNIQUE (material_id, chunk_index)
+      );
+      CREATE INDEX IF NOT EXISTS idx_material_chunks_scope ON material_chunks(board, grade, subject);
+      CREATE INDEX IF NOT EXISTS idx_material_chunks_tsv ON material_chunks USING GIN (tsv);
+      CREATE INDEX IF NOT EXISTS idx_material_chunks_embedding ON material_chunks USING hnsw (embedding vector_cosine_ops);
+    `)
+  } catch (err) {
+    console.warn('[db] pgvector unavailable — material_chunks not created; AI tutor retrieval disabled:', err)
+  }
+  // Chunks indexed without an embedding provider keep embedding NULL (keyword search only).
+  try {
+    await pool.query(`ALTER TABLE material_chunks ALTER COLUMN embedding DROP NOT NULL`)
+  } catch (err) {
+    console.warn('[db] material_chunks.embedding DROP NOT NULL skipped:', err)
+  }
+  // Student AI tutor metering (#441). Questions carry the limit (what schools think in); tokens carry
+  // our cost — ₹0.013 per 1,000 tokens is Claude Haiku at $0.10 in / $0.50 out per million, ~3,000 in
+  // + 400 out per question, ₹88/$ (see DOCS/ai-tutor-cost-deck.html); editable in Plans & Pricing.
+  // Defaults: 10,000 questions a month per school, no extra charge.
+  await pool.query(`
+    INSERT INTO usage_meters (key, name, unit_label, unit_size, category, our_cost_per_unit, is_billable, sort_order) VALUES
+      ('tutor.question', 'AI tutor questions', 'question', 1, 'ai', NULL, TRUE, 8),
+      ('tutor.tokens', 'AI tutor tokens', '1,000 tokens', 1000, 'ai', 0.013, FALSE, 9)
+    ON CONFLICT (key) DO NOTHING;
+    INSERT INTO usage_prices (meter_key, tier, effective_month, in_plan, included_per_month, unit_price, monthly_cap, at_cap) VALUES
+      ('tutor.question', 'basic',    '2026-01-01', TRUE, 10000, 0, 10000, 'block'),
+      ('tutor.question', 'standard', '2026-01-01', TRUE, 10000, 0, 10000, 'block'),
+      ('tutor.question', 'premium',  '2026-01-01', TRUE, 10000, 0, 10000, 'block')
+    ON CONFLICT DO NOTHING;
+  `)
+
   // What we know about a school (DOCS/SCHOOL-ONBOARDING.md): legal entity and GST details for the invoice
   // (state → CGST+SGST or IGST), profile, size, commercial and needs; extra contacts (the accountant also gets
   // the bills); and each bill's "bill to", fixed when the bill is made so later edits never change it.
@@ -4114,6 +4180,332 @@ async function runIncrementalMigrations() {
     ALTER TABLE saas_invoices ADD COLUMN IF NOT EXISTS bill_to_address TEXT;
     ALTER TABLE saas_invoices ADD COLUMN IF NOT EXISTS bill_to_state_code VARCHAR(2);
     ALTER TABLE saas_invoices ADD COLUMN IF NOT EXISTS bill_to_gstin VARCHAR(15);
+  `)
+
+  // Daily Quiz question bank (#432). Questions belong to a syllabus topic: a master topic (shared by every
+  // school on that board) or, later, a school's own custom topic. Prepared once per subject from Platform
+  // Admin (Claude writes, Groq answers blind, only agreeing questions are kept), then published per subject.
+  // A subject's questions reach students only after quiz_bank_subjects.status = 'published'.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS quiz_questions (
+      id SERIAL PRIMARY KEY,
+      master_subject_id INTEGER REFERENCES master_subjects(id) ON DELETE CASCADE,
+      master_topic_id INTEGER REFERENCES master_topics(id) ON DELETE CASCADE,
+      school_topic_id INTEGER REFERENCES school_topics(id) ON DELETE CASCADE,
+      language VARCHAR(20) NOT NULL DEFAULT 'english',
+      stem TEXT NOT NULL,
+      options JSONB NOT NULL,
+      correct_index SMALLINT NOT NULL CHECK (correct_index BETWEEN 0 AND 3),
+      explanation TEXT,
+      difficulty VARCHAR(10) NOT NULL DEFAULT 'medium' CHECK (difficulty IN ('easy', 'medium', 'hard')),
+      source VARCHAR(10) NOT NULL CHECK (source IN ('ai', 'import', 'admin')),
+      status VARCHAR(10) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'retired', 'pulled')),
+      fingerprint VARCHAR(64) NOT NULL,
+      served_count INTEGER NOT NULL DEFAULT 0,
+      correct_count INTEGER NOT NULL DEFAULT 0,
+      report_count INTEGER NOT NULL DEFAULT 0,
+      updated_by INTEGER,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      CHECK (master_topic_id IS NOT NULL OR school_topic_id IS NOT NULL)
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_quiz_questions_master_fp ON quiz_questions(master_topic_id, fingerprint) WHERE master_topic_id IS NOT NULL;
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_quiz_questions_school_fp ON quiz_questions(school_topic_id, fingerprint) WHERE school_topic_id IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS idx_quiz_questions_subject ON quiz_questions(master_subject_id, status);
+
+    CREATE TABLE IF NOT EXISTS quiz_question_reports (
+      id SERIAL PRIMARY KEY,
+      question_id INTEGER NOT NULL REFERENCES quiz_questions(id) ON DELETE CASCADE,
+      student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      reason VARCHAR(20) NOT NULL CHECK (reason IN ('wrong_answer', 'unclear', 'typo', 'other')),
+      note TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      resolved_at TIMESTAMPTZ,
+      UNIQUE (question_id, student_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS quiz_bank_subjects (
+      master_subject_id INTEGER PRIMARY KEY REFERENCES master_subjects(id) ON DELETE CASCADE,
+      -- Preparation progress only. Being live is published_at, kept separate so topping up a published
+      -- subject never takes it offline for the daily quiz.
+      status VARCHAR(12) NOT NULL DEFAULT 'idle' CHECK (status IN ('idle', 'generating', 'checking', 'ready')),
+      use_textbook BOOLEAN NOT NULL DEFAULT FALSE,
+      material_id INTEGER REFERENCES master_subject_materials(id) ON DELETE SET NULL,
+      anthropic_file_id VARCHAR(120),
+      anthropic_file_expires_at TIMESTAMPTZ,
+      textbook_tokens INTEGER,
+      batch_id VARCHAR(120),
+      batch_submitted_at TIMESTAMPTZ,
+      last_error TEXT,
+      started_by INTEGER,
+      published_by INTEGER,
+      published_at TIMESTAMPTZ,
+      -- Set while one caller (an open admin screen or the daily cron) collects this subject's batch,
+      -- so two callers never collect it twice. A stale claim (>10 min) is taken over.
+      claimed_at TIMESTAMPTZ,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS quiz_bank_chapters (
+      master_chapter_id INTEGER PRIMARY KEY REFERENCES master_chapters(id) ON DELETE CASCADE,
+      master_subject_id INTEGER NOT NULL REFERENCES master_subjects(id) ON DELETE CASCADE,
+      status VARCHAR(10) NOT NULL CHECK (status IN ('queued', 'generated', 'done', 'failed')),
+      raw_output JSONB,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      generated_count INTEGER NOT NULL DEFAULT 0,
+      kept_count INTEGER NOT NULL DEFAULT 0,
+      last_error TEXT,
+      claimed_at TIMESTAMPTZ,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_quiz_bank_chapters_subject ON quiz_bank_chapters(master_subject_id, status);
+    -- Tokens Claude used for the chapter (#463), so the real cost can be shown.
+    ALTER TABLE quiz_bank_chapters ADD COLUMN IF NOT EXISTS input_tokens INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE quiz_bank_chapters ADD COLUMN IF NOT EXISTS output_tokens INTEGER NOT NULL DEFAULT 0;
+    -- OmniRoute writing (#478): the topics of the chapter still to write, and the questions already written.
+    ALTER TABLE quiz_bank_chapters ADD COLUMN IF NOT EXISTS omni JSONB;
+  `)
+
+  // Daily Quiz (#433). One quiz per class per working day: one question per class subject whose bank is
+  // published (lib/quizBank.ts), from topics the class covered recently. Each student draws their own
+  // questions. Answers stay hidden until the class quiz closes; a missed quiz can be taken late for 7 days.
+  await pool.query(`
+    -- Platform Admin only. school_id NULL = the global row; a school row overrides only the fields it sets.
+    CREATE TABLE IF NOT EXISTS quiz_settings (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER UNIQUE REFERENCES schools(id) ON DELETE CASCADE,
+      season_start CHAR(5),
+      season_end CHAR(5),
+      open_time CHAR(5),
+      close_time CHAR(5),
+      grades INTEGER[],
+      updated_by INTEGER,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_quiz_settings_global ON quiz_settings ((school_id IS NULL)) WHERE school_id IS NULL;
+    INSERT INTO quiz_settings (school_id, season_start, season_end, open_time, close_time, grades)
+    SELECT NULL, '07-01', '03-15', '15:30', '21:00', ARRAY[3,4,5,6,7,8,9,10]
+    WHERE NOT EXISTS (SELECT 1 FROM quiz_settings WHERE school_id IS NULL);
+
+    -- opens_at / closes_at are frozen when the quiz is created, so a later settings change never moves a past quiz.
+    CREATE TABLE IF NOT EXISTS daily_quizzes (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      class_id INTEGER NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
+      quiz_date DATE NOT NULL,
+      opens_at TIMESTAMPTZ NOT NULL,
+      closes_at TIMESTAMPTZ NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (class_id, quiz_date)
+    );
+    CREATE INDEX IF NOT EXISTS idx_daily_quizzes_school_date ON daily_quizzes(school_id, quiz_date);
+
+    -- One item per class subject. topic_ids are the class's own school_topics rows (master-backed or the
+    -- school's custom ones): 'covered' = the one newly completed topic of the day, 'revision' = earlier ones.
+    CREATE TABLE IF NOT EXISTS daily_quiz_items (
+      id SERIAL PRIMARY KEY,
+      quiz_id INTEGER NOT NULL REFERENCES daily_quizzes(id) ON DELETE CASCADE,
+      position SMALLINT NOT NULL,
+      school_subject_id INTEGER NOT NULL REFERENCES school_subjects(id) ON DELETE CASCADE,
+      subject_name VARCHAR(100) NOT NULL,
+      source VARCHAR(10) NOT NULL CHECK (source IN ('covered', 'revision')),
+      topic_ids INTEGER[] NOT NULL,
+      UNIQUE (quiz_id, school_subject_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS daily_quiz_attempts (
+      id SERIAL PRIMARY KEY,
+      quiz_id INTEGER NOT NULL REFERENCES daily_quizzes(id) ON DELETE CASCADE,
+      student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      is_late BOOLEAN NOT NULL DEFAULT FALSE,
+      status VARCHAR(12) NOT NULL DEFAULT 'in_progress' CHECK (status IN ('in_progress', 'submitted')),
+      started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      submitted_at TIMESTAMPTZ,
+      correct_count INTEGER,
+      total_count INTEGER,
+      UNIQUE (quiz_id, student_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_daily_quiz_attempts_student ON daily_quiz_attempts(student_id, quiz_id);
+
+    -- One row per drawn question. chosen_index can change until submit; is_correct is set on submit.
+    CREATE TABLE IF NOT EXISTS daily_quiz_answers (
+      id SERIAL PRIMARY KEY,
+      attempt_id INTEGER NOT NULL REFERENCES daily_quiz_attempts(id) ON DELETE CASCADE,
+      item_id INTEGER NOT NULL REFERENCES daily_quiz_items(id) ON DELETE CASCADE,
+      question_id INTEGER NOT NULL REFERENCES quiz_questions(id) ON DELETE CASCADE,
+      -- The class's topic the question was drawn for (mastery, revision order, doubts).
+      school_topic_id INTEGER REFERENCES school_topics(id) ON DELETE SET NULL,
+      position SMALLINT NOT NULL,
+      chosen_index SMALLINT CHECK (chosen_index BETWEEN 0 AND 3),
+      is_correct BOOLEAN,
+      answered_at TIMESTAMPTZ,
+      UNIQUE (attempt_id, item_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_daily_quiz_answers_question ON daily_quiz_answers(question_id);
+
+    CREATE TABLE IF NOT EXISTS student_topic_mastery (
+      student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+      school_topic_id INTEGER NOT NULL REFERENCES school_topics(id) ON DELETE CASCADE,
+      attempted INTEGER NOT NULL DEFAULT 0,
+      correct INTEGER NOT NULL DEFAULT 0,
+      last_wrong_at TIMESTAMPTZ,
+      last_seen_at TIMESTAMPTZ,
+      PRIMARY KEY (student_id, school_topic_id)
+    );
+
+    -- Claimed before sending, so each notice (ready / reminder / results) goes once per quiz however often the cron runs.
+    CREATE TABLE IF NOT EXISTS daily_quiz_notices (
+      quiz_id INTEGER NOT NULL REFERENCES daily_quizzes(id) ON DELETE CASCADE,
+      kind VARCHAR(10) NOT NULL CHECK (kind IN ('ready', 'reminder', 'results')),
+      sent_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (quiz_id, kind)
+    );
+  `)
+
+  // Daily Quiz rewards (#434). student_points is the points ledger (balance = sum; a future marketplace spends
+  // with negative rows). Learning awards are unique per (student, action, reference) so a retry or a second
+  // cron run never pays twice; older rows (no reference type in this list) are untouched by the index.
+  // lib/quizRewards.ts LEARNING_REFS must match the WHERE clause exactly.
+  await pool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_student_points_learning
+      ON student_points (student_id, action_type, reference_type, reference_id)
+      WHERE reference_type IN ('daily_quiz_attempt', 'daily_quiz_week', 'student_doubt');
+    CREATE INDEX IF NOT EXISTS idx_student_points_earned ON student_points (student_id, earned_at);
+
+    -- Accuracy points are paid once the answers are out; this marks an attempt as paid.
+    ALTER TABLE daily_quiz_attempts ADD COLUMN IF NOT EXISTS points_settled_at TIMESTAMPTZ;
+
+    -- The parents' weekly "learning week" report, claimed per student per week so it goes once.
+    CREATE TABLE IF NOT EXISTS quiz_weekly_reports (
+      student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+      week_start DATE NOT NULL,
+      sent_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (student_id, week_start)
+    );
+  `)
+
+  // Student Doubts (#435). After a quiz's answers are out: read the explanation → Ask WLYL AI → Ask Teacher.
+  // A doubt goes to the subject teacher (else the class teacher). It is clarified only when the student answers
+  // a fresh question on the same topic correctly and confirms; then the student earns points and the teacher
+  // who explained earns WLYL Stars (teacher_star_points, a ledger like student_points).
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS student_doubts (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+      class_id INTEGER NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
+      attempt_id INTEGER REFERENCES daily_quiz_attempts(id) ON DELETE SET NULL,
+      question_id INTEGER NOT NULL REFERENCES quiz_questions(id) ON DELETE CASCADE,
+      school_topic_id INTEGER REFERENCES school_topics(id) ON DELETE SET NULL,
+      subject_name VARCHAR(100) NOT NULL,
+      chosen_index SMALLINT,
+      note TEXT,
+      ai_tried BOOLEAN NOT NULL DEFAULT FALSE,
+      teacher_id INTEGER REFERENCES teachers(id) ON DELETE SET NULL,
+      status VARCHAR(12) NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'explained', 'clarified')),
+      reply TEXT,
+      replied_by INTEGER REFERENCES teachers(id) ON DELETE SET NULL,
+      explained_at TIMESTAMPTZ,
+      explained_in_class BOOLEAN NOT NULL DEFAULT FALSE,
+      proof_question_id INTEGER REFERENCES quiz_questions(id) ON DELETE SET NULL,
+      proof_chosen_index SMALLINT,
+      proof_correct BOOLEAN,
+      proof_at TIMESTAMPTZ,
+      clarified_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (student_id, question_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_student_doubts_teacher ON student_doubts(teacher_id, status);
+    CREATE INDEX IF NOT EXISTS idx_student_doubts_class ON student_doubts(class_id, question_id, status);
+    CREATE INDEX IF NOT EXISTS idx_student_doubts_school ON student_doubts(school_id, status, created_at);
+
+    -- Every step, for the student, parent, teacher and school timelines.
+    CREATE TABLE IF NOT EXISTS student_doubt_events (
+      id SERIAL PRIMARY KEY,
+      doubt_id INTEGER NOT NULL REFERENCES student_doubts(id) ON DELETE CASCADE,
+      actor_type VARCHAR(10) NOT NULL CHECK (actor_type IN ('student', 'teacher', 'system')),
+      actor_id INTEGER,
+      event VARCHAR(20) NOT NULL,
+      note TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_student_doubt_events_doubt ON student_doubt_events(doubt_id, created_at);
+
+    -- "Ask WLYL AI" answers: shown again on reload, and counted for the per-student daily limit.
+    CREATE TABLE IF NOT EXISTS doubt_ai_help (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+      question_id INTEGER NOT NULL REFERENCES quiz_questions(id) ON DELETE CASCADE,
+      attempt_id INTEGER REFERENCES daily_quiz_attempts(id) ON DELETE SET NULL,
+      message TEXT,
+      reply TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_doubt_ai_help_student ON doubt_ai_help(student_id, created_at);
+
+    -- A teacher's one-tap "Covered in class" on a most-missed question.
+    CREATE TABLE IF NOT EXISTS quiz_misconceptions_covered (
+      class_id INTEGER NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
+      question_id INTEGER NOT NULL REFERENCES quiz_questions(id) ON DELETE CASCADE,
+      teacher_id INTEGER REFERENCES teachers(id) ON DELETE SET NULL,
+      covered_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (class_id, question_id)
+    );
+
+    -- WLYL Stars for teachers: one row per award (balance = sum), unique per (teacher, action, reference).
+    CREATE TABLE IF NOT EXISTS teacher_star_points (
+      id SERIAL PRIMARY KEY,
+      teacher_id INTEGER NOT NULL REFERENCES teachers(id) ON DELETE CASCADE,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      action VARCHAR(40) NOT NULL,
+      stars INTEGER NOT NULL,
+      reference_type VARCHAR(30) NOT NULL,
+      reference_id INTEGER NOT NULL,
+      earned_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (teacher_id, action, reference_type, reference_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_teacher_star_points_school ON teacher_star_points(school_id, earned_at);
+  `)
+
+  // Questions made at syllabus import (#444). Importing or adding Master Syllabus topics prepares that subject's
+  // bank automatically (8 per topic) and publishes it once the checks pass; a school's own custom topics get
+  // their own questions through quiz_bank_school_chapters. The quiz language is a setting on the subject.
+  await pool.query(`
+    ALTER TABLE master_subjects ADD COLUMN IF NOT EXISTS quiz_language VARCHAR(10) CHECK (quiz_language IN ('english', 'telugu', 'hindi'));
+    ALTER TABLE school_subjects ADD COLUMN IF NOT EXISTS quiz_language VARCHAR(10) CHECK (quiz_language IN ('english', 'telugu', 'hindi'));
+
+    -- auto_prepare: preparation was started by an import (not a person), so the jobs retry it themselves.
+    -- rerun_requested: topics were added while a preparation was running; prepare again when it finishes.
+    -- unpublished_at: an admin took the subject offline; automatic publishing then leaves it offline.
+    ALTER TABLE quiz_bank_subjects ADD COLUMN IF NOT EXISTS auto_prepare BOOLEAN NOT NULL DEFAULT FALSE;
+    ALTER TABLE quiz_bank_subjects ADD COLUMN IF NOT EXISTS rerun_requested BOOLEAN NOT NULL DEFAULT FALSE;
+    ALTER TABLE quiz_bank_subjects ADD COLUMN IF NOT EXISTS auto_tries INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE quiz_bank_subjects ADD COLUMN IF NOT EXISTS unpublished_at TIMESTAMPTZ;
+
+    -- A school's own (custom) chapter whose topics need questions: one Claude batch request per chapter,
+    -- then the same Groq check. Questions are stored with school_topic_id and used only by that school.
+    CREATE TABLE IF NOT EXISTS quiz_bank_school_chapters (
+      school_chapter_id INTEGER PRIMARY KEY REFERENCES school_chapters(id) ON DELETE CASCADE,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      status VARCHAR(10) NOT NULL CHECK (status IN ('queued', 'generated', 'done', 'failed')),
+      batch_id VARCHAR(120),
+      raw_output JSONB,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      generated_count INTEGER NOT NULL DEFAULT 0,
+      kept_count INTEGER NOT NULL DEFAULT 0,
+      last_error TEXT,
+      claimed_at TIMESTAMPTZ,
+      submitted_at TIMESTAMPTZ,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_quiz_bank_school_chapters_status ON quiz_bank_school_chapters(status, batch_id);
+    ALTER TABLE quiz_bank_school_chapters ADD COLUMN IF NOT EXISTS input_tokens INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE quiz_bank_school_chapters ADD COLUMN IF NOT EXISTS output_tokens INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE quiz_bank_school_chapters ADD COLUMN IF NOT EXISTS omni JSONB;
   `)
 
   // Daily Newspaper + Rewards Marketplace (tables, ledger indexes, features seeded OFF, starter catalog).

@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { announceChange, ANNOUNCEMENTS_CHANGED } from './announcementEvents'
 import { getTemplate } from '@/lib/announcementTemplates'
 import NoticeModal from './NoticeModal'
 import { localised, type Lang, type NoticeItem } from './types'
@@ -22,15 +23,17 @@ function fmt(s: string) {
 
 // The notices card for teacher / student / parent dashboards: latest notices with unread marks,
 // a full searchable list, and the notice card popup (animated greeting cards for festive notices).
-// Unseen greeting / urgent / action-needed notices pop up once so nobody misses them.
+// Pop-ups for new notices live in AnnouncementPopup (once per person); this is the list people come back to.
 export default function NoticeCenter({
-  schoolId, lang = 'en', schoolName, preview = 4, experience = 'shared',
+  schoolId, lang = 'en', schoolName, preview = 4, experience = 'shared', mode = 'card',
 }: {
   schoolId: number
   lang?: Lang
   schoolName?: string
   preview?: number
   experience?: 'student' | 'shared'
+  // 'card' = the dashboard summary; 'page' = the full Announcements tab (every announcement, searchable)
+  mode?: 'card' | 'page'
 }) {
   const isStudent = experience === 'student'
   const tx = TX[lang]
@@ -38,25 +41,26 @@ export default function NoticeCenter({
   const [past, setPast] = useState<NoticeItem[] | null>(null)
   const [loaded, setLoaded] = useState(false)
   const [openId, setOpenId] = useState<number | null>(null)
-  const [queue, setQueue] = useState<number[]>([])
   const [showAll, setShowAll] = useState(false)
   const [filter, setFilter] = useState<Filter>('all')
   const [query, setQuery] = useState('')
 
   useEffect(() => {
     let cancelled = false
-    fetch(`/api/announcements?school_id=${schoolId}`)
-      .then(r => (r.ok ? r.json() : []))
-      .then((data: unknown) => {
-        if (cancelled) return
-        const list = Array.isArray(data) ? (data as NoticeItem[]) : []
-        setItems(list)
-        // Anything unseen that deserves a pop-up: festive card, urgent, or needs an acknowledgement
-        setQueue(list.filter(n => !n.seen && (n.priority === 'urgent' || (n.requires_ack && !n.acked) || getTemplate(n.template_key)?.greeting)).map(n => n.id))
-        setLoaded(true)
-      })
-      .catch(() => { if (!cancelled) setLoaded(true) })
-    return () => { cancelled = true }
+    const load = () => {
+      fetch(`/api/announcements?school_id=${schoolId}`)
+        .then(r => (r.ok ? r.json() : []))
+        .then((data: unknown) => {
+          if (cancelled) return
+          setItems(Array.isArray(data) ? (data as NoticeItem[]) : [])
+          setLoaded(true)
+        })
+        .catch(() => { if (!cancelled) setLoaded(true) })
+    }
+    load()
+    // The login popup marks notices seen; refresh so the NEW marks match
+    window.addEventListener(ANNOUNCEMENTS_CHANGED, load)
+    return () => { cancelled = true; window.removeEventListener(ANNOUNCEMENTS_CHANGED, load) }
   }, [schoolId])
 
   const loadPast = useCallback(async () => {
@@ -68,7 +72,14 @@ export default function NoticeCenter({
     } catch { setPast([]) }
   }, [past, schoolId])
 
-  const activeId = openId ?? queue[0] ?? null
+  // The Announcements tab keeps every announcement, including expired ones
+  useEffect(() => {
+    if (mode !== 'page') return
+    const t = window.setTimeout(() => { void loadPast() }, 0)
+    return () => window.clearTimeout(t)
+  }, [mode, loadPast])
+
+  const activeId = openId
   const all = useMemo(() => [...items, ...(past ?? [])], [items, past])
   const active = activeId !== null ? all.find(n => n.id === activeId) ?? null : null
 
@@ -81,17 +92,15 @@ export default function NoticeCenter({
   useEffect(() => {
     if (!active || active.seen) return
     patch(active.id, { seen: true })
-    fetch(`/api/announcements/${active.id}/read`, { method: 'POST' }).catch(() => {})
+    fetch(`/api/announcements/${active.id}/read`, { method: 'POST' }).then(() => announceChange()).catch(() => {})
   }, [active?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function acknowledge(id: number) {
     patch(id, { acked: true, seen: true })
-    fetch(`/api/announcements/${id}/ack`, { method: 'POST' }).catch(() => {})
+    fetch(`/api/announcements/${id}/ack`, { method: 'POST' }).then(() => announceChange()).catch(() => {})
   }
 
   function closeModal() {
-    if (activeId === null) return
-    setQueue(q => q.filter(id => id !== activeId))
     setOpenId(null)
   }
 
@@ -99,7 +108,7 @@ export default function NoticeCenter({
   const urgent = items.filter(n => n.priority === 'urgent').length
 
   const filtered = useMemo(() => {
-    const base = filter === 'past' ? (past ?? []) : items
+    const base = filter === 'past' ? (past ?? []) : mode === 'page' && filter === 'all' ? [...items, ...(past ?? [])] : items
     const q = query.trim().toLowerCase()
     return base.filter(n => {
       if (filter === 'unread' && n.seen) return false
@@ -109,10 +118,10 @@ export default function NoticeCenter({
       const l = localised(n, lang)
       return `${l.title} ${l.content}`.toLowerCase().includes(q)
     })
-  }, [items, past, filter, query, lang])
+  }, [items, past, filter, query, lang, mode])
 
   if (!loaded) return null
-  if (items.length === 0 && !active) return null
+  if (items.length === 0 && !active && mode === 'card') return null
 
   const noteTone = (n: NoticeItem): Tone => {
     if (n.priority === 'urgent') return 'coral'
@@ -163,6 +172,43 @@ export default function NoticeCenter({
     )
   }
 
+  const panelInner = (
+    <>
+            <div className="px-5 pt-5 pb-3 space-y-3 border-b border-gray-100">
+              <div className="flex items-center justify-between">
+                <p id="notice-panel-title" data-testid="notice-panel-title" className="flex items-center gap-2 text-base font-semibold text-gray-900"><Megaphone size={17} className="text-[#245b46]" />{tx.title}</p>
+                {mode === 'card' && <button data-testid="notice-panel-close" onClick={() => setShowAll(false)} className="text-gray-400 hover:text-gray-600 text-xl leading-none px-2">×</button>}
+              </div>
+              <label className="relative block"><span className="sr-only">{tx.search}</span><Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" /><input data-testid="notices-search" value={query} onChange={e => setQuery(e.target.value)} placeholder={tx.search}
+                className="w-full border border-gray-200 rounded-md py-2 pl-9 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#245b46]/20 focus:border-[#245b46]" /></label>
+              <div className="flex gap-1.5 flex-wrap">
+                {(['all', 'unread', 'pinned', 'action', 'past'] as Filter[]).map(f => (
+                  <button key={f} data-testid={`notices-filter-${f}`}
+                    onClick={() => { setFilter(f); if (f === 'past') loadPast() }}
+                    className={`px-3 py-1 rounded-full text-xs font-semibold border transition-colors ${filter === f ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
+                    {tx[f]}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="overflow-y-auto divide-y divide-gray-50 flex-1">
+              {filtered.length === 0
+                ? <p className="text-center text-sm text-gray-400 py-12">{tx.none}</p>
+                : filtered.map(row)}
+            </div>
+            <p className="px-5 py-2 text-[11px] text-gray-400 border-t border-gray-100">{tx.of(filtered.length, filter === 'past' ? (past?.length ?? 0) : items.length)}</p>
+    </>
+  )
+
+  if (mode === 'page') {
+    return (
+      <>
+        <div data-testid="announcements-tab" className="bg-white border border-gray-200 rounded-lg flex flex-col max-w-3xl mx-auto">{panelInner}</div>
+        {active && <NoticeModal notice={active} schoolName={schoolName} lang={lang} onClose={closeModal} onAck={acknowledge} />}
+      </>
+    )
+  }
+
   return (
     <>
       {items.length > 0 && isStudent && (
@@ -203,29 +249,7 @@ export default function NoticeCenter({
       {showAll && (
         <div className="fixed inset-0 z-[250] bg-black/45 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={() => setShowAll(false)}>
           <div role="dialog" aria-modal="true" aria-labelledby="notice-panel-title" data-testid="notice-panel" data-student-ui={isStudent ? '' : undefined} className="bg-white w-full sm:max-w-xl max-h-[88vh] rounded-t-lg sm:rounded-lg shadow-2xl flex flex-col" onClick={e => e.stopPropagation()}>
-            <div className="px-5 pt-5 pb-3 space-y-3 border-b border-gray-100">
-              <div className="flex items-center justify-between">
-                <p id="notice-panel-title" className="flex items-center gap-2 text-base font-semibold text-gray-900"><Megaphone size={17} className="text-[#245b46]" />{tx.title}</p>
-                <button data-testid="notice-panel-close" onClick={() => setShowAll(false)} className="text-gray-400 hover:text-gray-600 text-xl leading-none px-2">×</button>
-              </div>
-              <label className="relative block"><span className="sr-only">{tx.search}</span><Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" /><input data-testid="notices-search" value={query} onChange={e => setQuery(e.target.value)} placeholder={tx.search}
-                className="w-full border border-gray-200 rounded-md py-2 pl-9 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#245b46]/20 focus:border-[#245b46]" /></label>
-              <div className="flex gap-1.5 flex-wrap">
-                {(['all', 'unread', 'pinned', 'action', 'past'] as Filter[]).map(f => (
-                  <button key={f} data-testid={`notices-filter-${f}`}
-                    onClick={() => { setFilter(f); if (f === 'past') loadPast() }}
-                    className={`px-3 py-1 rounded-full text-xs font-semibold border transition-colors ${filter === f ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
-                    {tx[f]}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="overflow-y-auto divide-y divide-gray-50 flex-1">
-              {filtered.length === 0
-                ? <p className="text-center text-sm text-gray-400 py-12">{tx.none}</p>
-                : filtered.map(row)}
-            </div>
-            <p className="px-5 py-2 text-[11px] text-gray-400 border-t border-gray-100">{tx.of(filtered.length, filter === 'past' ? (past?.length ?? 0) : items.length)}</p>
+            {panelInner}
           </div>
         </div>
       )}

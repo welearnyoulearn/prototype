@@ -16,7 +16,8 @@ async function callAI(
   userPrompt: string,
   maxTokens = 1024,
   jsonMode = false,
-  usage?: AIUsage
+  usage?: AIUsage,
+  temperature = 0.7
 ): Promise<string> {
   const key = process.env.GROQ_API_KEY
   if (!key) throw new Error('GROQ_API_KEY not set')
@@ -34,7 +35,7 @@ async function callAI(
       { role: 'user',   content: userPrompt   },
     ],
     max_tokens: maxTokens,
-    temperature: 0.7,
+    temperature,
   }
   if (jsonMode) body.response_format = { type: 'json_object' }
 
@@ -61,6 +62,77 @@ async function callAI(
   return (data.choices?.[0]?.message?.content ?? '').trim()
 }
 
+/** Thrown when Groq is rate-limited or unavailable: the caller should stop and try again later. */
+export class AIRetryLaterError extends Error {}
+
+// ─── Quiz bank: blind answer check (#432) ─────────────────────────────────
+// Groq answers each question without being told the key. A question is kept only when its answer matches
+// the one Claude wrote — two different models agreeing catches far more wrong keys than one model
+// checking itself. Platform-level work for the shared bank, so it is not metered against a school.
+export async function answerMcqsBlind(
+  items: { key: string; stem: string; options: string[] }[],
+  context: { board: string; grade: string; subject: string }
+): Promise<Map<string, number>> {
+  if (items.length === 0) return new Map()
+  const list = items.map(i => ({ id: i.key, question: i.stem, options: i.options.map((o, n) => `${n}: ${o}`) }))
+  let raw: string
+  try {
+    raw = await callAI(
+      `You are an expert ${context.board} Grade ${context.grade} ${context.subject} teacher checking quiz questions. For each question choose the single best option. Reply with JSON only: {"answers":[{"id":"<id>","answer":<0-3>}]}. If a question has no correct option or more than one, answer -1.`,
+      JSON.stringify(list),
+      Math.min(4000, 60 + items.length * 30),
+      true,
+      undefined,
+      0
+    )
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    if (/Groq API error (429|5\d\d)/.test(msg) || /fetch failed|ECONN|ETIMEDOUT/i.test(msg)) throw new AIRetryLaterError(msg)
+    throw err
+  }
+  const answers = new Map<string, number>()
+  try {
+    const parsed = JSON.parse(raw) as { answers?: { id?: unknown; answer?: unknown }[] }
+    for (const a of parsed.answers ?? []) {
+      if (typeof a.id === 'string' && Number.isInteger(a.answer)) answers.set(a.id, a.answer as number)
+    }
+  } catch { /* unparseable reply: nothing agrees, so nothing from this chunk is kept */ }
+  return answers
+}
+
+// ─── Daily Quiz: "Ask WLYL AI" about a reviewed question (#435) ───────────
+// Only after the answers are out, so nothing is given away. Short, kind, at the student's level, in the
+// question's language. Not metered against the school's AI plan: it is part of the Student Doubts feature
+// and capped per student per day by the caller (lib/studentDoubts.ts).
+export async function explainQuizDoubt(q: {
+  grade: string; subject: string; language: string; stem: string; options: string[]
+  correctIndex: number; explanation: string | null; chosenIndex: number | null; studentMessage: string | null
+}): Promise<string> {
+  const letters = ['A', 'B', 'C', 'D']
+  const lang = q.language === 'telugu' ? 'Telugu' : q.language === 'hindi' ? 'Hindi' : 'simple English'
+  const prompt = [
+    `Question: ${q.stem}`,
+    ...q.options.map((o, i) => `${letters[i]}. ${o}`),
+    `Correct answer: ${letters[q.correctIndex]}. ${q.options[q.correctIndex]}`,
+    q.chosenIndex === null ? 'The student did not answer.' : `The student chose: ${letters[q.chosenIndex]}. ${q.options[q.chosenIndex]}`,
+    q.explanation ? `Book explanation: ${q.explanation}` : '',
+    q.studentMessage ? `The student says: "${q.studentMessage}"` : 'The student read the explanation and is still confused.',
+  ].filter(Boolean).join('\n')
+  try {
+    return await callAI(
+      `You are WLYL's friendly tutor for a Grade ${q.grade} ${q.subject} student. Explain why the correct answer is right${q.chosenIndex !== null && q.chosenIndex !== q.correctIndex ? ' and why the student\'s choice is not' : ''}, using a simple everyday example. Write in ${lang}, in at most 120 words, no markdown headings. Never be discouraging. Only talk about this question and its topic.`,
+      prompt,
+      400,
+      false,
+      undefined,
+      0.4,
+    )
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    if (/Groq API error (429|5\d\d)/.test(msg) || /fetch failed|ECONN|ETIMEDOUT/i.test(msg)) throw new AIRetryLaterError(msg)
+    throw err
+  }
+}
 
 // ─── 4. Announcement Drafter ──────────────────────────────────────────────
 

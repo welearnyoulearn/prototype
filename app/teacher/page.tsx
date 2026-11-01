@@ -15,7 +15,10 @@ import PortalSidebar from '@/components/portal/PortalSidebar'
 import FeatureLauncher, { type LauncherSection } from '@/components/portal/FeatureLauncher'
 import FeatureLauncherButton from '@/components/portal/FeatureLauncherButton'
 import { hueForSection } from '@/components/portal/sectionHues'
-import { CalendarDays, Eye, Home, LayoutGrid, LogOut, Menu, School, UserRound } from 'lucide-react'
+import { CalendarDays, Eye, Home, LayoutGrid, ListChecks, LogOut, Megaphone, Menu, MessageCircleQuestion, School, UserRound } from 'lucide-react'
+import NoticeCenter from '@/components/announcements/NoticeCenter'
+import AnnouncementPopup from '@/components/announcements/AnnouncementPopup'
+import { useUnreadAnnouncements } from '@/components/announcements/useUnreadAnnouncements'
 import { Skeleton } from '@/components/ui/skeleton'
 
 // Always-loaded (landing tab, and small enough not to be worth its own chunk)
@@ -45,6 +48,8 @@ const MyStudents     = dynamic(() => import('./components/MyStudents'),     { lo
 const MyClasses      = dynamic(() => import('./components/MyClasses'),      { loading: () => <ModuleSkeleton /> })
 const TeacherLibrary = dynamic(() => import('./components/TeacherLibrary'), { loading: () => <ModuleSkeleton /> })
 const TeacherExamSchedule = dynamic(() => import('./components/TeacherExamSchedule'), { loading: () => <ModuleSkeleton /> })
+const TeacherQuizBank = dynamic(() => import('./components/TeacherQuizBank'), { loading: () => <ModuleSkeleton /> })
+const TeacherDoubts = dynamic(() => import('./components/TeacherDoubts'), { loading: () => <ModuleSkeleton /> })
 
 type Teacher = {
   id: number
@@ -82,6 +87,8 @@ const NAV_KEY_TO_FEATURE: Record<string, string> = {
   library: 'library',
   'exam-schedule': 'exam-marks',
   syllabus: 'curriculum',
+  'quiz-bank': 'daily-quiz',
+  doubts: 'student-doubts',
 }
 
 // Section icons for the "All features" window (the sidebar itself shows section labels only).
@@ -96,6 +103,7 @@ const NAV_SECTIONS: NavSection[] = [
     label: 'MAIN',
     items: [
       { key: 'snapshot', label: 'Overview', icon: <Home size={18} /> },
+      { key: 'announcements', label: 'Announcements', icon: <Megaphone size={18} /> },
     ],
   },
   {
@@ -104,6 +112,8 @@ const NAV_SECTIONS: NavSection[] = [
       { key: 'my-classes', label: 'My Classes', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" /></svg> },
       { key: 'my-students', label: 'My Students', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg> },
       { key: 'syllabus', label: 'Syllabus', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" /></svg> },
+      { key: 'doubts', label: 'Doubts', icon: <MessageCircleQuestion className="w-4 h-4" aria-hidden="true" /> },
+      { key: 'quiz-bank', label: 'Quiz Questions', icon: <ListChecks className="w-4 h-4" aria-hidden="true" /> },
       { key: 'library', label: 'Digital Library', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253m0-13v13" /></svg> },
       { key: 'exam-schedule', label: 'Exam Schedule', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg> },
       { key: 'attendance', label: 'Attendance', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" /></svg> },
@@ -133,7 +143,9 @@ function TeacherPortal() {
     return () => window.clearTimeout(update)
   }, [activeNav])
   const [sidebarOpen, setSidebarOpen] = useState(false)
-  const { counts: navCounts, latest: navLatest } = useNavNotifications('teacher')
+  const { counts: baseNavCounts, latest: navLatest } = useNavNotifications('teacher')
+  const unreadAnnouncements = useUnreadAnnouncements(teacher?.school_id)
+  const navCounts: Record<string, number> = { ...baseNavCounts, announcements: unreadAnnouncements }
   const [launcherOpen, setLauncherOpen] = useState(false)
   const [selectedClass, setSelectedClass] = useState<{ id: number; grade: string; section: string; class_teacher_name: string | null; class_teacher_id?: number | null } | null>(null)
   const [classViewInitialTab, setClassViewInitialTab] = useState<string | undefined>(undefined)
@@ -380,10 +392,14 @@ function TeacherPortal() {
           {visitedNav.has('class-view') && selectedClass && <div hidden={activeNav !== 'class-view'}><ClassView key={selectedClass.id} classId={selectedClass.id} grade={selectedClass.grade} section={selectedClass.section} schoolId={teacher.school_id} teacherName={teacher.name} teacherId={teacher.id} isClassTeacher={selectedClass.class_teacher_id === teacher.id || teacher.class_teacher_assignments?.some(c => c.id === selectedClass.id)} teacher={{ id: teacher.id, name: teacher.name, subject: teacher.subject, department: teacher.department, class_teacher_grade: teacher.class_teacher_grade, class_teacher_section: teacher.class_teacher_section }} onBack={() => navigateTo('snapshot')} initialTab={classViewInitialTab} openExamId={classViewOpenExamId} /></div>}
           {visitedNav.has('attendance')     && <div hidden={activeNav !== 'attendance'}><Attendance teacherId={teacher.id} schoolId={teacher.school_id} /></div>}
           {visitedNav.has('calendar')       && <div hidden={activeNav !== 'calendar'}><SchoolCalendarView /></div>}
+          {teacher && <AnnouncementPopup schoolId={teacher.school_id} />}
+          {visitedNav.has('announcements')  && <div hidden={activeNav !== 'announcements'}><NoticeCenter schoolId={teacher.school_id} mode="page" /></div>}
           {visitedNav.has('profile')        && <div hidden={activeNav !== 'profile'}><TeacherProfile teacher={teacher} onUpdate={setTeacher as (t: unknown) => void} availableYears={availableYears} selectedAcademicYear={selectedAcademicYear} schoolCurrentYear={schoolCurrentYear} onSelectYear={setSelectedAcademicYear} /></div>}
           {visitedNav.has('my-classes')     && <div hidden={activeNav !== 'my-classes'}><MyClasses teacher={{ id: teacher.id, name: teacher.name, subject: teacher.subject, department: teacher.department, class_teacher_grade: teacher.class_teacher_grade, class_teacher_section: teacher.class_teacher_section }} schoolId={teacher.school_id} onViewClass={cls => { setSelectedClass(cls); navigateTo('class-view') }} onGoToSyllabus={cls => handleNavigate('class-view', { classId: cls.id, tab: 'Syllabus' })} /></div>}
           {visitedNav.has('my-students')    && <div hidden={activeNav !== 'my-students'}><MyStudents teacher={{ id: teacher.id, name: teacher.name, subject: teacher.subject, department: teacher.department, class_teacher_grade: teacher.class_teacher_grade, class_teacher_section: teacher.class_teacher_section }} schoolId={teacher.school_id} /></div>}
           {visitedNav.has('syllabus')       && <div hidden={activeNav !== 'syllabus'}><TeacherSyllabus teacher={{ id: teacher.id, name: teacher.name, subject: teacher.subject, department: teacher.department, class_teacher_grade: teacher.class_teacher_grade, class_teacher_section: teacher.class_teacher_section }} schoolId={teacher.school_id} academicYear={selectedAcademicYear} readOnly={isViewingPastYear} /></div>}
+          {visitedNav.has('quiz-bank')      && <div hidden={activeNav !== 'quiz-bank'}><TeacherQuizBank /></div>}
+          {visitedNav.has('doubts')         && <div hidden={activeNav !== 'doubts'}><TeacherDoubts /></div>}
           {visitedNav.has('library')        && <div hidden={activeNav !== 'library'}><TeacherLibrary teacher={{ id: teacher.id, class_teacher_grade: teacher.class_teacher_grade, class_teacher_section: teacher.class_teacher_section }} schoolId={teacher.school_id} /></div>}
           {visitedNav.has('exam-schedule')  && <div hidden={activeNav !== 'exam-schedule'}><TeacherExamSchedule teacherId={teacher.id} schoolId={teacher.school_id} /></div>}
           </div>

@@ -11,6 +11,25 @@ Non-obvious technical decisions and their reasoning for the WLYL School prototyp
 **Consequences:** What trade-offs come with this decision?
 -->
 
+## 2026-10-27 — AI tutor metered as questions (limit) and tokens (cost) (#441)
+
+**Context:** The student AI tutor only logged its tokens. We need a per-school monthly limit and to know what each school costs us.
+
+**Decision:** Two meters in the existing usage system. `tutor.question` is billable and carries the limit (10,000 a month per school by default, blocked at the cap, no extra charge), because schools think in questions. `tutor.tokens` is track-only and carries our cost (₹0.013 per 1,000 tokens: Claude Haiku at $0.10 in / $0.50 out per million, ~3,000 in + 400 out per question, ₹88/$), since what we pay varies with each question's length. Both are recorded once an answer is produced, including when the student stops it midway.
+
+**Alternatives considered:** Reusing `ai.tokens` (rejected: it meters the Groq helpers with a token-based plan limit, a number schools can't reason about); one question meter with a flat cost (rejected: hides long syllabus answers and the rewrite call).
+
+**Consequences:** The per-student daily limit (60) stays alongside the school limit. Query-rewrite tokens spent on a question that then fails are not recorded. Billing → Usage shows a per-school "Our cost" over every meter with a cost.
+
+
+## 2026-10-20 — Student tutor RAG: pgvector in Supabase, OpenAI-compatible embeddings, Claude Haiku 5.5
+
+**Context:** #407 needs answers grounded in 93 board textbook/handbook PDFs (~4.2 GB in R2). Existing `textbook_chunks` was keyword-only and empty.
+**Decision:** Chunks + 1024-dim embeddings live in a new `material_chunks` table (pgvector HNSW + `simple` tsvector) next to the rest of the data, indexed offline by `scripts/index-materials.ts`. Retrieval fuses vector and keyword results (RRF), scoped by board + grade (+ subject, falling back to the whole grade). Embeddings go through any OpenAI-compatible `/embeddings` endpoint (default model `@cf/baai/bge-m3`, multilingual) so the provider (OmniRoute, Cloudflare Workers AI) is config, not code. Answers come from Claude Haiku 5.5, streamed, excerpts in the user turn, stable cached system prompt.
+**Consequences:** No separate vector DB to run. Changing the embedding model to a non-1024-dim one needs a migration and full re-index. Scanned PDFs (no text layer) get `index_error` and are skipped — OCR is out of scope.
+**Amended 2026-10-21:** There is no direct Anthropic key, so the tutor LLM goes through OmniRoute's OpenAI-compatible `/chat/completions` with an ordered key × model fallback (`OMNIROUTE_API_KEYS` × `TUTOR_MODELS`, default ddgw Claude Haiku 4.5 → GPT-5.4 mini); a route fails over on network error, non-2xx or an empty stream, but never once text has streamed. These models reject a system message, so the system prompt is folded into the first user turn (no prompt caching). Embeddings are optional: OmniRoute has no embedding model yet, so `material_chunks.embedding` is nullable and retrieval is keyword-only until an embedding provider is configured and the materials are re-indexed with `--force`.
+**Amended 2026-10-21 (embeddings):** Embeddings come from Gemini `gemini-embedding-001` at 1024 dims (Matryoshka truncation via the `dimensions` param) through its OpenAI-compatible endpoint; 429s are retried (honouring `Retry-After`, else 60 s). Keyword-only chunks are backfilled by re-running the index script (no `--force` needed).
+**Amended 2026-10-24:** Embeddings are now Cloudflare Workers AI `@cf/baai/bge-m3` (1024 dims, multilingual) through its OpenAI-compatible endpoint (`EMBEDDINGS_BASE_URL` / `EMBEDDINGS_API_KEY` / `EMBEDDINGS_MODEL`), superseding the Gemini `gemini-embedding-001` amendment; the code default in `lib/rag/embeddings.ts` is `@cf/baai/bge-m3`. The tutor LLM goes through the remote OmniRoute gateway (`OMNIROUTE_BASE_URL` ending in `/v1`, `OMNIROUTE_API_KEYS`); default models `ddgw/claude-haiku-4-5` then `ddgw/gpt-5.4-mini`, both verified working. The chunker (`lib/rag/chunk.ts`) filters garbled text from legacy non-Unicode-font PDFs: it drops tokens containing legacy-font characters (`dropLegacyFontWords`) and skips any chunk whose real-word share is below 0.5 (`wordShare`). On a Cloudflare 429 code 4006 ("daily free allocation") embeddings throw `EmbeddingQuotaError` at once and `scripts/index-materials.ts` stops the run; re-running resumes. The free tier is 10,000 neurons/day — enough for live student questions (one short embedding each), but a full re-index of all books may need two days or the $5/month Workers Paid plan.
 
 ## 2026-11-01 — Daily Newspaper + Rewards Marketplace: one points ledger, real stories, WLYL-run supply chain
 

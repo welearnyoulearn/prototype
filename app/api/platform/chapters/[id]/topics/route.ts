@@ -1,5 +1,6 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
 import pool from '@/lib/db'
+import { autoPrepareForChapter } from '@/lib/quizBank'
 import { requirePlatformAdmin } from '@/lib/auth'
 
 // GET /api/platform/chapters/[id]/topics
@@ -85,6 +86,8 @@ export async function POST(
     // Fetch final resources to return
     const { rows: finalResources } = await pool.query('SELECT * FROM master_resources WHERE topic_id = $1', [topicId])
     topicRow.resources = finalResources
+    // A new or changed topic gets its questions in the background (#444).
+    after(() => autoPrepareForChapter(Number(chapterId)))
 
     return NextResponse.json({ topic: topicRow })
   } catch (err) {

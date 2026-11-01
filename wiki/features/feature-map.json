@@ -31,7 +31,8 @@
     "doc": "wiki/features/student-portal.md",
     "ui": [
       "app/student/page.tsx",
-      "app/student/components"
+      "app/student/components",
+      "components/dial"
     ]
   },
   "parent-portal": {
@@ -78,6 +79,26 @@
       "app/school-admin/components/ExamSchedule.tsx",
       "app/teacher/components/ExamMarks.tsx",
       "app/student/components/StudentMarks.tsx"
+    ]
+  },
+  "daily-quiz": {
+    "doc": "wiki/features/daily-quiz.md",
+    "ui": [
+      "app/platform-admin/question-bank",
+      "app/platform-admin/daily-quiz",
+      "app/teacher/components/TeacherQuizBank.tsx",
+      "components/dailyQuiz",
+      "app/student/components/StudentDailyQuiz.tsx",
+      "app/parent/components/ParentDailyReport.tsx",
+      "app/school-admin/components/SchoolDailyQuiz.tsx"
+    ]
+  },
+  "student-doubts": {
+    "doc": "wiki/features/student-doubts.md",
+    "ui": [
+      "components/dailyQuiz/Doubts.tsx",
+      "app/teacher/components/TeacherDoubts.tsx",
+      "app/school-admin/components/SchoolDoubts.tsx"
     ]
   },
   "daily-newspaper": {

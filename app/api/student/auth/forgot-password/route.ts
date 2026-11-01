@@ -3,49 +3,44 @@ import pool, { ensureDB } from '@/lib/db'
 import { sendPasswordResetEmail } from '@/lib/email'
 import { sendWhatsappMessage } from '@/lib/whatsapp'
 import { issueResetToken } from '@/lib/passwordReset'
-import { checkAuthRateLimit, RECOVERY_LIMIT } from '@/lib/authRateLimit'
+import { classifyIdentifier, forgotPasswordResponse, phoneMatchSql, startForgotPassword } from '@/lib/forgotPassword'
+import { maskEmail } from '@/lib/maskContact'
+
+interface StudentRow { id: number; school_id: number; name: string; email: string | null; phone: string | null }
 
 export async function POST(req: NextRequest) {
   try {
     await ensureDB()
-    const { rollNumber, email } = await req.json()
-    if (!rollNumber && !email) return NextResponse.json({ success: true })
-    const recoveryId = String(rollNumber || email)
-    if (!await checkAuthRateLimit(req, 'student-recovery', recoveryId, RECOVERY_LIMIT)) return NextResponse.json({ success: true })
+    const start = await startForgotPassword(req, 'student-recovery')
+    if ('response' in start) return start.response
 
-    const both = Boolean(rollNumber && email)
-    const q = both
-      ? `SELECT id, school_id, name, email, phone FROM students
-         WHERE LOWER(roll_number) = LOWER($1) AND LOWER(email) = LOWER($2) AND status = 'active'`
-      : rollNumber
-        ? `SELECT id, school_id, name, email, phone FROM students WHERE LOWER(roll_number) = LOWER($1) AND status = 'active'`
-        : `SELECT id, school_id, name, email, phone FROM students WHERE LOWER(email) = LOWER($1) AND status = 'active'`
-
-    const result = await pool.query(q, both ? [rollNumber, email] : [rollNumber || email])
+    // One field: Student ID, registered email or mobile number.
+    const { kind, value } = classifyIdentifier(start.identifier)
+    const where = kind === 'email' ? 'LOWER(email) = LOWER($1)'
+      : kind === 'phone' ? phoneMatchSql('phone', '$1')
+      : 'LOWER(roll_number) = LOWER($1)'
+    const result = await pool.query<StudentRow>(
+      `SELECT id, school_id, name, email, phone FROM students WHERE ${where} AND status = 'active'`, [value],
+    )
+    if (result.rows.length === 0) return forgotPasswordResponse({ status: 'not_found' })
     // Never choose an arbitrary account when legacy data contains a collision.
-    // Supplying both system id and registered email safely disambiguates it.
-    if (result.rows.length !== 1) return NextResponse.json({ success: true })
+    if (result.rows.length > 1) return forgotPasswordResponse({ status: 'ambiguous' })
 
     const student = result.rows[0]
-    // A reset link is only useful if there's somewhere to send it — but that
-    // no longer means "must have email". A student with only a phone on
-    // file can still get the link via WhatsApp; only bail if neither exists.
-    if (!student.email && !student.phone) return NextResponse.json({ success: true })
+    // WhatsApp delivery is not live yet, so an account with only a phone has no working channel.
+    if (!student.email) return forgotPasswordResponse({ status: 'no_contact' })
 
     const token = await issueResetToken('student', student.id)
-
     const resetUrl = `${process.env.APP_URL || 'http://localhost:3000'}/student/reset-password?token=${token}`
-    if (student.email) {
-      sendPasswordResetEmail({ to: student.email, name: student.name, resetUrl, role: 'student', schoolId: student.school_id }).catch(console.error)
-    }
-    if (student.phone) {
-      sendWhatsappMessage({
+    // Must be awaited: on Vercel the function is frozen once the response is sent, which dropped the email.
+    await Promise.allSettled([
+      sendPasswordResetEmail({ to: student.email, name: student.name, resetUrl, role: 'student', schoolId: student.school_id }),
+      student.phone ? sendWhatsappMessage({
         schoolId: student.school_id, to: student.phone, templateName: 'password_reset', recipientName: student.name,
         templateParams: { name: student.name, reset_url: resetUrl },
-      }).catch(console.error)
-    }
-
-    return NextResponse.json({ success: true })
+      }) : Promise.resolve(),
+    ]).then(rs => rs.forEach(r => { if (r.status === 'rejected') console.error(r.reason) }))
+    return forgotPasswordResponse({ status: 'sent', sentTo: [maskEmail(student.email)] })
   } catch (error) {
     console.error('[student/auth/forgot-password]', error)
     return NextResponse.json({ error: 'Failed' }, { status: 500 })

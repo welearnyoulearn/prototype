@@ -2,7 +2,7 @@
 
 All notable changes to the WLYL School prototype are documented here.
 
-## [Unreleased] - Daily Newspaper + Rewards Marketplace foundation (branch feature/newspaper-rewards-foundation)
+## [Unreleased] - Daily Newspaper + Rewards Marketplace (#484, PR #485)
 
 ### Added
 - **Feature keys** `daily-newspaper` and `rewards-marketplace` (new *Learning* category), seeded OFF at every plan tier. No screens or routes yet.
@@ -24,12 +24,16 @@ All notable changes to the WLYL School prototype are documented here.
 - Tests for the pipeline (feed parsing, filter, writer, checker, fallback), the overnight build (idempotent, fallbacks), the student flow (reading time, once-only answers, window, pulled notes) and the reminder; they run against a local database only.
 
 ### Fixed
-- **A completely empty database now bootstraps.** `ALTER TABLE fee_year_close ADD COLUMN close_reason` ran from SYLLABUS_SCHEMA before the table was created, so `initDB()` failed on a fresh database. It now runs right after the CREATE (no change for existing databases).
 - Parent portal: the Rewards menu entry had no label (missing from the English and Telugu translations).
 
 ### Tests
 - `e2e/newspaper-rewards.spec.ts`: the whole flow through all four portals with real logins on a throwaway local database (build, read and answer, student order, parent order, close run, Sent, Parcel arrived, Collected, Can't deliver, every notice). Runs only when `E2E_LOCAL_DATABASE_URL` points at a local database.
 - `DOCS/openapi.json` documents all 18 new operations (version 2026-11-01).
+
+## [Unreleased] - Parent session revoke (#468)
+
+### Fixed
+- **Parent login change**: changing a parent's email or phone on the student record now ends that parent's sessions, so the old contact cannot stay signed in.
 
 ## [Unreleased] - School onboarding details (branch feature/school-onboarding-details)
 
@@ -75,6 +79,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 -->
 
 ## [Unreleased]
+- **AI tutor metered per school.** Each answered tutor question and the tokens it used are recorded. A school gets 10,000 questions a month by default (no extra charge); after that its students are told the tutor is back on the 1st. Limits and prices are set in Plans & Pricing and per school in Billing, and Billing → Usage shows a new **Our cost** column per school. (#441)
+- **Student AI tutor (#407):** AI Pro students can ask questions in AI Hub and get answers drawn only from their board and grade textbooks, cited by book and page, with chats saved to `ai_chat_sessions` and 60 questions per student per day. Retrieval combines vector (Cloudflare `@cf/baai/bge-m3`) and keyword search; the answer comes from OmniRoute (Claude Haiku 4.5, then GPT-5.4 mini). Garbled legacy-font PDF text is filtered out, and the indexer stops cleanly on Cloudflare's daily quota and resumes on re-run. About 25 books can't be read yet (see Known Issues).
+- **Parent mobile app stays signed in for life.** A login from the app now lasts until the parent taps Logout or changes their password, with no idle timeout and no 1-year cap (technically 50 years). The web parent portal keeps its 20-minute idle timeout and 12-hour cap. (#424)
 - **Platform Admin: Billing and Traffic tables page 50 rows at a time.** Billing → Usage and Bills, and Traffic → By school, School Health and a school's users list now have Previous/Next and a "Showing X–Y of Z" line instead of one long list. Changing a search, filter, month or period goes back to page 1. (#400)
 - **Usage tracking, service prices and limits.** Every school's WhatsApp messages, AI tokens and requests, emails and exports are now recorded once each, with daily totals, after the provider accepts. Platform Admin → Billing → Usage shows each school's month against its plan, with daily usage and per-school own prices in a drawer. Plans & Pricing → Service prices sets what each plan includes, the price per extra unit and the monthly limit, and the changes apply from next month. School admins and principals see this month's usage and estimated extra charges. Admins get one email at 80% and one at 100% of the included amount. WhatsApp now really sends through Meta when the platform number is configured, pauses at the monthly limit except for login and password messages, and stores no passwords or reset links in its log. A Meta delivery-status webhook is added at `/api/whatsapp/webhook`. Bills are created automatically on the 1st at 06:00 IST for the month before. They carry GST and accept part payments, and corrections land on the next bill. Overdue bills get a reminder every 7 days. Plans have monthly and yearly prices. A school can get an agreed price with a reason, a yearly term creates a plan bill, and the quick Renew carries the last deal forward. File uploads and API requests are counted, and emails are counted per school. Platform Admin → Traffic shows the busiest hours and links to Cloudflare Web Analytics for website visitors. School admins get their own Traffic page. (#358, #359)
 - **School admin: Student List loads 50 students per page** with server-side search, status, grade and section filters. Totals and the grade/section options come from a small summary (`GET /api/students?summary=1`), so they stay accurate across pages. The plain `/api/students` read still returns the whole roster, which the fee screens rely on. (#352)

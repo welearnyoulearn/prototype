@@ -177,6 +177,18 @@
       "description": "Platform admin: bills, plan and service prices, usage, renewals and per-school price overrides."
     },
     {
+      "name": "Question bank",
+      "description": "Daily Quiz question bank (#432): one-time preparation of MCQs per subject (Claude writes, Groq checks), review and publishing in Platform Admin, the teachers' read-only view, and student reports."
+    },
+    {
+      "name": "Daily quiz",
+      "description": "Daily Quiz (#433): one question per class subject every working day from what the class covered, taken by the student (or through the parent), answers shown after the close, missed quizzes open late for 7 days, and the Platform Admin settings for when it runs."
+    },
+    {
+      "name": "Student doubts",
+      "description": "Student Doubts (#435): after a Daily Quiz's answers are out, Ask WLYL AI then Ask Teacher; the teacher answers (or covers it in class); a fresh question on the same topic proves understanding, earning the student points and the teacher WLYL Stars."
+    },
+    {
       "name": "Rewards marketplace",
       "description": "Students and parents spend reward points on stationery; the school hands it out."
     },
@@ -5488,7 +5500,7 @@
           "Master curriculum"
         ],
         "summary": "Create or update a chapter's master topic",
-        "description": "Inserts a master_topics row under the chapter, or updates the row with body.id (scoped to this chapter). Deletes and re-inserts the topic's master_resources from body.resources. An id that matches no row errors with 500.\n\n**Who can call:** Platform admin.",
+        "description": "Inserts a master_topics row under the chapter, or updates the row with body.id (scoped to this chapter). Deletes and re-inserts the topic's master_resources from body.resources. An id that matches no row errors with 500.\n\n**Who can call:** Platform admin.\n\nSince #444 this also starts question preparation for the new topics in the background (8 per topic, published automatically once checked).",
         "operationId": "postPlatformChaptersIdTopics",
         "security": [
           {
@@ -7310,7 +7322,7 @@
           "Master curriculum"
         ],
         "summary": "Bulk import syllabus JSON into a subject",
-        "description": "Parses pasted syllabus JSON (chapters -> topics -> subtopics, optional semester groups, or a book-extraction {units} shape) and writes master_chapters/master_topics under an existing subject in one transaction. append re-uses chapters matching (book_type, book_name, chapter_name) and replaces their topics; replace first deletes every chapter of the book(s) being imported.\n\n**Who can call:** Platform admin.",
+        "description": "Parses pasted syllabus JSON (chapters -> topics -> subtopics, optional semester groups, or a book-extraction {units} shape) and writes master_chapters/master_topics under an existing subject in one transaction. append re-uses chapters matching (book_type, book_name, chapter_name) and replaces their topics; replace first deletes every chapter of the book(s) being imported.\n\n**Who can call:** Platform admin.\n\nSince #444 this also starts question preparation for the new topics in the background (8 per topic, published automatically once checked).",
         "operationId": "postPlatformSyllabusBulkImport",
         "security": [
           {
@@ -7601,7 +7613,7 @@
           "Master curriculum"
         ],
         "summary": "Create or update a master topic",
-        "description": "Inserts a master_topics row, or updates the row with body.id (not scoped to chapter_id). Deletes and re-inserts the topic's master_resources from body.resources. An id that matches no row errors with 500.\n\n**Who can call:** Platform admin.",
+        "description": "Inserts a master_topics row, or updates the row with body.id (not scoped to chapter_id). Deletes and re-inserts the topic's master_resources from body.resources. An id that matches no row errors with 500.\n\n**Who can call:** Platform admin.\n\nSince #444 this also starts question preparation for the new topics in the background (8 per topic, published automatically once checked).",
         "operationId": "postPlatformTopics",
         "security": [
           {
@@ -12410,7 +12422,7 @@
           "School curriculum"
         ],
         "summary": "Create or edit school topic",
-        "description": "With id, updates an existing topic (custom or board) and, when resources is an array, replaces all its school_resources. Without id, creates a custom topic under a chapter with the given resources. Resources missing title/url/resource_type are skipped.\n\n**Who can call:** Platform admin, School admin, Teacher.\n\n**Checks:** requireSyllabusWriteAccess(owner school of the topic/chapter); students and parents are refused.",
+        "description": "With id, updates an existing topic (custom or board) and, when resources is an array, replaces all its school_resources. Without id, creates a custom topic under a chapter with the given resources. Resources missing title/url/resource_type are skipped.\n\n**Who can call:** Platform admin, School admin, Teacher.\n\n**Checks:** requireSyllabusWriteAccess(owner school of the topic/chapter); students and parents are refused.\n\nSince #444 a topic the school adds itself gets its own Daily Quiz questions in the background (when the school has the daily-quiz feature).",
         "operationId": "postSchoolCustomTopics",
         "security": [
           {
@@ -13513,7 +13525,7 @@
           "School curriculum"
         ],
         "summary": "Bulk import school syllabus from JSON",
-        "description": "Parses a pasted syllabus JSON string (chapters -> topics -> subtopics, semester-grouped, or book 'units' shape) and appends it to the school's subject for the class's grade, creating the subject if needed. A chapter matching an existing one by book type, book name and title gets its topics replaced instead of being duplicated.\n\n**Who can call:** Platform admin, School admin, Teacher.\n\n**Checks:** requireSyllabusWriteAccess(school_id); class must belong to school_id. Students and parents are refused.",
+        "description": "Parses a pasted syllabus JSON string (chapters -> topics -> subtopics, semester-grouped, or book 'units' shape) and appends it to the school's subject for the class's grade, creating the subject if needed. A chapter matching an existing one by book type, book name and title gets its topics replaced instead of being duplicated.\n\n**Who can call:** Platform admin, School admin, Teacher.\n\n**Checks:** requireSyllabusWriteAccess(school_id); class must belong to school_id. Students and parents are refused.\n\nSince #444 a topic the school adds itself gets its own Daily Quiz questions in the background (when the school has the daily-quiz feature).",
         "operationId": "postSchoolSyllabusBulkImport",
         "security": [
           {
@@ -20215,7 +20227,7 @@
           "Syllabus tracking"
         ],
         "summary": "Add custom syllabus topics",
-        "description": "Adds one topic (body is the topic) or many (body.topics[]). For each, finds or creates the school subject (linking to master_subjects when one board matches) and the chapter (appended with next order), then inserts a custom topic with next topic_order if none given.\n\n**Who can call:** Platform admin, School admin, Teacher.\n\n**Checks:** requireSyllabusWriteAccess(school_id): teacher, school_admin/principal/vice_principal of the matching school, or platform admin. Checked per topic against its own school_id.",
+        "description": "Adds one topic (body is the topic) or many (body.topics[]). For each, finds or creates the school subject (linking to master_subjects when one board matches) and the chapter (appended with next order), then inserts a custom topic with next topic_order if none given.\n\n**Who can call:** Platform admin, School admin, Teacher.\n\n**Checks:** requireSyllabusWriteAccess(school_id): teacher, school_admin/principal/vice_principal of the matching school, or platform admin. Checked per topic against its own school_id.\n\nSince #444 a topic the school adds itself gets its own Daily Quiz questions in the background (when the school has the daily-quiz feature).",
         "operationId": "postSyllabus",
         "security": [
           {
@@ -49448,6 +49460,3591 @@
             }
           }
         }
+      }
+    },
+    "/api/platform/quiz-bank": {
+      "get": {
+        "tags": [
+          "Question bank"
+        ],
+        "summary": "List subjects with question-bank progress",
+        "description": "Every academic master subject of one board and grade with its topics, topics at the minimum question count, active questions, preparation status and whether it is published.\n\n**Who can call:** Platform admin.\n\n**Checks:** requirePlatformAdmin(); board and grade required.",
+        "operationId": "getPlatformQuizBank",
+        "security": [
+          {
+            "platformAdmin": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "board",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "CBSE"
+            }
+          },
+          {
+            "name": "grade",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "7"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Subjects",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "subjects": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          }
+        ],
+        "x-source-file": "app/api/platform/quiz-bank/route.ts"
+      }
+    },
+    "/api/platform/quiz-bank/subjects/{id}": {
+      "get": {
+        "tags": [
+          "Question bank"
+        ],
+        "summary": "Question-bank detail for one subject",
+        "description": "Chapters → topics with active / retired / pulled counts, each chapter's last preparation result, the subject's textbooks, open student reports, and the target and minimum per topic.\n\n**Who can call:** Platform admin.\n\n**Checks:** requirePlatformAdmin(); subject must be academic.",
+        "operationId": "getPlatformQuizBankSubject",
+        "security": [
+          {
+            "platformAdmin": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Master subject id",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Subject detail",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {}
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Subject not found"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          }
+        ],
+        "x-source-file": "app/api/platform/quiz-bank/subjects/[id]/route.ts"
+      },
+      "patch": {
+        "tags": [
+          "Question bank"
+        ],
+        "summary": "Set the language of a subject's questions",
+        "description": "English, Telugu or Hindi (#444). Used for questions made from now on; existing questions keep theirs. When unset, the language is guessed from the subject name.\n\n**Who can call:** Platform admin.\n\n**Checks:** requirePlatformAdmin(); strict body; subject must be academic.",
+        "operationId": "patchPlatformQuizBankSubject",
+        "security": [
+          {
+            "platformAdmin": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Master subject id",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "language": {
+                    "type": "string",
+                    "enum": [
+                      "english",
+                      "telugu",
+                      "hindi"
+                    ]
+                  }
+                },
+                "required": [
+                  "language"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "language": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Subject not found"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          }
+        ],
+        "x-source-file": "app/api/platform/quiz-bank/subjects/[id]/route.ts"
+      }
+    },
+    "/api/platform/quiz-bank/subjects/{id}/estimate": {
+      "post": {
+        "tags": [
+          "Question bank"
+        ],
+        "summary": "Estimate a preparation run",
+        "description": "What preparing the subject would do and its maximum cost. Imports questions typed into Master Syllabus (idempotent) and, when a textbook is chosen, uploads it once to Anthropic and counts its tokens so Start can reuse it.\n\n**Who can call:** Platform admin.\n\n**Checks:** requirePlatformAdmin(); material_id must be a textbook of this subject. Needs ANTHROPIC_API_KEY when a textbook is used (503 otherwise).",
+        "operationId": "postPlatformQuizBankEstimate",
+        "security": [
+          {
+            "platformAdmin": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Master subject id",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "material_id": {
+                    "type": "integer",
+                    "nullable": true,
+                    "description": "Textbook to read, or null for syllabus topics only"
+                  }
+                },
+                "required": [
+                  "material_id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Estimate",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "imported": {
+                      "type": "integer"
+                    },
+                    "topics": {
+                      "type": "integer"
+                    },
+                    "topics_needing": {
+                      "type": "integer"
+                    },
+                    "chapters": {
+                      "type": "integer"
+                    },
+                    "questions_needed": {
+                      "type": "integer"
+                    },
+                    "textbook_tokens": {
+                      "type": "integer",
+                      "nullable": true
+                    },
+                    "estimated_max_usd": {
+                      "type": "number"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Subject or textbook not found"
+          },
+          "500": {
+            "description": "Internal server error"
+          },
+          "503": {
+            "description": "ANTHROPIC_API_KEY not set"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          }
+        ],
+        "x-source-file": "app/api/platform/quiz-bank/subjects/[id]/estimate/route.ts"
+      }
+    },
+    "/api/platform/quiz-bank/subjects/{id}/start": {
+      "post": {
+        "tags": [
+          "Question bank"
+        ],
+        "summary": "Start preparing a subject",
+        "description": "Submits one Claude Message Batches request per chapter that still has topics below the target. Claude writes in the background; /advance or the daily cron collects and checks the results.\n\n**Who can call:** Platform admin.\n\n**Checks:** requirePlatformAdmin(); one preparation per subject at a time (409); 409 when every topic is already full.",
+        "operationId": "postPlatformQuizBankStart",
+        "security": [
+          {
+            "platformAdmin": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Master subject id",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "material_id": {
+                    "type": "integer",
+                    "nullable": true
+                  }
+                },
+                "required": [
+                  "material_id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Started",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "chapters": {
+                      "type": "integer"
+                    },
+                    "topics": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Subject not found"
+          },
+          "409": {
+            "description": "Already running, or nothing to prepare"
+          },
+          "500": {
+            "description": "Internal server error"
+          },
+          "503": {
+            "description": "ANTHROPIC_API_KEY not set"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          }
+        ],
+        "x-source-file": "app/api/platform/quiz-bank/subjects/[id]/start/route.ts"
+      }
+    },
+    "/api/platform/quiz-bank/subjects/{id}/publish": {
+      "post": {
+        "tags": [
+          "Question bank"
+        ],
+        "summary": "Publish or unpublish a subject",
+        "description": "After the admin's spot-check, makes the subject's questions available to the daily quiz (or takes them back out). Only published subjects ever reach students.\n\n**Who can call:** Platform admin.\n\n**Checks:** requirePlatformAdmin(); cannot publish while preparing or with no questions (409).",
+        "operationId": "postPlatformQuizBankPublish",
+        "security": [
+          {
+            "platformAdmin": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Master subject id",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "published": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "published"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Publishing state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "published_at": {
+                      "type": "string",
+                      "format": "date-time",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "409": {
+            "description": "Not ready to publish"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          }
+        ],
+        "x-source-file": "app/api/platform/quiz-bank/subjects/[id]/publish/route.ts"
+      }
+    },
+    "/api/platform/quiz-bank/advance": {
+      "post": {
+        "tags": [
+          "Question bank"
+        ],
+        "summary": "Move preparations forward",
+        "description": "Called every few seconds by the open Question Bank screen: collects finished Claude batches and checks generated chapters with Groq (blind answers; only agreeing questions are saved) for up to about 60 seconds. Safe to run alongside the cron — work is claimed.\n\n**Who can call:** Platform admin.\n\n**Checks:** requirePlatformAdmin().",
+        "operationId": "postPlatformQuizBankAdvance",
+        "security": [
+          {
+            "platformAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Progress",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "collected": {
+                      "type": "integer"
+                    },
+                    "checked": {
+                      "type": "integer"
+                    },
+                    "failed": {
+                      "type": "integer"
+                    },
+                    "retryLater": {
+                      "type": "boolean"
+                    },
+                    "pending": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          }
+        ],
+        "x-source-file": "app/api/platform/quiz-bank/advance/route.ts"
+      }
+    },
+    "/api/platform/quiz-bank/topics/{id}/questions": {
+      "get": {
+        "tags": [
+          "Question bank"
+        ],
+        "summary": "Questions of one topic",
+        "description": "Every question of a master topic (pulled first, then active, then retired) with its answer, explanation, source and open student reports.\n\n**Who can call:** Platform admin.\n\n**Checks:** requirePlatformAdmin().",
+        "operationId": "getPlatformQuizBankTopicQuestions",
+        "security": [
+          {
+            "platformAdmin": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Master topic id",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Questions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "questions": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          }
+        ],
+        "x-source-file": "app/api/platform/quiz-bank/topics/[id]/questions/route.ts"
+      }
+    },
+    "/api/platform/quiz-bank/questions/{id}": {
+      "patch": {
+        "tags": [
+          "Question bank"
+        ],
+        "summary": "Edit, retire or restore a question",
+        "description": "Fix a question's wording, options, answer, explanation or difficulty, or retire / restore it. Restoring or retiring resolves its open student reports. The shared bank is edited by Platform Admin only.\n\n**Who can call:** Platform admin.\n\n**Checks:** requirePlatformAdmin(); the result must still be a valid question (4 distinct options, one correct); 409 when another question in the topic says the same thing.",
+        "operationId": "patchPlatformQuizBankQuestion",
+        "security": [
+          {
+            "platformAdmin": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Question id",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "stem": {
+                    "type": "string"
+                  },
+                  "options": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "minItems": 4,
+                    "maxItems": 4
+                  },
+                  "correct_index": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 3
+                  },
+                  "explanation": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "difficulty": {
+                    "type": "string",
+                    "enum": [
+                      "easy",
+                      "medium",
+                      "hard"
+                    ]
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "active",
+                      "retired"
+                    ]
+                  }
+                },
+                "required": []
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated question",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "question": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Question not found"
+          },
+          "409": {
+            "description": "Duplicate question"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          }
+        ],
+        "x-source-file": "app/api/platform/quiz-bank/questions/[id]/route.ts"
+      }
+    },
+    "/api/platform/quiz-bank/reports": {
+      "get": {
+        "tags": [
+          "Question bank"
+        ],
+        "summary": "Questions reported by students",
+        "description": "Questions with open student reports, pulled ones (3+ reports, out of use) first.\n\n**Who can call:** Platform admin.\n\n**Checks:** requirePlatformAdmin().",
+        "operationId": "getPlatformQuizBankReports",
+        "security": [
+          {
+            "platformAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Reported questions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "questions": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          }
+        ],
+        "x-source-file": "app/api/platform/quiz-bank/reports/route.ts"
+      }
+    },
+    "/api/cron/quiz-bank": {
+      "get": {
+        "tags": [
+          "Question bank"
+        ],
+        "summary": "Collect and check question-bank preparations",
+        "description": "Backup for the Question Bank screen: collects finished Claude batches and checks their chapters with Groq, so a preparation always completes even if nobody keeps the screen open. Idempotent; invoked daily by Vercel Cron.\n\n**Who can call:** Cron.\n\n**Checks:** Authorization: Bearer $CRON_SECRET (503 when CRON_SECRET is not configured).",
+        "operationId": "getCronQuizBank",
+        "security": [
+          {
+            "cron": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Progress",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "collected": {
+                      "type": "integer"
+                    },
+                    "checked": {
+                      "type": "integer"
+                    },
+                    "pending": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "500": {
+            "description": "Internal server error"
+          },
+          "503": {
+            "description": "Cron is not configured"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Cron",
+            "color": "#475569"
+          }
+        ],
+        "x-source-file": "app/api/cron/quiz-bank/route.ts"
+      },
+      "post": {
+        "tags": [
+          "Question bank"
+        ],
+        "summary": "Collect and check question-bank preparations",
+        "description": "Backup for the Question Bank screen: collects finished Claude batches and checks their chapters with Groq, so a preparation always completes even if nobody keeps the screen open. Idempotent; invoked daily by Vercel Cron.\n\n**Who can call:** Cron.\n\n**Checks:** Authorization: Bearer $CRON_SECRET (503 when CRON_SECRET is not configured).",
+        "operationId": "postCronQuizBank",
+        "security": [
+          {
+            "cron": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Progress",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "collected": {
+                      "type": "integer"
+                    },
+                    "checked": {
+                      "type": "integer"
+                    },
+                    "pending": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "500": {
+            "description": "Internal server error"
+          },
+          "503": {
+            "description": "Cron is not configured"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Cron",
+            "color": "#475569"
+          }
+        ],
+        "x-source-file": "app/api/cron/quiz-bank/route.ts"
+      }
+    },
+    "/api/teacher/quiz-bank": {
+      "get": {
+        "tags": [
+          "Question bank"
+        ],
+        "summary": "Quiz questions for my subjects",
+        "description": "Without subject_id: the published question-bank subjects this teacher teaches. With subject_id: that subject's active questions with answers and explanations, by chapter and topic. Read-only.\n\n**Who can call:** Teacher.\n\n**Checks:** getTeacherSession(); school has the daily-quiz feature; the teacher must teach the subject (class_subjects) and it must be published.",
+        "operationId": "getTeacherQuizBank",
+        "security": [
+          {
+            "teacher": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "subject_id",
+            "in": "query",
+            "required": false,
+            "description": "Master subject id",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Subjects or questions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "subjects": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "questions": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Teacher",
+            "color": "#0f766e"
+          }
+        ],
+        "x-source-file": "app/api/teacher/quiz-bank/route.ts"
+      }
+    },
+    "/api/student/quiz/questions/{id}/report": {
+      "post": {
+        "tags": [
+          "Question bank"
+        ],
+        "summary": "Report a quiz question",
+        "description": "A student flags a question as wrong, unclear or mistyped. Each student counts once; three open reports pull the question from use until Platform Admin reviews it.\n\n**Who can call:** Student.\n\n**Checks:** getStudentSession(); school has the daily-quiz feature; the question must be active, of a published subject the school uses for the student's grade.",
+        "operationId": "postStudentQuizQuestionReport",
+        "security": [
+          {
+            "student": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Question id",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "enum": [
+                      "wrong_answer",
+                      "unclear",
+                      "typo",
+                      "other"
+                    ]
+                  },
+                  "note": {
+                    "type": "string",
+                    "maxLength": 300
+                  }
+                },
+                "required": [
+                  "reason"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Already reported by this student",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "already_reported": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Reported",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "already_reported": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Question not found"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Student",
+            "color": "#15803d"
+          }
+        ],
+        "x-source-file": "app/api/student/quiz/questions/[id]/report/route.ts"
+      }
+    },
+    "/api/student/quiz/today": {
+      "get": {
+        "tags": [
+          "Daily quiz"
+        ],
+        "summary": "Today's Daily Quiz card",
+        "description": "Today's quiz and its state (#444: a topic the teacher marked completed since the last quiz, else revision of earlier completed topics), the attempt's progress, missed quizzes of the last 7 days that can still be taken late, and the week's finished quizzes. Once the open time has passed, the first call creates the class's quiz. Scores are null until the answers are out.\n\n**Who can call:** Student.\n\n**Checks:** getStudentSession(); the student acts only for themself; daily-quiz feature on.",
+        "operationId": "getStudentQuizToday",
+        "security": [
+          {
+            "student": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Today view",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    },
+                    "quiz": {
+                      "type": "object",
+                      "nullable": true
+                    },
+                    "late": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "recent": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden, or the daily-quiz feature is off"
+          },
+          "404": {
+            "description": "Student not found"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Student",
+            "color": "#15803d"
+          }
+        ],
+        "x-source-file": "app/api/student/quiz/today/route.ts"
+      }
+    },
+    "/api/student/quiz/attempts": {
+      "post": {
+        "tags": [
+          "Daily quiz"
+        ],
+        "summary": "Start or resume a quiz",
+        "description": "Starts the student's attempt (on time while the quiz is open, late for 7 days after it closes) and draws their own question per subject, unseen first. Resuming returns the same attempt. No correct answers are included.\n\n**Who can call:** Student.\n\n**Checks:** getStudentSession(); the student acts only for themself; daily-quiz feature on. The quiz must belong to the student's class.",
+        "operationId": "postStudentQuizAttempt",
+        "security": [
+          {
+            "student": []
+          }
+        ],
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "quiz_id": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "quiz_id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The attempt (see GET attempts/{id})",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {}
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden, or the daily-quiz feature is off"
+          },
+          "404": {
+            "description": "Quiz not found"
+          },
+          "409": {
+            "description": "Not open yet, no longer open, or no questions available"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Student",
+            "color": "#15803d"
+          }
+        ],
+        "x-source-file": "app/api/student/quiz/attempts/route.ts"
+      }
+    },
+    "/api/student/quiz/attempts/{id}": {
+      "get": {
+        "tags": [
+          "Daily quiz"
+        ],
+        "summary": "An attempt's questions",
+        "description": "The attempt's questions in order with the chosen answers. correctIndex, explanation, isCorrect and questionId are included only after the class quiz closes (a late attempt: once it is finished).\n\n**Who can call:** Student.\n\n**Checks:** getStudentSession(); the student acts only for themself; daily-quiz feature on. The attempt must be the student's.",
+        "operationId": "getStudentQuizAttemptById",
+        "security": [
+          {
+            "student": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Attempt id",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Attempt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {}
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden, or the daily-quiz feature is off"
+          },
+          "404": {
+            "description": "Attempt not found"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Student",
+            "color": "#15803d"
+          }
+        ],
+        "x-source-file": "app/api/student/quiz/attempts/[id]/route.ts"
+      }
+    },
+    "/api/student/quiz/attempts/{id}/answers": {
+      "put": {
+        "tags": [
+          "Daily quiz"
+        ],
+        "summary": "Save an answer",
+        "description": "Saves or changes the answer to one question while the attempt is in progress. An on-time attempt still open at the close is finished automatically with the answers given.\n\n**Who can call:** Student.\n\n**Checks:** getStudentSession(); the student acts only for themself; daily-quiz feature on. The attempt must be the student's and in progress.",
+        "operationId": "putStudentQuizAnswer",
+        "security": [
+          {
+            "student": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Attempt id",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "item_id": {
+                    "type": "integer"
+                  },
+                  "chosen_index": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 3
+                  }
+                },
+                "required": [
+                  "item_id",
+                  "chosen_index"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "saved": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden, or the daily-quiz feature is off"
+          },
+          "404": {
+            "description": "Attempt or question not found"
+          },
+          "409": {
+            "description": "Already finished"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Student",
+            "color": "#15803d"
+          }
+        ],
+        "x-source-file": "app/api/student/quiz/attempts/[id]/answers/route.ts"
+      }
+    },
+    "/api/student/quiz/attempts/{id}/submit": {
+      "post": {
+        "tags": [
+          "Daily quiz"
+        ],
+        "summary": "Finish a quiz",
+        "description": "Finishes the attempt. Every question must be answered. Marks it, records topic mastery, and returns when the answers will be shown (null = now, for a late attempt). Finishing twice is harmless.\n\n**Who can call:** Student.\n\n**Checks:** getStudentSession(); the student acts only for themself; daily-quiz feature on. The attempt must be the student's.",
+        "operationId": "postStudentQuizSubmit",
+        "security": [
+          {
+            "student": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Attempt id",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Completed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "completed": {
+                      "type": "boolean"
+                    },
+                    "alreadyFinished": {
+                      "type": "boolean"
+                    },
+                    "answersAt": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden, or the daily-quiz feature is off"
+          },
+          "404": {
+            "description": "Attempt not found"
+          },
+          "409": {
+            "description": "Unanswered questions left"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Student",
+            "color": "#15803d"
+          }
+        ],
+        "x-source-file": "app/api/student/quiz/attempts/[id]/submit/route.ts"
+      }
+    },
+    "/api/parent/quiz/today": {
+      "get": {
+        "tags": [
+          "Daily quiz"
+        ],
+        "summary": "Today's Daily Quiz card",
+        "description": "Today's quiz and its state (upcoming / ready / holiday / out of season / grade off / no questions), the attempt's progress, missed quizzes of the last 7 days that can still be taken late, and the week's finished quizzes. Once the open time has passed, the first call creates the class's quiz. Scores are null until the answers are out.\n\n**Who can call:** Parent, for one of their own children.\n\n**Checks:** getParentSession(); the child must be the parent's own (student_parents) and in the parent's school; daily-quiz feature on.",
+        "operationId": "getParentQuizToday",
+        "security": [
+          {
+            "parent": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "student_id",
+            "in": "query",
+            "required": true,
+            "description": "One of the parent's children",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Today view",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    },
+                    "quiz": {
+                      "type": "object",
+                      "nullable": true
+                    },
+                    "late": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "recent": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden, or the daily-quiz feature is off"
+          },
+          "404": {
+            "description": "Student not found"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Parent",
+            "color": "#b45309"
+          }
+        ],
+        "x-source-file": "app/api/parent/quiz/today/route.ts"
+      }
+    },
+    "/api/parent/quiz/attempts": {
+      "post": {
+        "tags": [
+          "Daily quiz"
+        ],
+        "summary": "Start or resume a quiz",
+        "description": "Starts the student's attempt (on time while the quiz is open, late for 7 days after it closes) and draws their own question per subject, unseen first. Resuming returns the same attempt. No correct answers are included.\n\n**Who can call:** Parent, for one of their own children.\n\n**Checks:** getParentSession(); the child must be the parent's own (student_parents) and in the parent's school; daily-quiz feature on. The quiz must belong to the student's class.",
+        "operationId": "postParentQuizAttempt",
+        "security": [
+          {
+            "parent": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "student_id",
+            "in": "query",
+            "required": true,
+            "description": "One of the parent's children",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "quiz_id": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "quiz_id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The attempt (see GET attempts/{id})",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {}
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden, or the daily-quiz feature is off"
+          },
+          "404": {
+            "description": "Quiz not found"
+          },
+          "409": {
+            "description": "Not open yet, no longer open, or no questions available"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Parent",
+            "color": "#b45309"
+          }
+        ],
+        "x-source-file": "app/api/parent/quiz/attempts/route.ts"
+      }
+    },
+    "/api/parent/quiz/attempts/{id}": {
+      "get": {
+        "tags": [
+          "Daily quiz"
+        ],
+        "summary": "An attempt's questions",
+        "description": "The attempt's questions in order with the chosen answers. correctIndex, explanation, isCorrect and questionId are included only after the class quiz closes (a late attempt: once it is finished).\n\n**Who can call:** Parent, for one of their own children.\n\n**Checks:** getParentSession(); the child must be the parent's own (student_parents) and in the parent's school; daily-quiz feature on. The attempt must be the student's.",
+        "operationId": "getParentQuizAttemptById",
+        "security": [
+          {
+            "parent": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Attempt id",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "student_id",
+            "in": "query",
+            "required": true,
+            "description": "One of the parent's children",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Attempt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {}
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden, or the daily-quiz feature is off"
+          },
+          "404": {
+            "description": "Attempt not found"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Parent",
+            "color": "#b45309"
+          }
+        ],
+        "x-source-file": "app/api/parent/quiz/attempts/[id]/route.ts"
+      }
+    },
+    "/api/parent/quiz/attempts/{id}/answers": {
+      "put": {
+        "tags": [
+          "Daily quiz"
+        ],
+        "summary": "Save an answer",
+        "description": "Saves or changes the answer to one question while the attempt is in progress. An on-time attempt still open at the close is finished automatically with the answers given.\n\n**Who can call:** Parent, for one of their own children.\n\n**Checks:** getParentSession(); the child must be the parent's own (student_parents) and in the parent's school; daily-quiz feature on. The attempt must be the student's and in progress.",
+        "operationId": "putParentQuizAnswer",
+        "security": [
+          {
+            "parent": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Attempt id",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "student_id",
+            "in": "query",
+            "required": true,
+            "description": "One of the parent's children",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "item_id": {
+                    "type": "integer"
+                  },
+                  "chosen_index": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 3
+                  }
+                },
+                "required": [
+                  "item_id",
+                  "chosen_index"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "saved": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden, or the daily-quiz feature is off"
+          },
+          "404": {
+            "description": "Attempt or question not found"
+          },
+          "409": {
+            "description": "Already finished"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Parent",
+            "color": "#b45309"
+          }
+        ],
+        "x-source-file": "app/api/parent/quiz/attempts/[id]/answers/route.ts"
+      }
+    },
+    "/api/parent/quiz/attempts/{id}/submit": {
+      "post": {
+        "tags": [
+          "Daily quiz"
+        ],
+        "summary": "Finish a quiz",
+        "description": "Finishes the attempt. Every question must be answered. Marks it, records topic mastery, and returns when the answers will be shown (null = now, for a late attempt). Finishing twice is harmless.\n\n**Who can call:** Parent, for one of their own children.\n\n**Checks:** getParentSession(); the child must be the parent's own (student_parents) and in the parent's school; daily-quiz feature on. The attempt must be the student's.",
+        "operationId": "postParentQuizSubmit",
+        "security": [
+          {
+            "parent": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Attempt id",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "student_id",
+            "in": "query",
+            "required": true,
+            "description": "One of the parent's children",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Completed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "completed": {
+                      "type": "boolean"
+                    },
+                    "alreadyFinished": {
+                      "type": "boolean"
+                    },
+                    "answersAt": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden, or the daily-quiz feature is off"
+          },
+          "404": {
+            "description": "Attempt not found"
+          },
+          "409": {
+            "description": "Unanswered questions left"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Parent",
+            "color": "#b45309"
+          }
+        ],
+        "x-source-file": "app/api/parent/quiz/attempts/[id]/submit/route.ts"
+      }
+    },
+    "/api/platform/quiz-settings": {
+      "get": {
+        "tags": [
+          "Daily quiz"
+        ],
+        "summary": "Daily Quiz settings",
+        "description": "The global settings (season, open and close time in IST, grades) and every school with its override, if any. Schools never see these.\n\n**Who can call:** Platform admin.\n\n**Checks:** requirePlatformAdmin().",
+        "operationId": "getPlatformQuizSettings",
+        "security": [
+          {
+            "platformAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "global": {
+                      "type": "object",
+                      "properties": {
+                        "seasonStart": {
+                          "type": "string",
+                          "example": "07-01"
+                        },
+                        "seasonEnd": {
+                          "type": "string",
+                          "example": "03-15"
+                        },
+                        "openTime": {
+                          "type": "string",
+                          "example": "15:30"
+                        },
+                        "closeTime": {
+                          "type": "string",
+                          "example": "21:00"
+                        },
+                        "grades": {
+                          "type": "array",
+                          "items": {
+                            "type": "integer"
+                          },
+                          "example": [
+                            3,
+                            4,
+                            5,
+                            6,
+                            7,
+                            8,
+                            9,
+                            10
+                          ]
+                        }
+                      }
+                    },
+                    "schools": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden, or the daily-quiz feature is off"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          }
+        ],
+        "x-source-file": "app/api/platform/quiz-settings/route.ts"
+      },
+      "put": {
+        "tags": [
+          "Daily quiz"
+        ],
+        "summary": "Change the global Daily Quiz settings",
+        "description": "Changes the settings every school without an override follows. The quiz must stay open at least an hour. Quizzes already posted keep their own times.\n\n**Who can call:** Platform admin.\n\n**Checks:** requirePlatformAdmin(); strict validation.",
+        "operationId": "putPlatformQuizSettings",
+        "security": [
+          {
+            "platformAdmin": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "seasonStart": {
+                    "type": "string",
+                    "example": "07-01"
+                  },
+                  "seasonEnd": {
+                    "type": "string",
+                    "example": "03-15"
+                  },
+                  "openTime": {
+                    "type": "string",
+                    "example": "15:30"
+                  },
+                  "closeTime": {
+                    "type": "string",
+                    "example": "21:00"
+                  },
+                  "grades": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer"
+                    },
+                    "example": [
+                      3,
+                      4,
+                      5,
+                      6,
+                      7,
+                      8,
+                      9,
+                      10
+                    ]
+                  }
+                },
+                "required": [
+                  "seasonStart",
+                  "seasonEnd",
+                  "openTime",
+                  "closeTime",
+                  "grades"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {}
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden, or the daily-quiz feature is off"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          }
+        ],
+        "x-source-file": "app/api/platform/quiz-settings/route.ts"
+      }
+    },
+    "/api/platform/quiz-settings/schools/{id}": {
+      "get": {
+        "tags": [
+          "Daily quiz"
+        ],
+        "summary": "One school's Daily Quiz settings",
+        "description": "The school's override, the global settings, and the settings the school ends up with.\n\n**Who can call:** Platform admin.\n\n**Checks:** requirePlatformAdmin().",
+        "operationId": "getPlatformQuizSettingsSchool",
+        "security": [
+          {
+            "platformAdmin": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "School id",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "global": {
+                      "type": "object"
+                    },
+                    "override": {
+                      "type": "object",
+                      "nullable": true
+                    },
+                    "effective": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden, or the daily-quiz feature is off"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          }
+        ],
+        "x-source-file": "app/api/platform/quiz-settings/schools/[id]/route.ts"
+      },
+      "put": {
+        "tags": [
+          "Daily quiz"
+        ],
+        "summary": "Override the Daily Quiz settings for one school",
+        "description": "A null field follows the global setting; a null body (or all fields null) removes the override. The resulting settings are validated as a whole.\n\n**Who can call:** Platform admin.\n\n**Checks:** requirePlatformAdmin(); the school must exist.",
+        "operationId": "putPlatformQuizSettingsSchool",
+        "security": [
+          {
+            "platformAdmin": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "School id",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "nullable": true,
+                "properties": {
+                  "seasonStart": {
+                    "type": "string",
+                    "example": "07-01"
+                  },
+                  "seasonEnd": {
+                    "type": "string",
+                    "example": "03-15"
+                  },
+                  "openTime": {
+                    "type": "string",
+                    "example": "15:30"
+                  },
+                  "closeTime": {
+                    "type": "string",
+                    "example": "21:00"
+                  },
+                  "grades": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer"
+                    },
+                    "example": [
+                      3,
+                      4,
+                      5,
+                      6,
+                      7,
+                      8,
+                      9,
+                      10
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {}
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden, or the daily-quiz feature is off"
+          },
+          "404": {
+            "description": "School not found"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          }
+        ],
+        "x-source-file": "app/api/platform/quiz-settings/schools/[id]/route.ts"
+      }
+    },
+    "/api/cron/daily-quiz": {
+      "get": {
+        "tags": [
+          "Daily quiz"
+        ],
+        "summary": "Post due quizzes and send notices",
+        "description": "Catch-up job run after the open, after the reminder time and after the close (vercel.json, ?run= is only a label). Posts every due class quiz and sends each notice at most once: ready (students and parents), not done yet (2 hours before the close, only to those who have not finished) and answers are out (after the close, to those who finished on time). Then pushes them.\n\n**Who can call:** Cron.\n\n**Checks:** Authorization: Bearer CRON_SECRET (503 when not configured).",
+        "operationId": "getCronDailyQuiz",
+        "security": [
+          {
+            "cron": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "run",
+            "in": "query",
+            "required": false,
+            "description": "Label only (open / remind / close)",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Summary",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "schools": {
+                      "type": "integer"
+                    },
+                    "posted": {
+                      "type": "integer"
+                    },
+                    "ready": {
+                      "type": "integer"
+                    },
+                    "reminders": {
+                      "type": "integer"
+                    },
+                    "results": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "500": {
+            "description": "Internal server error"
+          },
+          "503": {
+            "description": "Cron is not configured"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Cron",
+            "color": "#475569"
+          }
+        ],
+        "x-source-file": "app/api/cron/daily-quiz/route.ts"
+      },
+      "post": {
+        "tags": [
+          "Daily quiz"
+        ],
+        "summary": "Post due quizzes and send notices",
+        "description": "Catch-up job run after the open, after the reminder time and after the close (vercel.json, ?run= is only a label). Posts every due class quiz and sends each notice at most once: ready (students and parents), not done yet (2 hours before the close, only to those who have not finished) and answers are out (after the close, to those who finished on time). Then pushes them.\n\n**Who can call:** Cron.\n\n**Checks:** Authorization: Bearer CRON_SECRET (503 when not configured).",
+        "operationId": "postCronDailyQuiz",
+        "security": [
+          {
+            "cron": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "run",
+            "in": "query",
+            "required": false,
+            "description": "Label only (open / remind / close)",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Summary",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "schools": {
+                      "type": "integer"
+                    },
+                    "posted": {
+                      "type": "integer"
+                    },
+                    "ready": {
+                      "type": "integer"
+                    },
+                    "reminders": {
+                      "type": "integer"
+                    },
+                    "results": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "500": {
+            "description": "Internal server error"
+          },
+          "503": {
+            "description": "Cron is not configured"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Cron",
+            "color": "#475569"
+          }
+        ],
+        "x-source-file": "app/api/cron/daily-quiz/route.ts"
+      }
+    },
+    "/api/student/quiz/progress": {
+      "get": {
+        "tags": [
+          "Daily quiz"
+        ],
+        "summary": "Points, streak and leaderboard",
+        "description": "Reward points (balance and this week), working-day streak, quiz badges, this week's on-time results (accuracy only for closed quizzes, strongest and weakest subject), the class leaderboard (top 10 and own place), Most Improved and the class goal. Pays any accuracy points that are due first.\n\n**Who can call:** Student.\n\n**Checks:** getStudentSession(); daily-quiz feature on.",
+        "operationId": "getStudentQuizProgress",
+        "security": [
+          {
+            "student": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Progress",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "totalPoints": {
+                      "type": "integer"
+                    },
+                    "weekPoints": {
+                      "type": "integer"
+                    },
+                    "streak": {
+                      "type": "integer"
+                    },
+                    "badges": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "leaderboard": {
+                      "type": "object",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden, or the daily-quiz feature is off"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Student",
+            "color": "#15803d"
+          }
+        ],
+        "x-source-file": "app/api/student/quiz/progress/route.ts"
+      }
+    },
+    "/api/parent/quiz/progress": {
+      "get": {
+        "tags": [
+          "Daily quiz"
+        ],
+        "summary": "Points, streak and leaderboard",
+        "description": "The child's points, streak, badges and week, their class rank, the class average and the top 3 only (never other children's scores), their own improvement and the class goal.\n\n**Who can call:** Parent, for one of their own children.\n\n**Checks:** getParentSession(); the child must be the parent's own and in the parent's school; daily-quiz feature on.",
+        "operationId": "getParentQuizProgress",
+        "security": [
+          {
+            "parent": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "student_id",
+            "in": "query",
+            "required": true,
+            "description": "One of the parent's children",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Progress",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "totalPoints": {
+                      "type": "integer"
+                    },
+                    "weekPoints": {
+                      "type": "integer"
+                    },
+                    "streak": {
+                      "type": "integer"
+                    },
+                    "badges": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "leaderboard": {
+                      "type": "object",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden, or the daily-quiz feature is off"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Parent",
+            "color": "#b45309"
+          }
+        ],
+        "x-source-file": "app/api/parent/quiz/progress/route.ts"
+      }
+    },
+    "/api/school/quiz-report": {
+      "get": {
+        "tags": [
+          "Daily quiz"
+        ],
+        "summary": "Daily Quiz report for the school",
+        "description": "This week per class: participation against the 80% class goal, accuracy, top students and the most improved; accuracy per subject. Read-only.\n\n**Who can call:** School admin, principal or vice principal.\n\n**Checks:** requireSchoolAdmin(); the school comes from the session; daily-quiz feature on.",
+        "operationId": "getSchoolQuizReport",
+        "security": [
+          {
+            "schoolAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Report",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "weekStart": {
+                      "type": "string"
+                    },
+                    "classes": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "subjects": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden, or the daily-quiz feature is off"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
+          }
+        ],
+        "x-source-file": "app/api/school/quiz-report/route.ts"
+      }
+    },
+    "/api/student/doubts": {
+      "get": {
+        "tags": [
+          "Student doubts"
+        ],
+        "summary": "My doubts",
+        "description": "The student's doubts, newest first, with the teacher's answer, proof state and timeline. With attempt_id, also which of that quiz's questions already have WLYL AI help or a doubt (only once its answers are out).\n\n**Who can call:** Student.\n\n**Checks:** getStudentSession(); the student acts only for themself; daily-quiz and student-doubts features on.",
+        "operationId": "getStudentDoubts",
+        "security": [
+          {
+            "student": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "attempt_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Doubts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "doubts": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "help": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden, or a feature is off"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Student",
+            "color": "#15803d"
+          }
+        ],
+        "x-source-file": "app/api/student/doubts/route.ts"
+      },
+      "post": {
+        "tags": [
+          "Student doubts"
+        ],
+        "summary": "Ask the teacher",
+        "description": "Raises a doubt about a quiz question whose answers are out. Routed to the subject teacher, else the class teacher, who is notified. One doubt per question; 3 a day.\n\n**Who can call:** Student.\n\n**Checks:** getStudentSession(); the student acts only for themself; daily-quiz and student-doubts features on.",
+        "operationId": "postStudentDoubt",
+        "security": [
+          {
+            "student": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "attempt_id": {
+                    "type": "integer"
+                  },
+                  "item_id": {
+                    "type": "integer"
+                  },
+                  "note": {
+                    "type": "string",
+                    "maxLength": 500
+                  }
+                },
+                "required": [
+                  "attempt_id",
+                  "item_id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Raised",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "integer"
+                    },
+                    "routedToTeacher": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden, or a feature is off"
+          },
+          "404": {
+            "description": "Question not found"
+          },
+          "409": {
+            "description": "Answers not out yet, or already asked"
+          },
+          "429": {
+            "description": "Daily limit reached"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Student",
+            "color": "#15803d"
+          }
+        ],
+        "x-source-file": "app/api/student/doubts/route.ts"
+      }
+    },
+    "/api/student/doubts/ai": {
+      "post": {
+        "tags": [
+          "Student doubts"
+        ],
+        "summary": "Ask WLYL AI",
+        "description": "A short explanation (Groq) of a quiz question whose answers are out, tailored to the student's answer and optional message, in the question's language. 10 a day per student.\n\n**Who can call:** Student.\n\n**Checks:** getStudentSession(); the student acts only for themself; daily-quiz and student-doubts features on.",
+        "operationId": "postStudentDoubtAI",
+        "security": [
+          {
+            "student": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "attempt_id": {
+                    "type": "integer"
+                  },
+                  "item_id": {
+                    "type": "integer"
+                  },
+                  "message": {
+                    "type": "string",
+                    "maxLength": 300
+                  }
+                },
+                "required": [
+                  "attempt_id",
+                  "item_id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Reply",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "reply": {
+                      "type": "string"
+                    },
+                    "left": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden, or a feature is off"
+          },
+          "409": {
+            "description": "Answers not out yet"
+          },
+          "429": {
+            "description": "Daily limit reached"
+          },
+          "500": {
+            "description": "Internal server error"
+          },
+          "503": {
+            "description": "AI busy or not configured"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Student",
+            "color": "#15803d"
+          }
+        ],
+        "x-source-file": "app/api/student/doubts/ai/route.ts"
+      }
+    },
+    "/api/student/doubts/{id}/proof": {
+      "post": {
+        "tags": [
+          "Student doubts"
+        ],
+        "summary": "Get a fresh question",
+        "description": "Once the teacher has answered: a fresh question on the same topic (never the original, unseen first, the same one until answered). No answer key. question is null when the topic has no other question.\n\n**Who can call:** Student.\n\n**Checks:** getStudentSession(); the student acts only for themself; daily-quiz and student-doubts features on.",
+        "operationId": "postStudentDoubtProof",
+        "security": [
+          {
+            "student": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Doubt id",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Question",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "question": {
+                      "type": "object",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden, or a feature is off"
+          },
+          "404": {
+            "description": "Doubt not found"
+          },
+          "409": {
+            "description": "Not answered yet, or already clarified"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Student",
+            "color": "#15803d"
+          }
+        ],
+        "x-source-file": "app/api/student/doubts/[id]/proof/route.ts"
+      }
+    },
+    "/api/student/doubts/{id}/proof/answer": {
+      "post": {
+        "tags": [
+          "Student doubts"
+        ],
+        "summary": "Answer the fresh question",
+        "description": "Answers the fresh question once. Returns whether it was right, the right answer and its explanation. A wrong answer shows the teacher it is not understood yet.\n\n**Who can call:** Student.\n\n**Checks:** getStudentSession(); the student acts only for themself; daily-quiz and student-doubts features on.",
+        "operationId": "postStudentDoubtProofAnswer",
+        "security": [
+          {
+            "student": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Doubt id",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "chosen_index": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 3
+                  }
+                },
+                "required": [
+                  "chosen_index"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "correct": {
+                      "type": "boolean"
+                    },
+                    "correctIndex": {
+                      "type": "integer"
+                    },
+                    "explanation": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden, or a feature is off"
+          },
+          "404": {
+            "description": "Doubt not found"
+          },
+          "409": {
+            "description": "No pending fresh question"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Student",
+            "color": "#15803d"
+          }
+        ],
+        "x-source-file": "app/api/student/doubts/[id]/proof/answer/route.ts"
+      }
+    },
+    "/api/student/doubts/{id}/confirm": {
+      "post": {
+        "tags": [
+          "Student doubts"
+        ],
+        "summary": "I understand now",
+        "description": "After a correct fresh question: the doubt is clarified, the student earns +5 points and the teacher who answered earns +3 WLYL Stars (+2 if answered within 2 working days), each once. If the topic has no other question it is clarified without points or Stars.\n\n**Who can call:** Student.\n\n**Checks:** getStudentSession(); the student acts only for themself; daily-quiz and student-doubts features on.",
+        "operationId": "postStudentDoubtConfirm",
+        "security": [
+          {
+            "student": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Doubt id",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Clarified",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "clarified": {
+                      "type": "boolean"
+                    },
+                    "points": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden, or a feature is off"
+          },
+          "404": {
+            "description": "Doubt not found"
+          },
+          "409": {
+            "description": "Fresh question not answered correctly yet"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Student",
+            "color": "#15803d"
+          }
+        ],
+        "x-source-file": "app/api/student/doubts/[id]/confirm/route.ts"
+      }
+    },
+    "/api/student/doubts/{id}/reopen": {
+      "post": {
+        "tags": [
+          "Student doubts"
+        ],
+        "summary": "Still not clear",
+        "description": "Sends an answered doubt back to the teacher, with an optional note. The teacher is notified.\n\n**Who can call:** Student.\n\n**Checks:** getStudentSession(); the student acts only for themself; daily-quiz and student-doubts features on.",
+        "operationId": "postStudentDoubtReopen",
+        "security": [
+          {
+            "student": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Doubt id",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "note": {
+                    "type": "string",
+                    "maxLength": 500
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Reopened",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "reopened": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden, or a feature is off"
+          },
+          "404": {
+            "description": "Doubt not found"
+          },
+          "409": {
+            "description": "Only an answered doubt can be reopened"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Student",
+            "color": "#15803d"
+          }
+        ],
+        "x-source-file": "app/api/student/doubts/[id]/reopen/route.ts"
+      }
+    },
+    "/api/parent/doubts": {
+      "get": {
+        "tags": [
+          "Student doubts"
+        ],
+        "summary": "A child's doubts",
+        "description": "One of the parent's children's doubts with their timeline; an open one shows how many school days it has waited.\n\n**Who can call:** Parent, for one of their own children (read-only).\n\n**Checks:** getParentSession(); the child must be the parent's own and in the parent's school; daily-quiz and student-doubts features on.",
+        "operationId": "getParentDoubts",
+        "security": [
+          {
+            "parent": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "student_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Doubts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "doubts": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden, or a feature is off"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Parent",
+            "color": "#b45309"
+          }
+        ],
+        "x-source-file": "app/api/parent/doubts/route.ts"
+      }
+    },
+    "/api/teacher/doubts": {
+      "get": {
+        "tags": [
+          "Student doubts"
+        ],
+        "summary": "Doubts, misconceptions and Stars",
+        "description": "Open and recently answered doubts grouped by class and question, the class misconceptions card (3 most-missed questions per class and subject from the latest closed quiz) and the teacher's WLYL Stars.\n\n**Who can call:** Teacher.\n\n**Checks:** getTeacherSession(); only doubts routed to the teacher (or unrouted ones in a class they are class teacher of); daily-quiz and student-doubts features on.",
+        "operationId": "getTeacherDoubts",
+        "security": [
+          {
+            "teacher": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Doubts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "clusters": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "misconceptions": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "stars": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden, or a feature is off"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Teacher",
+            "color": "#0f766e"
+          }
+        ],
+        "x-source-file": "app/api/teacher/doubts/route.ts"
+      }
+    },
+    "/api/teacher/doubts/explain": {
+      "post": {
+        "tags": [
+          "Student doubts"
+        ],
+        "summary": "Answer doubts",
+        "description": "Answers one or more open doubts (e.g. everyone stuck on the same question). Each student is notified and can then try a fresh question.\n\n**Who can call:** Teacher.\n\n**Checks:** getTeacherSession(); only doubts routed to the teacher (or unrouted ones in a class they are class teacher of); daily-quiz and student-doubts features on.",
+        "operationId": "postTeacherDoubtsExplain",
+        "security": [
+          {
+            "teacher": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "doubt_ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer"
+                    }
+                  },
+                  "reply": {
+                    "type": "string",
+                    "maxLength": 2000
+                  }
+                },
+                "required": [
+                  "doubt_ids",
+                  "reply"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Answered",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "explained": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden, or a feature is off"
+          },
+          "404": {
+            "description": "None of the doubts are open and the teacher's"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Teacher",
+            "color": "#0f766e"
+          }
+        ],
+        "x-source-file": "app/api/teacher/doubts/explain/route.ts"
+      }
+    },
+    "/api/teacher/doubts/covered": {
+      "post": {
+        "tags": [
+          "Student doubts"
+        ],
+        "summary": "Covered in class",
+        "description": "One tap on a most-missed question of a subject the teacher teaches in that class: marks it covered and answers every open doubt on it there.\n\n**Who can call:** Teacher.\n\n**Checks:** getTeacherSession(); only doubts routed to the teacher (or unrouted ones in a class they are class teacher of); daily-quiz and student-doubts features on.",
+        "operationId": "postTeacherDoubtsCovered",
+        "security": [
+          {
+            "teacher": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "class_id": {
+                    "type": "integer"
+                  },
+                  "question_id": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "class_id",
+                  "question_id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Covered",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "covered": {
+                      "type": "boolean"
+                    },
+                    "explained": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden, or a feature is off"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Teacher",
+            "color": "#0f766e"
+          }
+        ],
+        "x-source-file": "app/api/teacher/doubts/covered/route.ts"
+      }
+    },
+    "/api/school/doubts-report": {
+      "get": {
+        "tags": [
+          "Student doubts"
+        ],
+        "summary": "Doubts and Star teachers",
+        "description": "Per teacher: open, overdue (over 2 school days), answered and clarified this month; this month's WLYL Stars leaders. Read-only.\n\n**Who can call:** School admin, principal or vice principal.\n\n**Checks:** requireSchoolAdmin(); the school comes from the session; daily-quiz and student-doubts features on.",
+        "operationId": "getSchoolDoubtsReport",
+        "security": [
+          {
+            "schoolAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Report",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "byTeacher": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "starTeachers": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden, or a feature is off"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
+          }
+        ],
+        "x-source-file": "app/api/school/doubts-report/route.ts"
+      }
+    },
+    "/api/platform/quiz-bank/school-topics": {
+      "get": {
+        "tags": [
+          "Question bank"
+        ],
+        "summary": "Schools' own topics and their questions",
+        "description": "Per school (#444): topics the school added itself, how many have enough questions, chapters still being prepared and any failures. Those questions are made automatically and used only by that school.\n\n**Who can call:** Platform admin.\n\n**Checks:** requirePlatformAdmin().",
+        "operationId": "getPlatformQuizBankSchoolTopics",
+        "security": [
+          {
+            "platformAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Schools",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "schools": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          }
+        ],
+        "x-source-file": "app/api/platform/quiz-bank/school-topics/route.ts"
+      }
+    },
+    "/api/platform/quiz-bank/needs": {
+      "get": {
+        "tags": [
+          "Question bank"
+        ],
+        "summary": "Subjects that still need questions",
+        "description": "Every academic master subject, on any board and class, with topics that do not have enough questions yet (older syllabus or a failed run), so Platform Admin can start them by hand (#463).\n\n**Who can call:** Platform admin.\n\n**Checks:** requirePlatformAdmin().",
+        "operationId": "getPlatformQuizBankNeeds",
+        "security": [
+          {
+            "platformAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Subjects",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "subjects": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          }
+        ],
+        "x-source-file": "app/api/platform/quiz-bank/needs/route.ts"
       }
     },
     "/api/student/newspaper": {
