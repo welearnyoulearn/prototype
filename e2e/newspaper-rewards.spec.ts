@@ -133,6 +133,8 @@ test('WLYL sees the item counts, closes the run and marks the parcel sent', asyn
   await page.getByTestId('rewards-close-run').click()
   await page.getByRole('button', { name: 'Close run' }).last().click()
   await expect(page.getByTestId('rewards-admin-note')).toBeVisible()
+  // Let the Close-run confirm finish closing before opening the next one.
+  await expect(page.getByRole('alertdialog')).toHaveCount(0)
   const sent = page.locator(`[data-testid^="rewards-mark-sent-"][data-testid$="-${ids.school}"]`)
   await sent.click()
   await page.getByRole('button', { name: 'Mark sent' }).click()
