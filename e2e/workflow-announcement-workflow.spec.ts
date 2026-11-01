@@ -365,4 +365,19 @@ test.describe.serial('Announcement workflow — targeting, drafts, seen, acknowl
     expect(st).toMatchObject({ recipients: 2, seen: 1, acknowledged: 1 })
     expect(st.by_role.parents).toMatchObject({ recipients: 2, seen: 1, acked: 1 })
   })
+
+  test('13. UI (parent): every announcement is kept in the Announcements tab and nothing pops up again', async ({ browser }) => {
+    test.setTimeout(150000)
+    const ctx = await browser.newContext()
+    const state = await ashaP.storageState()
+    await ctx.addCookies(state.cookies.map(c => ({ name: c.name, value: c.value, url: BASE })))
+    const page = await ctx.newPage()
+    await page.goto(`${BASE}/parent?tab=announcements`)
+    await expect(page.getByTestId('announcements-tab')).toBeVisible({ timeout: 90000 })
+    await expect(page.getByTestId('notice-modal')).toHaveCount(0)   // all seen in test 11 — no popup on a later visit
+    const mine = ((await call(ashaP, 'get', `/api/announcements?school_id=${schoolId}`)).body as Array<{ id: number }>)
+    expect(mine.length).toBeGreaterThan(0)
+    for (const n of mine) await expect(page.getByTestId('announcements-tab').getByTestId(`notice-row-${n.id}`)).toBeVisible()
+    await ctx.close()
+  })
 })
