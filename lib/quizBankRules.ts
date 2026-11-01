@@ -162,7 +162,7 @@ export type ChapterPromptInput = {
   withTextbook: boolean
   /** A school's own chapter (#444), not part of the board's master syllabus. */
   custom?: boolean
-  topics: { topicId: number; name: string; subtopics: string[]; notes: string | null; need: number; existingStems: string[] }[]
+  topics: { topicId: number; name: string; subtopics: string[]; notes: string | null; need: number; existingStems: string[]; /** Textbook excerpts for the topic (#478). */ passages?: string[] }[]
 }
 
 export const SYSTEM_PROMPT = `You write multiple-choice questions for a daily 5-minute quiz taken by Indian school students.
@@ -192,6 +192,7 @@ export function buildChapterPrompt(p: ChapterPromptInput): string {
     `- topic_id ${t.topicId}: "${t.name}" — write ${t.need} new question${t.need === 1 ? '' : 's'}`,
     t.subtopics.length ? `  Subtopics: ${t.subtopics.join('; ')}` : '',
     t.notes ? `  Teacher notes: ${t.notes}` : '',
+    t.passages?.length ? `  Textbook passages (base the questions on what is relevant to this topic, ignore the rest):\n${t.passages.map((p, i) => `    ${i + 1}. ${p}`).join('\n')}` : '',
     t.existingStems.length ? `  Already existing (do not repeat):\n${t.existingStems.map(s => `    * ${s}`).join('\n')}` : '',
   ].filter(Boolean).join('\n')).join('\n')
   return `Board: ${p.board}. Grade: ${p.grade}. Subject: ${p.subject}.
