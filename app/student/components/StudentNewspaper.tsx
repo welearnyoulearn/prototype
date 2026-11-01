@@ -5,7 +5,7 @@ import { motion, useReducedMotion } from 'framer-motion'
 import { Check, ExternalLink } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import type { NewspaperView } from '@/lib/newspaper/service'
-import { StudentAlert, StudentEmptyState, StudentPageIntro, studentReveal } from './StudentExperience'
+import { StudentAlert, StudentEmptyState, StudentPageIntro, StudentProgressTrack, studentReveal } from './StudentExperience'
 import { Sticker, type Tone } from './stickers'
 
 type Loaded = Extract<NewspaperView, { items: unknown }>
@@ -117,6 +117,13 @@ export default function StudentNewspaper() {
       <StudentPageIntro eyebrow="New every morning" title={v.edition.mode === 'bank' ? 'Today’s Big Idea' : 'Today’s Newspaper'} sticker="scroll" tone="yellow"
         description={done ? 'You’ve finished today’s newspaper. See you tomorrow morning!' : 'Read the short notes, then answer one question to earn up to 5 points.'}
         aside={<span className="sb-chip" data-size="lg" data-tone="mint" data-testid="newspaper-balance"><Sticker name="hundred-points" size="xs" />{v.balance} points</span>} />
+
+      {v.goal && (
+        <div className="sb-card p-4" data-tone="paper" data-testid="newspaper-goal">
+          <p className="mb-2 text-sm font-semibold">{v.goal.remaining} points to a {v.goal.emoji} {v.goal.name}</p>
+          <StudentProgressTrack value={Math.round((v.balance / v.goal.pointsCost) * 100)} label={`${v.balance} of ${v.goal.pointsCost} points`} tone="yellow" />
+        </div>
+      )}
 
       <div className="space-y-6">
         {v.items.map((item, index) => (

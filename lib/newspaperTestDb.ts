@@ -1,15 +1,15 @@
-// Test support for the Daily Newspaper tests that need a real Postgres. Not used by the app.
+// Test support for the Daily Newspaper and Rewards Marketplace tests that need a real Postgres. Not used by the app.
 //
 // The tests only run when TEST_DATABASE_URL points at a throwaway database on this machine; any other host throws, so
 // they can never touch Supabase:
 //   TEST_DATABASE_URL=postgresql://postgres@127.0.0.1:55432/wlyl_newspaper_test
 //
 // Running the whole initDB() is not used: on a completely empty database it stops at `ALTER TABLE fee_year_close`,
-// which runs before that table is created (an existing problem in the fresh-database path, since fixed in #459).
+// which runs before that table is created (an existing problem in the fresh-database path, not in these features).
 // Instead the existing tables these features build on are created here, copied from lib/db.ts (only the columns that
 // matter), and then the feature's own migration runs on top.
 import { Pool } from 'pg'
-import { ensureNewspaperSchema } from './newspaperSchema'
+import { ensureNewspaperRewardsSchema } from './newspaperRewardsSchema'
 
 export const testDbUrl = process.env.TEST_DATABASE_URL
 if (testDbUrl && !['127.0.0.1', 'localhost', '[::1]'].includes(new URL(testDbUrl).hostname)) {
@@ -47,7 +47,7 @@ export async function openTestDb(): Promise<Pool> {
   // Same session timezone as lib/db.ts, so the IST maths is tested the way production runs it.
   const pool = new Pool({ connectionString: testDbUrl, max: 6, options: '-c timezone=Asia/Kolkata' })
   await pool.query(BASE_TABLES)
-  await ensureNewspaperSchema(pool)
+  await ensureNewspaperRewardsSchema(pool)
   return pool
 }
 

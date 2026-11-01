@@ -36,8 +36,9 @@ export const ALL_FEATURES: { key: string; label: string; category: string; porta
   // plan_features / override rows for the removed Ask a Doubt (#137) under that name.
   { key: 'daily-quiz',         label: 'Daily Quiz & Leaderboard',        category: 'Learning', portals: ['school-admin', 'teacher', 'student', 'parent'] },
   { key: 'student-doubts',     label: 'Student Doubts',                  category: 'Learning', portals: ['school-admin', 'teacher', 'student', 'parent'] },
-  // Daily Newspaper. Seeded OFF at every tier in lib/newspaperSchema.ts until the pilot.
+  // Daily Newspaper + Rewards Marketplace. Seeded OFF at every tier in lib/newspaperRewardsSchema.ts until the pilot.
   { key: 'daily-newspaper',     label: 'Daily Newspaper',                 category: 'Learning', portals: ['student'] },
+  { key: 'rewards-marketplace', label: 'Rewards Marketplace',             category: 'Learning', portals: ['school-admin', 'student', 'parent'] },
 
   // ── Analytics & Intelligence ─────────────────────────────────────────────────
 
@@ -81,4 +82,5 @@ export const PORTAL_NAV_KEY_ALIASES: Record<string, string> = {
   'fees': 'fee-management',           // parent portal's fees nav key for the same capability
   'academic-calendar': 'calendar',    // school-admin's nav key for the Academic Calendar feature
   'newspaper': 'daily-newspaper',     // student portal's Daily Newspaper nav key
+  'rewards': 'rewards-marketplace',   // student/parent portals' and school admin's Rewards nav key
 }

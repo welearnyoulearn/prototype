@@ -13,7 +13,8 @@ export async function GET() {
     if (!await schoolHasFeature(session.schoolId, 'daily-newspaper')) {
       return NextResponse.json({ error: 'Feature not enabled', code: 'FEATURE_DISABLED', feature: 'daily-newspaper' }, { status: 403 })
     }
-    const view = await getNewspaper(pool, { studentId: session.studentId, schoolId: session.schoolId })
+    const showGoal = await schoolHasFeature(session.schoolId, 'rewards-marketplace')
+    const view = await getNewspaper(pool, { studentId: session.studentId, schoolId: session.schoolId, showGoal })
     return NextResponse.json(view, { headers: { 'Cache-Control': 'no-store' } })
   } catch (err) {
     console.error('[student/newspaper]', err)

@@ -61,6 +61,7 @@ const StudentAiHub      = dynamic(() => import('./components/StudentAiHub'),    
 const StudentDailyQuiz  = dynamic(() => import('./components/StudentDailyQuiz'), { loading: () => <ModuleSkeleton /> })
 const StudentClassCircle = dynamic(() => import('./components/StudentClassCircle'), { loading: () => <ModuleSkeleton /> })
 const StudentNewspaper  = dynamic(() => import('./components/StudentNewspaper'),  { loading: () => <ModuleSkeleton /> })
+const StudentRewards    = dynamic(() => import('./components/StudentRewards'),    { loading: () => <ModuleSkeleton /> })
 
 type Student = {
   id: number; name: string; grade: string; section: string; roll_number: string
@@ -86,6 +87,7 @@ const NAV_SECTIONS: NavSection[] = [
     label: 'LEARNING',
     items: [
       { key: 'newspaper', label: 'Today’s newspaper', sticker: 'scroll' },
+      { key: 'rewards', label: 'Rewards shop', sticker: 'wrapped-gift' },
       { key: 'class-circle', label: 'Class circle', sticker: 'party-popper' },
     ],
   },
@@ -128,7 +130,7 @@ const SECTION_STICKERS: Record<string, StickerName> = {
 // 'attendance' has no dedicated nav item — it only gates the Dashboard's
 // engagement-score ring, so isNavItemVisible('attendance') is read directly
 // by StudentDashboard, not used for a sidebar entry.
-const RESTRICTABLE_NAV_KEYS = new Set(['syllabus', 'library', 'my-marks', 'attendance', 'calendar', 'newspaper'])
+const RESTRICTABLE_NAV_KEYS = new Set(['syllabus', 'library', 'my-marks', 'attendance', 'calendar', 'newspaper', 'rewards'])
 
 const BOTTOM_NAV: { key: string; label: string; sticker: StickerName }[] = [
   { key: 'dashboard', label: 'Home', sticker: 'house' },
@@ -169,7 +171,7 @@ function StudentPortal() {
     if (key === 'ai-hub') return aiAccessTier === 'ai_basic' || aiAccessTier === 'ai_pro'
     // Off by default for every plan, so it stays hidden until the school is confirmed to have it.
     if (key === 'daily-quiz') return enabledFeatures?.has('daily-quiz') ?? false
-    if (key === 'newspaper') return enabledFeatures?.has('daily-newspaper') ?? false
+    if (key === 'newspaper' || key === 'rewards') return enabledFeatures?.has(PORTAL_NAV_KEY_ALIASES[key]) ?? false
     if (!RESTRICTABLE_NAV_KEYS.has(key)) return true
     if (enabledFeatures === null) return true
     return enabledFeatures.has(PORTAL_NAV_KEY_ALIASES[key] ?? key)
@@ -365,6 +367,7 @@ function StudentPortal() {
             {visitedNav.has('daily-quiz') && isNavItemVisible('daily-quiz') && <div hidden={activeNav !== 'daily-quiz'}><StudentDailyQuiz doubtsEnabled={enabledFeatures?.has('student-doubts') ?? false} tutorEnabled={aiAccessTier === 'ai_pro'} /></div>}
             {visitedNav.has('announcements') && <div hidden={activeNav !== 'announcements'}><NoticeCenter schoolId={student.school_id} experience="student" mode="page" /></div>}
             {visitedNav.has('newspaper') && isNavItemVisible('newspaper') && <div hidden={activeNav !== 'newspaper'}><StudentNewspaper /></div>}
+            {visitedNav.has('rewards') && isNavItemVisible('rewards') && <div hidden={activeNav !== 'rewards'}><StudentRewards /></div>}
             {visitedNav.has('class-circle') && <div hidden={activeNav !== 'class-circle'}><StudentClassCircle /></div>}
             {visitedNav.has('attendance') && isNavItemVisible('attendance') && (
               <div hidden={activeNav !== 'attendance'}>

@@ -21,6 +21,7 @@ export type NewspaperItem = {
   whyItMatters: string | null; tryIt: string | null; sourceName: string | null; sourceUrl: string | null
 }
 export type NewspaperResult = { selectedIndex: number; correctIndex: number; correct: boolean; explanation: string; pointsAwarded: number }
+export type Goal = { name: string; emoji: string; pointsCost: number; remaining: number }
 
 export type NewspaperView =
   | { state: 'unavailable' }
@@ -34,6 +35,7 @@ export type NewspaperView =
       result: NewspaperResult | null
       pointsAvailable: number
       balance: number
+      goal: Goal | null
     }
 
 /** Which of `count` questions a student gets: stable for the same student and edition, different between neighbours. */
@@ -62,9 +64,15 @@ async function currentEdition(db: Db, band: GradeBand, now: Date): Promise<Editi
   return rows[0] ?? null
 }
 
+async function nextGoal(db: Db, balance: number): Promise<Goal | null> {
+  const { rows } = await db.query<{ name: string; emoji: string; points_cost: number }>(
+    `SELECT name, emoji, points_cost FROM reward_items WHERE active AND points_cost > $1 ORDER BY points_cost, sort_order LIMIT 1`, [balance])
+  return rows[0] ? { name: rows[0].name, emoji: rows[0].emoji, pointsCost: rows[0].points_cost, remaining: rows[0].points_cost - balance } : null
+}
+
 export async function getNewspaper(
   db: Db,
-  p: { studentId: number; schoolId: number; now?: Date },
+  p: { studentId: number; schoolId: number; now?: Date; showGoal?: boolean },
 ): Promise<NewspaperView> {
   const now = p.now ?? new Date()
   const band = await studentBand(db, p.studentId, p.schoolId)
@@ -119,6 +127,7 @@ export async function getNewspaper(
       : null,
     pointsAvailable: state === 'done' ? 0 : NEWS_POINTS.answered + NEWS_POINTS.correct,
     balance,
+    goal: p.showGoal ? await nextGoal(db, balance) : null,
   }
 }
 
