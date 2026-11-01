@@ -16,6 +16,9 @@ import { NextResponse } from 'next/server'
 import pool from './db'
 import { schoolHasFeature } from './auth'
 import { AIRetryLaterError, answerMcqsBlind } from './gemini'
+import { OMNI_BATCH_ID, answerBlindOmni, bankProvider, checkerProvider, omniQueue, topicQuestionsFromOutput, writeQuestions, type OmniQueue } from './quizBankOmni'
+import { passageQuery } from './quizBankOffline'
+import { retrieveChunks } from './rag/retrieve'
 import {
   QuizBankConfigError, batchResults, batchState, countTextbookTokens, submitChapterBatch, uploadTextbook, type ChapterRequest,
 } from './quizBankAI'
@@ -23,7 +26,7 @@ import {
   CHECK_CHUNK_SIZE, MAX_TEXTBOOK_TOKENS, MIN_READY_PER_TOPIC, REPORTS_TO_PULL, TARGET_PER_TOPIC,
   actualCostUsd, buildChapterPrompt, draftFromLegacy, draftsFromChapterOutput, estimateCostUsd, fingerprint, keepAgreeing,
   spreadAnswerPosition, subjectLanguage, topicKey, topicNeeds, validateDraft,
-  type Difficulty, type QuestionDraft, type QuizLanguage,
+  type ChapterPromptInput, type Difficulty, type QuestionDraft, type QuizLanguage,
 } from './quizBankRules'
 
 export class QuizBankError extends Error {
@@ -318,8 +321,11 @@ export async function estimate(subjectId: number, materialId: number | null) {
   const needs = topicNeeds(topics.map(t => ({ topicId: t.topic_id, chapterId: t.chapter_id, activeCount: t.active })))
   const chapters = new Set(needs.map(n => n.chapterId)).size
   const questionsNeeded = needs.reduce((s, n) => s + n.need, 0)
-  const book = materialId && chapters > 0 ? await ensureTextbookFile(subjectId, materialId) : null
+  const provider = bankProvider()
+  // OmniRoute reads short textbook passages found by search, not a whole PDF, so nothing is uploaded.
+  const book = materialId && chapters > 0 && provider === 'anthropic' ? await ensureTextbookFile(subjectId, materialId) : null
   return {
+    provider,
     imported,
     topics: topics.length,
     topics_needing: needs.length,
@@ -351,7 +357,8 @@ export async function start(subjectId: number, materialId: number | null, adminI
     const needs = topicNeeds(topics.map(t => ({ topicId: t.topic_id, chapterId: t.chapter_id, activeCount: t.active })))
     if (needs.length === 0) throw new QuizBankError(`Every topic already has ${TARGET_PER_TOPIC} questions.`, 409)
 
-    let book = materialId ? await ensureTextbookFile(subjectId, materialId) : null
+    const omni = bankProvider() === 'omniroute'
+    let book = materialId && !omni ? await ensureTextbookFile(subjectId, materialId) : null
     if (book && (book.tokens ?? 0) > MAX_TEXTBOOK_TOKENS) {
       // Haiku 4.5 can read about 150K tokens. An admin is told; an automatic run goes on without the book.
       if (adminId !== null) throw new QuizBankError(`This textbook is too long to read (${book.tokens} tokens; the limit is ${MAX_TEXTBOOK_TOKENS}). Prepare without it, or upload a shorter one.`, 400)
@@ -369,36 +376,38 @@ export async function start(subjectId: number, materialId: number | null, adminI
     for (const s of stems) stemsByTopic.set(s.master_topic_id, [...(stemsByTopic.get(s.master_topic_id) ?? []), s.stem])
 
     const requests: ChapterRequest[] = []
+    const omniQueues = new Map<number, OmniQueue>()
     for (const chapterId of new Set(needs.map(n => n.chapterId))) {
       const chapterTopics = topics.filter(t => t.chapter_id === chapterId && needByTopic.has(t.topic_id))
-      requests.push({
-        chapterId,
-        prompt: buildChapterPrompt({
-          board: subject.board, grade: subject.grade, subject: subject.subject_name, language,
-          chapterName: chapterTopics[0].chapter_name,
-          withTextbook: book !== null,
-          topics: chapterTopics.map(t => ({
-            topicId: t.topic_id,
-            name: t.topic_name,
-            subtopics: Array.isArray(t.subtopics) ? t.subtopics.filter((s): s is string => typeof s === 'string') : [],
-            notes: t.content_text?.trim() ? t.content_text.trim().slice(0, NOTES_MAX_CHARS) : null,
-            need: needByTopic.get(t.topic_id) ?? 0,
-            existingStems: stemsByTopic.get(t.topic_id) ?? [],
-          })),
-        }),
-      })
+      const input: ChapterPromptInput = {
+        board: subject.board, grade: subject.grade, subject: subject.subject_name, language,
+        chapterName: chapterTopics[0].chapter_name,
+        withTextbook: book !== null,
+        topics: await Promise.all(chapterTopics.map(async t => ({
+          topicId: t.topic_id,
+          name: t.topic_name,
+          subtopics: Array.isArray(t.subtopics) ? t.subtopics.filter((s): s is string => typeof s === 'string') : [],
+          notes: t.content_text?.trim() ? t.content_text.trim().slice(0, NOTES_MAX_CHARS) : null,
+          need: needByTopic.get(t.topic_id) ?? 0,
+          existingStems: stemsByTopic.get(t.topic_id) ?? [],
+          ...(omni ? { passages: await topicPassages({ board: subject.board, grade: subject.grade, masterSubjectIds: [subjectId], subject: subject.subject_name }, t.topic_name, t.chapter_name) } : {}),
+        }))),
+      }
+      requests.push({ chapterId, prompt: buildChapterPrompt(input) })
+      if (omni) omniQueues.set(chapterId, omniQueue(input))
     }
 
     for (const r of requests) {
       await pool.query(`
-        INSERT INTO quiz_bank_chapters (master_chapter_id, master_subject_id, status, attempts)
-        VALUES ($1, $2, 'queued', 1)
+        INSERT INTO quiz_bank_chapters (master_chapter_id, master_subject_id, status, attempts, omni)
+        VALUES ($1, $2, 'queued', 1, $3)
         ON CONFLICT (master_chapter_id) DO UPDATE
-          SET status = 'queued', attempts = quiz_bank_chapters.attempts + 1, raw_output = NULL,
+          SET status = 'queued', attempts = quiz_bank_chapters.attempts + 1, raw_output = NULL, omni = $3,
               last_error = NULL, claimed_at = NULL, updated_at = NOW()
-      `, [r.chapterId, subjectId])
+      `, [r.chapterId, subjectId, omni ? JSON.stringify(omniQueues.get(r.chapterId)) : null])
     }
-    const batchId = await submitChapterBatch(requests, book?.fileId ?? null)
+    // OmniRoute has no batch to wait for: the chapters are written topic by topic from advance() (generateOmniQueued).
+    const batchId = omni ? OMNI_BATCH_ID : await submitChapterBatch(requests, book?.fileId ?? null)
     await pool.query(`
       UPDATE quiz_bank_subjects
       SET batch_id = $2, batch_submitted_at = NOW(), use_textbook = $3, material_id = COALESCE($4, material_id), started_by = $5, updated_at = NOW()
@@ -423,7 +432,7 @@ async function collectFinishedBatches(): Promise<number> {
       UPDATE quiz_bank_subjects SET claimed_at = NOW()
       WHERE master_subject_id = (
         SELECT master_subject_id FROM quiz_bank_subjects
-        WHERE status = 'generating' AND batch_id IS NOT NULL
+        WHERE status = 'generating' AND batch_id IS NOT NULL AND batch_id <> 'omniroute'
           AND (claimed_at IS NULL OR claimed_at < NOW() - ${STALE_CLAIM})
           -- Ask Anthropic about a running batch at most once a minute (updated_at is bumped on every look).
           AND updated_at < NOW() - INTERVAL '1 minute'
@@ -488,7 +497,8 @@ async function checkGenerated(
   const answers = new Map<string, number>()
   for (let i = 0; i < candidates.length; i += CHECK_CHUNK_SIZE) {
     const chunk = candidates.slice(i, i + CHECK_CHUNK_SIZE)
-    const checked = await answerMcqsBlind(chunk.map(c => ({ key: c.key, stem: c.stem, options: c.options })), context)
+    const items = chunk.map(c => ({ key: c.key, stem: c.stem, options: c.options }))
+    const checked = checkerProvider() === 'groq' ? await answerMcqsBlind(items, context) : await answerBlindOmni(items, context)
     for (const [k, v] of checked) answers.set(k, v)
   }
   const kept = keepAgreeing(candidates, answers)
@@ -708,38 +718,40 @@ export async function prepareSchoolTopics(schoolId: number): Promise<{ chapters:
     if (!needs.length) return { chapters: 0 }
     const byChapter = new Map<number, SchoolTopicNeed[]>()
     for (const n of needs) byChapter.set(n.school_chapter_id, [...(byChapter.get(n.school_chapter_id) ?? []), n])
+    const omni = bankProvider() === 'omniroute'
     const requests: ChapterRequest[] = []
+    const omniQueues = new Map<number, OmniQueue>()
     for (const [chapterId, topics] of byChapter) {
       const first = topics[0]
       const { rows: stems } = await pool.query<{ school_topic_id: number; stem: string }>(
         `SELECT school_topic_id, stem FROM quiz_questions WHERE school_topic_id = ANY($1::int[])`, [topics.map(t => t.topic_id)])
-      requests.push({
-        chapterId,
-        prompt: buildChapterPrompt({
-          board: first.board, grade: first.grade, subject: first.subject_name, language: subjectLanguage(first.quiz_language, first.subject_name),
-          chapterName: first.chapter_name, withTextbook: false, custom: true,
-          topics: topics.map(t => ({
-            topicId: t.topic_id, name: t.topic_name,
-            subtopics: Array.isArray(t.subtopics) ? t.subtopics.filter((s): s is string => typeof s === 'string') : [],
-            notes: t.content_text?.trim() ? t.content_text.trim().slice(0, NOTES_MAX_CHARS) : null,
-            need: TARGET_PER_TOPIC - t.active,
-            existingStems: stems.filter(s => s.school_topic_id === t.topic_id).map(s => s.stem).slice(0, EXISTING_STEMS_IN_PROMPT),
-          })),
-        }),
-      })
+      const input: ChapterPromptInput = {
+        board: first.board, grade: first.grade, subject: first.subject_name, language: subjectLanguage(first.quiz_language, first.subject_name),
+        chapterName: first.chapter_name, withTextbook: false, custom: true,
+        topics: await Promise.all(topics.map(async t => ({
+          topicId: t.topic_id, name: t.topic_name,
+          subtopics: Array.isArray(t.subtopics) ? t.subtopics.filter((s): s is string => typeof s === 'string') : [],
+          notes: t.content_text?.trim() ? t.content_text.trim().slice(0, NOTES_MAX_CHARS) : null,
+          need: TARGET_PER_TOPIC - t.active,
+          existingStems: stems.filter(s => s.school_topic_id === t.topic_id).map(s => s.stem).slice(0, EXISTING_STEMS_IN_PROMPT),
+          ...(omni ? { passages: await topicPassages({ board: first.board, grade: first.grade, subject: first.subject_name }, t.topic_name, first.chapter_name) } : {}),
+        }))),
+      }
+      requests.push({ chapterId, prompt: buildChapterPrompt(input) })
+      if (omni) omniQueues.set(chapterId, omniQueue(input))
     }
     // Claim the chapters before calling Anthropic, so a second caller doesn't submit them too.
     for (const r of requests) {
       await pool.query(`
-        INSERT INTO quiz_bank_school_chapters (school_chapter_id, school_id, status, attempts, updated_at)
-        VALUES ($1, $2, 'queued', 1, NOW())
+        INSERT INTO quiz_bank_school_chapters (school_chapter_id, school_id, status, attempts, omni, updated_at)
+        VALUES ($1, $2, 'queued', 1, $3, NOW())
         ON CONFLICT (school_chapter_id) DO UPDATE
-          SET status = 'queued', attempts = quiz_bank_school_chapters.attempts + 1, batch_id = NULL, raw_output = NULL,
+          SET status = 'queued', attempts = quiz_bank_school_chapters.attempts + 1, batch_id = NULL, raw_output = NULL, omni = $3,
               last_error = NULL, claimed_at = NULL, updated_at = NOW()
-      `, [r.chapterId, schoolId])
+      `, [r.chapterId, schoolId, omni ? JSON.stringify(omniQueues.get(r.chapterId)) : null])
     }
     try {
-      const batchId = await submitChapterBatch(requests, null)
+      const batchId = omni ? OMNI_BATCH_ID : await submitChapterBatch(requests, null)
       await pool.query(
         `UPDATE quiz_bank_school_chapters SET batch_id = $2, submitted_at = NOW(), updated_at = NOW() WHERE school_chapter_id = ANY($1::int[])`,
         [requests.map(r => r.chapterId), batchId])
@@ -760,7 +772,7 @@ export async function prepareSchoolTopics(schoolId: number): Promise<{ chapters:
 async function collectSchoolBatches(): Promise<number> {
   const { rows: batches } = await pool.query<{ batch_id: string }>(`
     SELECT DISTINCT batch_id FROM quiz_bank_school_chapters
-    WHERE status = 'queued' AND batch_id IS NOT NULL AND updated_at < NOW() - INTERVAL '1 minute'
+    WHERE status = 'queued' AND batch_id IS NOT NULL AND batch_id <> 'omniroute' AND updated_at < NOW() - INTERVAL '1 minute'
       AND (claimed_at IS NULL OR claimed_at < NOW() - ${STALE_CLAIM})
     LIMIT 10
   `)
@@ -870,6 +882,110 @@ export async function schoolTopicsOverview() {
   return rows
 }
 
+// ── Writing through OmniRoute (#478) ────────────────────────────────────────
+const PASSAGES_PER_TOPIC = 4
+const PASSAGE_CHARS = 1200
+
+/** The best textbook excerpts for a topic (the tutor's search), or none: the topic is then written from the syllabus alone. */
+async function topicPassages(scope: { board: string | null; grade: string; masterSubjectIds?: number[]; subject: string }, topicName: string, chapterName: string): Promise<string[]> {
+  const query = passageQuery(topicName, chapterName)?.replace(/ \| /g, ' ')
+  if (!query) return []
+  try {
+    const chunks = await retrieveChunks({ ...scope, query, limit: PASSAGES_PER_TOPIC })
+    return chunks.map(c => c.content.replace(/\s+/g, ' ').trim().slice(0, PASSAGE_CHARS)).filter(Boolean)
+  } catch (err) {
+    console.error('[quiz-bank] textbook passages unavailable', err instanceof Error ? err.message : String(err))
+    return []
+  }
+}
+
+const OMNI_TABLES = [
+  { table: 'quiz_bank_chapters', idCol: 'master_chapter_id', master: true },
+  { table: 'quiz_bank_school_chapters', idCol: 'school_chapter_id', master: false },
+] as const
+
+/**
+ * Writes the next topic of one queued chapter. The chapter row holds what is left to write and what is written, so a call that
+ * is cut off loses at most one topic. When the last topic is done the chapter becomes 'generated' and the normal check takes over.
+ */
+async function generateOneOmniTopic(t: (typeof OMNI_TABLES)[number]): Promise<'none' | 'done' | 'retry-later'> {
+  const { rows: [row] } = await pool.query<{ id: number; omni: OmniQueue }>(`
+    UPDATE ${t.table} SET claimed_at = NOW()
+    WHERE ${t.idCol} = (
+      SELECT ${t.idCol} FROM ${t.table}
+      WHERE status = 'queued' AND omni IS NOT NULL AND (claimed_at IS NULL OR claimed_at < NOW() - ${STALE_CLAIM})
+      ORDER BY updated_at LIMIT 1 FOR UPDATE SKIP LOCKED
+    )
+    RETURNING ${t.idCol} AS id, omni
+  `)
+  if (!row) return 'none'
+  const q = row.omni
+  const next = q.pending[0]
+  let input = 0
+  let output = 0
+  let note: string | null = null
+  if (next) {
+    try {
+      const r = await writeQuestions(next.prompt, next.need)
+      input = r.usage.input
+      output = r.usage.output
+      const questions = topicQuestionsFromOutput(r.output, next.topic_id)
+      if (questions) q.done.push({ topic_id: next.topic_id, questions })
+      else { q.failed.push(next.topic_id); note = 'The model did not return usable questions for a topic.' }
+    } catch (err) {
+      if (err instanceof AIRetryLaterError) {
+        await pool.query(`UPDATE ${t.table} SET claimed_at = NULL WHERE ${t.idCol} = $1`, [row.id])
+        return 'retry-later'
+      }
+      q.failed.push(next.topic_id)
+      note = (err instanceof Error ? err.message : String(err)).slice(0, 500)
+    }
+    q.pending.shift()
+  }
+  if (q.pending.length) {
+    await pool.query(`UPDATE ${t.table} SET omni = $2, input_tokens = input_tokens + $3, output_tokens = output_tokens + $4, claimed_at = NULL, updated_at = NOW() WHERE ${t.idCol} = $1`,
+      [row.id, JSON.stringify(q), input, output])
+    return 'done'
+  }
+  // That was the last topic of the chapter.
+  if (q.done.length) {
+    await pool.query(`UPDATE ${t.table} SET status = 'generated', raw_output = $2, omni = NULL, last_error = $5, input_tokens = input_tokens + $3, output_tokens = output_tokens + $4, claimed_at = NULL, updated_at = NOW() WHERE ${t.idCol} = $1`,
+      [row.id, JSON.stringify({ topics: q.done }), input, output, q.failed.length ? `${q.failed.length} topic(s) were not written — they are retried automatically.` : null])
+  } else {
+    await pool.query(`UPDATE ${t.table} SET status = 'failed', omni = NULL, last_error = $2, input_tokens = input_tokens + $3, output_tokens = output_tokens + $4, claimed_at = NULL, updated_at = NOW() WHERE ${t.idCol} = $1`,
+      [row.id, note ?? 'No questions were written.', input, output])
+  }
+  if (t.master) {
+    // Every chapter of the subject has been written (or failed): the subject moves on to checking.
+    await pool.query(`
+      UPDATE quiz_bank_subjects s SET status = 'checking', claimed_at = NULL, updated_at = NOW()
+      WHERE s.status = 'generating' AND s.batch_id = $2
+        AND s.master_subject_id = (SELECT master_subject_id FROM quiz_bank_chapters WHERE master_chapter_id = $1)
+        AND NOT EXISTS (SELECT 1 FROM quiz_bank_chapters c WHERE c.master_subject_id = s.master_subject_id AND c.status = 'queued')
+    `, [row.id, OMNI_BATCH_ID])
+  }
+  return 'done'
+}
+
+/** Writes queued OmniRoute topics until the budget is used. Returns how many topics were written. */
+async function generateOmniQueued(startedAt: number, budgetMs: number): Promise<number> {
+  let written = 0
+  for (;;) {
+    let progressed = false
+    for (const t of OMNI_TABLES) {
+      const r = await generateOneOmniTopic(t)
+      if (r === 'retry-later') return written
+      if (r === 'done') {
+        written++
+        progressed = true
+        // Only after a topic was written: a table with nothing queued must not use up the budget of the next one.
+        if (Date.now() - startedAt >= budgetMs) return written
+      }
+    }
+    if (!progressed) return written
+  }
+}
+
 let lastNudge = 0
 /**
  * Moves pending preparations forward from ordinary traffic (the daily-quiz pages and cron), at most once every
@@ -966,6 +1082,9 @@ export async function advance(budgetMs: number): Promise<{ collected: number; ch
     }
   }
 
+  // OmniRoute writing: one topic per call, as many as the time allows (always at least one, so every call makes progress).
+  const written = retryLater ? 0 : await generateOmniQueued(startedAt, budgetMs)
+
   // Imports that asked for questions: re-run after a running preparation, retry gaps; catch up schools' topics.
   if (Date.now() - startedAt < budgetMs) await retryAutoPrepared()
   if (Date.now() - startedAt < budgetMs) await catchUpSchoolTopics()
@@ -974,7 +1093,7 @@ export async function advance(budgetMs: number): Promise<{ collected: number; ch
     SELECT EXISTS (SELECT 1 FROM quiz_bank_subjects WHERE status IN ('generating', 'checking'))
         OR EXISTS (SELECT 1 FROM quiz_bank_school_chapters WHERE status IN ('queued', 'generated')) AS pending
   `)
-  return { collected: collected + schoolCollected, checked, failed, retryLater, pending }
+  return { collected: collected + schoolCollected + written, checked, failed, retryLater, pending }
 }
 
 // ── Publishing ───────────────────────────────────────────────────────────────

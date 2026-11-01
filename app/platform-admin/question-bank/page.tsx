@@ -31,7 +31,7 @@ type Detail = {
   min_ready_per_topic: number
   chapters: { chapter_id: number; chapter_name: string; job: ChapterJob | null; topics: TopicCount[] }[]
 }
-type Estimate = { imported: number; topics: number; topics_needing: number; chapters: number; questions_needed: number; textbook_tokens: number | null; textbook_too_long: boolean; max_textbook_tokens: number; estimated_max_usd: number }
+type Estimate = { provider: 'anthropic' | 'omniroute'; imported: number; topics: number; topics_needing: number; chapters: number; questions_needed: number; textbook_tokens: number | null; textbook_too_long: boolean; max_textbook_tokens: number; estimated_max_usd: number }
 type NeedsRow = { id: number; board: string; grade: string; subject_name: string; topics: number; topics_ready: number; status: Subject['status'] }
 type Question = {
   id: number; stem: string; options: string[]; correct_index: number; explanation: string | null
@@ -143,7 +143,7 @@ export default function QuestionBankPage() {
   async function startPrep() {
     if (!detail || !est) return
     const ok = await confirm(
-      `Claude will write about ${est.questions_needed} questions for ${est.topics_needing} topics in ${est.chapters} chapters${materialId ? ', reading the textbook' : ''}. Maximum cost about $${est.estimated_max_usd.toFixed(2)} (usually much less). Results usually arrive within an hour; you can close this page.`,
+      `Claude will write about ${est.questions_needed} questions for ${est.topics_needing} topics in ${est.chapters} chapters${materialId && est.provider === 'anthropic' ? ', reading the textbook' : ''}. ${est.provider === 'omniroute' ? 'It goes through OmniRoute, so the cost is what your OmniRoute plan charges; the tokens used are shown on the subject afterwards.' : `Maximum cost about $${est.estimated_max_usd.toFixed(2)} (usually much less).`} Results usually arrive within an hour; you can close this page.`,
       { title: `Prepare ${detail.subject.subject_name}?`, confirmText: 'Start preparation' },
     )
     if (!ok) return
@@ -311,7 +311,9 @@ export default function QuestionBankPage() {
                           <p>{est.topics_needing} of {est.topics} topics need questions · {est.chapters} chapters · about {est.questions_needed} questions to write.</p>
                           {est.textbook_tokens && <p className="text-xs text-gray-500">Textbook size: {est.textbook_tokens.toLocaleString('en-IN')} tokens.</p>}
                           {est.textbook_too_long && <p className="text-xs text-red-700" data-testid="qbank-textbook-too-long">This textbook is longer than the {est.max_textbook_tokens.toLocaleString('en-IN')} tokens Claude can read here. Choose “Syllabus topics only”, or upload a shorter book.</p>}
-                          <p>Maximum cost: <strong>${est.estimated_max_usd.toFixed(2)}</strong> <span className="text-xs text-gray-500">(upper estimate; usually much less)</span></p>
+                          {est.provider === 'omniroute'
+                            ? <p className="text-xs text-gray-500">Written through OmniRoute (Claude Haiku 4.5), one topic at a time, with textbook excerpts found by search. Cost is what your OmniRoute plan charges; the tokens used show on the subject afterwards.</p>
+                            : <p>Maximum cost: <strong>${est.estimated_max_usd.toFixed(2)}</strong> <span className="text-xs text-gray-500">(upper estimate; usually much less)</span></p>}
                           <button data-testid="qbank-start" onClick={startPrep} disabled={busy}
                             className="mt-2 px-4 py-2 rounded-lg text-sm bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-60">Start preparation</button>
                         </>

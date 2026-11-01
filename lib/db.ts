@@ -87,7 +87,7 @@ const BOOTSTRAP_MARKER_KEY   = 'initial_schema_bootstrap'
 // silently never runs anywhere, and you will chase a "column does not exist" 500
 // that reproduces on production but never locally against a fresh DB.
 // Adding a migration statement and bumping this number is ONE change, not two.
-const SCHEMA_VERSION = 71
+const SCHEMA_VERSION = 72
 
 // Records the schema level this build finished applying, on the same row as the
 // bootstrap marker (no extra row, no extra round-trip to read it back).
@@ -4262,6 +4262,8 @@ async function runIncrementalMigrations() {
     -- Tokens Claude used for the chapter (#463), so the real cost can be shown.
     ALTER TABLE quiz_bank_chapters ADD COLUMN IF NOT EXISTS input_tokens INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE quiz_bank_chapters ADD COLUMN IF NOT EXISTS output_tokens INTEGER NOT NULL DEFAULT 0;
+    -- OmniRoute writing (#478): the topics of the chapter still to write, and the questions already written.
+    ALTER TABLE quiz_bank_chapters ADD COLUMN IF NOT EXISTS omni JSONB;
   `)
 
   // Daily Quiz (#433). One quiz per class per working day: one question per class subject whose bank is
@@ -4502,5 +4504,6 @@ async function runIncrementalMigrations() {
     CREATE INDEX IF NOT EXISTS idx_quiz_bank_school_chapters_status ON quiz_bank_school_chapters(status, batch_id);
     ALTER TABLE quiz_bank_school_chapters ADD COLUMN IF NOT EXISTS input_tokens INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE quiz_bank_school_chapters ADD COLUMN IF NOT EXISTS output_tokens INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE quiz_bank_school_chapters ADD COLUMN IF NOT EXISTS omni JSONB;
   `)
 }
