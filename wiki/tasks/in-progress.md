@@ -4,6 +4,18 @@ Move an entry to [completed.md](completed.md) when it ships. Add new entries at 
 
 ---
 
+### Daily Newspaper (pilot) (#484)
+**Type:** Feature
+**Portals:** Student, Platform Admin
+**Branch:** `feature/484-newspaper-rewards-marketplace` (PR #485); the Rewards Marketplace is a separate PR
+**Summary:** A short, real, fact-checked newspaper each morning per grade band, with one question; points go into the same balance as the Daily Quiz. OFF at every tier.
+**Progress:**
+- [x] Feature key (OFF), tables, points helper, grade bands
+- [x] Feed fetch, filter, writer, blind checker, fallback, 04:00 build and 07:00 reminder, student screen, Today dial task, Platform Admin Pull page
+- [x] Tests: unit, database and end to end (`e2e/newspaper.spec.ts`)
+- [ ] Review and merge
+- [ ] Live dry run with GROQ_API_KEY and the real feeds; set CRON_SECRET in production
+
 ### Daily Quiz + Student Doubts (#430)
 **Type:** Feature (epic)
 **Portals:** School Admin, Teacher, Student, Parent

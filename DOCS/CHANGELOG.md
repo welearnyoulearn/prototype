@@ -2,6 +2,21 @@
 
 All notable changes to the WLYL School prototype are documented here.
 
+## [Unreleased] - Daily Newspaper (#484, PR #485)
+
+### Added
+- **Daily Newspaper** (feature `daily-newspaper`, new *Learning* category, OFF at every tier):
+  - A nightly job (04:00 IST) builds one edition per grade band (3-5, 6-8, 9-10) from an allow-list of real feeds (NASA, ESA, Science News Explores, ScienceDaily, WHO, PIB). A block-list removes unsuitable stories; the writer may use only the source text; a second blind model call rejects any note with a claim not in the source, an unsuitable topic or activity, or a different answer. An edition needs 3 passing notes, otherwise it is one "Today's Big Idea" from the reviewed topic bank. Nothing unchecked is published.
+  - Students see it from 06:00 to 06:00 IST: 3-4 short notes, "I've read it" (after a 20 second minimum), one question graded on the server (the key is never sent before answering). +2 points for answering, +3 more when right, paid once per student per edition into the shared points ledger (`student_points`, the same balance as the Daily Quiz).
+  - A 07:00 IST job sends one bell + push to students who have not finished; it also builds any missing edition first.
+  - Student screen (Learning section, a dashboard card and a task in the Today dial) and a Platform Admin **Newspaper** page: last 7 days of editions, Pull / Restore a note or an edition, and Build today's editions now.
+  - Tables `news_editions`, `news_items`, `news_questions`, `news_attempts` (`lib/newspaperSchema.ts`); cron schedules in `vercel.json`; `CRON_SECRET` is required in production.
+
+### Tests
+- Unit and database tests for the pipeline, the overnight build, the student flow, the reminder and the points (database tests run only against a local database via `TEST_DATABASE_URL`).
+- `e2e/newspaper.spec.ts`: platform admin builds, student reads and answers, reload and repeat answers, pull, with real logins on a throwaway local database (`E2E_LOCAL_DATABASE_URL`).
+- `DOCS/openapi.json` documents the new operations.
+
 ## [Unreleased] - Parent session revoke (#468)
 
 ### Fixed

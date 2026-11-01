@@ -31,6 +31,19 @@ Non-obvious technical decisions and their reasoning for the WLYL School prototyp
 **Amended 2026-10-21 (embeddings):** Embeddings come from Gemini `gemini-embedding-001` at 1024 dims (Matryoshka truncation via the `dimensions` param) through its OpenAI-compatible endpoint; 429s are retried (honouring `Retry-After`, else 60 s). Keyword-only chunks are backfilled by re-running the index script (no `--force` needed).
 **Amended 2026-10-24:** Embeddings are now Cloudflare Workers AI `@cf/baai/bge-m3` (1024 dims, multilingual) through its OpenAI-compatible endpoint (`EMBEDDINGS_BASE_URL` / `EMBEDDINGS_API_KEY` / `EMBEDDINGS_MODEL`), superseding the Gemini `gemini-embedding-001` amendment; the code default in `lib/rag/embeddings.ts` is `@cf/baai/bge-m3`. The tutor LLM goes through the remote OmniRoute gateway (`OMNIROUTE_BASE_URL` ending in `/v1`, `OMNIROUTE_API_KEYS`); default models `ddgw/claude-haiku-4-5` then `ddgw/gpt-5.4-mini`, both verified working. The chunker (`lib/rag/chunk.ts`) filters garbled text from legacy non-Unicode-font PDFs: it drops tokens containing legacy-font characters (`dropLegacyFontWords`) and skips any chunk whose real-word share is below 0.5 (`wordShare`). On a Cloudflare 429 code 4006 ("daily free allocation") embeddings throw `EmbeddingQuotaError` at once and `scripts/index-materials.ts` stops the run; re-running resumes. The free tier is 10,000 neurons/day — enough for live student questions (one short embedding each), but a full re-index of all books may need two days or the $5/month Workers Paid plan.
 
+## 2026-11-01 — Daily Newspaper: real stories only, one points ledger, a Platform-Admin feature
+
+**Context:** The founder wants a short daily newspaper that gets students reading every day and asks one question, with points, at little running cost. The Daily Quiz also awards points. An earlier Daily Knowledge screen (preserved branch #169) was removed from `dev` as unreachable and AI-only.
+
+**Decision:**
+- **Real stories, never AI-only.** Notes are written only from allow-listed feed text and accepted only if a blind second model call finds no unsupported claim and reaches the same answer; otherwise a one-note fallback from the reviewed topic bank. Nothing unchecked is published.
+- **One points ledger.** Newspaper points are rows in `student_points`, the same balance as the quiz, with their own partial unique index (`uq_student_points_news`) so each award is paid once; the quiz's index is untouched. Spending points (the Rewards Marketplace) is a separate PR.
+- **A Platform-Admin feature key** (`daily-newspaper`), seeded OFF and switched on per pilot school. This reverses the 2026-09 note that Learning Hub / Daily Knowledge "is not a Platform-Admin feature", which was written for a feature with no pilot.
+
+**Alternatives considered:** AI-written news (rejected: invents "latest" facts); a separate newspaper currency (rejected: two balances confuse children).
+
+**Consequences:** One Groq model writes and checks (a different-vendor checker would be stronger). Editions are global per grade band, not per school.
+
 ## 2026-10-18 — Push notifications go through an outbox and FCM HTTP v1, not firebase-admin
 
 **Context:** Notifications are rows in `notifications`, written by raw `INSERT`s in about 19 route files, and the web bell polls every 30 seconds. We want pushes to the web app and the separate parent app through Firebase Cloud Messaging.

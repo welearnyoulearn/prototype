@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "WLYL School Management API",
-    "version": "2026-10-29",
+    "version": "2026-11-01",
     "description": "Every API route in the WLYL platform, generated from the route handlers on the `dev` branch.\n\n## How to read this\n\n- **Sections and subcategories.** The sidebar groups routes by area, such as Fees & finance, then by topic, such as Waivers.\n- **Who can call.** The coloured badges on each route show which signed-in users it accepts. A red **Public** badge means the route has no sign-in check in code.\n- **Checks.** Extra rules inside the route, such as \"parent must own this student\", are listed under Checks.\n- **Feature flag.** Routes that are switched off unless the school's plan includes a feature say which one.\n\n## Signing in\n\nEach portal has its own session cookie: `wlyl-platform`, `wlyl-auth` (school admin), `wlyl-teacher`, `wlyl-student` and `wlyl-parent`. Sign in to the app in this browser, then use **Test Request** on any route. Scheduled jobs take `Authorization: Bearer $CRON_SECRET`."
   },
   "servers": [
@@ -187,6 +187,10 @@
     {
       "name": "Student doubts",
       "description": "Student Doubts (#435): after a Daily Quiz's answers are out, Ask WLYL AI then Ask Teacher; the teacher answers (or covers it in class); a fresh question on the same topic proves understanding, earning the student points and the teacher WLYL Stars."
+    },
+    {
+      "name": "Platform admin: newspaper",
+      "description": "WLYL controls for the Daily Newspaper."
     }
   ],
   "x-tagGroups": [
@@ -53037,6 +53041,449 @@
           }
         ],
         "x-source-file": "app/api/platform/quiz-bank/needs/route.ts"
+      }
+    },
+    "/api/student/newspaper": {
+      "get": {
+        "tags": [
+          "Student portal"
+        ],
+        "summary": "Today's newspaper and my progress",
+        "description": "Today's edition for the student's grade band (3-5, 6-8, 9-10) in the 06:00-06:00 IST window. Opening it records when reading started. The question's options appear only after \"I've read it\"; the correct answer only after answering.\n\n**Who can call:** Student.\n\n**Checks:** Student session; school has daily-newspaper. Band comes from the student record, never the request.",
+        "operationId": "getStudentNewspaper",
+        "security": [
+          {
+            "student": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The view: state unavailable | not_ready | reading | question | done, with notes, question (never the key before answering), result, points, goal",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Feature not enabled for this school (FEATURE_DISABLED)"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Student",
+            "color": "#15803d"
+          }
+        ],
+        "x-source-file": "app/api/student/newspaper/route.ts"
+      }
+    },
+    "/api/student/newspaper/ack": {
+      "post": {
+        "tags": [
+          "Student portal"
+        ],
+        "summary": "\"I've read it\"",
+        "description": "Allowed once the newspaper was opened at least 20 seconds ago and before answering.\n\n**Who can call:** Student.\n\n**Checks:** Student session; school has daily-newspaper.",
+        "operationId": "postStudentNewspaperAck",
+        "security": [
+          {
+            "student": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Feature not enabled for this school (FEATURE_DISABLED)"
+          },
+          "409": {
+            "description": "too_soon (waitSeconds), not_opened or already_answered"
+          },
+          "410": {
+            "description": "No open edition"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Student",
+            "color": "#15803d"
+          }
+        ],
+        "x-source-file": "app/api/student/newspaper/ack/route.ts"
+      }
+    },
+    "/api/student/newspaper/answer": {
+      "post": {
+        "tags": [
+          "Student portal"
+        ],
+        "summary": "Answer the question",
+        "description": "Graded on the server. +2 points for answering, +3 more when right, paid once per student per edition into the shared points ledger.\n\n**Who can call:** Student.\n\n**Checks:** Student session; school has daily-newspaper; after \"I've read it\"; once.",
+        "operationId": "postStudentNewspaperAnswer",
+        "security": [
+          {
+            "student": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "selected_index missing or out of range"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Feature not enabled for this school (FEATURE_DISABLED)"
+          },
+          "409": {
+            "description": "not_acknowledged or already_answered"
+          },
+          "410": {
+            "description": "No open edition"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Student",
+            "color": "#15803d"
+          }
+        ],
+        "x-source-file": "app/api/student/newspaper/answer/route.ts",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "selected_index": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 3
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/cron/newspaper": {
+      "get": {
+        "tags": [
+          "Scheduled jobs"
+        ],
+        "summary": "Build editions (04:00 IST) or send the reminder (07:00 IST)",
+        "description": "build: one edition per grade band from the allow-listed feeds, written and blind-checked; fewer than 3 passing notes gives one note from the reviewed topic bank. notify: builds anything missing, then one bell + push to students who have not finished. Both are safe to repeat.\n\n**Who can call:** Cron.\n\n**Checks:** Authorization: Bearer $CRON_SECRET; in production a missing CRON_SECRET refuses the call.",
+        "operationId": "getCronNewspaper",
+        "security": [
+          {
+            "cron": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "run must be build or notify"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Cron",
+            "color": "#475569"
+          }
+        ],
+        "x-source-file": "app/api/cron/newspaper/route.ts",
+        "parameters": [
+          {
+            "name": "run",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "build",
+                "notify"
+              ]
+            }
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Scheduled jobs"
+        ],
+        "summary": "Build editions (04:00 IST) or send the reminder (07:00 IST)",
+        "description": "build: one edition per grade band from the allow-listed feeds, written and blind-checked; fewer than 3 passing notes gives one note from the reviewed topic bank. notify: builds anything missing, then one bell + push to students who have not finished. Both are safe to repeat.\n\n**Who can call:** Cron.\n\n**Checks:** Authorization: Bearer $CRON_SECRET; in production a missing CRON_SECRET refuses the call.",
+        "operationId": "postCronNewspaper",
+        "security": [
+          {
+            "cron": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "run must be build or notify"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Cron",
+            "color": "#475569"
+          }
+        ],
+        "x-source-file": "app/api/cron/newspaper/route.ts",
+        "parameters": [
+          {
+            "name": "run",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "build",
+                "notify"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "/api/platform/newspaper": {
+      "get": {
+        "tags": [
+          "Platform admin: newspaper"
+        ],
+        "summary": "Last 7 days of editions",
+        "description": "Each edition with its notes, sources, live/fallback, opened and answered counts.\n\n**Who can call:** Platform admin.\n\n**Checks:** Platform admin session.",
+        "operationId": "getPlatformNewspaper",
+        "security": [
+          {
+            "platformAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          }
+        ],
+        "x-source-file": "app/api/platform/newspaper/route.ts"
+      },
+      "post": {
+        "tags": [
+          "Platform admin: newspaper"
+        ],
+        "summary": "Build today's editions now",
+        "description": "Same as the overnight build. An edition that exists is never replaced (pull it instead).\n\n**Who can call:** Platform admin.\n\n**Checks:** Platform admin session.",
+        "operationId": "postPlatformNewspaper",
+        "security": [
+          {
+            "platformAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "action must be build"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          }
+        ],
+        "x-source-file": "app/api/platform/newspaper/route.ts",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "action": {
+                    "type": "string",
+                    "enum": [
+                      "build"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/platform/newspaper/pull": {
+      "post": {
+        "tags": [
+          "Platform admin: newspaper"
+        ],
+        "summary": "Pull or restore a note or an edition",
+        "description": "Takes it away from students at once (or puts it back). Points already paid stay paid.\n\n**Who can call:** Platform admin.\n\n**Checks:** Platform admin session.",
+        "operationId": "postPlatformNewspaperPull",
+        "security": [
+          {
+            "platformAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid body"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          }
+        ],
+        "x-source-file": "app/api/platform/newspaper/pull/route.ts",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "item",
+                      "edition"
+                    ]
+                  },
+                  "id": {
+                    "type": "integer"
+                  },
+                  "restore": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     }
   },

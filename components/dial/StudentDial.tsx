@@ -6,14 +6,14 @@
 // already exist; the wording and counts are decided in lib/studentDial.ts.
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
-import { BookOpen, CalendarDays, Check, ChevronRight, CircleHelp, ClipboardCheck, MessageCircle, X, type LucideIcon } from 'lucide-react'
+import { BookOpen, CalendarDays, Check, ChevronRight, CircleHelp, ClipboardCheck, MessageCircle, Newspaper, X, type LucideIcon } from 'lucide-react'
 import { NOTIFICATIONS_CHANGED_EVENT } from '@/app/components/notificationGroups'
 import { todayIST } from '@/lib/attendanceRules'
-import { buildDialModel, type DialDoubt, type DialLink, type DialProgress, type DialRing, type DialStat, type DialTask, type DialToday } from '@/lib/studentDial'
+import { buildDialModel, type DialDoubt, type DialLink, type DialNewspaper, type DialProgress, type DialRing, type DialStat, type DialTask, type DialToday } from '@/lib/studentDial'
 
 const POLL_MS = 60_000
 
-const TASK_ICON: Record<DialTask['key'], LucideIcon> = { quiz: CircleHelp, doubts: MessageCircle }
+const TASK_ICON: Record<DialTask['key'], LucideIcon> = { quiz: CircleHelp, doubts: MessageCircle, newspaper: Newspaper }
 const LINK_ICON: Record<DialLink['key'], LucideIcon> = { marks: BookOpen, attendance: ClipboardCheck, calendar: CalendarDays }
 
 type Props = {
@@ -25,6 +25,8 @@ type Props = {
   attendance: boolean
   /** The school has the Academic Calendar switched on. */
   calendar: boolean
+  /** The school has the Daily Newspaper switched on. */
+  newspaper?: boolean
   /** Hide the dial while another layer (sidebar drawer, "All features") is open. */
   suspended?: boolean
   onNavigate: (navKey: string) => void
@@ -59,28 +61,31 @@ function Gauge({ ring, size, idPrefix }: { ring: DialRing; size: number; idPrefi
   )
 }
 
-export default function StudentDial({ dailyQuiz, doubts, attendance, calendar, suspended = false, onNavigate }: Props) {
+export default function StudentDial({ dailyQuiz, doubts, attendance, calendar, newspaper = false, suspended = false, onNavigate }: Props) {
   const gid = useId().replace(/[^a-zA-Z0-9]/g, '')
   const [open, setOpen] = useState(false)
   const [today, setToday] = useState<DialToday | null>(null)
   const [progress, setProgress] = useState<DialProgress | null>(null)
   const [doubtList, setDoubtList] = useState<DialDoubt[] | null>(null)
   const [attendancePct, setAttendancePct] = useState<number | null>(null)
+  const [newspaperView, setNewspaperView] = useState<DialNewspaper | null>(null)
   const fabRef = useRef<HTMLButtonElement>(null)
   const panelRef = useRef<HTMLDivElement>(null)
 
   const load = useCallback(async () => {
-    const [t, p, d, a] = await Promise.all([
+    const [t, p, d, a, n] = await Promise.all([
       dailyQuiz ? getJson<DialToday>('/api/student/quiz/today') : null,
       dailyQuiz ? getJson<DialProgress>('/api/student/quiz/progress') : null,
       doubts ? getJson<{ doubts: DialDoubt[] }>('/api/student/doubts') : null,
       attendance ? getJson<{ month?: { summary?: { pct?: unknown } } }>('/api/student/attendance') : null,
+      newspaper ? getJson<DialNewspaper>('/api/student/newspaper') : null,
     ])
     if (t) setToday(t)
     if (p) setProgress(p)
     if (d) setDoubtList(d.doubts)
     if (a) setAttendancePct(typeof a.month?.summary?.pct === 'number' ? a.month.summary.pct : null)
-  }, [dailyQuiz, doubts, attendance])
+    if (n) setNewspaperView(n)
+  }, [dailyQuiz, doubts, attendance, newspaper])
 
   useEffect(() => {
     const first = setTimeout(() => { void load() }, 0)
@@ -95,8 +100,8 @@ export default function StudentDial({ dailyQuiz, doubts, attendance, calendar, s
   }, [load])
 
   const model = useMemo(
-    () => buildDialModel({ dailyQuiz, doubts, attendance, calendar, today, progress, doubtList, attendancePct }),
-    [dailyQuiz, doubts, attendance, calendar, today, progress, doubtList, attendancePct],
+    () => buildDialModel({ dailyQuiz, doubts, attendance, calendar, today, progress, doubtList, attendancePct, newspaper, newspaperView }),
+    [dailyQuiz, doubts, attendance, calendar, today, progress, doubtList, attendancePct, newspaper, newspaperView],
   )
 
   const close = useCallback(() => {
