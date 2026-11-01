@@ -13,7 +13,9 @@ Move an entry to [completed.md](completed.md) when it ships. Add new entries at 
 - [x] Foundation: feature keys (OFF), tables, starter catalog, points helper (earn / spend / refund under a per-student lock), grade-band helper, tests
 - [x] Newspaper: feed fetch, filter, writer, blind checker, fallback, jobs, student screens, Platform Admin Pull page (not yet run against the real Groq API or live feeds; tested with a fake model and fake feeds)
 - [x] Marketplace: ordering, monthly run, order alert email, parcel arrived / collected, Rewards pages
-- [ ] End-to-end test on a throwaway local database
+- [x] End-to-end test on a throwaway local database (e2e/newspaper-rewards.spec.ts, 7 steps, all four portals)
+- [ ] GitHub issues, branch rename, review, merge (SCHEMA_VERSION renumbering against the quiz branches)
+- [ ] Live dry run with GROQ_API_KEY and the real feeds; set CRON_SECRET, REWARDS_ALERT_EMAIL in production
 ### Push notifications via Firebase (FCM)
 **Type:** Feature
 **Branch:** `feature/fcm-push-backend` (no GitHub issue yet — branch to be renamed with the issue number)

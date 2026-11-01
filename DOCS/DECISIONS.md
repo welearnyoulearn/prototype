@@ -12,6 +12,21 @@ Non-obvious technical decisions and their reasoning for the WLYL School prototyp
 -->
 
 
+## 2026-11-01 — Daily Newspaper + Rewards Marketplace: one points ledger, real stories, WLYL-run supply chain
+
+**Context:** The founder wants a short daily newspaper that makes students want to read, and a way to spend reward points on simple stationery, without much running cost or operational load. The Daily Quiz (separate branch) also awards points. Earlier versions of both features (preserved branches #169, #170) were removed from `dev` as unreachable and insecure (client-supplied ids, an unauthenticated delivery endpoint, AI-only "news").
+
+**Decision:**
+- **One ledger.** All points live in `student_points`; the balance is the sum; spending is a negative row and a refund a positive row. Each feature adds its own partial unique index (`uq_student_points_news`, `uq_student_points_market`) and never touches the quiz's. Spending takes a per-student advisory lock.
+- **Real stories, never AI-only.** Notes are written only from allow-listed feed text and accepted only if a blind second model call finds no unsupported claim and reaches the same answer; otherwise a one-note fallback from the reviewed topic bank. Nothing unchecked is published.
+- **Centralised, monthly, points-only marketplace.** WLYL owns the catalog and supplies items; orders close monthly; the school admin taps "Parcel arrived" and ticks children "Collected". Families only ever see points. Cost control: 500 points per child per month, cheap items only, buy exactly what was ordered. Tracking is counts of orders, with no separate stock bookkeeping in the pilot.
+- **Both are Platform-Admin feature keys**, seeded OFF, switched on per pilot school. This reverses the 2026-09 note that Learning Hub and Marketplace "are not Platform-Admin features", which was written for features with no pilot.
+
+**Alternatives considered:** AI-written news (rejected: invents "latest" facts); a separate marketplace currency (rejected: two balances confuse children and parents); per-school catalogs bought by the school (rejected by the founder in favour of a WLYL-run chain); full inventory, receipt reconciliation and an exceptions queue (parked until there are more than about 5 schools).
+
+**Consequences:** One Groq model writes and checks (a different-vendor checker would be stronger). The quiz branch must keep its points in the same table and leave these indexes alone. `SCHEMA_VERSION` (57 here) will need renumbering when merged with the quiz branches.
+
+
 ## 2026-10-18 — Push notifications go through an outbox and FCM HTTP v1, not firebase-admin
 
 **Context:** Notifications are rows in `notifications`, written by raw `INSERT`s in about 19 route files, and the web bell polls every 30 seconds. We want pushes to the web app and the separate parent app through Firebase Cloud Messaging.

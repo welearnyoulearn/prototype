@@ -23,6 +23,14 @@ All notable changes to the WLYL School prototype are documented here.
   - Children and parents get a bell notice at every step, telling them to collect from the school management (school office).
 - Tests for the pipeline (feed parsing, filter, writer, checker, fallback), the overnight build (idempotent, fallbacks), the student flow (reading time, once-only answers, window, pulled notes) and the reminder; they run against a local database only.
 
+### Fixed
+- **A completely empty database now bootstraps.** `ALTER TABLE fee_year_close ADD COLUMN close_reason` ran from SYLLABUS_SCHEMA before the table was created, so `initDB()` failed on a fresh database. It now runs right after the CREATE (no change for existing databases).
+- Parent portal: the Rewards menu entry had no label (missing from the English and Telugu translations).
+
+### Tests
+- `e2e/newspaper-rewards.spec.ts`: the whole flow through all four portals with real logins on a throwaway local database (build, read and answer, student order, parent order, close run, Sent, Parcel arrived, Collected, Can't deliver, every notice). Runs only when `E2E_LOCAL_DATABASE_URL` points at a local database.
+- `DOCS/openapi.json` documents all 18 new operations (version 2026-11-01).
+
 ## [Unreleased] - School onboarding details (branch feature/school-onboarding-details)
 
 ### Added
