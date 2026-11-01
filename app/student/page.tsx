@@ -400,6 +400,7 @@ function StudentPortal() {
           doubts={enabledFeatures.has('student-doubts')}
           attendance={isNavItemVisible('attendance')}
           calendar={isNavItemVisible('calendar')}
+          newspaper={isNavItemVisible('newspaper')}
           suspended={sidebarOpen || launcherOpen}
           onNavigate={navigateTo}
         />

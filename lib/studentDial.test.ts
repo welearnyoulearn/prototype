@@ -94,3 +94,37 @@ test('attendance shortcut shows this month’s percentage when known', () => {
   assert.equal(buildDialModel(input({ attendancePct: 92 })).links.find(l => l.key === 'attendance')!.detail, '92% this month')
   assert.equal(buildDialModel(input()).links.find(l => l.key === 'attendance')!.detail, 'This month')
 })
+
+test('newspaper: unread or unanswered is a to-do with the points; answered shows the points earned', () => {
+  const reading = buildDialModel(input({ newspaper: true, newspaperView: { state: 'reading' } }))
+  assert.equal(reading.tasks[0].key, 'newspaper')
+  assert.equal(reading.tasks[0].title, 'Read today’s newspaper')
+  assert.match(reading.tasks[0].detail, /up to 5 points/)
+  assert.equal(reading.tasks[0].navKey, 'newspaper')
+  assert.equal(reading.badge, 1)
+  assert.equal(reading.headline, '1 thing to do')
+
+  const question = buildDialModel(input({ newspaper: true, newspaperView: { state: 'question' } }))
+  assert.equal(question.tasks[0].title, 'Answer today’s newspaper question')
+  assert.equal(question.tasks[0].urgent, true)
+
+  const done = buildDialModel(input({ newspaper: true, newspaperView: { state: 'done', result: { correct: true, pointsAwarded: 5 } } }))
+  assert.equal(done.tasks[0].title, 'Newspaper done: +5 points')
+  assert.equal(done.tasks[0].urgent, false)
+  assert.equal(done.badge, 0)
+  assert.equal(done.headline, 'All done for today')
+})
+
+test('newspaper: nothing shows when it is switched off, not ready, or not for this grade', () => {
+  assert.equal(buildDialModel(input({ newspaper: false, newspaperView: { state: 'reading' } })).tasks.length, 0)
+  assert.equal(buildDialModel(input({ newspaper: true, newspaperView: { state: 'not_ready' } })).tasks.length, 0)
+  assert.equal(buildDialModel(input({ newspaper: true, newspaperView: { state: 'unavailable' } })).tasks.length, 0)
+  assert.equal(buildDialModel(input({ newspaper: true, newspaperView: null })).tasks.length, 0)
+})
+
+test('newspaper sits after the quiz and both count in the badge', () => {
+  const m = buildDialModel(input({ today: ready(null), newspaper: true, newspaperView: { state: 'reading' } }))
+  assert.deepEqual(m.tasks.map(t => t.key), ['quiz', 'newspaper'])
+  assert.equal(m.badge, 2)
+  assert.equal(m.headline, '2 things to do')
+})
