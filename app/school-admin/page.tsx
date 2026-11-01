@@ -22,7 +22,7 @@ import { hueForSection } from '@/components/portal/sectionHues'
 import { Skeleton } from '@/components/ui/skeleton'
 
 // Always-loaded (small, needed immediately)
-import { Brain, BookOpen, Building2, CalendarDays, ChevronDown, ClipboardCheck, Download, GraduationCap, LayoutDashboard, Library, GripVertical, LayoutGrid, LineChart, ListChecks, Megaphone, MessageSquareText, NotebookPen, Receipt, RefreshCcw, School, SlidersHorizontal, Users, Wallet, Wrench, Gift } from 'lucide-react'
+import { Brain, BookOpen, Building2, CalendarDays, ChevronDown, ClipboardCheck, Download, GraduationCap, LayoutDashboard, Library, GripVertical, LayoutGrid, LineChart, ListChecks, Megaphone, MessageSquareText, NotebookPen, Receipt, RefreshCcw, School, SlidersHorizontal, Users, Wallet, Wrench } from 'lucide-react'
 import Overview from './components/Overview'
 import StaffProfile from './components/StaffProfile'
 import { unregisterPushDevice } from '@/lib/pushClient'
@@ -54,7 +54,6 @@ const ExamSchedule          = dynamic(() => import('./components/ExamSchedule'),
 const TeachersManagement    = dynamic(() => import('./components/TeachersManagement'),     { loading: () => <ModuleSkeleton /> })
 const StudentsManagement    = dynamic(() => import('./components/StudentsManagement'),     { loading: () => <ModuleSkeleton /> })
 const AnnouncementBoard     = dynamic(() => import('./components/AnnouncementBoard'),      { loading: () => <ModuleSkeleton /> })
-const RewardsDelivery       = dynamic(() => import('./components/RewardsDelivery'),        { loading: () => <ModuleSkeleton /> })
 const FeedbackManagement    = dynamic(() => import('./components/FeedbackManagement'),      { loading: () => <ModuleSkeleton /> })
 const ExportCenter          = dynamic(() => import('./components/ExportCenter'),           { loading: () => <ModuleSkeleton /> })
 const SchoolSettings        = dynamic(() => import('./components/SchoolSettings'),         { loading: () => <ModuleSkeleton /> })
@@ -213,12 +212,6 @@ const NAV_ITEMS: NavItem[] = [
     label: 'Announcements',
     tier: ['basic', 'standard', 'premium'],
     icon: (<Megaphone className="w-4 h-4" aria-hidden="true" />),
-  },
-  {
-    key: 'rewards',
-    label: 'Rewards delivery',
-    tier: ['basic', 'standard', 'premium'],
-    icon: (<Gift className="w-4 h-4" aria-hidden="true" />),
   },
   {
     key: 'feedback-management',
@@ -996,7 +989,6 @@ function SchoolAdmin() {
                 {visited.has('daily-quiz') && navEnabled('daily-quiz') && <div hidden={activeNav !== 'daily-quiz'}><SchoolDailyQuiz extra={navEnabled('student-doubts') ? <SchoolDoubts /> : null} /></div>}
                 {visited.has('exam-schedule')    && <div hidden={activeNav !== 'exam-schedule'}><ExamSchedule schoolId={selectedSchool.id} /></div>}
                 {visited.has('announcements')    && <div hidden={activeNav !== 'announcements'}><AnnouncementBoard schoolId={selectedSchool.id} schoolName={selectedSchool.name} /></div>}
-                {visited.has('rewards')          && <div hidden={activeNav !== 'rewards'}><RewardsDelivery /></div>}
                 {visited.has('feedback-management') && <div hidden={activeNav !== 'feedback-management'}><FeedbackManagement schoolId={selectedSchool.id} /></div>}
                 {visited.has('export')           && <div hidden={activeNav !== 'export'}><ExportCenter schoolId={selectedSchool.id} /></div>}
                 {visited.has('settings')         && <div hidden={activeNav !== 'settings'}><SchoolSettings schoolId={selectedSchool.id} /></div>}

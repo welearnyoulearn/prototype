@@ -4,19 +4,17 @@ Move an entry to [completed.md](completed.md) when it ships. Add new entries at 
 
 ---
 
-### Daily Newspaper + Rewards Marketplace (pilot)
+### Daily Newspaper (pilot) (#484)
 **Type:** Feature
-**Portals:** Student, Parent, School Admin, Platform Admin
-**Branch:** `feature/484-newspaper-rewards-marketplace` (issue #484, PR #485)
-**Summary:** A short, real, fact-checked newspaper each morning per grade band, with one question; points go into the same balance as the Daily Quiz and are spent on simple stationery supplied by WLYL and handed out by the school admin. Monthly delivery. Both feature keys are OFF at every tier.
+**Portals:** Student, Platform Admin
+**Branch:** `feature/484-newspaper-rewards-marketplace` (PR #485); the Rewards Marketplace is a separate PR
+**Summary:** A short, real, fact-checked newspaper each morning per grade band, with one question; points go into the same balance as the Daily Quiz. OFF at every tier.
 **Progress:**
-- [x] Foundation: feature keys (OFF), tables, starter catalog, points helper (earn / spend / refund under a per-student lock), grade-band helper, tests
-- [x] Newspaper: feed fetch, filter, writer, blind checker, fallback, jobs, student screens, Platform Admin Pull page (not yet run against the real Groq API or live feeds; tested with a fake model and fake feeds)
-- [x] Marketplace: ordering, monthly run, order alert email, parcel arrived / collected, Rewards pages
-- [x] End-to-end test on a throwaway local database (e2e/newspaper-rewards.spec.ts, 7 steps, all four portals)
-- [x] Issue #484, draft PR #485; merged with dev after the Daily Quiz landed (SCHEMA_VERSION 73)
+- [x] Feature key (OFF), tables, points helper, grade bands
+- [x] Feed fetch, filter, writer, blind checker, fallback, 04:00 build and 07:00 reminder, student screen, Today dial task, Platform Admin Pull page
+- [x] Tests: unit, database and end to end (`e2e/newspaper.spec.ts`)
 - [ ] Review and merge
-- [ ] Live dry run with GROQ_API_KEY and the real feeds; set CRON_SECRET, REWARDS_ALERT_EMAIL in production
+- [ ] Live dry run with GROQ_API_KEY and the real feeds; set CRON_SECRET in production
 
 ### Daily Quiz + Student Doubts (#430)
 **Type:** Feature (epic)

@@ -1,7 +1,7 @@
 import { Pool, types } from 'pg'
 import { matchTeacher } from './matchTeacher'
 import { buildFeedbackCategoryBackfillAllQuery } from './feedback-defaults'
-import { ensureNewspaperRewardsSchema } from './newspaperRewardsSchema'
+import { ensureNewspaperSchema } from './newspaperSchema'
 
 // Return DATE columns as plain "YYYY-MM-DD" strings instead of JS Date objects.
 // Without this, pg serialises dates as UTC midnight which JSON-stringifies to
@@ -4508,6 +4508,6 @@ async function runIncrementalMigrations() {
     ALTER TABLE quiz_bank_school_chapters ADD COLUMN IF NOT EXISTS omni JSONB;
   `)
 
-  // Daily Newspaper + Rewards Marketplace (tables, ledger indexes, features seeded OFF, starter catalog).
-  await ensureNewspaperRewardsSchema(pool)
+  // Daily Newspaper (tables, ledger index, feature seeded OFF).
+  await ensureNewspaperSchema(pool)
 }

@@ -2,33 +2,20 @@
 
 All notable changes to the WLYL School prototype are documented here.
 
-## [Unreleased] - Daily Newspaper + Rewards Marketplace (#484, PR #485)
+## [Unreleased] - Daily Newspaper (#484, PR #485)
 
 ### Added
-- **Feature keys** `daily-newspaper` and `rewards-marketplace` (new *Learning* category), seeded OFF at every plan tier. No screens or routes yet.
-- **Tables** for the newspaper (`news_editions`, `news_items`, `news_questions`, `news_attempts`) and the marketplace (`reward_items`, `reward_runs`, `reward_orders`), created by `lib/newspaperRewardsSchema.ts`. The 7-item starter catalog (pencil, eraser, sharpener 150 points; blue pen 250; black pen 400; ruler and glue stick 500) is added once; WLYL owns it afterwards.
-- **Points helper** (`lib/pointsLedger.ts`) on the existing `student_points` ledger: newspaper points paid once per student per edition, an order's points held with one negative row, refunded once, a 500-points-per-month ordering limit, all under a per-student lock so two orders at once cannot spend the same points twice.
-- Grade bands for the newspaper (3-5, 6-8, 9-10).
-- Tests for bands, rules and the ledger (the ledger tests run only against a local database via `TEST_DATABASE_URL`).
-- **Daily Newspaper** (feature `daily-newspaper`, OFF at every tier):
+- **Daily Newspaper** (feature `daily-newspaper`, new *Learning* category, OFF at every tier):
   - A nightly job (04:00 IST) builds one edition per grade band (3-5, 6-8, 9-10) from an allow-list of real feeds (NASA, ESA, Science News Explores, ScienceDaily, WHO, PIB). A block-list removes unsuitable stories; the writer may use only the source text; a second blind model call rejects any note with a claim not in the source, an unsuitable topic or activity, or a different answer. An edition needs 3 passing notes, otherwise it is one "Today's Big Idea" from the reviewed topic bank. Nothing unchecked is published.
-  - Students see it from 06:00 to 06:00 IST: 3-4 short notes, "I've read it" (after a 20 second minimum), one question, graded on the server (the key is never sent before answering). +2 points for answering, +3 more when right, paid once per student per edition into the shared points ledger.
+  - Students see it from 06:00 to 06:00 IST: 3-4 short notes, "I've read it" (after a 20 second minimum), one question graded on the server (the key is never sent before answering). +2 points for answering, +3 more when right, paid once per student per edition into the shared points ledger (`student_points`, the same balance as the Daily Quiz).
   - A 07:00 IST job sends one bell + push to students who have not finished; it also builds any missing edition first.
-  - Student screen (Learning section and a dashboard card) and a Platform Admin **Newspaper** page: last 7 days of editions, Pull / Restore a note or an edition, and Build today's editions now.
-  - Cron schedules added to `vercel.json`; `CRON_SECRET` is required in production.
-- **Rewards Marketplace** (feature `rewards-marketplace`, OFF at every tier):
-  - Students, or parents for their own child, order simple stationery with reward points. Points are held at once; up to 500 points' worth per child per month; cancel until the month's run closes.
-  - WLYL gets an email on every order with the school's running item counts. Platform Admin → **Rewards**: open run per school, shopping list with cost, Close run, CSV, Sent per school, parcel table (Ordered · Sent · At school · Collected · Waiting, late in red), totals, catalog editor.
-  - School Admin → **Rewards delivery**: Parcel arrived, then tick children Collected (one by one or the whole class); Can't deliver refunds the points.
-  - Children and parents get a bell notice at every step, telling them to collect from the school management (school office).
-- Tests for the pipeline (feed parsing, filter, writer, checker, fallback), the overnight build (idempotent, fallbacks), the student flow (reading time, once-only answers, window, pulled notes) and the reminder; they run against a local database only.
-
-### Fixed
-- Parent portal: the Rewards menu entry had no label (missing from the English and Telugu translations).
+  - Student screen (Learning section, a dashboard card and a task in the Today dial) and a Platform Admin **Newspaper** page: last 7 days of editions, Pull / Restore a note or an edition, and Build today's editions now.
+  - Tables `news_editions`, `news_items`, `news_questions`, `news_attempts` (`lib/newspaperSchema.ts`); cron schedules in `vercel.json`; `CRON_SECRET` is required in production.
 
 ### Tests
-- `e2e/newspaper-rewards.spec.ts`: the whole flow through all four portals with real logins on a throwaway local database (build, read and answer, student order, parent order, close run, Sent, Parcel arrived, Collected, Can't deliver, every notice). Runs only when `E2E_LOCAL_DATABASE_URL` points at a local database.
-- `DOCS/openapi.json` documents all 18 new operations (version 2026-11-01).
+- Unit and database tests for the pipeline, the overnight build, the student flow, the reminder and the points (database tests run only against a local database via `TEST_DATABASE_URL`).
+- `e2e/newspaper.spec.ts`: platform admin builds, student reads and answers, reload and repeat answers, pull, with real logins on a throwaway local database (`E2E_LOCAL_DATABASE_URL`).
+- `DOCS/openapi.json` documents the new operations.
 
 ## [Unreleased] - Parent session revoke (#468)
 

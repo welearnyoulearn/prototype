@@ -31,20 +31,18 @@ Non-obvious technical decisions and their reasoning for the WLYL School prototyp
 **Amended 2026-10-21 (embeddings):** Embeddings come from Gemini `gemini-embedding-001` at 1024 dims (Matryoshka truncation via the `dimensions` param) through its OpenAI-compatible endpoint; 429s are retried (honouring `Retry-After`, else 60 s). Keyword-only chunks are backfilled by re-running the index script (no `--force` needed).
 **Amended 2026-10-24:** Embeddings are now Cloudflare Workers AI `@cf/baai/bge-m3` (1024 dims, multilingual) through its OpenAI-compatible endpoint (`EMBEDDINGS_BASE_URL` / `EMBEDDINGS_API_KEY` / `EMBEDDINGS_MODEL`), superseding the Gemini `gemini-embedding-001` amendment; the code default in `lib/rag/embeddings.ts` is `@cf/baai/bge-m3`. The tutor LLM goes through the remote OmniRoute gateway (`OMNIROUTE_BASE_URL` ending in `/v1`, `OMNIROUTE_API_KEYS`); default models `ddgw/claude-haiku-4-5` then `ddgw/gpt-5.4-mini`, both verified working. The chunker (`lib/rag/chunk.ts`) filters garbled text from legacy non-Unicode-font PDFs: it drops tokens containing legacy-font characters (`dropLegacyFontWords`) and skips any chunk whose real-word share is below 0.5 (`wordShare`). On a Cloudflare 429 code 4006 ("daily free allocation") embeddings throw `EmbeddingQuotaError` at once and `scripts/index-materials.ts` stops the run; re-running resumes. The free tier is 10,000 neurons/day — enough for live student questions (one short embedding each), but a full re-index of all books may need two days or the $5/month Workers Paid plan.
 
-## 2026-11-01 — Daily Newspaper + Rewards Marketplace: one points ledger, real stories, WLYL-run supply chain
+## 2026-11-01 — Daily Newspaper: real stories only, one points ledger, a Platform-Admin feature
 
-**Context:** The founder wants a short daily newspaper that makes students want to read, and a way to spend reward points on simple stationery, without much running cost or operational load. The Daily Quiz (separate branch) also awards points. Earlier versions of both features (preserved branches #169, #170) were removed from `dev` as unreachable and insecure (client-supplied ids, an unauthenticated delivery endpoint, AI-only "news").
+**Context:** The founder wants a short daily newspaper that gets students reading every day and asks one question, with points, at little running cost. The Daily Quiz also awards points. An earlier Daily Knowledge screen (preserved branch #169) was removed from `dev` as unreachable and AI-only.
 
 **Decision:**
-- **One ledger.** All points live in `student_points`; the balance is the sum; spending is a negative row and a refund a positive row. Each feature adds its own partial unique index (`uq_student_points_news`, `uq_student_points_market`) and never touches the quiz's. Spending takes a per-student advisory lock.
 - **Real stories, never AI-only.** Notes are written only from allow-listed feed text and accepted only if a blind second model call finds no unsupported claim and reaches the same answer; otherwise a one-note fallback from the reviewed topic bank. Nothing unchecked is published.
-- **Centralised, monthly, points-only marketplace.** WLYL owns the catalog and supplies items; orders close monthly; the school admin taps "Parcel arrived" and ticks children "Collected". Families only ever see points. Cost control: 500 points per child per month, cheap items only, buy exactly what was ordered. Tracking is counts of orders, with no separate stock bookkeeping in the pilot.
-- **Both are Platform-Admin feature keys**, seeded OFF, switched on per pilot school. This reverses the 2026-09 note that Learning Hub and Marketplace "are not Platform-Admin features", which was written for features with no pilot.
+- **One points ledger.** Newspaper points are rows in `student_points`, the same balance as the quiz, with their own partial unique index (`uq_student_points_news`) so each award is paid once; the quiz's index is untouched. Spending points (the Rewards Marketplace) is a separate PR.
+- **A Platform-Admin feature key** (`daily-newspaper`), seeded OFF and switched on per pilot school. This reverses the 2026-09 note that Learning Hub / Daily Knowledge "is not a Platform-Admin feature", which was written for a feature with no pilot.
 
-**Alternatives considered:** AI-written news (rejected: invents "latest" facts); a separate marketplace currency (rejected: two balances confuse children and parents); per-school catalogs bought by the school (rejected by the founder in favour of a WLYL-run chain); full inventory, receipt reconciliation and an exceptions queue (parked until there are more than about 5 schools).
+**Alternatives considered:** AI-written news (rejected: invents "latest" facts); a separate newspaper currency (rejected: two balances confuse children).
 
-**Consequences:** One Groq model writes and checks (a different-vendor checker would be stronger). The quiz branch must keep its points in the same table and leave these indexes alone. `SCHEMA_VERSION` (57 here) will need renumbering when merged with the quiz branches.
-
+**Consequences:** One Groq model writes and checks (a different-vendor checker would be stronger). Editions are global per grade band, not per school.
 
 ## 2026-10-18 — Push notifications go through an outbox and FCM HTTP v1, not firebase-admin
 

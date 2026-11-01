@@ -2,7 +2,7 @@
 
 **Platform Admin feature key:** `daily-newspaper`
 **Portal:** Student (Platform Admin controls it; a school admin participation count is planned)
-**Status:** Partial. Built end to end (feeds, writer, blind checker, fallback, nightly and 07:00 jobs, student screens, points, Platform Admin Pull page). The goal bar needs the Rewards Marketplace (separate step) and is hidden until then. OFF at every tier until a platform admin switches it on.
+**Status:** Partial. Built end to end (feeds, writer, blind checker, fallback, nightly and 07:00 jobs, student screen, points, Platform Admin Pull page). OFF at every tier until a platform admin switches it on.
 **Last updated:** 2026-10-28
 
 ---
@@ -17,15 +17,15 @@ Every morning each student finds a short newspaper made for their grade band: fo
 - **Content:** real stories from a short allow-list of trusted feeds, rewritten from the article text only, then checked by a second blind model call (every claim in the source, age-appropriate, one clear answer). If fewer than 3 notes pass, a one-note "Today's Big Idea" from the reviewed topic bank is published instead. Unchecked text is never published.
 - **A note:** headline, 40-60 words, "Why it matters to you", "Try it today", source link.
 - **The day:** published 06:00 IST, open 24 hours, one reminder at 07:00 for students who have not finished. One attempt, no penalty for a wrong answer. The correct answer is never sent to the browser before the student submits.
-- **Points:** +2 for answering, +3 more for a correct answer (max 5 a day). They go in the same points balance as the Daily Quiz and Doubts, and are spent in the [Rewards Marketplace](rewards-marketplace.md). Newspaper points are not part of the class leaderboard.
+- **Points:** +2 for answering, +3 more for a correct answer (max 5 a day). They go in the same points balance as the Daily Quiz and Doubts. Newspaper points are not part of the class leaderboard.
 - **Platform admin** can pull a note or a whole edition afterwards.
 
 ## Key files
 
 | Piece | Where |
 |---|---|
-| Feature key `daily-newspaper`, seeded OFF at every tier | `lib/features.ts`, `lib/newspaperRewardsSchema.ts` |
-| Tables `news_editions`, `news_items`, `news_questions`, `news_attempts` | `lib/newspaperRewardsSchema.ts` |
+| Feature key `daily-newspaper`, seeded OFF at every tier | `lib/features.ts`, `lib/newspaperSchema.ts` |
+| Tables `news_editions`, `news_items`, `news_questions`, `news_attempts` | `lib/newspaperSchema.ts` |
 | The allow-listed feeds (only these are used) | `lib/newspaper/sources.ts` |
 | Feed reading, article fetch limited to each source's own domains | `lib/newspaper/feed.ts` |
 | Block-list and candidate selection | `lib/newspaper/filter.ts` |
@@ -62,7 +62,7 @@ Every morning each student finds a short newspaper made for their grade band: fo
 ## Not built yet
 
 - Streak bonuses, the parent "read today" line, the class participation count and the second reminder (parked for the pilot).
-- The goal bar ("35 points to a Pencil") shows only when `rewards-marketplace` is on for the school, so it appears with the marketplace.
+- Spending points: the Rewards Marketplace is a separate PR.
 
 ## Code evidence
 
@@ -83,7 +83,6 @@ API routes these screens call (all exist):
 
 ## Related
 
-- [rewards-marketplace.md](rewards-marketplace.md): where the points are spent
 - Daily Quiz (separate work, own branch): the other source of points
 
 ## Status history
