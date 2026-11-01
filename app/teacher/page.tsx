@@ -15,7 +15,10 @@ import PortalSidebar from '@/components/portal/PortalSidebar'
 import FeatureLauncher, { type LauncherSection } from '@/components/portal/FeatureLauncher'
 import FeatureLauncherButton from '@/components/portal/FeatureLauncherButton'
 import { hueForSection } from '@/components/portal/sectionHues'
-import { CalendarDays, Eye, Home, LayoutGrid, ListChecks, LogOut, Menu, MessageCircleQuestion, School, UserRound } from 'lucide-react'
+import { CalendarDays, Eye, Home, LayoutGrid, ListChecks, LogOut, Megaphone, Menu, MessageCircleQuestion, School, UserRound } from 'lucide-react'
+import NoticeCenter from '@/components/announcements/NoticeCenter'
+import AnnouncementPopup from '@/components/announcements/AnnouncementPopup'
+import { useUnreadAnnouncements } from '@/components/announcements/useUnreadAnnouncements'
 import { Skeleton } from '@/components/ui/skeleton'
 
 // Always-loaded (landing tab, and small enough not to be worth its own chunk)
@@ -100,6 +103,7 @@ const NAV_SECTIONS: NavSection[] = [
     label: 'MAIN',
     items: [
       { key: 'snapshot', label: 'Overview', icon: <Home size={18} /> },
+      { key: 'announcements', label: 'Announcements', icon: <Megaphone size={18} /> },
     ],
   },
   {
@@ -139,7 +143,9 @@ function TeacherPortal() {
     return () => window.clearTimeout(update)
   }, [activeNav])
   const [sidebarOpen, setSidebarOpen] = useState(false)
-  const { counts: navCounts, latest: navLatest } = useNavNotifications('teacher')
+  const { counts: baseNavCounts, latest: navLatest } = useNavNotifications('teacher')
+  const unreadAnnouncements = useUnreadAnnouncements(teacher?.school_id)
+  const navCounts: Record<string, number> = { ...baseNavCounts, announcements: unreadAnnouncements }
   const [launcherOpen, setLauncherOpen] = useState(false)
   const [selectedClass, setSelectedClass] = useState<{ id: number; grade: string; section: string; class_teacher_name: string | null; class_teacher_id?: number | null } | null>(null)
   const [classViewInitialTab, setClassViewInitialTab] = useState<string | undefined>(undefined)
@@ -386,6 +392,8 @@ function TeacherPortal() {
           {visitedNav.has('class-view') && selectedClass && <div hidden={activeNav !== 'class-view'}><ClassView key={selectedClass.id} classId={selectedClass.id} grade={selectedClass.grade} section={selectedClass.section} schoolId={teacher.school_id} teacherName={teacher.name} teacherId={teacher.id} isClassTeacher={selectedClass.class_teacher_id === teacher.id || teacher.class_teacher_assignments?.some(c => c.id === selectedClass.id)} teacher={{ id: teacher.id, name: teacher.name, subject: teacher.subject, department: teacher.department, class_teacher_grade: teacher.class_teacher_grade, class_teacher_section: teacher.class_teacher_section }} onBack={() => navigateTo('snapshot')} initialTab={classViewInitialTab} openExamId={classViewOpenExamId} /></div>}
           {visitedNav.has('attendance')     && <div hidden={activeNav !== 'attendance'}><Attendance teacherId={teacher.id} schoolId={teacher.school_id} /></div>}
           {visitedNav.has('calendar')       && <div hidden={activeNav !== 'calendar'}><SchoolCalendarView /></div>}
+          {teacher && <AnnouncementPopup schoolId={teacher.school_id} />}
+          {visitedNav.has('announcements')  && <div hidden={activeNav !== 'announcements'}><NoticeCenter schoolId={teacher.school_id} mode="page" /></div>}
           {visitedNav.has('profile')        && <div hidden={activeNav !== 'profile'}><TeacherProfile teacher={teacher} onUpdate={setTeacher as (t: unknown) => void} availableYears={availableYears} selectedAcademicYear={selectedAcademicYear} schoolCurrentYear={schoolCurrentYear} onSelectYear={setSelectedAcademicYear} /></div>}
           {visitedNav.has('my-classes')     && <div hidden={activeNav !== 'my-classes'}><MyClasses teacher={{ id: teacher.id, name: teacher.name, subject: teacher.subject, department: teacher.department, class_teacher_grade: teacher.class_teacher_grade, class_teacher_section: teacher.class_teacher_section }} schoolId={teacher.school_id} onViewClass={cls => { setSelectedClass(cls); navigateTo('class-view') }} onGoToSyllabus={cls => handleNavigate('class-view', { classId: cls.id, tab: 'Syllabus' })} /></div>}
           {visitedNav.has('my-students')    && <div hidden={activeNav !== 'my-students'}><MyStudents teacher={{ id: teacher.id, name: teacher.name, subject: teacher.subject, department: teacher.department, class_teacher_grade: teacher.class_teacher_grade, class_teacher_section: teacher.class_teacher_section }} schoolId={teacher.school_id} /></div>}

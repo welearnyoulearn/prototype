@@ -22,7 +22,8 @@ School admin / principal / vice principal publish; teachers, students and parent
 - **When:** publish now, schedule for a date and time, or save as a draft. Optional "hide after" date; expired notices move to the Archive (and to readers' "Past" list).
 - **Priority, pin, acknowledge:** urgent / high / normal; pin to the top; ask for acknowledgement ("I have read this").
 - **Telugu / Hindi:** optional translated title and message; readers using the app in that language see it.
-- **Reader experience:** teacher, student and parent dashboards show a notice card with NEW marks and an "Action needed" tag. Tapping a notice opens it — festive notices open as an animated greeting card, others as a clean sheet with a coloured banner. Unseen greeting, urgent and acknowledgement notices pop up once. "View all" has search and Unread / Pinned / Action needed / Past filters.
+- **Reader experience:** teacher, student and parent portals each have an **Announcements** tab listing every announcement (live and past) with search, Unread / Pinned / Action needed / Past filters and an unread badge on the tab. The dashboard also shows a notice card with NEW marks and an "Action needed" tag. Tapping a notice opens it — festive notices open as an animated greeting card, others as a clean sheet with a coloured banner.
+- **Popup once:** the next time someone opens their portal after a notice goes live, it pops up. Closing it is enough — it is recorded against that person's account, so it never pops up again on any device or on later visits. Several new notices come one after another (newest/most urgent first, at most 3); anything beyond that, or older than 14 days (someone who was away), waits in the Announcements tab as unread instead of popping up. Notices that need acknowledging pop up once, then stay marked "Action needed" in the tab.
 - **Tracking:** opening a notice records "seen"; the admin sees "Seen by 118 of 142", the list of people who have not, and who acknowledged. Every create / edit / publish / delete is kept in a history with who did it.
 - **Manage:** Live, Scheduled, Drafts, Archive and Deleted tabs; edit, pin, unpublish, delete (soft — stays in Deleted).
 
@@ -59,3 +60,4 @@ API routes these screens call (all exist):
 | 2026-09-21 | Doc created from the code; status checked with `scripts/product-docs.mjs` | #162 |
 | 2026-09-21 | Write API locked to the school's own staff; edit added to the screen; IST expiry; tests | #203 |
 | 2026-09-22 | Templates + greeting cards, class targeting, drafts/scheduling, pin, seen tracking, acknowledgement, translations, archive + audit | #205 |
+| 2026-11-01 | Popup shows once per person for every new announcement (max 3, last 14 days); Announcements tab with unread badge in teacher, student and parent portals | #482 |

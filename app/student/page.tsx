@@ -14,6 +14,9 @@ import PortalSidebar from '@/components/portal/PortalSidebar'
 import FeatureLauncher, { type LauncherSection } from '@/components/portal/FeatureLauncher'
 import FeatureLauncherButton from '@/components/portal/FeatureLauncherButton'
 import { LogOut, Menu } from 'lucide-react'
+import NoticeCenter from '@/components/announcements/NoticeCenter'
+import AnnouncementPopup from '@/components/announcements/AnnouncementPopup'
+import { useUnreadAnnouncements } from '@/components/announcements/useUnreadAnnouncements'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Sticker, type StickerName } from './components/stickers'
 import StudentDial from '@/components/dial/StudentDial'
@@ -73,6 +76,7 @@ const NAV_SECTIONS: NavSection[] = [
     items: [
       { key: 'dashboard', label: 'Overview', sticker: 'house' },
       { key: 'daily-quiz', label: 'Daily quiz', sticker: 'brain' },
+      { key: 'announcements', label: 'Announcements', sticker: 'megaphone' },
       { key: 'syllabus', label: 'Syllabus', sticker: 'graduation-cap' },
       { key: 'library', label: 'Digital library', sticker: 'open-book' },
     ],
@@ -144,7 +148,9 @@ function StudentPortal() {
     setVisitedNav(prev => (prev.has(activeNav) ? prev : new Set([...prev, activeNav])))
   }, [activeNav])
   const [sidebarOpen, setSidebarOpen] = useState(false)
-  const { counts: navCounts, latest: navLatest } = useNavNotifications('student')
+  const { counts: baseNavCounts, latest: navLatest } = useNavNotifications('student')
+  const unreadAnnouncements = useUnreadAnnouncements(student?.school_id)
+  const navCounts: Record<string, number> = { ...baseNavCounts, announcements: unreadAnnouncements }
   const [launcherOpen, setLauncherOpen] = useState(false)
   const [loading,     setLoading]     = useState(true)
   const [enabledFeatures, setEnabledFeatures] = useState<Set<string> | null>(null)
@@ -351,8 +357,10 @@ function StudentPortal() {
         {/* ── Main Content ──────────────────────────────────────────── */}
         <main id="student-content" tabIndex={-1} className="portal-main">
           <div className="mx-auto w-full max-w-5xl pb-28">
+            <AnnouncementPopup schoolId={student.school_id} />
             {visitedNav.has('dashboard')   && <div hidden={activeNav !== 'dashboard'}><StudentDashboard student={student} classId={classId} schoolId={student.school_id} onNavigate={navigateTo} isNavItemVisible={isNavItemVisible} /></div>}
             {visitedNav.has('daily-quiz') && isNavItemVisible('daily-quiz') && <div hidden={activeNav !== 'daily-quiz'}><StudentDailyQuiz doubtsEnabled={enabledFeatures?.has('student-doubts') ?? false} tutorEnabled={aiAccessTier === 'ai_pro'} /></div>}
+            {visitedNav.has('announcements') && <div hidden={activeNav !== 'announcements'}><NoticeCenter schoolId={student.school_id} experience="student" mode="page" /></div>}
             {visitedNav.has('class-circle') && <div hidden={activeNav !== 'class-circle'}><StudentClassCircle /></div>}
             {visitedNav.has('attendance') && isNavItemVisible('attendance') && (
               <div hidden={activeNav !== 'attendance'}>
