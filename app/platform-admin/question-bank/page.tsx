@@ -1,7 +1,9 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { ArrowUp, ChevronDown } from 'lucide-react'
 import { useConfirm } from '@/components/ui/use-confirm'
+import InfoTip from '@/components/ui/InfoTip'
 
 // Platform Admin → Question Bank (#432): one-time preparation of the Daily Quiz MCQs per subject.
 // Pick board + grade → a subject → Prepare (optionally from its textbook; the cost is shown first) →
@@ -14,6 +16,20 @@ const BOARDS = [
 ]
 const GRADES = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10']
 const POLL_MS = 15_000
+
+const TABS = [
+  { key: 'subjects', label: 'Subjects', tip: 'Every subject of the chosen board and grade, with how many of its topics already have enough questions; click one to review, edit, prepare or publish its questions.' },
+  { key: 'needs', label: 'Needs questions', tip: 'Subjects on any board or grade whose topics still do not have enough questions, so you can start writing them by hand.' },
+  { key: 'schools', label: 'Schools’ own topics', tip: 'Topics a school added itself (not from Master Syllabus), how many already have their own questions, and any that failed.' },
+  { key: 'reports', label: 'Reported questions', tip: 'Questions students flagged as wrong, unclear or a typo; three reports take a question out of use until you fix or retire it.' },
+] as const
+
+/** Smooth scrolling, unless the person asked their device for less motion. */
+function scrollToEl(el: HTMLElement | null) {
+  if (!el) return
+  const reduce = typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  el.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' })
+}
 
 type Subject = {
   id: number; subject_name: string; topics: number; topics_ready: number; questions: number
@@ -74,6 +90,10 @@ export default function QuestionBankPage() {
   const [openTopic, setOpenTopic] = useState<number | null>(null)
   // A subject picked on the "Needs questions" tab: open it as soon as its board/grade list has loaded.
   const pendingOpen = useRef<number | null>(null)
+  // Clicking a subject opens its panel below the table, off screen on a long list: scroll to it (#480).
+  const detailAnchor = useRef<HTMLDivElement | null>(null)
+  const listAnchor = useRef<HTMLDivElement | null>(null)
+  const scrolledDetail = useRef<number | null>(null)
 
   const loadSubjects = useCallback(async () => {
     try {
@@ -92,6 +112,17 @@ export default function QuestionBankPage() {
   useEffect(() => { setLoading(true); setSelected(null); setDetail(null); void loadSubjects() }, [loadSubjects])
 
   useEffect(() => {
+    if (selected !== null) scrollToEl(detailAnchor.current)
+  }, [selected])
+  // Once the subject has loaded, the panel is its full height: scroll again so its top is what you see.
+  useEffect(() => {
+    if (detail && detail.subject.id === selected && scrolledDetail.current !== selected) {
+      scrolledDetail.current = selected
+      scrollToEl(detailAnchor.current)
+    }
+  }, [detail, selected])
+
+  useEffect(() => {
     if (pendingOpen.current === null) return
     const s = subjects.find(x => x.id === pendingOpen.current)
     if (!s) return
@@ -106,6 +137,7 @@ export default function QuestionBankPage() {
   }
 
   function openSubject(s: Subject) {
+    scrolledDetail.current = null
     setSelected(s.id); setDetail(null); setEst(null); setOpenTopic(null); setNotice(''); setError('')
     setMaterialId(null)
     void loadDetail(s.id)
@@ -195,19 +227,24 @@ export default function QuestionBankPage() {
     <div className="p-6 max-w-6xl">
       {ConfirmDialog}
       <h1 className="text-xl font-bold text-gray-900">Question Bank</h1>
-      <p className="text-sm text-gray-500 mt-1">
-        Questions are made automatically when topics are imported or added in Master Syllabus: {detail?.target_per_topic ?? 8} per topic, written by Claude,
-        every answer checked by Groq, and published once they pass. Here you can watch progress, edit or retire any question, set the language,
-        and prepare older subjects. Schools’ own topics get their own questions too.
+      <p className="mt-1 max-w-3xl text-sm leading-6 text-gray-500">
+        Questions are written automatically when topics are imported or added in Master Syllabus ({detail?.target_per_topic ?? 8} per topic), checked by a
+        second AI model, and published once they pass. Use the tabs to watch progress, review and edit questions, and start older subjects by hand.
       </p>
 
-      <div className="flex gap-2 mt-5" role="tablist">
-        {(['subjects', 'needs', 'schools', 'reports'] as const).map(t => (
-          <button key={t} role="tab" aria-selected={tab === t} data-testid={`qbank-tab-${t}`} onClick={() => setTab(t)}
-            className={`px-3 py-1.5 rounded-full text-sm border ${tab === t ? 'bg-purple-600 text-white border-purple-600' : 'border-gray-300 text-gray-700 hover:bg-gray-50'}`}>
-            {t === 'subjects' ? 'Subjects' : t === 'needs' ? 'Needs questions' : t === 'schools' ? 'Schools’ own topics' : 'Reported questions'}
-          </button>
-        ))}
+      <div className="mt-5 flex flex-wrap gap-2" role="tablist" aria-label="Question bank sections">
+        {TABS.map(t => {
+          const active = tab === t.key
+          return (
+            <div key={t.key} className={`inline-flex items-center rounded-full border transition-colors ${active ? 'border-purple-600 bg-purple-600' : 'border-gray-300 bg-white hover:bg-gray-50'}`}>
+              <button role="tab" aria-selected={active} data-testid={`qbank-tab-${t.key}`} onClick={() => setTab(t.key)}
+                className={`rounded-l-full py-1.5 pl-4 pr-1 text-sm font-medium outline-none focus-visible:ring-2 focus-visible:ring-purple-400 ${active ? 'text-white' : 'text-gray-700'}`}>
+                {t.label}
+              </button>
+              <span className="pr-1"><InfoTip label={t.label} text={t.tip} tone={active ? 'onDark' : 'default'} testId={`qbank-tip-${t.key}`} /></span>
+            </div>
+          )
+        })}
       </div>
 
       {error && <p className="mt-4 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2" role="alert" data-testid="qbank-error">{error}</p>}
@@ -231,32 +268,69 @@ export default function QuestionBankPage() {
           {loading ? <p className="mt-6 text-sm text-gray-500">Loading…</p>
             : subjects.length === 0 ? <p className="mt-6 text-sm text-gray-500" data-testid="qbank-empty">No academic subjects for this board and grade yet. Add the syllabus in Master Syllabus first.</p>
             : (
-              <div className="mt-5 overflow-x-auto bg-white border border-gray-200 rounded-xl">
-                <table className="w-full text-sm">
-                  <thead className="bg-gray-50 text-xs text-gray-500 text-left">
-                    <tr><th className="px-4 py-2">Subject</th><th className="px-4 py-2">Topics ready</th><th className="px-4 py-2">Questions</th><th className="px-4 py-2">Status</th><th className="px-4 py-2">Live</th></tr>
-                  </thead>
-                  <tbody>
-                    {subjects.map(s => (
-                      <tr key={s.id} data-testid={`qbank-subject-${s.id}`} onClick={() => openSubject(s)}
-                        className={`border-t border-gray-100 cursor-pointer hover:bg-purple-50/40 ${selected === s.id ? 'bg-purple-50/60' : ''}`}>
-                        <td className="px-4 py-2 font-medium text-gray-900">{s.subject_name}{s.has_textbook && <span className="ml-2 text-[11px] text-gray-500">📘 textbook</span>}</td>
-                        <td className="px-4 py-2">{s.topics_ready}/{s.topics}</td>
-                        <td className="px-4 py-2">{s.questions}</td>
-                        <td className="px-4 py-2"><span className={`text-xs px-2 py-0.5 rounded-full border ${STATUS_BADGE[s.status]}`}>{STATUS_TEXT[s.status]}</span></td>
-                        <td className="px-4 py-2">{s.published_at ? <span className="text-xs text-green-700">● Published</span> : <span className="text-xs text-gray-400">—</span>}</td>
+              <div ref={listAnchor} className="mt-5 scroll-mt-20">
+                <p className="mb-2 text-xs text-gray-500">Click a subject to open its panel below: language, prepare or top up questions, publish, and every topic.</p>
+                <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+                      <tr>
+                        <th scope="col" className="px-4 py-2.5">Subject</th>
+                        <th scope="col" className="px-4 py-2.5">Topics ready</th>
+                        <th scope="col" className="px-4 py-2.5">Questions</th>
+                        <th scope="col" className="px-4 py-2.5">Status</th>
+                        <th scope="col" className="px-4 py-2.5">Live</th>
+                        <th scope="col" className="w-10 px-2 py-2.5"><span className="sr-only">Open</span></th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {subjects.map(s => {
+                        const pct = s.topics ? Math.round((s.topics_ready / s.topics) * 100) : 0
+                        const isOpen = selected === s.id
+                        return (
+                          <tr key={s.id} data-testid={`qbank-subject-${s.id}`} onClick={() => openSubject(s)}
+                            className={`cursor-pointer border-t border-gray-100 transition-colors hover:bg-purple-50/50 ${isOpen ? 'bg-purple-50/70 shadow-[inset_3px_0_0_#9333ea]' : ''}`}>
+                            <td className="px-4 py-3">
+                              <button type="button" aria-expanded={isOpen} onClick={e => { e.stopPropagation(); openSubject(s) }}
+                                className="text-left font-semibold text-gray-900 outline-none hover:text-purple-700 focus-visible:underline">
+                                {s.subject_name}
+                              </button>
+                              {s.has_textbook && <span className="ml-2 text-[11px] font-normal text-gray-500">📘 textbook</span>}
+                            </td>
+                            <td className="px-4 py-3">
+                              <div className="flex items-center gap-2">
+                                <div className="h-1.5 w-20 overflow-hidden rounded-full bg-gray-100" role="img" aria-label={`${s.topics_ready} of ${s.topics} topics ready`}>
+                                  <div className={`h-full rounded-full ${pct >= 100 ? 'bg-green-500' : pct > 0 ? 'bg-amber-400' : 'bg-gray-300'}`} style={{ width: `${Math.max(pct, s.topics_ready > 0 ? 4 : 0)}%` }} />
+                                </div>
+                                <span className="tabular-nums text-xs text-gray-600">{s.topics_ready}/{s.topics}</span>
+                              </div>
+                            </td>
+                            <td className="px-4 py-3 tabular-nums">{s.questions}</td>
+                            <td className="px-4 py-3"><span className={`rounded-full border px-2 py-0.5 text-xs ${STATUS_BADGE[s.status]}`}>{STATUS_TEXT[s.status]}</span></td>
+                            <td className="px-4 py-3">{s.published_at ? <span className="text-xs font-medium text-green-700">● Published</span> : <span className="text-xs text-gray-400">Not live</span>}</td>
+                            <td className="px-2 py-3 text-gray-400"><ChevronDown className={`h-4 w-4 transition-transform ${isOpen ? 'rotate-180 text-purple-600' : ''}`} aria-hidden="true" /></td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             )}
 
-          {selected && !detail && <p className="mt-6 text-sm text-gray-500">Loading subject…</p>}
+          {selected !== null && <div ref={detailAnchor} className="scroll-mt-20" />}
+          {selected && !detail && (
+            <div className="mt-6 min-h-[70vh] rounded-xl border border-dashed border-gray-200 bg-white/60 p-5" aria-busy="true">
+              <p className="text-sm text-gray-500">Loading subject…</p>
+            </div>
+          )}
           {detail && (
-            <section className="mt-6 bg-white border border-gray-200 rounded-xl p-5" data-testid="qbank-detail">
+            <section className="mt-6 rounded-xl border border-gray-200 bg-white p-5 shadow-sm" data-testid="qbank-detail">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
+                  <button type="button" onClick={() => scrollToEl(listAnchor.current)} data-testid="qbank-back-to-list"
+                    className="mb-2 inline-flex items-center gap-1 rounded-full text-xs font-medium text-purple-700 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-purple-400">
+                    <ArrowUp className="h-3.5 w-3.5" aria-hidden="true" /> Back to the subject list
+                  </button>
                   <h2 className="text-lg font-semibold text-gray-900">{detail.subject.subject_name} · Grade {detail.subject.grade} · {detail.subject.board}</h2>
                   <p className="text-xs text-gray-500 mt-1">
                     <label className="inline-flex items-center gap-1">Questions in
