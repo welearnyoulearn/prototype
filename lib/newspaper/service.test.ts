@@ -154,6 +154,19 @@ test('if the note their question was about is pulled before they answer, they ge
   await pool.query(`UPDATE news_items SET status = 'active' WHERE id = $1`, [att.item_id])
 })
 
+test('the goal bar points at the cheapest item the student cannot afford yet, and only when the marketplace is on', opts, async () => {
+  const { at } = await day()
+  const s = await makeStudent(pool, '6')
+  const v = await getNewspaper(pool, { ...s, now: at('07:00'), showGoal: true })
+  assert.ok(v.state === 'reading' && v.goal)
+  assert.deepEqual({ name: v.goal.name, remaining: v.goal.remaining, pointsCost: v.goal.pointsCost }, { name: 'Pencil', remaining: 150, pointsCost: 150 })
+  assert.equal(reading(await getNewspaper(pool, { ...s, now: at('07:00'), showGoal: false })).goal, null)
+  await pool.query(`INSERT INTO student_points (student_id, school_id, action_type, points) VALUES ($1, $2, 'test_seed', 160)`, [s.studentId, s.schoolId])
+  const richer = reading(await getNewspaper(pool, { ...s, now: at('07:00'), showGoal: true }))
+  assert.equal(richer.goal?.pointsCost, 250, 'having 160 points, the next goal is the 250-point blue pen')
+  assert.equal(richer.goal?.remaining, 90)
+})
+
 test('neighbouring students get different questions, the same student always the same one', () => {
   assert.equal(pickQuestionIndex(7, 3, 4), pickQuestionIndex(7, 3, 4))
   const seen = new Set(Array.from({ length: 100 }, (_, i) => pickQuestionIndex(1000 + i, 55, 4)))

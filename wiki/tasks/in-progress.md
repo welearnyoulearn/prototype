@@ -4,6 +4,17 @@ Move an entry to [completed.md](completed.md) when it ships. Add new entries at 
 
 ---
 
+### Rewards Marketplace (pilot) (#486)
+**Type:** Feature
+**Portals:** Student, Parent, School Admin, Platform Admin
+**Branch:** `feature/486-rewards-marketplace` (stacked on PR #485, the newspaper)
+**Summary:** Students and parents spend points (one balance with the quiz and newspaper) on cheap stationery; WLYL ships one parcel per school per month; the school admin hands items out. OFF at every tier.
+**Progress:**
+- [x] Catalog, ordering, monthly run, Sent, Parcel arrived, Collected, Can't deliver, order alert email, four screens
+- [x] Tests: service, ledger and end to end (`e2e/newspaper-rewards.spec.ts`)
+- [ ] Review and merge after #485
+- [ ] Real supplier prices; `REWARDS_ALERT_EMAIL` in production
+
 ### Daily Newspaper (pilot) (#484)
 **Type:** Feature
 **Portals:** Student, Platform Admin

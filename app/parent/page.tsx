@@ -9,6 +9,7 @@ import { FullPageLoader } from '@/components/loaders'
 import Link from 'next/link'
 import { TRANSLATIONS, type Lang } from './translations'
 import ParentSyllabus from './components/ParentSyllabus'
+import RewardsShop from '@/app/components/rewards/RewardsShop'
 import DigitalLibrary from '../components/library/DigitalLibrary'
 import ParentProfile from './components/ParentProfile'
 import { useUsageHeartbeat } from '@/lib/useUsageHeartbeat'
@@ -134,13 +135,14 @@ const NAV = [
   { key: 'results',    label: 'Results',            icon: 'M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z' },
   { key: 'syllabus',   label: 'Syllabus',           icon: 'M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253' },
   { key: 'library',    label: 'Digital Library',    icon: 'M12 6.253C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253m0-13v13' },
+  { key: 'rewards',    label: 'Rewards',            icon: 'M12 8v13m0-13V6a2 2 0 112 2h-2zm0 0V5.5A2.5 2.5 0 109.5 8H12zm-7 4h14M5 12a2 2 0 110-4h14a2 2 0 110 4M5 12v7a2 2 0 002 2h10a2 2 0 002-2v-7' },
   { key: 'profile',    label: 'Profile',            icon: 'M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z' },
 ]
 
 // Only nav keys that map to a plan-gated ALL_FEATURES entry get checked
 // against enabledFeatures — everything else (overview, profile) has always
 // been unconditionally available and stays that way. 'syllabus' resolves through PORTAL_NAV_KEY_ALIASES to 'curriculum'.
-const RESTRICTABLE_NAV_KEYS = new Set(['syllabus', 'library', 'attendance', 'fees', 'exams', 'results', 'calendar'])
+const RESTRICTABLE_NAV_KEYS = new Set(['syllabus', 'library', 'attendance', 'fees', 'exams', 'results', 'calendar', 'rewards'])
 
 function fmt(n: number | string) { return `₹${Number(n).toLocaleString('en-IN')}` }
 function timeStr(t: string) { return t ? t.slice(0, 5) : '' }
@@ -930,6 +932,20 @@ function ParentDashboard() {
               studentName={student.name}
               grade={student.grade}
               section={student.section}
+            />
+          </div>
+          )}
+
+          {/* ── REWARDS (order for this child from the child's own points) ──── */}
+          {visited.has('rewards') && isNavItemVisible('rewards') && (
+          <div hidden={activeNav !== 'rewards'}>
+            <RewardsShop
+              key={student.id}
+              viewUrl={`/api/parent/rewards?student_id=${student.id}`}
+              orderUrl="/api/parent/rewards"
+              cancelUrl={id => `/api/parent/rewards/orders/${id}/cancel`}
+              extraBody={{ student_id: student.id }}
+              childName={student.name.split(' ')[0]}
             />
           </div>
           )}

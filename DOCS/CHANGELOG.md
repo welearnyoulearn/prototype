@@ -2,6 +2,21 @@
 
 All notable changes to the WLYL School prototype are documented here.
 
+## [Unreleased] - Rewards Marketplace (#486)
+
+### Added
+- **Rewards Marketplace** (feature `rewards-marketplace`, OFF at every tier):
+  - Students, or parents for their own child, order simple stationery with reward points. Points are held at once; up to 500 points' worth per child per month; cancel until the month's run closes.
+  - WLYL gets an email on every order with the school's running item counts. Platform Admin → **Rewards**: open run per school, shopping list with cost, Close run, CSV, Sent per school, parcel table (Ordered · Sent · At school · Collected · Waiting, late in red), totals, catalog editor.
+  - School Admin → **Rewards delivery**: Parcel arrived, then tick children Collected (one by one or the whole class); Can't deliver refunds the points.
+  - Children and parents get a bell notice at every step, telling them to collect from the school management (school office).
+  - Tables `reward_items`, `reward_runs`, `reward_orders` and the 7-item starter catalog (pencil, eraser, sharpener 150 points; blue pen 250; black pen 400; ruler and glue stick 500), added once; WLYL owns it afterwards. Spending is a negative row in the shared `student_points` ledger and a refund a positive one, under a per-student lock; 500 points per child per month.
+  - The Daily Newspaper shows a goal bar ("100 points to a Black pen") when the marketplace is on.
+
+### Tests
+- Marketplace service tests (ordering, refusals, monthly limit, two orders at once, cancel, the monthly cycle with every notice, school isolation, late flags, CSV, alert email) and ledger spend / refund tests, on a local database.
+- `e2e/newspaper-rewards.spec.ts`: the whole flow through all four portals with real logins.
+
 ## [Unreleased] - Daily Newspaper (#484, PR #485)
 
 ### Added

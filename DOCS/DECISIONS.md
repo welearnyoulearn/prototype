@@ -31,6 +31,17 @@ Non-obvious technical decisions and their reasoning for the WLYL School prototyp
 **Amended 2026-10-21 (embeddings):** Embeddings come from Gemini `gemini-embedding-001` at 1024 dims (Matryoshka truncation via the `dimensions` param) through its OpenAI-compatible endpoint; 429s are retried (honouring `Retry-After`, else 60 s). Keyword-only chunks are backfilled by re-running the index script (no `--force` needed).
 **Amended 2026-10-24:** Embeddings are now Cloudflare Workers AI `@cf/baai/bge-m3` (1024 dims, multilingual) through its OpenAI-compatible endpoint (`EMBEDDINGS_BASE_URL` / `EMBEDDINGS_API_KEY` / `EMBEDDINGS_MODEL`), superseding the Gemini `gemini-embedding-001` amendment; the code default in `lib/rag/embeddings.ts` is `@cf/baai/bge-m3`. The tutor LLM goes through the remote OmniRoute gateway (`OMNIROUTE_BASE_URL` ending in `/v1`, `OMNIROUTE_API_KEYS`); default models `ddgw/claude-haiku-4-5` then `ddgw/gpt-5.4-mini`, both verified working. The chunker (`lib/rag/chunk.ts`) filters garbled text from legacy non-Unicode-font PDFs: it drops tokens containing legacy-font characters (`dropLegacyFontWords`) and skips any chunk whose real-word share is below 0.5 (`wordShare`). On a Cloudflare 429 code 4006 ("daily free allocation") embeddings throw `EmbeddingQuotaError` at once and `scripts/index-materials.ts` stops the run; re-running resumes. The free tier is 10,000 neurons/day — enough for live student questions (one short embedding each), but a full re-index of all books may need two days or the $5/month Workers Paid plan.
 
+## 2026-11-01 — Rewards Marketplace: WLYL-run, monthly, points only (#486)
+
+**Context:** The founder wants children to spend points from the newspaper and the quiz on simple stationery, to keep them motivated, without WLYL investing much or running heavy operations. An earlier marketplace (preserved branch #170) was removed from `dev`: separate coins, client-supplied ids and an unauthenticated delivery endpoint.
+
+**Decision:** WLYL owns one catalog and supplies the items; orders close monthly; one parcel per school; the school admin taps "Parcel arrived" and ticks children "Collected". Families only ever see points. Spending is a negative row in the same `student_points` ledger (own unique index `uq_student_points_market`, per-student advisory lock), so there is one balance. Cost control: 500 points per child per month, cheap items only, buy exactly what was ordered. Tracking is counts of orders. Feature key `rewards-marketplace`, seeded OFF.
+
+**Alternatives considered:** a separate marketplace currency; per-school catalogs bought by the school; full inventory, receipt reconciliation and an exceptions queue (parked until more than about 5 schools).
+
+**Consequences:** The quiz leaderboard counts only quiz actions, so spending never moves a rank. Item costs are placeholders until real supplier quotes.
+
+
 ## 2026-11-01 — Daily Newspaper: real stories only, one points ledger, a Platform-Admin feature
 
 **Context:** The founder wants a short daily newspaper that gets students reading every day and asks one question, with points, at little running cost. The Daily Quiz also awards points. An earlier Daily Knowledge screen (preserved branch #169) was removed from `dev` as unreachable and AI-only.
