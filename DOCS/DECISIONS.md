@@ -44,6 +44,8 @@ Non-obvious technical decisions and their reasoning for the WLYL School prototyp
 
 **Consequences:** One Groq model writes and checks (a different-vendor checker would be stronger). Editions are global per grade band, not per school.
 
+**Amended 2026-11-04:** One band for grades 6-10 (`6-10`) instead of three (3-5, 6-8, 9-10); grades below 6 and 11-12 get no newspaper. One edition a day means a third of the model calls. The writer aims at the youngest reader (age 11) and the checker judges suitability for them. The `grade_band` column and the list in `lib/newspaperBands.ts` are kept so a band can be added later; a database made with the three bands keeps its old editions (the check constraint is re-added `NOT VALID`).
+
 ## 2026-10-18 — Push notifications go through an outbox and FCM HTTP v1, not firebase-admin
 
 **Context:** Notifications are rows in `notifications`, written by raw `INSERT`s in about 19 route files, and the web bell polls every 30 seconds. We want pushes to the web app and the separate parent app through Firebase Cloud Messaging.

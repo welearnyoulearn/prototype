@@ -9,9 +9,7 @@ import type { EditionNote } from './writer'
 import type { GradeBand } from '../newspaperBands'
 
 const GRADE_TEXT: Record<GradeBand, string> = {
-  '3-5': 'children aged 8 to 11',
-  '6-8': 'children aged 11 to 14',
-  '9-10': 'students aged 14 to 16',
+  '6-10': 'students aged 11 to 16 (grades 6-10); judge suitability for the youngest of them',
 }
 
 export const CHECKER_SYSTEM = [

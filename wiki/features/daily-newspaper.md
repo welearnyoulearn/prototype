@@ -3,17 +3,18 @@
 **Platform Admin feature key:** `daily-newspaper`
 **Portal:** Student (Platform Admin controls it; a school admin participation count is planned)
 **Status:** Partial. Built end to end (feeds, writer, blind checker, fallback, nightly and 07:00 jobs, student screen, points, Platform Admin Pull page). OFF at every tier until a platform admin switches it on.
-**Last updated:** 2026-10-28
+**Last updated:** 2026-11-04
 
 ---
 
 ## What it does
 
-Every morning each student finds a short newspaper made for their grade band: four short notes (new technology, science, health and environment, India and world general knowledge). They read it, tap "I've read it", answer one question about it and earn reward points. It is fully automatic.
+Every morning each student in grades 6 to 10 finds a short newspaper: four short notes (new technology, science, health and environment, India and world general knowledge). They read it, tap "I've read it", answer one question about it and earn reward points. It is fully automatic.
 
 ## How it works
 
-- **Grade bands:** Junior (grades 3-5), Middle (6-8) and Senior (9-10), taken from the student's grade on the server. One edition per band per day, shared by every school. Nursery to grade 2 get nothing yet.
+- **Grades:** one band, grades 6 to 10, taken from the student's grade on the server. One edition per day, shared by every school. Nursery to grade 5, and grades 11-12, get no newspaper (they see "The newspaper is for grades 6 to 10").
+- **Every day:** the build and the reminder run all seven days of the week, weekends and holidays included.
 - **Content:** real stories from a short allow-list of trusted feeds, rewritten from the article text only, then checked by a second blind model call (every claim in the source, age-appropriate, one clear answer). If fewer than 3 notes pass, a one-note "Today's Big Idea" from the reviewed topic bank is published instead. Unchecked text is never published.
 - **A note:** headline, 40-60 words, "Why it matters to you", "Try it today", source link.
 - **The day:** published 06:00 IST, open 24 hours, one reminder at 07:00 for students who have not finished. One attempt, no penalty for a wrong answer. The correct answer is never sent to the browser before the student submits.
@@ -54,7 +55,7 @@ Every morning each student finds a short newspaper made for their grade band: fo
 
 | Table | Role |
 |-------|------|
-| `news_editions` | One per grade band per day (published or pulled; live or fallback) |
+| `news_editions` | One per day for grades 6-10 (band `6-10`; published or pulled; live or fallback) |
 | `news_items` | The notes of an edition |
 | `news_questions` | One question per note, with the key (never sent before answering) |
 | `news_attempts` | A student's progress on an edition: opened, read, answered, points |
@@ -91,3 +92,4 @@ API routes these screens call (all exist):
 |------|--------|-------|
 | 2026-10-28 | Foundation: feature key (OFF), tables, points helper, grade-band helper; doc created as Planned | (no issue yet) |
 | 2026-10-28 | Newspaper built: feeds, writer, blind checker, fallback, jobs, student screen, Platform Admin Pull page | (no issue yet) |
+| 2026-11-04 | One band for grades 6-10 instead of three (3-5, 6-8, 9-10); confirmed it runs every day | #484 |

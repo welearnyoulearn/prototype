@@ -22,9 +22,7 @@ export const NOTE_MAX_WORDS = 75
 export const countWords = (s: string) => s.trim().split(/\s+/).filter(Boolean).length
 
 const BAND_STYLE: Record<GradeBand, string> = {
-  '3-5': 'Readers are 8 to 11 years old (grades 3-5). Use very simple words and short sentences. Compare things to everyday life.',
-  '6-8': 'Readers are 11 to 14 years old (grades 6-8). Use simple words; one new term is fine if you explain it. Show cause and effect.',
-  '9-10': 'Readers are 14 to 16 years old (grades 9-10). Use clear language with a little more depth. You may link to what they study or to careers.',
+  '6-10': 'Readers are 11 to 16 years old (grades 6-10). Use simple, clear words that the youngest reader follows; explain any new term. Show cause and effect, and where it fits, link it to what they study or to careers.',
 }
 
 const questionSchema = z.object({

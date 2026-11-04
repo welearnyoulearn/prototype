@@ -13,7 +13,7 @@ const BAND_LIST = GRADE_BANDS.map(b => `'${b}'`).join(', ')
 export async function ensureNewspaperSchema(db: Db): Promise<void> {
   await db.query(`
     -- ── Daily Newspaper ───────────────────────────────────────────────────────────
-    -- One edition per grade band per day, shared by every school.
+    -- One edition per grade band per day (one band today: grades 6-10), shared by every school.
     CREATE TABLE IF NOT EXISTS news_editions (
       id SERIAL PRIMARY KEY,
       edition_date DATE NOT NULL,
@@ -24,6 +24,10 @@ export async function ensureNewspaperSchema(db: Db): Promise<void> {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       UNIQUE (edition_date, grade_band)
     );
+    -- Grades 6-10 are now one band ('6-10'); there used to be three ('3-5', '6-8', '9-10'). A database made with the
+    -- three keeps its old editions (NOT VALID leaves existing rows alone) but accepts only today's bands from now on.
+    ALTER TABLE news_editions DROP CONSTRAINT IF EXISTS news_editions_grade_band_check;
+    ALTER TABLE news_editions ADD CONSTRAINT news_editions_grade_band_check CHECK (grade_band IN (${BAND_LIST})) NOT VALID;
 
     CREATE TABLE IF NOT EXISTS news_items (
       id SERIAL PRIMARY KEY,

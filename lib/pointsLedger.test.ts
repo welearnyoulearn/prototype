@@ -24,7 +24,7 @@ after(async () => {
 const makeStudent = () => makeTestStudent(pool)
 let counter = 0
 const newEdition = async () => (await pool.query<{ id: number }>(
-  `INSERT INTO news_editions (edition_date, grade_band) VALUES (CURRENT_DATE + ($1 || ' days')::interval, '6-8') RETURNING id`,
+  `INSERT INTO news_editions (edition_date, grade_band) VALUES (CURRENT_DATE + ($1 || ' days')::interval, '6-10') RETURNING id`,
   [String(1000 + (++counter) + (Date.now() % 100000))])).rows[0].id
 const balance = (s: { studentId: number; schoolId: number }) => ledger.getBalance(pool, s.studentId, s.schoolId)
 
@@ -34,6 +34,23 @@ test('the schema migrates, is idempotent and leaves the newspaper OFF at every t
   const flags = await pool.query<{ enabled: boolean }>(`SELECT enabled FROM plan_features WHERE feature_key = 'daily-newspaper'`)
   assert.equal(flags.rows.length, 3)
   assert.ok(flags.rows.every(r => r.enabled === false))
+})
+
+test('a database made with the old three bands moves to the one 6-10 band and keeps its old editions', opts, async () => {
+  const day = `2039-01-${String(1 + (Date.now() % 28)).padStart(2, '0')}`
+  await pool.query('DELETE FROM news_editions WHERE edition_date = $1', [day])
+  // Put back the rule a database created before the change has, plus an edition made under it.
+  await pool.query('ALTER TABLE news_editions DROP CONSTRAINT IF EXISTS news_editions_grade_band_check')
+  await pool.query(`ALTER TABLE news_editions ADD CONSTRAINT news_editions_grade_band_check CHECK (grade_band IN ('3-5', '6-8', '9-10'))`)
+  await pool.query(`INSERT INTO news_editions (edition_date, grade_band) VALUES ($1, '6-8')`, [day])
+
+  await schema.ensureNewspaperSchema(pool)
+
+  await pool.query(`INSERT INTO news_editions (edition_date, grade_band) VALUES ($1, '6-10')`, [day])
+  await assert.rejects(pool.query(`INSERT INTO news_editions (edition_date, grade_band) VALUES ($1, '9-10')`, [day]), /news_editions_grade_band_check/)
+  const kept = await pool.query<{ grade_band: string }>('SELECT grade_band FROM news_editions WHERE edition_date = $1 ORDER BY grade_band', [day])
+  assert.deepEqual(kept.rows.map(r => r.grade_band), ['6-10', '6-8'])
+  await pool.query('DELETE FROM news_editions WHERE edition_date = $1', [day])
 })
 
 test('newspaper points are paid once per child per edition, each action separately', opts, async () => {

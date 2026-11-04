@@ -41,7 +41,7 @@ test('the whole flow: read, wait, "I read it", answer, points once, then done', 
 
   const first = reading(await getNewspaper(pool, { ...s, now: at('07:00') }))
   assert.equal(first.items.length, 4)
-  assert.equal(first.edition.band, '6-8')
+  assert.equal(first.edition.band, '6-10')
   assert.equal(first.secondsUntilCanAcknowledge, MIN_READ_SECONDS)
   assert.equal(first.question, null, 'the question is not shown until they say they read it')
   assert.equal(first.pointsAvailable, 5)
@@ -93,7 +93,7 @@ test('a correct answer pays 5: 2 for answering and 3 for being right', opts, asy
 
 test('two answers at the same moment pay once', opts, async () => {
   const { at } = await day()
-  const s = await makeStudent(pool, '4')
+  const s = await makeStudent(pool, '8')
   const t0 = at('08:00')
   await getNewspaper(pool, { ...s, now: t0 })
   const t1 = new Date(t0.getTime() + 21_000)
@@ -130,9 +130,9 @@ test('a pulled note disappears at once and a pulled edition closes; a restored o
   assert.equal(after1.items.length, 3)
   assert.ok(!after1.items.some(i => i.id === pulledItem))
 
-  await pool.query(`UPDATE news_editions SET status = 'pulled' WHERE edition_date = $1 AND grade_band = '6-8'`, [date])
+  await pool.query(`UPDATE news_editions SET status = 'pulled' WHERE edition_date = $1 AND grade_band = '6-10'`, [date])
   assert.equal((await getNewspaper(pool, { ...s, now: at('07:02') })).state, 'not_ready')
-  await pool.query(`UPDATE news_editions SET status = 'published' WHERE edition_date = $1 AND grade_band = '6-8'`, [date])
+  await pool.query(`UPDATE news_editions SET status = 'published' WHERE edition_date = $1 AND grade_band = '6-10'`, [date])
   await pool.query(`UPDATE news_items SET status = 'active' WHERE id = $1`, [pulledItem])
   assert.equal(reading(await getNewspaper(pool, { ...s, now: at('07:03') })).items.length, 4)
 })

@@ -149,10 +149,10 @@ test('a written note must follow the rules', () => {
 test('writeNotes keeps the good replies, tolerates code fences and takes one note per source', async () => {
   const good = raw()
   const reply = '```json\n' + JSON.stringify({ notes: [good, raw({ source_id: 0 }), raw({ source_id: 1, note: 'short' }), raw({ source_id: 1 })] }) + '\n```'
-  const { notes, sourceIds } = await writeNotes({ complete: async () => reply }, '6-8', candidates)
+  const { notes, sourceIds } = await writeNotes({ complete: async () => reply }, '6-10', candidates)
   assert.equal(notes.length, 2)
   assert.deepEqual(sourceIds, [0, 1])
-  await assert.rejects(writeNotes({ complete: async () => 'not json' }, '6-8', candidates))
+  await assert.rejects(writeNotes({ complete: async () => 'not json' }, '6-10', candidates))
 })
 
 // ── checker ────────────────────────────────────────────────────────────────────
@@ -177,17 +177,17 @@ test('checkNote: pass, each kind of failure, and a check that cannot run counts 
   const note = validNote({ headline: 'Note about idea 0 today', note: noteText(0) })
   const answer = (over: Record<string, unknown>) => ({ complete: async () => JSON.stringify({ unsupported_claims: [], age_appropriate: true, safe_activity: true, answer_index: 0, ...over }) })
 
-  assert.deepEqual(await checkNote(answer({}), '6-8', note, source), { pass: true, reason: 'ok' })
-  assert.match((await checkNote(answer({ unsupported_claims: ['made up'] }), '6-8', note, source)).reason, /unsupported/)
-  assert.match((await checkNote(answer({ age_appropriate: false }), '6-8', note, source)).reason, /age/)
-  assert.match((await checkNote(answer({ safe_activity: false }), '6-8', note, source)).reason, /unsafe/)
-  assert.match((await checkNote(answer({ answer_index: 3 }), '6-8', note, source)).reason, /differently/)
-  assert.equal((await checkNote({ complete: async () => 'garbage' }, '6-8', note, source)).pass, false)
-  assert.equal((await checkNote({ complete: async () => { throw new Error('down') } }, '6-8', note, source)).pass, false)
+  assert.deepEqual(await checkNote(answer({}), '6-10', note, source), { pass: true, reason: 'ok' })
+  assert.match((await checkNote(answer({ unsupported_claims: ['made up'] }), '6-10', note, source)).reason, /unsupported/)
+  assert.match((await checkNote(answer({ age_appropriate: false }), '6-10', note, source)).reason, /age/)
+  assert.match((await checkNote(answer({ safe_activity: false }), '6-10', note, source)).reason, /unsafe/)
+  assert.match((await checkNote(answer({ answer_index: 3 }), '6-10', note, source)).reason, /differently/)
+  assert.equal((await checkNote({ complete: async () => 'garbage' }, '6-10', note, source)).pass, false)
+  assert.equal((await checkNote({ complete: async () => { throw new Error('down') } }, '6-10', note, source)).pass, false)
 
   let called = false
   const copy = validNote({ note: storyText(0) })
-  const res = await checkNote({ complete: async () => { called = true; return '{}' } }, '6-8', copy, source)
+  const res = await checkNote({ complete: async () => { called = true; return '{}' } }, '6-10', copy, source)
   assert.deepEqual(res, { pass: false, reason: 'copies the source' })
   assert.equal(called, false, 'a copied note is rejected without asking the model')
 })
@@ -195,7 +195,7 @@ test('checkNote: pass, each kind of failure, and a check that cannot run counts 
 test('the blind checker is never shown the writer\'s answer key', async () => {
   const seen: string[] = []
   const note = validNote({ question: { stem: 'Q?', options: ['One', 'Two', 'Three', 'Four'], correctIndex: 2, explanation: 'SECRET-EXPLANATION' } })
-  await checkNote({ complete: async r => { seen.push(r.user); return '{}' } }, '6-8', note, item('S', storyText(9)))
+  await checkNote({ complete: async r => { seen.push(r.user); return '{}' } }, '6-10', note, item('S', storyText(9)))
   assert.equal(seen.length, 1)
   assert.ok(!seen[0].includes('SECRET-EXPLANATION'))
   assert.ok(!/correct/i.test(seen[0].split('Reply with')[0]), 'the question block does not mention which option is correct')
@@ -231,8 +231,8 @@ test('the fake pipeline end to end: a feed, the writer and the checker give four
   const cands = selectCandidates(items, NOW)
   assert.equal(cands.length, 6)
   const model = fakeModel()
-  const { notes, sourceIds } = await writeNotes(model, '6-8', cands)
+  const { notes, sourceIds } = await writeNotes(model, '6-10', cands)
   assert.equal(notes.length, 6)
-  const checks = await Promise.all(notes.map((n, i) => checkNote(model, '6-8', n, cands[sourceIds[i]])))
+  const checks = await Promise.all(notes.map((n, i) => checkNote(model, '6-10', n, cands[sourceIds[i]])))
   assert.ok(checks.every(c => c.pass), JSON.stringify(checks))
 })

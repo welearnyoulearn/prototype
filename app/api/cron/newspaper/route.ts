@@ -1,10 +1,12 @@
 // GET/POST /api/cron/newspaper?run=build|notify
 //
 // Vercel Cron has no timezone option, so the schedules in vercel.json are in UTC:
-//   build  22:30 UTC = 04:00 IST: make today's three editions (one per grade band), checked, ready for 06:00.
+//   build  22:30 UTC = 04:00 IST: make today's edition (one for grades 6-10), checked, ready for 06:00.
 //   notify 01:30 UTC = 07:00 IST: one bell + push to students who have not finished. It builds any missing edition
 //          first, so a failed overnight build still leaves children a newspaper.
-// Both are safe to run again: an edition that exists is never rebuilt and an edition is only notified once.
+// Both run every day of the week, weekends and holidays included ("* * *" in vercel.json): there is a newspaper
+// every day.
+// Both are also safe to run again: an edition that exists is never rebuilt and an edition is only notified once.
 //
 // Protected: requires Authorization: Bearer <CRON_SECRET>. In production a missing CRON_SECRET refuses the call.
 import { NextRequest, NextResponse, after } from 'next/server'
@@ -15,7 +17,7 @@ import { buildEditions } from '@/lib/newspaper/build'
 import { groqModel } from '@/lib/newspaper/model'
 import { notifyNewEditions } from '@/lib/newspaper/notify'
 
-// Writing and checking three editions takes a while; allow the long run.
+// Writing and checking an edition takes a while; allow the long run.
 export const maxDuration = 300
 
 export async function GET(req: NextRequest) { return run(req) }

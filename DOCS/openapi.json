@@ -53049,7 +53049,7 @@
           "Student portal"
         ],
         "summary": "Today's newspaper and my progress",
-        "description": "Today's edition for the student's grade band (3-5, 6-8, 9-10) in the 06:00-06:00 IST window. Opening it records when reading started. The question's options appear only after \"I've read it\"; the correct answer only after answering.\n\n**Who can call:** Student.\n\n**Checks:** Student session; school has daily-newspaper. Band comes from the student record, never the request.",
+        "description": "Today's edition for grades 6-10 (students in other grades get state \"unavailable\") in the 06:00-06:00 IST window. Opening it records when reading started. The question's options appear only after \"I've read it\"; the correct answer only after answering.\n\n**Who can call:** Student.\n\n**Checks:** Student session; school has daily-newspaper. Band comes from the student record, never the request.",
         "operationId": "getStudentNewspaper",
         "security": [
           {

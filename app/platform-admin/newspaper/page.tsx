@@ -15,7 +15,8 @@ type Edition = {
   notified_at: string | null; opened: number; answered: number; items: Item[]
 }
 
-const BAND_LABEL: Record<string, string> = { '3-5': 'Junior · grades 3-5', '6-8': 'Middle · grades 6-8', '9-10': 'Senior · grades 9-10' }
+// '3-5', '6-8' and '9-10' are the bands used before grades 6-10 became one; older editions may still carry them.
+const BAND_LABEL: Record<string, string> = { '6-10': 'Grades 6-10', '3-5': 'Grades 3-5 (old)', '6-8': 'Grades 6-8 (old)', '9-10': 'Grades 9-10 (old)' }
 
 async function fetchEditions(): Promise<{ editions: Edition[] } | { error: string }> {
   try {
@@ -67,7 +68,7 @@ export default function PlatformNewspaperPage() {
       const data = await res.json() as { report?: { built: { band: string; mode: string; notes: number }[]; alreadyThere: string[] }; error?: string }
       if (!res.ok || !data.report) throw new Error(data.error ?? String(res.status))
       const { built, alreadyThere } = data.report
-      setReport(built.length === 0 ? 'Today’s editions already exist, so nothing was built.'
+      setReport(built.length === 0 ? 'Today’s edition already exists, so nothing was built.'
         : `Built ${built.map(b => `${b.band} (${b.mode === 'live' ? `${b.notes} notes` : 'fallback'})`).join(', ')}${alreadyThere.length ? `. Already there: ${alreadyThere.join(', ')}` : ''}.`)
       reload()
     } catch (err) {
@@ -88,7 +89,7 @@ export default function PlatformNewspaperPage() {
           <p className="text-sm text-gray-500">Made automatically every night from checked real stories. Pull anything that should not be there.</p>
         </div>
         <Button onClick={buildNow} disabled={busy === 'build'} variant="outline" data-testid="newspaper-build-now">
-          <RefreshCw className={busy === 'build' ? 'animate-spin' : ''} aria-hidden="true" />Build today’s editions now
+          <RefreshCw className={busy === 'build' ? 'animate-spin' : ''} aria-hidden="true" />Build today’s edition now
         </Button>
       </div>
 

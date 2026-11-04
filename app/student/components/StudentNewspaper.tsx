@@ -98,7 +98,7 @@ export default function StudentNewspaper() {
 
   const view = screen.view
   if (view.state === 'unavailable') {
-    return <div className="mx-auto max-w-3xl"><StudentEmptyState sticker="scroll" title="The newspaper is for grades 3 to 10" description="It isn’t ready for your class yet. Keep an eye out." /></div>
+    return <div className="mx-auto max-w-3xl"><StudentEmptyState sticker="scroll" title="The newspaper is for grades 6 to 10" description="It isn’t ready for your class yet. Keep an eye out." /></div>
   }
   if (view.state === 'not_ready') {
     return (

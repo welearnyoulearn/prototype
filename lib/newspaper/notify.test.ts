@@ -23,9 +23,9 @@ test('one reminder to each student of a school with the newspaper on, whose grad
   const built = new Date(`${date}T04:00:00+05:30`)
   await buildEditions({ db: pool, model: fakeModel(), sources: TEST_SOURCES, now: built, fetchImpl: fakeFetch({ [TEST_FEED_URL]: freshFeed(6, built) }) })
 
-  const on = await makeStudent(pool, '6')                    // band 6-8, school ON
-  const g4 = await addStudent(pool, on.schoolId, '4')        // band 3-5
-  const g10 = await addStudent(pool, on.schoolId, '10')      // band 9-10
+  const on = await makeStudent(pool, '6')                    // grades 6-10, school ON
+  const g4 = await addStudent(pool, on.schoolId, '4')        // no newspaper below grade 6
+  const g10 = await addStudent(pool, on.schoolId, '10')      // grades 6-10
   const tiny = await addStudent(pool, on.schoolId, '1')      // no newspaper for grade 1
   const done = await addStudent(pool, on.schoolId, '7')      // already answered
   const off = await makeStudent(pool, '6')                   // school OFF
@@ -41,16 +41,16 @@ test('one reminder to each student of a school with the newspaper on, whose grad
 
   const first = await notifyNewEditions(deps)
   assert.equal(first.date, date)
-  assert.equal(first.editionsNotified, 3)
+  assert.equal(first.editionsNotified, 1)
   const got = await noticesFor(all)
-  assert.deepEqual(got.map(g => g.recipient_student_id).sort((a, b) => a - b), [on.studentId, g4, g10].sort((a, b) => a - b))
+  assert.deepEqual(got.map(g => g.recipient_student_id).sort((a, b) => a - b), [on.studentId, g10].sort((a, b) => a - b))
   assert.equal(got[0].title, '📰 Today’s newspaper is ready')
   assert.match(got[0].message, /4 short notes and one question/)
 
   const second = await notifyNewEditions(deps)
   assert.equal(second.editionsNotified, 0)
   assert.equal(second.notices, 0)
-  assert.equal((await noticesFor(all)).length, 3, 'running it again sends nothing more')
+  assert.equal((await noticesFor(all)).length, 2, 'running it again sends nothing more')
 })
 
 test('a fallback edition is announced as Today\'s Big Idea', opts, async () => {

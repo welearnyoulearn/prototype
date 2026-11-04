@@ -34,13 +34,13 @@ const deps = (now: Date, model = fakeModel(), feed?: string) => ({
   fetchImpl: fakeFetch(feed === undefined ? {} : { [TEST_FEED_URL]: feed }),
 })
 
-test('a normal night builds one live edition per grade band: 4 notes, 4 questions, 4 different categories', opts, async () => {
+test('a normal night builds one live edition for grades 6-10: 4 notes, 4 questions, 4 different categories', opts, async () => {
   const { date, now } = await freshDay()
   const report = await buildEditions(deps(now, fakeModel(), freshFeed(6, now)))
   assert.equal(report.date, date)
-  assert.deepEqual(report.built.map(b => b.mode), ['live', 'live', 'live'])
+  assert.deepEqual(report.built.map(b => b.mode), ['live'])
   const rows = await counts(date)
-  assert.deepEqual(rows.map(r => r.grade_band), ['3-5', '6-8', '9-10'])
+  assert.deepEqual(rows.map(r => r.grade_band), ['6-10'])
   for (const r of rows) assert.deepEqual({ mode: r.source_mode, items: r.items, questions: r.questions, categories: r.categories }, { mode: 'live', items: 4, questions: 4, categories: 4 })
 })
 
@@ -50,9 +50,9 @@ test('running it again changes nothing and does not call the model', opts, async
   const calls: ModelRequest[] = []
   const again = await buildEditions(deps(now, fakeModel({ calls }), freshFeed(6, now)))
   assert.deepEqual(again.built, [])
-  assert.equal(again.alreadyThere.length, 3)
+  assert.equal(again.alreadyThere.length, 1)
   assert.equal(calls.length, 0)
-  assert.equal((await counts(date)).length, 3)
+  assert.equal((await counts(date)).length, 1)
 })
 
 test('two builds at the same moment still leave exactly one edition per band', opts, async () => {
@@ -61,13 +61,13 @@ test('two builds at the same moment still leave exactly one edition per band', o
     buildEditions(deps(now, fakeModel(), freshFeed(6, now))),
     buildEditions(deps(now, fakeModel(), freshFeed(6, now))),
   ])
-  assert.equal((await counts(date)).length, 3)
+  assert.equal((await counts(date)).length, 1)
 })
 
 test('feeds down: every band gets the one-note fallback from the reviewed topic bank', opts, async () => {
   const { date, now } = await freshDay()
   const report = await buildEditions(deps(now))
-  assert.deepEqual(report.built.map(b => b.mode), ['bank', 'bank', 'bank'])
+  assert.deepEqual(report.built.map(b => b.mode), ['bank'])
   assert.match(report.built[0].reason ?? '', /only 0 usable stories/)
   assert.ok(report.feedErrors.length > 0)
   const rows = await counts(date)
@@ -81,14 +81,14 @@ test('feeds down: every band gets the one-note fallback from the reviewed topic 
 test('the writer being down also falls back, and says why', opts, async () => {
   const { now } = await freshDay()
   const report = await buildEditions(deps(now, fakeModel({ failWriter: true }), freshFeed(6, now)))
-  assert.deepEqual(report.built.map(b => b.mode), ['bank', 'bank', 'bank'])
+  assert.deepEqual(report.built.map(b => b.mode), ['bank'])
   assert.match(report.built[0].reason ?? '', /writer is down/)
 })
 
 test('a checker that cannot run publishes nothing unchecked', opts, async () => {
   const { date, now } = await freshDay()
   const report = await buildEditions(deps(now, fakeModel({ failChecker: true }), freshFeed(6, now)))
-  assert.deepEqual(report.built.map(b => b.mode), ['bank', 'bank', 'bank'])
+  assert.deepEqual(report.built.map(b => b.mode), ['bank'])
   assert.equal((await counts(date)).every(r => r.items === 1), true)
 })
 
@@ -96,7 +96,7 @@ test('notes the checker rejects are left out; three good notes are still a live 
   const { date, now } = await freshDay()
   const verdictFor = (h: string) => (['3', '4', '5'].some(i => h.includes(`idea ${i} `)) ? 'unsupported' : 'ok') as 'ok' | 'unsupported'
   const report = await buildEditions(deps(now, fakeModel({ verdictFor }), freshFeed(6, now)))
-  assert.deepEqual(report.built.map(b => `${b.mode}:${b.notes}`), ['live:3', 'live:3', 'live:3'])
+  assert.deepEqual(report.built.map(b => `${b.mode}:${b.notes}`), ['live:3'])
   assert.equal(report.built[0].rejected.length, 3)
   assert.ok(report.built[0].rejected[0].includes('unsupported claim'))
   assert.equal((await counts(date))[0].items, 3)
@@ -105,7 +105,7 @@ test('notes the checker rejects are left out; three good notes are still a live 
 test('only two good notes is not enough: the fallback is used instead', opts, async () => {
   const { date, now } = await freshDay()
   const report = await buildEditions(deps(now, fakeModel({ verdictFor: h => (h.includes('idea 0 ') || h.includes('idea 1 ') ? 'ok' : 'wrong_answer') }), freshFeed(6, now)))
-  assert.deepEqual(report.built.map(b => b.mode), ['bank', 'bank', 'bank'])
+  assert.deepEqual(report.built.map(b => b.mode), ['bank'])
   assert.match(report.built[0].reason ?? '', /only 2 notes passed/)
   assert.equal((await counts(date))[0].source_mode, 'bank')
 })
@@ -114,6 +114,6 @@ test('too few usable stories means the fallback without calling the writer', opt
   const { now } = await freshDay()
   const calls: ModelRequest[] = []
   const report = await buildEditions(deps(now, fakeModel({ calls }), freshFeed(2, now)))
-  assert.deepEqual(report.built.map(b => b.mode), ['bank', 'bank', 'bank'])
+  assert.deepEqual(report.built.map(b => b.mode), ['bank'])
   assert.equal(calls.length, 0)
 })
