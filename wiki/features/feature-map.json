@@ -101,6 +101,13 @@
       "app/school-admin/components/SchoolDoubts.tsx"
     ]
   },
+  "daily-newspaper": {
+    "doc": "wiki/features/daily-newspaper.md",
+    "ui": [
+      "app/student/components/StudentNewspaper.tsx",
+      "app/platform-admin/newspaper/page.tsx"
+    ]
+  },
   "announcements": {
     "doc": "wiki/features/announcements.md",
     "ui": [

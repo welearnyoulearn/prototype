@@ -37,6 +37,7 @@ export function featureRequirementForApiPath(pathname: string, method = 'GET'): 
 
   if (pathname.startsWith('/api/fees/') || pathname === '/api/fees' || pathname.startsWith('/api/parent/fees')) return one('fee-management')
   if (pathname.startsWith('/api/expenses')) return one('expenses')
+  if (pathname.startsWith('/api/student/newspaper')) return one('daily-newspaper')
   if (pathname.startsWith('/api/attendance') || pathname.startsWith('/api/parent/attendance') || pathname.startsWith('/api/student/attendance')) return one('attendance')
   if (pathname.startsWith('/api/exams') || pathname.startsWith('/api/exam-notification-settings') || pathname.startsWith('/api/export/marks')) return one('exam-marks')
   if (pathname.startsWith('/api/export/attendance')) return one('attendance')

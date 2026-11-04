@@ -22,6 +22,9 @@ export type DialProgress = {
 
 export type DialDoubt = { status: 'open' | 'explained' | 'clarified' }
 
+/** The parts of GET /api/student/newspaper the panel reads. */
+export type DialNewspaper = { state: string; result?: { correct: boolean; pointsAwarded: number } | null }
+
 export type DialInput = {
   dailyQuiz: boolean
   doubts: boolean
@@ -32,10 +35,13 @@ export type DialInput = {
   doubtList: DialDoubt[] | null
   /** This month's attendance %, when the school has attendance and something is recorded. */
   attendancePct: number | null
+  /** The school has the Daily Newspaper switched on, and today's newspaper as the student sees it. */
+  newspaper?: boolean
+  newspaperView?: DialNewspaper | null
 }
 
 export type DialTask = {
-  key: 'quiz' | 'doubts'
+  key: 'quiz' | 'doubts' | 'newspaper'
   navKey: string
   title: string
   detail: string
@@ -109,11 +115,26 @@ function doubtsTask(list: DialDoubt[] | null): DialTask | null {
   return null
 }
 
+function newspaperTask(view: DialNewspaper | null | undefined): DialTask | null {
+  const base = { key: 'newspaper', navKey: 'newspaper' } as const
+  if (view?.state === 'reading') return { ...base, title: 'Read today’s newspaper', detail: 'A few short notes and one question · up to 5 points', urgent: true }
+  if (view?.state === 'question') return { ...base, title: 'Answer today’s newspaper question', detail: 'One question · up to 5 points', urgent: true }
+  if (view?.state === 'done') {
+    const pts = view.result?.pointsAwarded ?? 0
+    return { ...base, title: `Newspaper done: +${pts} points`, detail: 'A new one comes tomorrow at 6 AM', urgent: false }
+  }
+  return null
+}
+
 /** Everything the Today panel shows, for the features this school has. */
 export function buildDialModel(input: DialInput): DialModel {
   const tasks: DialTask[] = []
   if (input.dailyQuiz && input.today) {
     const t = quizTask(input.today)
+    if (t) tasks.push(t)
+  }
+  if (input.newspaper) {
+    const t = newspaperTask(input.newspaperView)
     if (t) tasks.push(t)
   }
   if (input.doubts) {
@@ -134,7 +155,7 @@ export function buildDialModel(input: DialInput): DialModel {
   if (input.attendance) links.push({ key: 'attendance', navKey: 'attendance', label: 'Attendance', detail: input.attendancePct === null ? 'This month' : `${input.attendancePct}% this month` })
   if (input.calendar) links.push({ key: 'calendar', navKey: 'calendar', label: 'Calendar', detail: 'Exams and events' })
 
-  const badge = tasks.filter(t => t.urgent).reduce((n, t) => n + (t.key === 'quiz' ? 1 + (input.today?.late.length ?? 0) : countAnswered(input.doubtList)), 0)
+  const badge = tasks.filter(t => t.urgent).reduce((n, t) => n + (t.key === 'quiz' ? 1 + (input.today?.late.length ?? 0) : t.key === 'newspaper' ? 1 : countAnswered(input.doubtList)), 0)
   const todo = tasks.filter(t => t.urgent).length
   const headline = todo > 0 ? (todo === 1 ? '1 thing to do' : `${todo} things to do`) : 'All done for today'
 
