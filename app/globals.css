@@ -753,6 +753,21 @@ input, select, textarea {
 .pl-form-row a, .pl-form-back { display: inline-flex; align-items: center; gap: 2px; border: 0; background: none; color: var(--slide-accent); font: inherit; font-size: 13px; font-weight: 650; cursor: pointer; }
 .pl-form-row a:hover, .pl-form-back:hover { text-decoration: underline; text-underline-offset: 3px; }
 .pl-form-back svg { width: 15px; height: 15px; }
+/* Bigger, easier-to-tap Back button (was a tiny text link). */
+.pl-form-back { min-height: 44px; padding: 0 16px 0 10px; border: 1.5px solid color-mix(in srgb, var(--slide-accent) 35%, transparent); border-radius: 12px; background: color-mix(in srgb, var(--slide-accent) 8%, white); font-size: 15px; font-weight: 700; }
+.pl-form-back svg { width: 20px; height: 20px; }
+.pl-form-back:hover { text-decoration: none; background: color-mix(in srgb, var(--slide-accent) 15%, white); }
+.pl-form-row a { min-height: 44px; font-size: 14px; }
+/* Top navigation shown while a sign-in form is open. */
+.pl-topnav { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: min(100%, 520px); margin-bottom: 14px; }
+.pl-topnav-switch { display: flex; gap: 8px; }
+.pl-topnav-btn { display: inline-flex; align-items: center; gap: 4px; min-height: 44px; padding: 0 14px; border: 1.5px solid var(--pl-line); border-radius: 999px; background: rgb(255 255 255 / .85); color: var(--pl-ink); font: inherit; font-size: 14px; font-weight: 700; cursor: pointer; backdrop-filter: blur(6px); transition: border-color 180ms ease, color 180ms ease, transform 180ms ease; }
+.pl-topnav-btn svg { width: 18px; height: 18px; }
+.pl-topnav-btn:hover { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, var(--pl-line)); }
+.pl-topnav-btn:focus-visible { outline: 3px solid color-mix(in srgb, var(--accent) 45%, transparent); outline-offset: 2px; }
+.pl-topnav-back { background: var(--pl-brand); border-color: var(--pl-brand); color: white; }
+.pl-topnav-back:hover { color: white; filter: brightness(1.1); }
+@media (max-width: 640px) { .pl-topnav-btn { padding: 0 11px; font-size: 13px; } .pl-topnav-switch { gap: 6px; } }
 .pl-form .pl-slide-go { margin-top: auto; }
 @media (max-width: 640px) {
   .pl-shell[data-signin] .pl-stage { height: 456px; }

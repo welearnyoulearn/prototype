@@ -252,6 +252,23 @@ export default function PortalLanding({ operator }: { operator: Operator }) {
       </header>
 
       <main className="pl-main">
+        {signIn && (
+          <nav className="pl-topnav" aria-label="Sign-in navigation" data-testid="signin-topnav">
+            <button type="button" className="pl-topnav-btn pl-topnav-back" onClick={() => setSignIn(null)} data-testid="signin-topnav-back">
+              <ChevronLeft aria-hidden="true" /> All portals
+            </button>
+            <span className="pl-topnav-switch">
+              <button type="button" className="pl-topnav-btn" onClick={() => openPortal(portals[mod(active - 1)].id)}
+                aria-label={`Sign in to ${portals[mod(active - 1)].title} portal`} data-testid="signin-topnav-prev">
+                <ChevronLeft aria-hidden="true" /> {portals[mod(active - 1)].title}
+              </button>
+              <button type="button" className="pl-topnav-btn" onClick={() => openPortal(portals[mod(active + 1)].id)}
+                aria-label={`Sign in to ${portals[mod(active + 1)].title} portal`} data-testid="signin-topnav-next">
+                {portals[mod(active + 1)].title} <ChevronRight aria-hidden="true" />
+              </button>
+            </span>
+          </nav>
+        )}
         <motion.div
           className="pl-intro"
           initial={reduceMotion ? false : { opacity: 0, y: 14 }}
