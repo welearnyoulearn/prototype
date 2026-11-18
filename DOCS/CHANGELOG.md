@@ -2,6 +2,18 @@
 
 All notable changes to the WLYL School prototype are documented here.
 
+## [Unreleased] - Teacher mobile app: long sessions and Expo push
+
+### Added
+- **Teacher mobile app sessions**: a teacher login sent with `x-wlyl-client: mobile` gets the same long-lived session as the parent mobile app (persistent cookie, no 20-minute idle timeout; ends on logout, password change or reset, deactivation, removal or a login-email change). Web teacher logins keep 20 min idle / 12 h.
+- **Teacher push via Expo**: `POST/DELETE /api/teacher/push/expo` registers the teacher app's Expo push token in `device_tokens` (platform `expo`), mirroring `/api/parent/push/expo`. The dispatcher sends teachers a deep link into the teacher app (`teacherAppLink`: class Marks & Results, Exam Schedule, Doubts, Syllabus, else Notifications); `marks_*` notifications use the `results` sound channel.
+
+### Changed
+- Deactivating, reactivating, removing a teacher, resetting their credentials or changing their login email now also deletes their push devices (`removeTeacherDevices`), so a signed-out phone stops receiving pushes; a login-email change also ends their sessions.
+
+### Tests
+- `lib/portalSessionPolicy.test.ts`, `lib/pushLinks.test.ts`, `lib/expoPush.test.ts`.
+
 ## [Unreleased] - Daily Newspaper (#484, PR #485)
 
 ### Added

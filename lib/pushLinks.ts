@@ -38,3 +38,30 @@ export function mobilePushLink(link: string | null): string {
   if (!link) return '/notifications'
   return link.startsWith('/exams/') ? '/exams' : link
 }
+
+// Where a tapped push opens in the teacher mobile app (wlyl-teacher-mobile), mirroring the web teacher
+// bell's destinations: marks work opens that class's Marks & Results (and the exam, when known), exam
+// schedule changes the Exam Schedule, student doubts the Doubts screen, a syllabus nudge the Syllabus;
+// anything else opens Notifications. Paths are the app's expo-router routes.
+const TEACHER_SCHEDULE_TYPES = EXAM_LIST_TYPES
+const TEACHER_CLASS_TYPES = new Set(['marks_entry_required', 'marks_entry_nudge', 'marks_submitted', 'exam_entry_open', 'ack_completed'])
+const TEACHER_DOUBT_TYPES = new Set(['doubt_new', 'doubt_reopened', 'doubt_clarified'])
+
+function positiveId(data: unknown, key: string): number | null {
+  if (!data || typeof data !== 'object') return null
+  const id = Number((data as Record<string, unknown>)[key])
+  return Number.isInteger(id) && id > 0 ? id : null
+}
+
+export function teacherAppLink(type: string, data: unknown): string {
+  if (TEACHER_SCHEDULE_TYPES.has(type)) return '/exam-schedule'
+  if (TEACHER_DOUBT_TYPES.has(type)) return '/doubts'
+  if (type === 'syllabus_behind_nudge') return '/syllabus'
+  if (TEACHER_CLASS_TYPES.has(type)) {
+    const classId = positiveId(data, 'class_id')
+    if (!classId) return '/classes'
+    const examId = positiveId(data, 'exam_id')
+    return `/class/${classId}?tab=marks${examId ? `&examId=${examId}` : ''}`
+  }
+  return '/notifications'
+}

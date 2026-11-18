@@ -53485,6 +53485,142 @@
           }
         }
       }
+    },
+    "/api/teacher/push/expo": {
+      "post": {
+        "tags": [
+          "Teacher portal"
+        ],
+        "summary": "Register phone for push (teacher app)",
+        "description": "Saves the Expo push token of the teacher mobile app so school notifications reach the phone. Upserts on token: a phone that signs in as another account moves to that teacher.\n\n**Who can call:** teacher.\n\n**Checks:** school and teacher come from the session only; token must match `ExponentPushToken[...]` / `ExpoPushToken[...]`.",
+        "operationId": "postTeacherPushExpo",
+        "security": [
+          {
+            "teacher": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid push token"
+          },
+          "401": {
+            "description": "Not signed in as a teacher"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Teacher",
+            "color": "#0f766e"
+          }
+        ],
+        "x-source-file": "app/api/teacher/push/expo/route.ts",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "token"
+                ],
+                "properties": {
+                  "token": {
+                    "type": "string",
+                    "maxLength": 255,
+                    "pattern": "^(ExponentPushToken|ExpoPushToken)\\[.+\\]$",
+                    "description": "Expo push token from expo-notifications getExpoPushTokenAsync()"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Teacher portal"
+        ],
+        "summary": "Unregister phone from push (teacher app)",
+        "description": "Forgets this Expo push token. Only deletes it if it belongs to the signed-in teacher; otherwise a no-op.\n\n**Who can call:** teacher.\n\n**Checks:** school and teacher come from the session only; token must match `ExponentPushToken[...]` / `ExpoPushToken[...]`.",
+        "operationId": "deleteTeacherPushExpo",
+        "security": [
+          {
+            "teacher": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deleted (or not found)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid push token"
+          },
+          "401": {
+            "description": "Not signed in as a teacher"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Teacher",
+            "color": "#0f766e"
+          }
+        ],
+        "x-source-file": "app/api/teacher/push/expo/route.ts",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "token"
+                ],
+                "properties": {
+                  "token": {
+                    "type": "string",
+                    "maxLength": 255,
+                    "pattern": "^(ExponentPushToken|ExpoPushToken)\\[.+\\]$",
+                    "description": "Expo push token from expo-notifications getExpoPushTokenAsync()"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {

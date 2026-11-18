@@ -17,7 +17,7 @@
 import { z } from 'zod'
 import { SignJWT, importPKCS8 } from 'jose'
 import pool from '@/lib/db'
-import { mobilePushLink, pushLinkFor, type PushRole } from '@/lib/pushLinks'
+import { mobilePushLink, pushLinkFor, teacherAppLink, type PushRole } from '@/lib/pushLinks'
 import { pushKindFor, sendExpo } from '@/lib/expoPush'
 
 const serviceAccountSchema = z.object({
@@ -157,6 +157,12 @@ type PendingRow = {
   recipient_school_id: number | null
 }
 
+// notifications.data is JSONB, but some writers store a JSON string in it.
+function parsedData(data: unknown): unknown {
+  if (typeof data !== 'string') return data
+  try { return JSON.parse(data) } catch { return null }
+}
+
 function recipientOf(r: PendingRow): { role: PushRole; id: number } | null {
   if (r.recipient_teacher_id) return { role: 'teacher', id: r.recipient_teacher_id }
   if (r.recipient_student_id) return { role: 'student', id: r.recipient_student_id }
@@ -222,7 +228,9 @@ export async function dispatchPendingPushes(limit = 100): Promise<number> {
       const link = pushLinkFor(t.role, t.row.type, t.row.data)
       const expoTokens = mine.filter(d => d.platform === 'expo').map(d => d.token)
       if (expoTokens.length > 0) {
-        expoJobs.push({ tokens: expoTokens, title, body, url: mobilePushLink(link), type: t.row.type, id: String(t.row.id) })
+        // Each mobile app opens its own screens: the parent app from its link, the teacher app from teacherAppLink.
+        const url = t.role === 'teacher' ? teacherAppLink(t.row.type, parsedData(t.row.data)) : mobilePushLink(link)
+        expoJobs.push({ tokens: expoTokens, title, body, url, type: t.row.type, id: String(t.row.id) })
       }
       if (!firebaseOn) continue
       for (const d of mine) {

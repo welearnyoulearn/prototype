@@ -63,6 +63,7 @@ Move an entry to [completed.md](completed.md) when it ships. Add new entries at 
 - [x] Call `dispatchPendingPushes()` / `drainPendingPushes()` from every notification-creating route and cron
 - [x] Web: `firebase-messaging-sw.js`, "Turn on" prompt in NotificationBell, token registered on enable/visit and removed on logout (all four portals). Needs a real Firebase project to test end to end.
 - [x] Parent mobile app (Expo, #133): `/api/parent/push/expo` on `device_tokens`, Expo sender in the same dispatcher
+- [x] Teacher mobile app (Expo): `/api/teacher/push/expo`, teacher deep links (`teacherAppLink`); devices removed when the school deactivates / removes / re-emails a teacher
 - [ ] `FIREBASE_SERVICE_ACCOUNT` in Vercel; real-phone test of the mobile app on a development or Play build
 ### Usage credits & real WhatsApp sending (#358, #359)
 **Type:** Feature

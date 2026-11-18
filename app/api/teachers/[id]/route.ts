@@ -10,6 +10,7 @@ import {
 import { sendWhatsappMessage } from '@/lib/whatsapp'
 import { findAutoAssignableSubjects, findStaleAssignments, type ClassSubjectRow } from '@/lib/matchTeacher'
 import { normalizeStaffInput, validateStaffStatus } from '@/lib/staffValidation'
+import { removeTeacherDevices } from '@/lib/portalSessionPolicy'
 import { invalidateCache } from '@/lib/responseCache'
 import { syncOpenExamSubjectTeachers } from '@/lib/classManagement'
 import { canonicalStaffSubject, getStaffSubjectOptions } from '@/lib/staffSubjectOptions'
@@ -182,6 +183,10 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       await client.query('UPDATE classes SET class_teacher_id=NULL WHERE class_teacher_id=$1', [id])
     }
     if (becomingInactive || becomingActive) await revokePortalSessions('teacher', id, undefined, client)
+    // A login email change hands the account to someone else: end its (possibly long-lived mobile)
+    // sessions too, and stop pushes to the phones it was signed in on.
+    if (emailChanged && !becomingInactive && !becomingActive) await revokePortalSessions('teacher', id, undefined, client)
+    if (becomingInactive || becomingActive || emailChanged) await removeTeacherDevices(client, id)
 
     if ((subjectChanged || gradesChanged) && teacher.staff_type === 'teaching' && teacher.status === 'active') {
       // Release subjects the updated details no longer fit, so the teacher is
@@ -322,6 +327,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
       await client.query('UPDATE notifications SET recipient_teacher_id = NULL WHERE recipient_teacher_id = $1', [id])
       await client.query('UPDATE notifications SET sender_teacher_id = NULL WHERE sender_teacher_id = $1', [id])
       await revokePortalSessions('teacher', Number(id), undefined, client)
+      await removeTeacherDevices(client, Number(id))
 
       // Soft-delete: mark as removed (keeps record in DB)
       const result = await client.query(

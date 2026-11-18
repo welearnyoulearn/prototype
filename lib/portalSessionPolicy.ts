@@ -4,8 +4,9 @@
 export const SESSION_IDLE_MINUTES = 20   // no authenticated activity for this long → logged out
 export const SESSION_MAX_HOURS    = 12   // hard cap, however active the user is
 
-// The parent mobile app (login sent with `x-wlyl-client: mobile`) stays signed in for life,
-// like a chat app: only logout or a password change (both revoke it server-side) end it.
+// The parent and teacher mobile apps (login sent with `x-wlyl-client: mobile`) stay signed in for life,
+// like a chat app: only logout, a password change or reset, or the school removing / deactivating the
+// account (all revoke it server-side) end it.
 // 50 years rather than "never" so every expiry stays a real date; it also keeps the cookie
 // max-age under 2^31 seconds, which phone cookie stores handle safely.
 export const MOBILE_SESSION_DAYS  = 50 * 365
@@ -20,11 +21,15 @@ export type SessionLimits = {
   cookieMaxAgeSeconds: number | null
 }
 
-export function parentSessionLimits(mobile: boolean | undefined): SessionLimits {
+// Web portals keep the short session; the mobile apps get the long-lived one.
+export function mobileAwareSessionLimits(mobile: boolean | undefined): SessionLimits {
   if (!mobile) return { idleMinutes: SESSION_IDLE_MINUTES, maxHours: SESSION_MAX_HOURS, cookieMaxAgeSeconds: null }
   const minutes = MOBILE_SESSION_DAYS * 24 * 60
   return { idleMinutes: minutes, maxHours: MOBILE_SESSION_DAYS * 24, cookieMaxAgeSeconds: minutes * 60 }
 }
+
+export const parentSessionLimits = mobileAwareSessionLimits
+export const teacherSessionLimits = mobileAwareSessionLimits
 
 export function isMobileClient(headerValue: string | null): boolean {
   return headerValue === 'mobile'
@@ -47,4 +52,13 @@ export async function removeParentDevices(
   parentId: number,
 ): Promise<void> {
   await db.query(`DELETE FROM device_tokens WHERE recipient_role = 'parent' AND recipient_id = $1`, [parentId])
+}
+
+// A teacher's phones stop receiving pushes once the school removes or deactivates them, resets their
+// credentials or changes their login email — the same reasoning as removeParentDevices above.
+export async function removeTeacherDevices(
+  db: { query: (sql: string, params: unknown[]) => Promise<unknown> },
+  teacherId: number,
+): Promise<void> {
+  await db.query(`DELETE FROM device_tokens WHERE recipient_role = 'teacher' AND recipient_id = $1`, [teacherId])
 }

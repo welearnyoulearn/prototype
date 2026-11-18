@@ -8,6 +8,8 @@ import {
   parentLoginChanged,
   parentSessionLimits,
   removeParentDevices,
+  removeTeacherDevices,
+  teacherSessionLimits,
 } from './portalSessionPolicy'
 
 test('web parents keep the short session: 20 min idle, 12 h cap, browser-session cookie', () => {
@@ -55,5 +57,19 @@ test('removing a parent\'s devices deletes only that parent\'s device_tokens, on
   await removeParentDevices({ query: async (sql, params) => { calls.push({ sql, params }) } }, 42)
   assert.equal(calls.length, 1)
   assert.match(calls[0].sql, /^DELETE FROM device_tokens WHERE recipient_role = 'parent' AND recipient_id = \$1$/)
+  assert.deepEqual(calls[0].params, [42])
+})
+
+test('teachers follow the same policy: short on the web, long-lived in the mobile app', () => {
+  for (const mobile of [undefined, false, true]) assert.deepEqual(teacherSessionLimits(mobile), parentSessionLimits(mobile))
+  assert.equal(teacherSessionLimits(undefined).cookieMaxAgeSeconds, null)
+  assert.equal(teacherSessionLimits(true).idleMinutes, MOBILE_SESSION_DAYS * 24 * 60)
+})
+
+test('removing a teacher\'s devices deletes only that teacher\'s tokens', async () => {
+  const calls: { sql: string; params: unknown[] }[] = []
+  await removeTeacherDevices({ query: async (sql: string, params: unknown[]) => { calls.push({ sql, params }) } }, 42)
+  assert.equal(calls.length, 1)
+  assert.match(calls[0].sql, /DELETE FROM device_tokens WHERE recipient_role = 'teacher' AND recipient_id = \$1/)
   assert.deepEqual(calls[0].params, [42])
 })
