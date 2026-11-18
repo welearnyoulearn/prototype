@@ -60,6 +60,8 @@ test('each notification type gets the sound channel the app expects', () => {
   for (const type of ['exam_scheduled', 'exam_updated', 'exam_cancelled', 'exam_reminder_7day', 'exam_reminder_1day', 'exam_reminder_today']) assert.equal(pushKindFor(type), 'exams', type)
   assert.equal(pushKindFor('marks_released'), 'results')
   assert.equal(pushKindFor('ack_nudge'), 'results')
+  assert.equal(pushKindFor('marks_entry_required'), 'results') // teacher
+  assert.equal(pushKindFor('marks_entry_nudge'), 'results') // teacher
   assert.equal(pushKindFor('fee_writeoff_request'), 'fees')
   assert.equal(pushKindFor('birthday'), 'birthday')
   assert.equal(pushKindFor('student_absent'), 'absent')

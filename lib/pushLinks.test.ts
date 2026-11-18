@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mobilePushLink, pushLinkFor } from './pushLinks'
+import { mobilePushLink, pushLinkFor, teacherAppLink } from './pushLinks'
 
 test('parents get a deep link into the parent app; other portals get none', () => {
   assert.equal(pushLinkFor('teacher', 'exam_scheduled', null), null)
@@ -34,4 +34,15 @@ test('the mobile app gets a screen it can open: exam detail links become the exa
   assert.equal(mobilePushLink('/exams'), '/exams')
   assert.equal(mobilePushLink('/notifications'), '/notifications')
   assert.equal(mobilePushLink(null), '/notifications')
+})
+
+test('teacher pushes open the matching teacher-app screen', () => {
+  assert.equal(teacherAppLink('marks_entry_required', { class_id: 14, exam_id: 3 }), '/class/14?tab=marks&examId=3')
+  assert.equal(teacherAppLink('marks_entry_nudge', { class_id: 14 }), '/class/14?tab=marks')
+  assert.equal(teacherAppLink('ack_completed', null), '/classes')
+  for (const type of ['exam_scheduled', 'exam_updated', 'exam_cancelled', 'exam_reminder_1day']) assert.equal(teacherAppLink(type, { exam_id: 1 }), '/exam-schedule', type)
+  for (const type of ['doubt_new', 'doubt_reopened', 'doubt_clarified']) assert.equal(teacherAppLink(type, null), '/doubts', type)
+  assert.equal(teacherAppLink('syllabus_behind_nudge', null), '/syllabus')
+  for (const type of ['teacher_broadcast', 'substitute_needed', 'something_new']) assert.equal(teacherAppLink(type, null), '/notifications', type)
+  assert.equal(teacherAppLink('marks_submitted', { class_id: 'abc' }), '/classes')
 })

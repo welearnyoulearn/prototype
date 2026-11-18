@@ -80,6 +80,7 @@ export async function sendExpo(tokens: string[], msg: ParentPush, fetchImpl: typ
 export function pushKindFor(type: string): PushKind {
   if (type === 'marks_released' || type === 'ack_nudge') return 'results'
   if (type.startsWith('exam_')) return 'exams'
+  if (type.startsWith('marks_')) return 'results' // teacher: marks to enter / submitted
   if (type.startsWith('fee_')) return 'fees'
   if (type === 'birthday') return 'birthday'
   if (type.includes('absent')) return 'absent'

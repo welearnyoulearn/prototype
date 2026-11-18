@@ -120,6 +120,12 @@ Non-obvious technical decisions and their reasoning for the WLYL School prototyp
 
 **Consequences:** 20 features remain in the config. The attendance end-to-end checks that read the briefing route now use the overview route, which carries the same holiday and attendance facts.
 
+## 2026-11-18 — Teacher mobile app keeps teachers signed in, like the parent app
+
+**Context:** The teacher mobile app (wlyl-teacher-mobile) is used many times a day. With the 20-minute idle timeout teachers had to type their password almost every time they opened it.
+**Decision:** Apply the parent app's mobile session policy (#424) to teacher logins that send `x-wlyl-client: mobile`: a persistent cookie and a long-lived `portal_sessions` row. The web teacher portal keeps 20 min idle / 12 h. To keep a long-lived phone from outliving access, a teacher's sessions and push devices are removed on deactivation, removal, credential reset and login-email change, and on password change/reset as before.
+**Trade-off:** A lost, unlocked phone stays signed in until the teacher changes their password or the school deactivates/resets the account — the same trade-off already accepted for parents.
+
 ## 2026-09-20 — Attendance: any teacher marks, first submit locks; holidays live in the Academic Calendar (#153)
 
 **Context:** Attendance let any logged-in user (students and parents too) read and write any class, silently overwrote earlier records, and each portal computed its own percentage. The school calendar existed but nothing used it, so a holiday looked like a day nobody marked, and its routes had no authentication.

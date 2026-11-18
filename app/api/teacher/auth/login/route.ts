@@ -4,6 +4,7 @@ import pool, { ensureDB } from '@/lib/db'
 import { verifyPasswordForLogin, setTeacherAuthCookie, TeacherJWTPayload, createPortalSession } from '@/lib/auth'
 import { recordSessionStart } from '@/lib/usageTracking'
 import { checkAuthRateLimit, clearAuthRateLimit, LOGIN_LIMIT } from '@/lib/authRateLimit'
+import { isMobileClient, MOBILE_CLIENT_HEADER } from '@/lib/portalSessionPolicy'
 
 export async function POST(req: NextRequest) {
   try {
@@ -52,6 +53,8 @@ export async function POST(req: NextRequest) {
       passwordChanged: teacher.password_changed,
       name: teacher.name,
       email: teacher.email,
+      // The teacher mobile app stays signed in until logout; the web portal keeps its short session.
+      ...(isMobileClient(req.headers.get(MOBILE_CLIENT_HEADER)) ? { mobile: true } : {}),
     }
 
     // A school whose plan has ended is locked: no portal access for teachers, students or parents.
@@ -62,7 +65,7 @@ export async function POST(req: NextRequest) {
 
     }
 
-    payload.sid = await createPortalSession('teacher', teacher.id, teacher.school_id)
+    payload.sid = await createPortalSession('teacher', teacher.id, teacher.school_id, { longLived: payload.mobile === true })
     await setTeacherAuthCookie(payload)
 
     const usageSessionId = await recordSessionStart({

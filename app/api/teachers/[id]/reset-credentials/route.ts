@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 import { requireSchoolAdmin, generateTempPassword, hashPortalPassword, revokePortalSessions, schoolHasFeature } from '@/lib/auth'
 import { sendTeacherWelcomeEmail } from '@/lib/email'
+import { removeTeacherDevices } from '@/lib/portalSessionPolicy'
 
 // POST /api/teachers/[id]/reset-credentials
 //
@@ -57,6 +58,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       [passwordHash, teacherId]
     )
     await revokePortalSessions('teacher', teacherId, undefined, client)
+    await removeTeacherDevices(client, teacherId)
     await client.query('COMMIT')
   } catch (error) {
     await client.query('ROLLBACK').catch(() => {})
