@@ -306,7 +306,9 @@ function ParentDashboard() {
   }, [activeNav, student]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Auth ──────────────────────────────────────────────────────────────────────
-  async function selectChild(child: Child) {
+  // keepTab: the automatic pick on page load (only one child) keeps the section in the URL, so a link
+  // like /parent?tab=announcements opens that section. Switching children goes back to Overview.
+  async function selectChild(child: Child, opts: { keepTab?: boolean } = {}) {
     // Resolve class_id from grade + section
     let cid = 0
     try {
@@ -324,7 +326,7 @@ function ParentDashboard() {
     setShowChildPicker(false)
     setSummary(null); setFeeLedger([]); setFeePayments([]); setFeeWaivers([]); setFeeSummary(null); setPriorDues(null)
     setContact(null)
-    resetNav('overview'); setVisited(new Set(['overview']))
+    if (!opts.keepTab) { resetNav('overview'); setVisited(new Set(['overview'])) }
 
     fetch(`/api/parent/subjects?student_id=${child.id}`)
       .then(r => r.ok ? r.json() : null)
@@ -373,7 +375,7 @@ function ParentDashboard() {
           .then(d => { if (d?.enabled) setEnabledFeatures(new Set<string>(d.enabled)) })
           .catch(() => {})
         if (data.children.length === 1) {
-          await selectChild(data.children[0])
+          await selectChild(data.children[0], { keepTab: true })
         } else if (data.children.length > 1) {
           setShowChildPicker(true)
         }
