@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { announceChange, ANNOUNCEMENTS_CHANGED } from './announcementEvents'
+import { announceChange, ANNOUNCEMENTS_CHANGED, withReader } from './announcementEvents'
 import { getTemplate } from '@/lib/announcementTemplates'
 import NoticeModal from './NoticeModal'
 import { localised, type Lang, type NoticeItem } from './types'
@@ -48,7 +48,7 @@ export default function NoticeCenter({
   useEffect(() => {
     let cancelled = false
     const load = () => {
-      fetch(`/api/announcements?school_id=${schoolId}`)
+      fetch(withReader(`/api/announcements?school_id=${schoolId}`))
         .then(r => (r.ok ? r.json() : []))
         .then((data: unknown) => {
           if (cancelled) return
@@ -66,7 +66,7 @@ export default function NoticeCenter({
   const loadPast = useCallback(async () => {
     if (past !== null) return
     try {
-      const r = await fetch(`/api/announcements?school_id=${schoolId}&scope=past`)
+      const r = await fetch(withReader(`/api/announcements?school_id=${schoolId}&scope=past`))
       const data: unknown = r.ok ? await r.json() : []
       setPast(Array.isArray(data) ? (data as NoticeItem[]) : [])
     } catch { setPast([]) }
@@ -92,12 +92,12 @@ export default function NoticeCenter({
   useEffect(() => {
     if (!active || active.seen) return
     patch(active.id, { seen: true })
-    fetch(`/api/announcements/${active.id}/read`, { method: 'POST' }).then(() => announceChange()).catch(() => {})
+    fetch(withReader(`/api/announcements/${active.id}/read`), { method: 'POST' }).then(() => announceChange()).catch(() => {})
   }, [active?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function acknowledge(id: number) {
     patch(id, { acked: true, seen: true })
-    fetch(`/api/announcements/${id}/ack`, { method: 'POST' }).then(() => announceChange()).catch(() => {})
+    fetch(withReader(`/api/announcements/${id}/ack`), { method: 'POST' }).then(() => announceChange()).catch(() => {})
   }
 
   function closeModal() {

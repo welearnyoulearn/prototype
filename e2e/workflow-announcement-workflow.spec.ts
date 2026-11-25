@@ -327,9 +327,8 @@ test.describe.serial('Announcement workflow — targeting, drafts, seen, acknowl
     const modal = page.getByTestId('notice-modal')
     await expect(modal).toBeVisible({ timeout: 90000 })
     await expect(modal.getByTestId('notice-ack')).toBeVisible()
+    // acknowledging closes that popup by itself
     await modal.getByTestId('notice-ack').click()
-    await expect(modal.getByTestId('notice-acked')).toBeVisible()
-    await modal.getByTestId('notice-close').click()
 
     // then the Pongal greeting card pops up, animated, with the admin's headline
     await expect(modal).toBeVisible()
@@ -378,6 +377,34 @@ test.describe.serial('Announcement workflow — targeting, drafts, seen, acknowl
     const mine = ((await call(ashaP, 'get', `/api/announcements?school_id=${schoolId}`)).body as Array<{ id: number }>)
     expect(mine.length).toBeGreaterThan(0)
     for (const n of mine) await expect(page.getByTestId('announcements-tab').getByTestId(`notice-row-${n.id}`)).toBeVisible()
+    await ctx.close()
+  })
+
+  test('14. One browser signed in as school admin AND parent: the popup still shows once, then never again', async ({ browser }) => {
+    test.setTimeout(150000)
+    // Regression: the admin cookie used to win, so the parent portal got the staff list (no "seen" flag),
+    // "seen" / "acknowledged" were never recorded, and the popup came back on every visit.
+    const n = (await post(admin, { title: `Cyclone closure ${ts}`, priority: 'urgent', requires_ack: true, target_audience: 'all' })).body
+    const ctx = await browser.newContext()
+    const cookies = [...(await admin.storageState()).cookies, ...(await ashaP.storageState()).cookies]
+    await ctx.addCookies(cookies.map(c => ({ name: c.name, value: c.value, url: BASE })))
+    const page = await ctx.newPage()
+    await page.goto(`${BASE}/parent`)
+    const modal = page.getByTestId('notice-modal')
+    await expect(modal).toBeVisible({ timeout: 90000 })
+    await expect(modal.getByTestId('notice-body')).toBeVisible()
+    // the popup closes at once; the ack is saved in the background — wait for it before checking
+    const acked = page.waitForResponse(r => r.url().includes(`/api/announcements/${n.id}/ack`) && r.request().method() === 'POST')
+    await modal.getByTestId('notice-ack').click()
+    await expect(modal).toHaveCount(0)
+    expect((await acked).status()).toBe(200)
+
+    const mine = ((await call(ashaP, 'get', `/api/announcements?school_id=${schoolId}`)).body as Array<{ id: number; seen: boolean; acked: boolean }>)
+    expect(mine.find(x => x.id === n.id)).toMatchObject({ seen: true, acked: true })
+
+    await page.reload()
+    await expect(page.getByTestId('notice-center')).toBeVisible({ timeout: 60000 })
+    await expect(page.getByTestId('notice-modal')).toHaveCount(0)
     await ctx.close()
   })
 })
