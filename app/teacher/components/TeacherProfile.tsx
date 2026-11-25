@@ -52,7 +52,8 @@ export default function TeacherProfile({ teacher, onUpdate, availableYears, sele
     setSaving(true)
     setError('')
     try {
-      const res = await fetch(`/api/teachers/${teacher.id}`, {
+      if (Object.keys(form).length === 0) { setEditing(false); return }
+      const res = await fetch('/api/teacher/profile', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(form),
@@ -108,15 +109,10 @@ export default function TeacherProfile({ teacher, onUpdate, availableYears, sele
 
   const inputCls = 'w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-300'
 
-  const fields: { field: keyof Teacher; label: string; type?: string }[] = [
-    { field: 'name', label: 'Full Name' },
-    { field: 'email', label: 'Email', type: 'email' },
-    { field: 'phone', label: 'Phone' },
-    { field: 'subject', label: 'Subject' },
-    { field: 'department', label: 'Department' },
+  // A teacher keeps their own contact details up to date; everything else belongs to the school admin.
+  const fields: { field: 'phone' | 'qualification'; label: string; type?: string }[] = [
+    { field: 'phone', label: 'Phone', type: 'tel' },
     { field: 'qualification', label: 'Qualification' },
-    { field: 'date_of_joining', label: 'Date of Joining', type: 'date' },
-    { field: 'teaches_grades', label: 'Teaches Grades (e.g. 8A,8B,9A)' },
   ]
 
   return (
@@ -196,10 +192,11 @@ export default function TeacherProfile({ teacher, onUpdate, availableYears, sele
           </div>
         ) : (
           <div className="space-y-4">
+            <p className="text-xs text-muted-foreground">You can change your phone number and qualification. Ask your school admin to change anything else.</p>
             {fields.map(({ field, label, type }) => (
               <div key={field}>
-                <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
-                <input type={type || 'text'}
+                <label htmlFor={`teacher-profile-${field}`} className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
+                <input id={`teacher-profile-${field}`} type={type || 'text'}
                   value={(form[field] as string) ?? (teacher[field] as string) ?? ''}
                   onChange={e => setForm(f => ({ ...f, [field]: e.target.value }))}
                   className={inputCls} />
@@ -209,9 +206,7 @@ export default function TeacherProfile({ teacher, onUpdate, availableYears, sele
         )}
       </div>
 
-      {/* Birthday — self-service, separate from the admin-gated fields above
-          (PUT /api/teachers/{id}) since a teacher may only ever set this one
-          field for themselves */}
+      {/* Birthday — saved on its own, like the contact details above (PUT /api/teacher/profile). */}
       <div className="bg-white rounded-md border border-gray-200 p-6 mb-4">
         <h3 className="text-base font-semibold text-gray-900 mb-0.5">Birthday</h3>
         <p className="text-xs text-muted-foreground mb-4">Shared with your school so they can wish you on the day</p>

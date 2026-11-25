@@ -10,6 +10,7 @@ export async function GET() {
     const result = await pool.query(
       `SELECT t.id, t.name, t.email, t.subject, t.department, t.employee_id,
               t.school_id, t.staff_type, t.password_changed, t.date_of_birth,
+              t.phone, t.qualification, t.date_of_joining::text AS date_of_joining, t.teaches_grades, t.status,
               s.name AS school_name, s.city AS school_city,
               COALESCE((
                 SELECT json_agg(json_build_object('id', c.id, 'grade', c.grade, 'section', c.section)

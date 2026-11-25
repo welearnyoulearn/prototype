@@ -50365,6 +50365,82 @@
         "x-source-file": "app/api/cron/quiz-bank/route.ts"
       }
     },
+    "/api/teacher/profile": {
+      "put": {
+        "tags": [
+          "Teacher sign-in"
+        ],
+        "summary": "Update own contact details",
+        "description": "A teacher changes their own phone number and/or qualification. Name, email, subject, grades, dates and status stay with the school admin.\n\n**Who can call:** Teacher.\n\n**Checks:** Writes only the session teacher's row; any other field is refused; the phone must be unused by other staff of the school.",
+        "operationId": "putTeacherProfile",
+        "security": [
+          {
+            "teacher": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "phone": {
+                      "type": "string"
+                    },
+                    "qualification": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unsupported field, no changes or invalid body"
+          },
+          "401": {
+            "description": "Not signed in"
+          },
+          "409": {
+            "description": "Phone used by another staff member"
+          },
+          "422": {
+            "description": "Invalid phone or qualification"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Teacher",
+            "color": "#b45309"
+          }
+        ],
+        "x-source-file": "app/api/teacher/profile/route.ts",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "phone": {
+                    "type": "string"
+                  },
+                  "qualification": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/teacher/quiz-bank": {
       "get": {
         "tags": [

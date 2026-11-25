@@ -52,13 +52,23 @@ function normalizeGrades(value: string, errors: string[]): string | null {
   return [...new Set(parts)].sort((a, b) => Number(a) - Number(b)).join(',')
 }
 
+// Phone rules shared by admin onboarding and a teacher editing their own number.
+export function normalizeStaffPhone(value: unknown): { phone: string; error: string | null } {
+  const raw = text(value)
+  const digits = raw.replace(/\D/g, '')
+  const phone = `${raw.startsWith('+') ? '+' : ''}${digits}`
+  if (!raw) return { phone, error: 'Phone is required' }
+  if (!STAFF_PHONE_RE.test(raw) || digits.length < 7 || digits.length > 15) {
+    return { phone, error: 'Phone must contain 7–15 digits and may include +, spaces, brackets or hyphens' }
+  }
+  return { phone, error: null }
+}
+
 export function normalizeStaffInput(input: StaffInput): { data?: NormalizedStaffInput; errors: string[] } {
   const errors: string[] = []
   const name = text(input.name)
   const email = text(input.email).toLowerCase()
-  const rawPhone = text(input.phone)
-  const phoneDigits = rawPhone.replace(/\D/g, '')
-  const phone = `${rawPhone.startsWith('+') ? '+' : ''}${phoneDigits}`
+  const { phone, error: phoneError } = normalizeStaffPhone(input.phone)
   const staffTypeRaw = text(input.staff_type) || 'teaching'
   const subjectRaw = text(input.subject)
   const department = text(input.department)
@@ -70,10 +80,7 @@ export function normalizeStaffInput(input: StaffInput): { data?: NormalizedStaff
   else if (!isValidName(name)) errors.push(`Name: ${NAME_INVALID_MESSAGE}`)
   if (!email) errors.push('Email is required for teacher login')
   else if (!STAFF_EMAIL_RE.test(email)) errors.push('Enter a valid email address')
-  if (!rawPhone) errors.push('Phone is required')
-  else if (!STAFF_PHONE_RE.test(rawPhone) || phoneDigits.length < 7 || phoneDigits.length > 15) {
-    errors.push('Phone must contain 7–15 digits and may include +, spaces, brackets or hyphens')
-  }
+  if (phoneError) errors.push(phoneError)
   if (!STAFF_TYPES.includes(staffTypeRaw as typeof STAFF_TYPES[number])) errors.push('Staff Type must be teaching or non_teaching')
   if (staffTypeRaw === 'teaching' && !subjectRaw) errors.push('Subject is required for teaching staff')
   if (joiningDate && !validIsoDate(joiningDate)) errors.push('Date of Joining must be a real date in YYYY-MM-DD format')

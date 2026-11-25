@@ -61,3 +61,7 @@ API routes these screens call (all exist):
 | Date | Change | Issue |
 |------|--------|-------|
 | 2026-09-21 | Doc created from the code; status checked with `scripts/product-docs.mjs` | #162 |
+
+## Teacher self-service
+
+- A teacher can change their own **phone number** and **qualification** on My Profile (`PUT /api/teacher/profile`). Name, email, subject, grades, dates and status are changed by the school admin (#504).
