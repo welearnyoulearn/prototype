@@ -4,7 +4,7 @@ import { todayIST } from '@/lib/istDate'
 import pool, { ensureDB } from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
 import { withWatchline } from '@/lib/logger'
-import { lockYearClose, isYearClosed } from '@/lib/feeRollover'
+import { lockYearClose, recordedBeforeClose } from '@/lib/feeRollover'
 
 // POST /api/fees/payments/cancel
 // Cancel (reverse) a completed payment, OR correct it (cancel + re-record with new values).
@@ -42,16 +42,6 @@ async function handlePOST(req: NextRequest) {
       const access = await requireFeeAccess(pmtPreview.school_id, client)
       if (!access) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
       const done_by = access.actor
-
-      // Fast preliminary rejection (not authoritative — see the re-check below,
-      // which is the one that actually closes the race). fee_year_close is
-      // guaranteed to exist (see lib/db.ts), so a query error here is a real
-      // failure, not a missing table; let it propagate to the outer catch
-      // rather than silently failing this guard open.
-      const locked = await isYearClosed(client, pmtPreview.school_id, pmtPreview.academic_year)
-      if (locked) {
-        return NextResponse.json({ error: 'This academic year is closed. Reopen it to cancel/correct payments.' }, { status: 409 })
-      }
 
       await client.query('BEGIN')
 
@@ -91,16 +81,10 @@ async function handlePOST(req: NextRequest) {
         return NextResponse.json({ error: 'Payment already cancelled' }, { status: 409 })
       }
 
-      // Authoritative re-check, now that the ledger row lock above is held. If
-      // year-end closed this bill's year while this transaction was blocked
-      // waiting for that lock, this SELECT (a fresh read, now that the lock is
-      // ours) sees it — the earlier pre-BEGIN check above could be stale by
-      // exactly this race, since it ran before either transaction touched the
-      // ledger row and gave no ordering guarantee against a concurrent year-end.
-      const lockedNow = await isYearClosed(client, pmtPreview.school_id, pmt.academic_year)
-      if (lockedNow) {
+      // Checked under the year lock and the row locks above, so a concurrent close can't slip in between.
+      if (await recordedBeforeClose(client, { table: 'fee_payments', id: payment_id }, pmtPreview.school_id, pmt.academic_year)) {
         await client.query('ROLLBACK')
-        return NextResponse.json({ error: 'This academic year was closed by a year-end run while this request was in progress. Reopen it to cancel/correct payments.' }, { status: 409 })
+        return NextResponse.json({ error: 'This payment was recorded before the year was closed. Reopen the year to cancel or correct it.' }, { status: 409 })
       }
 
       const wasCompleted = pmt.payment_status === 'completed'

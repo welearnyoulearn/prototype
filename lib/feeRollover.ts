@@ -189,20 +189,40 @@ export async function isYearClosed(
   return !!row
 }
 
-// Locks every academic year the given ledger rows belong to, then reports whether any
-// of them is closed. Years are locked in sorted order so two requests touching the same
-// set of years can never take the locks in opposite order and deadlock.
-export async function lockLedgerYearsAndIsClosed(
+// Locks every academic year the given ledger rows belong to, so a payment can't interleave with a
+// year-end run. Years are locked in sorted order so two requests touching the same set of years can
+// never take the locks in opposite order and deadlock.
+//
+// A closed year still accepts money on bills left open (#495): a settled bill has no balance left to pay.
+export async function lockLedgerYears(
   client: PoolClient,
   ledgerIds: Array<number | string>
-): Promise<boolean> {
-  if (ledgerIds.length === 0) return false
+): Promise<void> {
+  if (ledgerIds.length === 0) return
   const { rows } = await client.query<{ school_id: number; academic_year: string }>(
     `SELECT DISTINCT school_id, academic_year FROM student_fee_ledger WHERE id = ANY($1)
      ORDER BY school_id, academic_year`,
     [ledgerIds]
   )
   for (const y of rows) await lockYearClose(client, y.school_id, y.academic_year)
-  for (const y of rows) if (await isYearClosed(client, y.school_id, y.academic_year)) return true
-  return false
+}
+
+// In a closed year only entries made after the close can be cancelled or corrected, so a mistake made
+// while collecting open dues can be fixed without changing what the year was closed on.
+// False for an open year. Call after lockYearClose.
+export async function recordedBeforeClose(
+  client: PoolClient,
+  entry: { table: 'fee_payments' | 'fee_waivers'; id: number | string },
+  schoolId: number | string,
+  academicYear: string
+): Promise<boolean> {
+  // An online payment counts from the day it was approved, when it reached the ledger.
+  const recordedAt = entry.table === 'fee_payments' ? 'GREATEST(e.created_at, e.verified_at)' : 'e.created_at'
+  const { rows: [row] } = await client.query(
+    `SELECT 1 FROM fee_year_close c JOIN ${entry.table} e ON e.id = $1
+     WHERE c.school_id = $2 AND c.academic_year = $3 AND c.is_reopened = FALSE AND ${recordedAt} <= c.closed_at
+     LIMIT 1`,
+    [entry.id, schoolId, academicYear]
+  )
+  return !!row
 }

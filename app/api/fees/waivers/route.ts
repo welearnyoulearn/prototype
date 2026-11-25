@@ -4,7 +4,7 @@ import pool from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
 import { withWatchline } from '@/lib/logger'
 import { claimIdempotencyKey, saveIdempotentResponse } from '@/lib/idempotency'
-import { lockYearClose, isYearClosed } from '@/lib/feeRollover'
+import { lockYearClose, recordedBeforeClose } from '@/lib/feeRollover'
 
 // GET /api/fees/waivers?school_id=X&student_id=Y
 async function handleGET(req: NextRequest) {
@@ -107,15 +107,6 @@ async function handlePOST(req: NextRequest) {
       if (!ledger) {
         await client.query('ROLLBACK')
         return NextResponse.json({ error: 'Ledger entry not found for this student' }, { status: 404 })
-      }
-
-      // Block waivers on a closed year (same guard as payments route) — re-checked
-      // here, now that the lock above is held, so this can't read a stale
-      // "not closed" state past a concurrent close that was waiting on it.
-      const closedYear = await isYearClosed(client, school_id, ledger.academic_year)
-      if (closedYear) {
-        await client.query('ROLLBACK')
-        return NextResponse.json({ error: 'This academic year is closed. Reopen it to grant waivers.' }, { status: 409 })
       }
 
       // Calculate waiver amount — always on remaining balance (after existing waiver), not full amount_due
@@ -270,12 +261,10 @@ async function handlePATCH(req: NextRequest) {
         }, { status: 400 })
       }
 
-      // Block correcting a waiver on a closed year — same guard as every other
-      // mutating fee route.
-      const closedYear = await isYearClosed(client, w0.school_id, lgCheck.academic_year)
-      if (closedYear) {
+      // In a closed year only a waiver granted after the close can be corrected.
+      if (await recordedBeforeClose(client, { table: 'fee_waivers', id }, w0.school_id, lgCheck.academic_year)) {
         await client.query('ROLLBACK')
-        return NextResponse.json({ error: 'This academic year is closed. Reopen it to correct waivers.' }, { status: 409 })
+        return NextResponse.json({ error: 'This waiver was granted before the year was closed. Reopen the year to correct it.' }, { status: 409 })
       }
 
       // Soft-revoke old waiver
@@ -367,14 +356,10 @@ async function handleDELETE(req: NextRequest) {
       // CLOSE, which doesn't touch any ledger row — only this shared lock does.
       await lockYearClose(client, w0.school_id, w0.academic_year)
 
-      // Block revoking a waiver on a closed year — same guard as every other
-      // mutating fee route (payments, waivers POST, structures/amend, etc.).
-      // Re-checked here, now that the lock above is held, so this can't read a
-      // stale "not closed" state past a concurrent close that was waiting on it.
-      const closedYear = await isYearClosed(client, w0.school_id, w0.academic_year)
-      if (closedYear) {
+      // In a closed year only a waiver granted after the close can be revoked. Checked under the lock.
+      if (await recordedBeforeClose(client, { table: 'fee_waivers', id: id! }, w0.school_id, w0.academic_year)) {
         await client.query('ROLLBACK')
-        return NextResponse.json({ error: 'This academic year is closed. Reopen it to revoke waivers.' }, { status: 409 })
+        return NextResponse.json({ error: 'This waiver was granted before the year was closed. Reopen the year to revoke it.' }, { status: 409 })
       }
 
       // Soft-delete — mark as revoked, keep the record

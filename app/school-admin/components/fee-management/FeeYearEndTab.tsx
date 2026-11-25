@@ -52,6 +52,7 @@ export default function FeeYearEndTab({
   onGoToYearRollover,
   onStatsChanged,
   onLedgerChanged,
+  onCollectYear,
   onAcademicYearsChanged,
   onPassoutChanged,
 }: {
@@ -63,6 +64,7 @@ export default function FeeYearEndTab({
   onGoToYearRollover: () => void
   onStatsChanged: () => void
   onLedgerChanged: () => void
+  onCollectYear: (academicYear: string) => void
   onAcademicYearsChanged: () => void
   onPassoutChanged: () => void
 }) {
@@ -72,6 +74,8 @@ export default function FeeYearEndTab({
   const [yearEnd, setYearEnd]               = useState<YearEndState | null>(null)
   const [yearEndLoading, setYearEndLoading] = useState(false)
   const [yearEndError, setYearEndError]     = useState('')
+  // Reloading the year already on screen keeps it there, so the open-dues register keeps its message.
+  const [loadedYear, setLoadedYear]         = useState('')
   // per-student decision: studentId -> 'carry' | 'writeoff' | 'open' | 'passout'
   const [yeDecisions, setYeDecisions]       = useState<Record<number, 'carry' | 'writeoff' | 'open' | 'passout'>>({})
   const [yeReasons, setYeReasons]           = useState<Record<number, string>>({})
@@ -108,6 +112,7 @@ export default function FeeYearEndTab({
         setYearEndError('')
         const d: YearEndState = await r.json()
         setYearEnd(d)
+        setLoadedYear(academicYear)
         // default every student to 'open' (admin decides each — no auto default action)
         const init: Record<number, 'carry' | 'writeoff' | 'open'> = {}
         d.students.forEach(s => { init[s.student_id] = 'open' })
@@ -384,7 +389,7 @@ export default function FeeYearEndTab({
         <p className="text-sm font-semibold text-indigo-600 mt-2" data-testid="year-end-follow-steps-hint">👇 Follow the steps below, in order</p>
       </div>
 
-      {yearEndLoading ? (
+      {yearEndLoading && loadedYear !== academicYear ? (
         <div className="bg-white rounded-xl border border-gray-100 p-12 text-center text-sm text-gray-400">Loading…</div>
       ) : !yearEnd ? (
         <div className="bg-white rounded-xl border border-gray-100 p-8 text-center">
@@ -424,7 +429,7 @@ export default function FeeYearEndTab({
                   <p className="text-sm font-bold">🔒 {academicYear} is CLOSED</p>
                   <p className="text-xs text-gray-300 mt-0.5">
                     Closed by {yearEnd.close_record?.closed_by} on {yearEnd.close_record ? fmtDate(yearEnd.close_record.closed_at) : ''}
-                    {' '}· Ledger and payments are locked.
+                    {' '}· Bills are locked. Dues left open can still be resolved below.
                   </p>
                   {yearEnd.close_record && (
                     <div className="flex gap-4 mt-2 text-xs text-gray-400">
@@ -724,7 +729,8 @@ export default function FeeYearEndTab({
           )}
 
           {/* Students left open at an earlier close: who follows up, what was promised, by when */}
-          <OpenDuesRegister schoolId={schoolId} />
+          <OpenDuesRegister schoolId={schoolId} onCollect={onCollectYear}
+            onChanged={() => { loadYearEnd(); loadSignoff(); onStatsChanged(); onLedgerChanged(); bumpReports() }} />
 
           {/* STEP 4 & 5 — Statement + Close */}
           {!yearEnd.is_closed && (
@@ -732,7 +738,7 @@ export default function FeeYearEndTab({
               <p className="text-xs font-bold text-indigo-600 uppercase tracking-wide">Step 4 · Statement &amp; Close</p>
               <p className="text-xs text-gray-500">
                 Print the year-end financial statement for your records, then close the year. Closing locks {academicYear} —
-                no further payments or edits until reopened. Students still “Leave Open” keep their dues in this year only — those dues will not appear in next year’s totals or in the parent’s next-year bills, so collect or carry them first if you want them followed up.
+                bills and amounts can no longer be changed until it is reopened. Students still “Leave Open” keep their dues in this year, outside next year’s totals and the parent’s next-year bills; afterwards those dues can still be collected, waived, carried forward or written off from the open-dues register.
               </p>
               <div className="flex items-center gap-2">
                 <button onClick={printYearEndStatement}

@@ -196,12 +196,13 @@ export async function POST(req: NextRequest) {
       // lockYearClose's own comment for why this must be the one shared implementation.
       await lockYearClose(client, school_id, from_year)
 
-      // Guard: cannot apply / close a year that is already closed
+      // A closed year takes only carry forward and write off, for the dues that were left open (#495).
       const { rows: [existing] } = await client.query(
         `SELECT * FROM fee_year_close WHERE school_id = $1 AND academic_year = $2`,
         [school_id, from_year]
       )
-      if (existing && !existing.is_reopened && action !== 'close') {
+      const alreadyClosed = !!existing && !existing.is_reopened
+      if (alreadyClosed && action !== 'close' && action !== 'apply') {
         await client.query('ROLLBACK')
         return NextResponse.json({ error: 'This year is closed. Reopen it before making changes.' }, { status: 409 })
       }
@@ -213,6 +214,16 @@ export async function POST(req: NextRequest) {
           await client.query('ROLLBACK')
           return NextResponse.json({ error: 'decisions array required' }, { status: 400 })
         }
+
+        if (alreadyClosed && decisions.some(d => d.decision !== 'carry' && d.decision !== 'writeoff')) {
+          await client.query('ROLLBACK')
+          return NextResponse.json({ error: 'This year is closed. Open dues can only be carried forward or written off. Reopen it to make other changes.' }, { status: 409 })
+        }
+        // Once students have moved to the next year, their new grade no longer says whether they left.
+        const { rows: [laterYear] } = alreadyClosed
+          ? await client.query(`SELECT 1 AS x FROM academic_years WHERE school_id = $1 AND is_current = TRUE AND label > $2`, [school_id, from_year])
+          : { rows: [] }
+        const rolledOver = !!laterYear
 
         // Prepare "Passout Dues" fee head for any passout decisions
         const passoutRequested = decisions.some(d => d.decision === 'passout')
@@ -335,7 +346,21 @@ export async function POST(req: NextRequest) {
           if (studentBills.length === 0) continue
 
           const studentBalance = studentBills.reduce((s, b) => s + parseFloat(b.balance), 0)
-          const isLeaver = isFinalOrBeyondGrade(studentBills[0].grade) || studentBills[0].student_status !== 'active'
+          const isLeaver = studentBills[0].student_status !== 'active' || (!rolledOver && isFinalOrBeyondGrade(studentBills[0].grade))
+
+          // A parent's reported payment that is still waiting would be left with nothing to pay (#509).
+          if (d.decision !== 'open') {
+            const { rows: [waiting] } = await client.query<{ name: string; total: string }>(
+              `SELECT s.name, SUM(fp.amount) AS total FROM fee_payments fp JOIN students s ON s.id = fp.student_id
+               WHERE fp.ledger_id = ANY($1) AND fp.payment_status = 'pending_verification' GROUP BY s.name`,
+              [studentBills.map(b => b.id)])
+            if (waiting) {
+              await client.query('ROLLBACK')
+              return NextResponse.json({
+                error: `${waiting.name} has a payment of ₹${Number(waiting.total).toLocaleString('en-IN')} waiting for approval. Approve or reject it first.`,
+              }, { status: 409 })
+            }
+          }
 
           if (d.decision === 'open') {
             // Leave as-is, just count
@@ -466,7 +491,7 @@ export async function POST(req: NextRequest) {
         // request's decisions — determines whether the year can auto-close. A student
         // left on 'open' (or never included in `decisions` at all) must keep the year open.
         const { count: stillOpenCount, total: stillOpenTotal } = await getRemainingOpenSummary(client, school_id, from_year)
-        const autoClosed = stillOpenCount === 0
+        const autoClosed = alreadyClosed || stillOpenCount === 0
 
         // M-18: persist apply counts into fee_year_close so the year-close banner
         // can show carry/writeoff/passout totals. If every student now has a resolved
@@ -496,7 +521,16 @@ export async function POST(req: NextRequest) {
         // accumulated — getRemainingOpenSummary always computes the CURRENT
         // true remaining balance from the ledger directly, not a per-request
         // delta, so overwriting them with each fresh snapshot is already correct.
-        await client.query(
+        // A year that was already closed keeps who closed it and when; only the totals move.
+        if (alreadyClosed) {
+          await client.query(
+            `UPDATE fee_year_close
+             SET carried_count = carried_count + $3, carried_total = carried_total + $4,
+                 writeoff_count = writeoff_count + $5, writeoff_total = writeoff_total + $6,
+                 open_count = $7, open_total = $8
+             WHERE school_id = $1 AND academic_year = $2`,
+            [school_id, from_year, carriedCount, carriedTotal, writeoffCount, writeoffTotal, stillOpenCount, stillOpenTotal])
+        } else await client.query(
           `INSERT INTO fee_year_close
              (school_id, academic_year, closed_by, carried_count, carried_total,
               writeoff_count, writeoff_total, open_count, open_total, is_reopened, closed_at)
