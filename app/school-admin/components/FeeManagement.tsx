@@ -1079,6 +1079,7 @@ ${Number(pbSummary.carried_forward) > 0 ? `<p style="font-size:11px;color:#92400
             onGoToYearRollover={() => onGoToYearRollover?.()}
             onStatsChanged={loadStats} onLedgerChanged={bumpLedger}
             onAcademicYearsChanged={loadAcademicYears} onPassoutChanged={loadPassout}
+            onCollectYear={year => viewArchiveYear(year, 'collect')}
           />
         </div>
       )}

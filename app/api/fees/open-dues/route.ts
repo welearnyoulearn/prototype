@@ -18,6 +18,7 @@ type Row = {
   owner_user_id: number | null; owner_name: string | null
   promised_date: string | null; deadline: string | null; note: string | null
   age_days: number; days_to_deadline: number | null
+  carry_to: string | null
   last_collected_by: string | null; last_collected_on: string | null; last_collected_amount: string | null
 }
 
@@ -38,6 +39,13 @@ async function handleGET(req: NextRequest) {
               od.promised_date::text AS promised_date, od.deadline::text AS deadline, od.note,
               (CURRENT_DATE - od.created_at::date) AS age_days,
               (od.deadline - CURRENT_DATE) AS days_to_deadline,
+              -- Where a balance can be carried: a later year that is not closed (the current one first).
+              -- Students who have left can only pay, be waived or be written off.
+              (SELECT ay.label FROM academic_years ay
+               WHERE ay.school_id = od.school_id AND ay.label > od.academic_year AND COALESCE(s.status, 'active') = 'active'
+                 AND NOT EXISTS (SELECT 1 FROM fee_year_close c
+                                 WHERE c.school_id = ay.school_id AND c.academic_year = ay.label AND c.is_reopened = FALSE)
+               ORDER BY ay.is_current DESC, ay.label LIMIT 1) AS carry_to,
               lp.collected_by_name AS last_collected_by, lp.paid_date::text AS last_collected_on, lp.amount AS last_collected_amount,
               (SELECT SUM(GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0))
                FROM student_fee_ledger l
@@ -62,7 +70,7 @@ async function handleGET(req: NextRequest) {
       return {
         id: r.id, academic_year: r.academic_year, student_id: r.student_id, student_name: r.student_name,
         grade: r.grade, section: r.section,
-        amount_at_close: Number(r.amount_at_close), balance_now: balance, resolved,
+        amount_at_close: Number(r.amount_at_close), balance_now: balance, resolved, carry_to: r.carry_to,
         owner_user_id: r.owner_user_id, owner_name: r.owner_name,
         promised_date: r.promised_date, deadline: r.deadline, note: r.note,
         last_collected_by: r.last_collected_by, last_collected_on: r.last_collected_on,

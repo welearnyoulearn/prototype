@@ -1310,7 +1310,7 @@ test.describe.serial('Fee Management — Full Lifecycle', () => {
     expect(d.closed).toBe(true)
   })
 
-  test('YE-011: Payment blocked on closed year', async () => {
+  test('YE-011: Dues left open in a closed year can still be paid (#495)', async () => {
     // Get any unpaid ledger for studentB
     const { data } = await api(
       `/api/fees/ledger?school_id=${schoolId}&student_id=${studentB}&status=pending`,
@@ -1325,15 +1325,17 @@ test.describe.serial('Fee Management — Full Lifecycle', () => {
       payment_mode: 'cash',
       collected_by_name: 'Test Admin',
     }, adminCookie)
-    expect(payStatus).toBe(409)
-    const d = payData as { error: string }
-    expect(d.error).toContain('academic year is closed')
+    expect(payStatus).toBe(201)
+    // Undo it so later tests see the same balances; a payment made after the close can be cancelled.
+    const cancelled = await api('/api/fees/payments/cancel', 'POST',
+      { payment_id: (payData as { id: number }).id, action: 'cancel', reason: 'test cleanup' }, adminCookie)
+    expect(cancelled.status).toBe(200)
   })
 
-  test('YE-012: Apply after close → 409', async () => {
+  test('YE-012: Only carry forward and write off apply after close → others 409', async () => {
     const { status, data } = await api('/api/fees/year-end', 'POST', {
       action: 'apply', school_id: schoolId, from_year: AY, to_year: AY_NEXT,
-      decisions: [{ student_id: studentC, decision: 'writeoff' }],
+      decisions: [{ student_id: studentC, decision: 'open' }],
     }, adminCookie)
     expect(status).toBe(409)
     const d = data as { error: string }

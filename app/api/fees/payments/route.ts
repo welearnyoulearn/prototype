@@ -5,7 +5,7 @@ import { requireFeeAccess } from '@/lib/auth'
 import { withWatchline } from '@/lib/logger'
 import { todayIST } from '@/lib/istDate'
 import { claimIdempotencyKey, saveIdempotentResponse } from '@/lib/idempotency'
-import { lockLedgerYearsAndIsClosed } from '@/lib/feeRollover'
+import { lockLedgerYears } from '@/lib/feeRollover'
 
 // Hard ceiling on rows per request so a payment history can never come back unbounded.
 const MAX_LIMIT = 500
@@ -177,21 +177,11 @@ async function handlePOST(req: NextRequest) {
 
       await client.query('BEGIN')
 
-      // Serialize against year-end apply/close/reopen for every academic year these
-      // ledger rows belong to — the SAME advisory lock those actions take
-      // (lib/feeRollover.ts). Without this, the closed-year check just below could
-      // read "not closed" and this transaction could still be mid-flight applying
-      // its payment when a concurrent year-end close lands, landing a completed
-      // payment inside what the admin now believes is a closed, immutable year.
-      // Taking the lock(s) BEFORE the check (not after, like a row lock would need)
-      // is required here because there's no specific ledger row a close action
-      // itself locks — the year-end route's own comment on lockYearClose explains why.
-      // lockLedgerYearsAndIsClosed takes the year lock(s) first, then checks closed — the
-      // lock must precede the check so a concurrent year-end close can't slip in between.
-      if (await lockLedgerYearsAndIsClosed(client, guardIds)) {
-        await client.query('ROLLBACK')
-        return NextResponse.json({ error: 'This academic year is closed. Reopen it to record payments.' }, { status: 409 })
-      }
+      // Serialize against year-end apply/close/reopen for every academic year these ledger rows
+      // belong to — the SAME advisory lock those actions take (lib/feeRollover.ts) — so a payment
+      // can't land halfway through a carry forward or write-off. A closed year still takes payments
+      // on dues left open (#495).
+      await lockLedgerYears(client, guardIds)
 
       // Duplicate-submission guard — see lib/idempotency.ts. A network timeout +
       // retry, or a double-click before the UI's own disable-while-saving state

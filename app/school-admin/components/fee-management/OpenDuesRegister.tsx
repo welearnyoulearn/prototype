@@ -5,7 +5,7 @@ import { fmt, plural } from './format'
 
 type Row = {
   id: number; academic_year: string; student_id: number; student_name: string; grade: string; section: string
-  amount_at_close: number; balance_now: number; resolved: boolean
+  amount_at_close: number; balance_now: number; resolved: boolean; carry_to: string | null
   owner_user_id: number | null; owner_name: string | null
   promised_date: string | null; deadline: string | null; note: string | null
   age_days: number; days_to_deadline: number | null; overdue: boolean
@@ -20,13 +20,20 @@ type Payload = { rows: Row[]; staff: Staff[]; summary: { open: number; overdue: 
 
 // Students left on "Leave Open" when a year was closed. Each has an owner, a promised date, a note and a
 // deadline; the amount is what is still owed now, so a row disappears once it is paid, carried or written off.
-// compact = read-only summary for the Overview; otherwise the full, editable register.
-export default function OpenDuesRegister({ schoolId, compact = false, onManage }: { schoolId: number; compact?: boolean; onManage?: () => void }) {
+// compact = read-only summary for the Overview; otherwise the full, editable register, where the money can
+// also be collected or waived (on the Collect tab), carried forward or written off.
+export default function OpenDuesRegister({ schoolId, compact = false, onManage, onCollect, onChanged, version = 0 }: {
+  schoolId: number; compact?: boolean; onManage?: () => void
+  onCollect?: (academicYear: string) => void; onChanged?: () => void; version?: number
+}) {
   const [data, setData] = useState<Payload | null>(null)
   const [error, setError] = useState('')
   const [saving, setSaving] = useState<number | null>(null)
   const [msg, setMsg] = useState('')
   const [draft, setDraft] = useState<Record<number, { owner?: string; promised?: string; note?: string }>>({})
+  const [action, setAction] = useState<{ row: Row; kind: 'carry' | 'writeoff' } | null>(null)
+  const [reason, setReason] = useState('')
+  const [busy, setBusy] = useState(false)
 
   const load = useCallback(async () => {
     try {
@@ -34,7 +41,7 @@ export default function OpenDuesRegister({ schoolId, compact = false, onManage }
       if (r.ok) { setData(await r.json()); setError('') } else setError('Could not load the open-dues register')
     } catch { setError('Network error — the open-dues register could not be loaded') }
   }, [schoolId])
-  useEffect(() => { load() }, [load])
+  useEffect(() => { load() }, [load, version])
 
   if (error) return <p className="text-sm text-red-600">{error}</p>
   if (!data || data.rows.length === 0) return null
@@ -52,6 +59,38 @@ export default function OpenDuesRegister({ schoolId, compact = false, onManage }
     if (r.ok) { setDraft(p => { const n = { ...p }; delete n[row.id]; return n }); setMsg('✓ Saved'); await load() }
     else setMsg(j.error || 'Could not save')
     setSaving(null)
+  }
+
+  async function post(url: string, body: object) {
+    const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    return { ok: r.ok, json: await r.json().catch(() => ({})) }
+  }
+
+  async function resolve() {
+    if (!action) return
+    const { row, kind } = action
+    if (kind === 'writeoff' && reason.trim().length < 3) { setMsg('Say why this amount is being written off'); return }
+    setBusy(true); setMsg('')
+    try {
+      const applied = await post('/api/fees/year-end', {
+        action: 'apply', school_id: schoolId, from_year: row.academic_year, to_year: row.carry_to ?? undefined,
+        decisions: [{ student_id: row.student_id, decision: kind, reason: reason.trim() || undefined }],
+      })
+      if (applied.ok) {
+        setMsg(kind === 'carry' ? `✓ ${fmt(row.balance_now)} carried to ${row.carry_to}` : `✓ ${fmt(row.balance_now)} written off`)
+        setAction(null)
+      } else if (applied.json.needs_approval) {
+        const asked = await post('/api/fees/year-end/writeoff-requests', {
+          school_id: schoolId, academic_year: row.academic_year, items: [{ student_id: row.student_id, reason: reason.trim() }],
+        })
+        if (!asked.ok) { setMsg(asked.json.error || 'Could not send the write-off for sign-off'); return }
+        setMsg(`✓ Sent for sign-off. Once it is approved (Year-End, ${row.academic_year}), choose Write off again.`)
+        setAction(null)
+      } else { setMsg(applied.json.error || 'Could not save'); return }
+      await load()
+      onChanged?.()
+    } catch { setMsg('Network error — nothing may have been saved. Check the register and try again.') }
+    finally { setBusy(false) }
   }
 
   const deadlineLabel = (r: Row) => r.days_to_deadline == null ? '—'
@@ -101,7 +140,26 @@ export default function OpenDuesRegister({ schoolId, compact = false, onManage }
   return (
     <div data-testid="open-dues-register" className="bg-white rounded-xl border border-amber-200 p-5 space-y-3">
       {header}
-      {msg && <p className={`text-sm font-medium ${msg.startsWith('✓') ? 'text-green-600' : 'text-red-600'}`}>{msg}</p>}
+      {msg && <p data-testid="open-dues-message" className={`text-sm font-medium ${msg.startsWith('✓') ? 'text-green-600' : 'text-red-600'}`}>{msg}</p>}
+      {action && (
+        <div data-testid="open-dues-confirm" className="rounded-lg border border-amber-300 bg-amber-50 p-3 flex flex-wrap items-center gap-3 text-sm text-amber-900">
+          <span>
+            {action.kind === 'carry'
+              ? <>Carry <b>{fmt(action.row.balance_now)}</b> owed by <b>{action.row.student_name}</b> from {action.row.academic_year} to <b>{action.row.carry_to}</b>?</>
+              : <>Write off <b>{fmt(action.row.balance_now)}</b> owed by <b>{action.row.student_name}</b> for {action.row.academic_year}? It will no longer be collected.</>}
+          </span>
+          {action.kind === 'writeoff' && (
+            <input data-testid="open-dues-reason" type="text" maxLength={500} value={reason} onChange={e => { setReason(e.target.value); setMsg('') }}
+              placeholder="Reason (required)" aria-label="Reason for write-off" className="text-xs border border-amber-300 rounded-lg px-2 py-1.5 w-56 bg-white" />
+          )}
+          <button data-testid="open-dues-confirm-yes" disabled={busy} onClick={resolve}
+            className="text-xs bg-amber-600 text-white px-3 py-1.5 rounded-lg font-medium hover:bg-amber-700 disabled:opacity-50">
+            {busy ? 'Saving…' : action.kind === 'carry' ? 'Carry forward' : 'Write off'}
+          </button>
+          <button data-testid="open-dues-confirm-no" disabled={busy} onClick={() => setAction(null)}
+            className="text-xs border border-gray-300 bg-white text-gray-700 px-3 py-1.5 rounded-lg font-medium">Cancel</button>
+        </div>
+      )}
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
@@ -113,7 +171,7 @@ export default function OpenDuesRegister({ schoolId, compact = false, onManage }
               <th className="py-2 pr-3 font-semibold">Owner</th>
               <th className="py-2 pr-3 font-semibold">Promised by</th>
               <th className="py-2 pr-3 font-semibold">Note</th>
-              <th className="py-2" />
+              <th className="py-2 font-semibold">Resolve</th>
             </tr>
           </thead>
           <tbody>
@@ -147,6 +205,18 @@ export default function OpenDuesRegister({ schoolId, compact = false, onManage }
                       placeholder="What was agreed…" className="text-xs border border-gray-200 rounded-lg px-2 py-1 w-44" />
                   </td>
                   <td className="py-2">
+                    <div className="flex flex-wrap gap-1.5 min-w-[14rem] mb-1.5">
+                      {onCollect && (
+                        <button data-testid={`open-dues-collect-${r.student_id}`} onClick={() => onCollect(r.academic_year)}
+                          className="text-xs border border-blue-300 text-blue-700 px-2 py-1 rounded-lg font-medium hover:bg-blue-50">Collect / waive</button>
+                      )}
+                      {r.carry_to && (
+                        <button data-testid={`open-dues-carry-${r.student_id}`} onClick={() => { setAction({ row: r, kind: 'carry' }); setReason(''); setMsg('') }}
+                          className="text-xs border border-gray-300 text-gray-700 px-2 py-1 rounded-lg font-medium hover:bg-gray-50">Carry forward</button>
+                      )}
+                      <button data-testid={`open-dues-writeoff-${r.student_id}`} onClick={() => { setAction({ row: r, kind: 'writeoff' }); setReason(''); setMsg('') }}
+                        className="text-xs border border-red-300 text-red-600 px-2 py-1 rounded-lg font-medium hover:bg-red-50">Write off</button>
+                    </div>
                     {dirty && (
                       <button data-testid={`open-dues-save-${r.student_id}`} disabled={saving === r.id} onClick={() => save(r)}
                         className="text-xs bg-blue-600 text-white px-3 py-1 rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50">{saving === r.id ? 'Saving…' : 'Save'}</button>
