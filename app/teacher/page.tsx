@@ -169,12 +169,13 @@ function TeacherPortal() {
             setClassViewInitialTab(payload.tab)
             setClassViewOpenExamId(payload.examId)
             navigateTo('class-view')
-          }
-        }).catch(() => {})
+          } else navigateTo('my-classes')
+        }).catch(() => navigateTo('my-classes'))
     } else {
       setClassViewInitialTab(undefined)
       setClassViewOpenExamId(undefined)
-      navigateTo(key)
+      // A class view without a class is an empty screen (#511).
+      navigateTo(key === 'class-view' ? 'my-classes' : key)
     }
   }
 

@@ -14,7 +14,8 @@ type Notification = {
   is_read: boolean
   created_at: string
   sender_name: string | null
-  data?: string | null  // JSON string with exam_id, class_id, subject_name etc.
+  // exam_id, class_id, subject_name etc. The column is JSONB, so the API sends an object; older callers sent a string.
+  data?: string | Record<string, unknown> | null
 }
 
 type NavPayload = { examId?: number; classId?: number; tab?: string; subjectName?: string }
@@ -272,7 +273,8 @@ export default function NotificationBell({ teacherId, schoolId, studentId, paren
       let payload: NavPayload | undefined
       if (n.data) {
         try {
-          const parsed = JSON.parse(n.data)
+          const parsed = (typeof n.data === 'string' ? JSON.parse(n.data) : n.data) as
+            { exam_id?: number; class_id?: number; subject_name?: string }
           payload = {
             examId: parsed.exam_id,
             classId: parsed.class_id,
