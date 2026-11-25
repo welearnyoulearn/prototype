@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
 import { AnnouncementCreateSchema, normaliseAudience, normaliseClasses, type TargetClass } from '@/lib/announcements'
-import { getViewer, readerCanSee } from '@/lib/announcementAudience'
+import { getViewer, parseReaderRole, readerCanSee } from '@/lib/announcementAudience'
 import { recordAudit, staffDisplayName } from '@/lib/announcementAudit'
 import { todayIST } from '@/lib/istDate'
 
@@ -40,7 +40,7 @@ const READER_SCOPES: Record<string, string> = {
 //   audience=teachers|students|parents filters by audience (staff only).
 export async function GET(req: NextRequest) {
   try {
-    const viewer = await getViewer()
+    const viewer = await getViewer(parseReaderRole(req.nextUrl.searchParams.get('as')))
     if (!viewer) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     const school_id = req.nextUrl.searchParams.get('school_id')
     if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
