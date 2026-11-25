@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { ANNOUNCEMENTS_CHANGED } from './announcementEvents'
+import { ANNOUNCEMENTS_CHANGED, withReader } from './announcementEvents'
 import type { NoticeItem } from './types'
 
 // How many live announcements this person has not seen yet (for the Announcements tab badge).
@@ -11,7 +11,7 @@ export function useUnreadAnnouncements(schoolId: number | null | undefined): num
     if (!schoolId) return
     let cancelled = false
     const load = () => {
-      fetch(`/api/announcements?school_id=${schoolId}`)
+      fetch(withReader(`/api/announcements?school_id=${schoolId}`))
         .then(r => (r.ok ? r.json() : []))
         .then((data: unknown) => {
           if (cancelled) return

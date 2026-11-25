@@ -30,6 +30,13 @@ All notable changes to the WLYL School prototype are documented here.
 - `e2e/newspaper.spec.ts`: platform admin builds, student reads and answers, reload and repeat answers, pull, with real logins on a throwaway local database (`E2E_LOCAL_DATABASE_URL`).
 - `DOCS/openapi.json` documents the new operations.
 
+## [Unreleased] - Announcement popup shows once (#536)
+
+### Fixed
+- **Announcement popup came back on every visit** in the teacher, student and parent portals when the same browser was also signed in to the school-admin portal. The admin login took priority, so "seen" and "acknowledged" were never saved. Each portal now sends `as=teacher|student|parent` to the announcement APIs, and only that portal's login is used.
+- Tapping "I have read this" in the popup now closes it.
+- `/parent?tab=<section>` links now open that section. Before, picking the only child on page load reset the tab to Overview.
+
 ## [Unreleased] - Parent session revoke (#468)
 
 ### Fixed

@@ -19,13 +19,23 @@ export type Viewer =
 
 const STAFF_ROLES = ['school_admin', 'principal', 'vice_principal']
 
+export function parseReaderRole(raw: string | null | undefined): ReaderRole | undefined {
+  return raw === 'teacher' || raw === 'student' || raw === 'parent' ? raw : undefined
+}
+
 // Who is asking? School staff, or a teacher / student / parent (with their classes loaded from the
 // database — never trusted from the cookie, because a promoted student's cookie still names the old class).
-export async function getViewer(): Promise<Viewer | null> {
-  const staff = await getSession({ passive: true })
-  if (staff && STAFF_ROLES.includes(staff.role) && staff.schoolId) return { kind: 'staff', schoolId: staff.schoolId, userId: staff.userId }
+// `as` = the portal the request comes from. One browser can hold several portal cookies at once (a school
+// admin who also opens the parent portal); without it the admin cookie would win, the reader would get the
+// staff list with no "seen" flag, and the popup would come back on every visit. With `as`, only that
+// portal's session is used.
+export async function getViewer(as?: ReaderRole): Promise<Viewer | null> {
+  if (!as) {
+    const staff = await getSession({ passive: true })
+    if (staff && STAFF_ROLES.includes(staff.role) && staff.schoolId) return { kind: 'staff', schoolId: staff.schoolId, userId: staff.userId }
+  }
 
-  const teacher = await getTeacherSession()
+  const teacher = !as || as === 'teacher' ? await getTeacherSession() : null
   if (teacher) {
     const { rows } = await pool.query<{ grade: string; section: string }>(
       `SELECT DISTINCT c.grade, c.section
@@ -37,7 +47,7 @@ export async function getViewer(): Promise<Viewer | null> {
     return { kind: 'reader', reader: { role: 'teacher', id: teacher.teacherId, schoolId: teacher.schoolId, classes: rows } }
   }
 
-  const student = await getStudentSession()
+  const student = !as || as === 'student' ? await getStudentSession() : null
   if (student) {
     const { rows } = await pool.query<{ grade: string; section: string | null }>(
       `SELECT grade, section FROM students WHERE id = $1 AND school_id = $2 AND (status IS NULL OR status = 'active')`,
@@ -46,7 +56,7 @@ export async function getViewer(): Promise<Viewer | null> {
     return { kind: 'reader', reader: { role: 'student', id: student.studentId, schoolId: student.schoolId, classes: rows } }
   }
 
-  const parent = await getParentSession()
+  const parent = !as || as === 'parent' ? await getParentSession() : null
   if (parent) {
     const { rows } = await pool.query<{ grade: string; section: string | null }>(
       `SELECT s.grade, s.section
