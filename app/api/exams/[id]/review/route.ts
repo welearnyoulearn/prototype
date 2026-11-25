@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse, after } from 'next/server'
 import { dispatchPendingPushes } from '@/lib/push'
 import pool, { ensureDB } from '@/lib/db'
-import { requireExamsTeacher, isClassTeacherOf } from '@/lib/examsAuth'
+import { requireExamsTeacher, isClassTeacherOf, getApplicableExamStudentIds, examMarkCoverage } from '@/lib/examsAuth'
 
 // POST /api/exams/[id]/review
 // The class teacher's "I've checked every subject's marks, forward this to
@@ -47,6 +47,17 @@ export async function POST(
       return NextResponse.json({
         error: `Pending subjects: ${pendingSubjects.map(s => s.subject_name).join(', ')}`,
         pending_subjects: pendingSubjects.map(s => s.subject_name),
+      }, { status: 400 })
+    }
+
+    // A student who joined between two subject submissions has only some marks. That can only be
+    // fixed before review, so say so now rather than leaving the exam impossible to release.
+    const roster = await getApplicableExamStudentIds(Number(exam_id), actor.schoolId)
+    const { partial } = await examMarkCoverage(Number(exam_id), roster)
+    if (partial.length > 0) {
+      const { rows: names } = await pool.query<{ name: string }>(`SELECT name FROM students WHERE id = ANY($1::int[]) ORDER BY name`, [partial])
+      return NextResponse.json({
+        error: `Marks are incomplete for ${names.map(n => n.name).join(', ')}. Reopen the missing subject and enter them before forwarding.`,
       }, { status: 400 })
     }
 

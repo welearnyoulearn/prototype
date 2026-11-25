@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse, after } from 'next/server'
 import { dispatchPendingPushes } from '@/lib/push'
 import pool, { ensureDB } from '@/lib/db'
-import { requireExamsAdmin, getApplicableExamStudentIds } from '@/lib/examsAuth'
+import { requireExamsAdmin, getApplicableExamStudentIds, hasNoClassTeacherReview, examMarkCoverage } from '@/lib/examsAuth'
 import { isPassing } from '@/lib/examGrading'
 import { awardPoints } from '@/lib/rewards'
 
-// POST /api/exams/[id]/release
+// POST /api/exams/[id]/release   Body: { school_id, confirm_missing? }
+// A class with no class teacher is released straight from marks collection (#500). Students with no
+// marks at all are left out, but only after the admin confirms it (#501).
 // School admin's final action — the only thing that actually makes an
 // exam's results visible to students and parents (GET /api/exams/[id]/marks
 // and GET /api/students/[id]/exams both gate on status === 'released'). This
@@ -21,7 +23,7 @@ export async function POST(
     await ensureDB()
     const { id: exam_id } = await params
     const body = await req.json()
-    const { school_id } = body
+    const { school_id, confirm_missing } = body
 
     const actor = await requireExamsAdmin(school_id)
     if (!actor) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
@@ -47,7 +49,7 @@ export async function POST(
         await client.query('ROLLBACK')
         return NextResponse.json({ error: 'Already released' }, { status: 409 })
       }
-      if (lockedExam.status !== 'teacher_reviewed') {
+      if (lockedExam.status !== 'teacher_reviewed' && !await hasNoClassTeacherReview(Number(exam_id), client)) {
         await client.query('ROLLBACK')
         return NextResponse.json({ error: 'This exam has not been reviewed by the class teacher yet' }, { status: 409 })
       }
@@ -64,21 +66,32 @@ export async function POST(
         return NextResponse.json({ error: 'Every subject must be submitted before release' }, { status: 409 })
       }
       totalMax = Number(subjectSummary.total_max)
-      const studentIds = await getApplicableExamStudentIds(Number(exam_id), actor.schoolId, client)
-      if (studentIds.length === 0) {
+      const roster = await getApplicableExamStudentIds(Number(exam_id), actor.schoolId, client)
+      if (roster.length === 0) {
         await client.query('ROLLBACK')
         return NextResponse.json({ error: 'This exam has no applicable active students' }, { status: 409 })
       }
-      const { rows: [coverage] } = await client.query(`
-        SELECT COUNT(*)::int AS entered
-        FROM exam_marks
-        WHERE exam_id = $1 AND student_id = ANY($2::int[])
-          AND (marks_obtained IS NOT NULL OR is_absent)
-      `, [exam_id, studentIds])
-      if (Number(coverage.entered) !== studentIds.length * Number(subjectSummary.subject_count)) {
+      const coverage = await examMarkCoverage(Number(exam_id), roster, client)
+      const namesOf = async (ids: number[]) => (await client.query<{ id: number; name: string }>(
+        `SELECT id, name FROM students WHERE id = ANY($1::int[]) ORDER BY name`, [ids])).rows
+      if (coverage.partial.length > 0 || coverage.complete.length === 0) {
+        const names = (await namesOf(coverage.partial)).map(s => s.name).join(', ')
         await client.query('ROLLBACK')
-        return NextResponse.json({ error: 'Marks are incomplete for one or more students' }, { status: 409 })
+        return NextResponse.json({
+          error: names
+            ? `Marks are incomplete for ${names}. Reopen the missing subject so their marks can be entered.`
+            : 'Marks are incomplete for every student',
+        }, { status: 409 })
       }
+      if (coverage.none.length > 0 && confirm_missing !== true) {
+        const missing = await namesOf(coverage.none)
+        await client.query('ROLLBACK')
+        return NextResponse.json({
+          error: `No marks for ${missing.map(s => s.name).join(', ')}. Students who join after marks are submitted have none. Release results without them?`,
+          code: 'STUDENTS_WITHOUT_MARKS', students: missing,
+        }, { status: 409 })
+      }
+      const studentIds = coverage.complete
       const studentResult = await client.query(`
         SELECT s.id, s.name, SUM(CASE WHEN em.is_absent THEN 0 ELSE em.marks_obtained END)::text AS total
         FROM students s

@@ -31,6 +31,7 @@ type MarksData = {
   exam: ExamListRow; subjects: Array<{ subject_name: string; max_marks: number; pass_marks: number | null }>
   students: StudentResult[]; subject_stats: SubjectStat[]
   pass_count: number; fail_count: number; total_max: number
+  admin_can_release?: boolean
 }
 
 const EXAM_TYPE_LABELS: Record<string, string> = {
@@ -1403,6 +1404,8 @@ function ResultsAndRelease({ schoolId }: { schoolId: number }) {
   const [releasing, setReleasing] = useState(false)
   const [releaseError, setReleaseError] = useState('')
   const [releaseConfirm, setReleaseConfirm] = useState(false)
+  // Students with no marks, waiting for the admin to agree to release without them.
+  const [releaseWithout, setReleaseWithout] = useState('')
 
   useEffect(() => { loadExamList() }, [schoolId]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1415,22 +1418,23 @@ function ResultsAndRelease({ schoolId }: { schoolId: number }) {
   }
 
   async function loadMarks(exam: ExamListRow) {
-    setSelectedExam(exam); setMarksLoading(true); setMarksData(null); setReleaseError(''); setReleaseConfirm(false)
+    setSelectedExam(exam); setMarksLoading(true); setMarksData(null); setReleaseError(''); setReleaseConfirm(false); setReleaseWithout('')
     try {
       const data = await fetch(`/api/exams/${exam.id}/marks?school_id=${schoolId}`).then(r => r.json())
       if (data.exam) setMarksData(data)
     } finally { setMarksLoading(false) }
   }
 
-  async function handleRelease() {
+  async function handleRelease(confirmMissing = false) {
     if (!selectedExam) return
     setReleasing(true); setReleaseError('')
     try {
       const res = await fetch(`/api/exams/${selectedExam.id}/release`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ school_id: schoolId }),
+        body: JSON.stringify({ school_id: schoolId, ...(confirmMissing ? { confirm_missing: true } : {}) }),
       })
       const data = await res.json()
+      if (data.code === 'STUDENTS_WITHOUT_MARKS') { setReleaseWithout(data.error); setReleasing(false); return }
       if (!res.ok) { setReleaseError(friendlyExamError(data.error, res.status)); setReleasing(false); return }
       await loadExamList()
       await loadMarks({ ...selectedExam, status: 'released' })
@@ -1495,10 +1499,14 @@ function ResultsAndRelease({ schoolId }: { schoolId: number }) {
           </div>
         ) : (
           <div className="space-y-4">
-            {marksData.exam.status === 'teacher_reviewed' && (
+            {(marksData.admin_can_release || marksData.exam.status === 'teacher_reviewed') && marksData.exam.status !== 'released' && (
               <div className="bg-violet-50 border border-violet-200 rounded-md p-4 flex items-center justify-between gap-4">
                 <div>
-                  <p className="text-sm font-bold text-violet-800">Reviewed by the class teacher — ready to release</p>
+                  <p className="text-sm font-bold text-violet-800" data-testid="exam-release-heading">
+                    {marksData.exam.status === 'teacher_reviewed'
+                      ? 'Reviewed by the class teacher — ready to release'
+                      : 'All subjects submitted. This class has no class teacher — check the marks, then release'}
+                  </p>
                   <p className="text-xs text-violet-600 mt-0.5">Releasing sends results to every student and parent in this class. This cannot be undone.</p>
                 </div>
                 {!releaseConfirm ? (
@@ -1509,12 +1517,22 @@ function ResultsAndRelease({ schoolId }: { schoolId: number }) {
                 ) : (
                   <div className="flex items-center gap-2 flex-shrink-0">
                     <button onClick={() => setReleaseConfirm(false)} className="px-3 py-2 text-xs font-semibold text-gray-500">Cancel</button>
-                    <button onClick={handleRelease} disabled={releasing} data-testid="exam-release-confirm"
+                    <button onClick={() => handleRelease()} disabled={releasing} data-testid="exam-release-confirm"
                       className="px-5 py-2.5 bg-violet-600 text-white rounded-md text-sm font-bold hover:bg-violet-700 disabled:opacity-50 transition-colors">
                       {releasing ? 'Releasing…' : 'Confirm Release'}
                     </button>
                   </div>
                 )}
+              </div>
+            )}
+            {releaseWithout && (
+              <div className="bg-amber-50 border border-amber-300 rounded-md px-4 py-3 flex flex-wrap items-center gap-3 text-sm text-amber-900" data-testid="exam-release-missing">
+                <span className="flex-1 min-w-[14rem]">{releaseWithout}</span>
+                <button type="button" onClick={() => { setReleaseWithout(''); setReleaseConfirm(false) }} className="px-3 py-2 text-xs font-semibold text-gray-600">Cancel</button>
+                <button type="button" onClick={() => handleRelease(true)} disabled={releasing} data-testid="exam-release-without"
+                  className="px-4 py-2 bg-amber-600 text-white rounded-md text-xs font-bold hover:bg-amber-700 disabled:opacity-50">
+                  Release without them
+                </button>
               </div>
             )}
             {releaseError && <div className="bg-red-50 border border-red-200 rounded-md px-4 py-3 text-sm text-red-600">{releaseError}</div>}
