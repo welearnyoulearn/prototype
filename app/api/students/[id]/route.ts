@@ -10,7 +10,7 @@ import { ClassWorkflowError, ensureClassWithSetup } from '@/lib/classManagement'
 
 const SAFE_STUDENT_COLUMNS = `id, school_id, name, email, grade, section, roll_number,
   school_roll_number, parent_name, parent_phone, parent_email, phone, status,
-  password_changed, created_at, date_of_birth, gender, avatar_url`
+  password_changed, created_at, date_of_birth`
 
 const EDITABLE_FIELDS = new Set([
   'name', 'email', 'grade', 'section', 'phone', 'parent_name', 'parent_phone',
