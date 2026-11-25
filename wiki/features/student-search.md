@@ -62,6 +62,7 @@ A student looks up a study topic in one search box and sees Google results with 
 |------|--------|-------|
 | 2026-11-25 | Initial build | #538 |
 | 2026-11-25 | Bug fix: existing databases did not get the search tables (`SCHEMA_VERSION` not raised), so the parent screen failed to load | #538 |
+| 2026-11-25 | Bug fix: the dev database had already recorded version 77, so 75 was skipped; raised to 78 | #538 |
 
 ## Known issues
 
