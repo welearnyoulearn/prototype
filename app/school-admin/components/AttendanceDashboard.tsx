@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { ClipboardList } from 'lucide-react'
 import { useOfflineAttendance } from '../hooks/useOfflineAttendance'
 import AttendanceTodayPanel, { type AttendanceOverview } from './AttendanceTodayPanel'
-import { todayIST } from '@/lib/attendanceRules'
+import { todayIST, attendancePercent } from '@/lib/attendanceRules'
 import { EmptyState } from '@/components/ui/empty-state'
 import AttendanceOverviewDashboard from './AttendanceOverviewDashboard'
 import AttendanceAbsentees from './AttendanceAbsentees'
@@ -44,9 +44,10 @@ function fmt(t: string | null) {
   return new Date(t).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })
 }
 
-function pct(present: number | null, total: number | null) {
-  if (!total || !present) return null
-  return Math.round((present / total) * 100)
+// Late counts as attended — the one rule every attendance screen follows (lib/attendanceRules.ts).
+function pct(present: number | null, late: number | null, total: number | null) {
+  // The day's counts arrive as text from the database, so convert before adding ("3" + "1" is "31").
+  return attendancePercent(Number(present ?? 0) + Number(late ?? 0), Number(total ?? 0))
 }
 
 function SessionCell({ total, present, absent, late, markedBy, markedAt, session }: {
@@ -59,7 +60,7 @@ function SessionCell({ total, present, absent, late, markedBy, markedAt, session
   session: 'morning' | 'afternoon'
 }) {
   const marked = !!total
-  const pctVal = pct(present, total)
+  const pctVal = pct(present, late, total)
   const time = fmt(markedAt)
 
   if (!marked) {

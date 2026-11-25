@@ -13,6 +13,8 @@ import { useFeature } from '@/lib/features-context'
 import { useConfirm } from '@/components/ui/use-confirm'
 import { syllabusPrompt, SYLLABUS_EXAMPLE } from '@/lib/syllabus/chatgpt-prompt'
 import StudentDetail from './StudentDetail'
+import { attendancePercent, attendanceBand, todayIST } from '@/lib/attendanceRules'
+import { examInsights, dailyAttendance, type ExamInsights, type ReleasedExamMarks } from '@/lib/classInsights'
 
 type Subject = {
   id: number
@@ -2140,6 +2142,51 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
   const [analyticsLoading, setAnalyticsLoading] = useState(false)
   const [analyticsData, setAnalyticsData] = useState<ClassAnalytics | null>(null)
 
+  // Overview numbers (#503): released exam results and this month's attendance.
+  const [exams, setExams] = useState<ExamInsights | null>(null)
+  const [examsFailed, setExamsFailed] = useState(false)
+  const [heat, setHeat] = useState<Map<string, number> | null>(null)
+  const [heatFailed, setHeatFailed] = useState(false)
+
+  useEffect(() => {
+    if (!hasExamMarksFeature || activeTab !== 'Overview') return
+    let stale = false
+    const json = async (url: string) => {
+      const r = await fetch(url)
+      if (!r.ok) throw new Error(url)
+      return r.json()
+    }
+    ;(async () => {
+      const list = await json(`/api/exams?school_id=${schoolId}&class_id=${classId}`) as
+        Array<{ id: number; exam_name: string; exam_date: string | null; status: string; passing_pct: number }>
+      // A teacher's list can hold one row per subject, so take each released exam once.
+      const released = [...new Map(list.filter(e => e.status === 'released').map(e => [e.id, e])).values()]
+      const marks: ReleasedExamMarks[] = await Promise.all(released.map(async e => {
+        const d = await json(`/api/exams/${e.id}/marks?school_id=${schoolId}`)
+        return { id: e.id, name: e.exam_name, date: e.exam_date, passingPct: d.exam?.passing_pct ?? e.passing_pct,
+          students: d.students ?? [], subjects: d.subject_stats ?? [] }
+      }))
+      if (!stale) { setExams(examInsights(marks)); setExamsFailed(false) }
+    })().catch(() => { if (!stale) setExamsFailed(true) })
+    return () => { stale = true }
+  }, [activeTab, classId, schoolId, hasExamMarksFeature])
+
+  useEffect(() => {
+    if (!hasAttendanceFeature || activeTab !== 'Overview') return
+    let stale = false
+    const month = todayIST().slice(0, 7)
+    Promise.all([
+      fetch(`/api/attendance?class_id=${classId}&month=${month}&school_id=${schoolId}`),
+      fetch(`/api/attendance?view=class-month&class_id=${classId}&month=${month}&school_id=${schoolId}`),
+    ]).then(async ([records, summary]) => {
+      if (!records.ok || !summary.ok) throw new Error('attendance')
+      const nonWorking = ((await summary.json()).nonWorking ?? []) as Array<{ date: string }>
+      const days = dailyAttendance(await records.json(), nonWorking.map(d => d.date))
+      if (!stale) { setHeat(days); setHeatFailed(false) }
+    }).catch(() => { if (!stale) setHeatFailed(true) })
+    return () => { stale = true }
+  }, [activeTab, classId, schoolId, hasAttendanceFeature])
+
   // Broadcast Message modal — a quick one-off notification to this class's
   // students and/or parents, same audience choice as a school announcement.
   const [showBroadcast, setShowBroadcast] = useState(false)
@@ -2170,7 +2217,7 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
   // Initial load
   useEffect(() => {
     setLoading(true)
-    const todayStr = new Date().toISOString().split('T')[0]
+    const todayStr = todayIST()
     Promise.all([
       fetch(`/api/classes/${classId}`).then(r => r.json()),
       fetch(`/api/students?school_id=${schoolId}&grade=${encodeURIComponent(grade)}&section=${encodeURIComponent(section)}`).then(r => r.json()),
@@ -2445,7 +2492,7 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
                 {/* Morning */}
                 {(() => {
                   const s = sessionStats(morningAtt)
-                  const pct = s.total > 0 ? Math.round((s.present / s.total) * 100) : 0
+                  const pct = attendancePercent(s.present + s.late, s.total) ?? 0
                   return (
                     <div className="bg-orange-50 rounded-lg px-3 py-2.5 border border-orange-100">
                       <div className="flex items-center gap-1.5 mb-1">
@@ -2454,9 +2501,9 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
                       </div>
                       {s.total > 0 ? (
                         <>
-                          <p className="text-lg font-bold text-gray-900">{s.present}<span className="text-sm text-muted-foreground">/{s.total}</span></p>
+                          <p className="text-lg font-bold text-gray-900">{s.present + s.late}<span className="text-sm text-muted-foreground">/{s.total}</span></p>
                           <div className="flex gap-2 mt-1">
-                            <span className="text-xs text-green-600">{pct}% present</span>
+                            <span className="text-xs text-green-600">{pct}% attended</span>
                             {s.absent > 0 && <span className="text-xs text-red-500">{s.absent} absent</span>}
                             {s.late > 0 && <span className="text-xs text-yellow-600">{s.late} late</span>}
                           </div>
@@ -2470,7 +2517,7 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
                 {/* Afternoon */}
                 {(() => {
                   const s = sessionStats(afternoonAtt)
-                  const pct = s.total > 0 ? Math.round((s.present / s.total) * 100) : 0
+                  const pct = attendancePercent(s.present + s.late, s.total) ?? 0
                   return (
                     <div className="bg-purple-50 rounded-lg px-3 py-2.5 border border-purple-100">
                       <div className="flex items-center gap-1.5 mb-1">
@@ -2479,9 +2526,9 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
                       </div>
                       {s.total > 0 ? (
                         <>
-                          <p className="text-lg font-bold text-gray-900">{s.present}<span className="text-sm text-muted-foreground">/{s.total}</span></p>
+                          <p className="text-lg font-bold text-gray-900">{s.present + s.late}<span className="text-sm text-muted-foreground">/{s.total}</span></p>
                           <div className="flex gap-2 mt-1">
-                            <span className="text-xs text-green-600">{pct}% present</span>
+                            <span className="text-xs text-green-600">{pct}% attended</span>
                             {s.absent > 0 && <span className="text-xs text-red-500">{s.absent} absent</span>}
                             {s.late > 0 && <span className="text-xs text-yellow-600">{s.late} late</span>}
                           </div>
@@ -2495,32 +2542,42 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
               </div>
             </div>
 
-            <div className="bg-white rounded-md border border-gray-200 px-5 py-4">
-              <p className="text-xs text-muted-foreground uppercase tracking-wide mb-2">Class Average</p>
-              <p className="text-3xl font-bold text-gray-900">—</p>
-              <p className="text-xs text-muted-foreground mt-0.5">Across all subjects</p>
-            </div>
-            <div className="bg-white rounded-md border border-gray-200 px-5 py-4">
-              <p className="text-xs text-muted-foreground uppercase tracking-wide mb-2">At Risk Students</p>
-              <p className="text-3xl font-bold text-gray-900">—</p>
-              <p className="text-xs text-muted-foreground mt-0.5">Marks needed</p>
-            </div>
+            {hasExamMarksFeature && (
+              <>
+                <div className="bg-white rounded-md border border-gray-200 px-5 py-4" data-testid="class-average">
+                  <p className="text-xs text-muted-foreground uppercase tracking-wide mb-2">Class Average</p>
+                  <p className="text-3xl font-bold text-gray-900">{exams?.classAvgPct != null ? `${exams.classAvgPct}%` : '—'}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    {examsFailed ? 'Could not load exam results' : !exams ? 'Loading…' : exams.recent.length === 0 ? 'No results released yet'
+                      : isClassTeacher ? 'Across all subjects' : 'Across your subjects'}
+                  </p>
+                </div>
+                <div className="bg-white rounded-md border border-gray-200 px-5 py-4" data-testid="class-at-risk">
+                  <p className="text-xs text-muted-foreground uppercase tracking-wide mb-2">At Risk Students</p>
+                  <p className="text-3xl font-bold text-gray-900">{exams?.classAvgPct != null ? exams.atRisk.length : '—'}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">Average below the pass mark</p>
+                </div>
+              </>
+            )}
           </div>
 
           {/* Subject cards */}
           {subjects.length > 0 && (
             <div className={`grid gap-4 grid-cols-2 ${subjects.length <= 3 ? 'sm:grid-cols-3' : subjects.length === 4 ? 'sm:grid-cols-4' : 'sm:grid-cols-5'}`}>
-              {subjects.map(subj => (
-                <div key={subj.id} className="bg-white rounded-md border border-gray-200 px-5 py-4">
-                  <div className="flex items-start justify-between mb-1">
-                    <p className="font-semibold text-gray-800 text-sm leading-tight">{subj.subject_name}</p>
-                    <span className="text-sm font-bold text-gray-300 ml-2">—</span>
+              {subjects.map(subj => {
+                const avg = exams?.subjectAvg.get(subj.subject_name)
+                return (
+                  <div key={subj.id} data-testid={`class-subject-${subj.id}`} className="bg-white rounded-md border border-gray-200 px-5 py-4">
+                    <div className="flex items-start justify-between mb-1">
+                      <p className="font-semibold text-gray-800 text-sm leading-tight">{subj.subject_name}</p>
+                      <span className={`text-sm font-bold ml-2 ${avg == null ? 'text-gray-300' : 'text-gray-800'}`}>{avg == null ? '—' : `${avg}%`}</span>
+                    </div>
+                    <p className="text-xs text-muted-foreground mb-3">{subj.teacher_name || 'No teacher assigned'}</p>
+                    <div className="w-full bg-gray-100 rounded-full h-1.5"><div className="h-1.5 rounded-full bg-emerald-500" style={{ width: `${Math.min(avg ?? 0, 100)}%` }} /></div>
+                    <p className="text-xs text-muted-foreground mt-1.5">{subj.periods_per_week} periods/week{avg == null && exams ? ' · No marks yet' : ''}</p>
                   </div>
-                  <p className="text-xs text-muted-foreground mb-3">{subj.teacher_name || 'No teacher assigned'}</p>
-                  <div className="w-full bg-gray-100 rounded-full h-1.5"><div className="h-1.5 rounded-full bg-gray-300 w-0" /></div>
-                  <p className="text-xs text-muted-foreground mt-1.5">{subj.periods_per_week} periods/week · No marks yet</p>
-                </div>
-              ))}
+                )
+              })}
             </div>
           )}
           {subjects.length === 0 && (
@@ -2571,7 +2628,11 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
                               }`}>{attRec.status}</span>
                             ) : <span className="text-xs text-muted-foreground">—</span>}
                           </td>
-                          <td className="px-3 py-3 text-muted-foreground text-sm">—</td>
+                          <td className="px-3 py-3 text-sm" data-testid={`class-student-avg-${student.id}`}>
+                            {exams?.studentAvg.has(student.id)
+                              ? <span className={exams.atRisk.includes(student.id) ? 'font-semibold text-red-600' : 'text-gray-800'}>{exams.studentAvg.get(student.id)}%</span>
+                              : <span className="text-muted-foreground">—</span>}
+                          </td>
                         </tr>
                       )
                     })}
@@ -2580,19 +2641,55 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
               )}
             </div>
             <div className="sm:col-span-2 space-y-4">
-              <div className="bg-white rounded-md border border-gray-200 px-5 py-4">
-                <h3 className="font-semibold text-gray-800 text-sm mb-3">Attendance Heatmap</h3>
-                <div className="grid grid-cols-7 gap-1 mb-2">
-                  {Array.from({ length: 35 }).map((_, i) => <div key={i} className="w-full aspect-square rounded-sm bg-gray-100" />)}
+              {hasAttendanceFeature && (
+                <div className="bg-white rounded-md border border-gray-200 px-5 py-4" data-testid="class-heatmap">
+                  <h3 className="font-semibold text-gray-800 text-sm mb-3">Attendance Heatmap</h3>
+                  {(() => {
+                    const today = todayIST()
+                    const [y, m] = today.split('-').map(Number)
+                    const days = new Date(Date.UTC(y, m, 0)).getUTCDate()
+                    const offset = (new Date(Date.UTC(y, m - 1, 1)).getUTCDay() + 6) % 7 // weeks start on Monday
+                    const colour = { good: 'bg-green-500', watch: 'bg-yellow-400', low: 'bg-red-400', none: 'bg-gray-100' }
+                    return (
+                      <div className="grid grid-cols-7 gap-1 mb-2">
+                        {Array.from({ length: offset }, (_, i) => <div key={`pad-${i}`} />)}
+                        {Array.from({ length: days }, (_, i) => {
+                          const date = `${today.slice(0, 7)}-${String(i + 1).padStart(2, '0')}`
+                          const value = heat?.get(date) ?? null
+                          const label = `${i + 1}: ${value === null ? 'no attendance' : `${value}% attended`}`
+                          return <div key={date} role="img" aria-label={label} title={label} data-date={date}
+                            className={`w-full aspect-square rounded-sm ${colour[attendanceBand(value)]}`} />
+                        })}
+                      </div>
+                    )
+                  })()}
+                  <p className="text-xs text-muted-foreground">
+                    {heatFailed ? 'Could not load attendance' : !heat ? 'Loading…' : heat.size === 0 ? 'No attendance marked this month' : 'This month · green is good attendance, red is low'}
+                  </p>
                 </div>
-                <p className="text-xs text-muted-foreground">No attendance data yet</p>
-              </div>
-              <div className="bg-white rounded-md border border-gray-200 px-5 py-4">
-                <h3 className="font-semibold text-gray-800 text-sm mb-3">Recent Exam Results</h3>
-                <div className="py-6 text-center">
-                  <p className="text-xs text-muted-foreground">No exams published yet</p>
+              )}
+              {hasExamMarksFeature && (
+                <div className="bg-white rounded-md border border-gray-200 px-5 py-4" data-testid="class-recent-results">
+                  <h3 className="font-semibold text-gray-800 text-sm mb-3">Recent Exam Results</h3>
+                  {exams && exams.recent.length > 0 ? (
+                    <ul className="divide-y divide-gray-50">
+                      {exams.recent.slice(0, 3).map(e => (
+                        <li key={e.id} className="py-2 flex items-center justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium text-gray-800 truncate">{e.name}</p>
+                            <p className="text-xs text-muted-foreground">{e.passCount} passed · {e.failCount} failed</p>
+                          </div>
+                          <span className="text-sm font-bold text-gray-800">{e.avgPct == null ? '—' : `${e.avgPct}%`}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <div className="py-6 text-center">
+                      <p className="text-xs text-muted-foreground">{examsFailed ? 'Could not load exam results' : !exams ? 'Loading…' : 'No results released yet'}</p>
+                    </div>
+                  )}
                 </div>
-              </div>
+              )}
             </div>
           </div>
         </div>
