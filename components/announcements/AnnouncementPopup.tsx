@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import NoticeModal from './NoticeModal'
-import { announceChange } from './announcementEvents'
+import { announceChange, withReader } from './announcementEvents'
 import { pickPopupNotices } from '@/lib/announcementPopup'
 import type { Lang, NoticeItem } from './types'
 
@@ -20,7 +20,7 @@ export default function AnnouncementPopup({
 
   useEffect(() => {
     let cancelled = false
-    fetch(`/api/announcements?school_id=${schoolId}`)
+    fetch(withReader(`/api/announcements?school_id=${schoolId}`))
       .then(r => (r.ok ? r.json() : []))
       .then((data: unknown) => {
         if (cancelled) return
@@ -30,7 +30,7 @@ export default function AnnouncementPopup({
         setQueue(picked)
         setTotal(picked.length)
         // Mark them all seen the moment they are shown, so a closed tab or a reload never repeats them.
-        Promise.all(picked.map(n => fetch(`/api/announcements/${n.id}/read`, { method: 'POST' }).catch(() => null)))
+        Promise.all(picked.map(n => fetch(withReader(`/api/announcements/${n.id}/read`), { method: 'POST' }).catch(() => null)))
           .then(() => announceChange())
       })
       .catch(() => {})
@@ -40,9 +40,10 @@ export default function AnnouncementPopup({
   const current = queue[0]
   if (!current) return null
 
+  // "I have read this" closes the popup (on to the next one, if any); the notice stays in the Announcements tab
   async function acknowledge(id: number) {
-    setQueue(q => q.map(n => (n.id === id ? { ...n, acked: true } : n)))
-    await fetch(`/api/announcements/${id}/ack`, { method: 'POST' }).catch(() => null)
+    setQueue(q => q.filter(n => n.id !== id))
+    await fetch(withReader(`/api/announcements/${id}/ack`), { method: 'POST' }).catch(() => null)
     announceChange()
   }
 

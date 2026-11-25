@@ -1,13 +1,13 @@
 import { NextResponse } from 'next/server'
 import pool from '@/lib/db'
-import { getViewer, readerCanSee, type Reader } from '@/lib/announcementAudience'
+import { getViewer, readerCanSee, type Reader, type ReaderRole } from '@/lib/announcementAudience'
 import type { TargetClass } from '@/lib/announcements'
 
 // Shared by POST /api/announcements/{id}/read and /ack: the reader must be a teacher / student / parent
 // of the notice's school, and the notice must be published, not deleted, already visible and addressed to them.
-export async function markNotice(idParam: string, mode: 'seen' | 'ack'): Promise<NextResponse> {
+export async function markNotice(idParam: string, mode: 'seen' | 'ack', as?: ReaderRole): Promise<NextResponse> {
   if (!/^\d+$/.test(idParam)) return NextResponse.json({ error: 'Invalid id' }, { status: 400 })
-  const viewer = await getViewer()
+  const viewer = await getViewer(as)
   if (!viewer) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   // School staff write the notices; there is nothing for them to "see" or acknowledge
   if (viewer.kind === 'staff') return NextResponse.json({ ok: true, skipped: true })
