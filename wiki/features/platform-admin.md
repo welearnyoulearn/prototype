@@ -34,6 +34,7 @@ The WLYL team's console: create schools, set plans, switch features per plan and
 - **School details** on the school page: edit all onboarding details (an older school needs its State for the GST split on bills) and see the setup checklist progress.
 - Billing (Usage, Bills) and Traffic (By school, School Health, a school's users) show 50 rows per page with the shared `app/components/Pagination.tsx` pager. Paging is in the browser over the rows already loaded; changing a search, filter, month or period goes back to page 1. (#400)
 - Billing → Usage shows each school's **Our cost** for the month (every meter with a cost set, e.g. AI tutor tokens). The AI tutor's monthly question limit (`tutor.question`) and token cost (`tutor.tokens`) are ordinary meters in Plans & Pricing and the Billing drawer. (#441)
+- A newer plan decision replaces older ones: renewing or saving a plan cancels a downgrade still waiting to start (the school page shows it, with **Cancel this change**), and the monthly run stops charging a monthly plan fee once a newer term has replaced it (#497, #498).
 - **Known security gap:** several `/api/platform/*` routes and `/api/schools/{id}/subscription` have no auth guard (see `docs/KNOWN_ISSUES.md`).
 
 ## Related

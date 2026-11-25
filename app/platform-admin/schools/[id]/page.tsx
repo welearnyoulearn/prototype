@@ -99,6 +99,7 @@ export default function SchoolDetailPage() {
   // Plan price (#358): list prices, the agreed price in force today, and this save's choices (null = default).
   const [plans, setPlans]               = useState<PlanRow[]>([])
   const [term, setTerm]                 = useState<PlanTerm | null>(null)
+  const [scheduled, setScheduled]       = useState<PlanTerm | null>(null)
   const [periodInput, setPeriodInput]   = useState<'yearly' | 'monthly' | null>(null)
   const [agreedInput, setAgreedInput]   = useState<string | null>(null)
   const [reasonInput, setReasonInput]   = useState<string | null>(null)
@@ -164,7 +165,11 @@ export default function SchoolDetailPage() {
           fetch(`/api/schools/${schoolId}/subscription`),
         ])
         if (plansRes.ok) setPlans(await plansRes.json())
-        if (subRes.ok) setTerm(((await subRes.json()) as { term?: PlanTerm | null }).term ?? null)
+        if (subRes.ok) {
+          const sub = (await subRes.json()) as { term?: PlanTerm | null; scheduled?: PlanTerm | null }
+          setTerm(sub.term ?? null)
+          setScheduled(sub.scheduled ?? null)
+        }
         const schoolData = await schoolRes.json()
         const featData   = await featRes.json()
         const overridesData = await overridesRes.json().catch(() => ({ overrides: {} }))
@@ -228,6 +233,7 @@ export default function SchoolDetailPage() {
       setSavedSub(data.tier === selectedTier)
       // A mid-term downgrade is stored for renewal: the tier and today's term stay as they are.
       if (data.term && data.term.startDate <= today) setTerm(data.term)
+      setScheduled(data.term && data.term.startDate > today ? data.term : null)
       setPeriodInput(null); setAgreedInput(null); setReasonInput(null)
       setPlanMsg(typeof data.message === 'string' ? data.message : '')
       setSelectedTier(data.tier)
@@ -252,9 +258,30 @@ export default function SchoolDetailPage() {
       if (!res.ok) throw new Error(data.error)
       setSchool(s => s ? { ...s, plan_start_date: data.plan_start_date, plan_end_date: data.plan_end_date } : s)
       setEndInput(data.plan_end_date ?? '')
-      setTermMsg(`Plan now runs until ${data.plan_end_date}`)
+      const cancelled = scheduled ? ' · The waiting plan change was cancelled' : ''
+      setScheduled(null)
+      setTermMsg(`Plan now runs until ${data.plan_end_date}${cancelled}`)
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to update plan dates')
+    } finally { setSavingTerm(false) }
+  }
+
+  // Saving the current plan again replaces any change waiting to start.
+  async function cancelScheduled() {
+    if (!school?.tier) return
+    setSavingTerm(true); setError(''); setPlanMsg('')
+    try {
+      const res = await fetch(`/api/schools/${schoolId}/subscription`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tier: school.tier }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      setScheduled(null)
+      setSelectedTier(school.tier)
+      setPlanMsg(typeof data.message === 'string' ? data.message : '')
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to cancel the plan change')
     } finally { setSavingTerm(false) }
   }
 
@@ -694,6 +721,19 @@ export default function SchoolDetailPage() {
                 {priceError
                   ? <p className="mt-3 text-sm text-red-700" role="alert" data-testid="plan-price-error">{priceError}</p>
                   : <p className="mt-3 text-sm text-gray-700" data-testid="plan-bill-preview">{billPreview()}</p>}
+              </div>
+            )}
+
+            {scheduled && (
+              <div className="mt-5 flex flex-wrap items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900" data-testid="plan-scheduled-change">
+                <span>
+                  This school moves to the <span className="font-semibold capitalize">{scheduled.tier}</span> plan on{' '}
+                  {new Date(scheduled.startDate + 'T00:00:00Z').toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })}.
+                </span>
+                <button type="button" onClick={cancelScheduled} disabled={savingTerm} data-testid="plan-scheduled-cancel"
+                  className="rounded-lg border border-amber-300 bg-white px-3 py-1.5 font-medium disabled:opacity-50">
+                  Cancel this change
+                </button>
               </div>
             )}
 

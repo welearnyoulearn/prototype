@@ -26,6 +26,16 @@ const TERM_COLS = `id, tier, start_date::text AS "startDate", end_date::text AS 
   list_price::float8 AS "listPrice", agreed_price::float8 AS "agreedPrice", discount_reason AS "discountReason"`
 const TIER_RANK: Record<string, number> = { none: 0, basic: 1, standard: 2, premium: 3 }
 const inr = (n: number) => '₹' + n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+// A new plan decision replaces any change still waiting to start (#497). Terms that were already billed
+// are kept. Returns what was removed, for the message and the audit log.
+async function cancelScheduledTerms(schoolId: number, today: string): Promise<PlanTerm[]> {
+  const { rows } = await pool.query<PlanTerm>(
+    `DELETE FROM school_plan_terms t
+     WHERE t.school_id = $1 AND t.start_date > $2::date
+       AND NOT EXISTS (SELECT 1 FROM saas_invoices i WHERE i.plan_term_id = t.id)
+     RETURNING ${TERM_COLS}`, [schoolId, today])
+  return rows
+}
 // '2026-11-01'..'2027-10-31' → '2026–27'
 const yearsLabel = (start: string, end: string) => start.slice(0, 4) === end.slice(0, 4) ? start.slice(0, 4) : `${start.slice(0, 4)}–${end.slice(2, 4)}`
 const longDate = (d: string) => new Date(d + 'T00:00:00Z').toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })
@@ -79,8 +89,12 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       const planTerm = platformAdmin ? (await pool.query<PlanTerm>(
         `SELECT ${TERM_COLS} FROM school_plan_terms WHERE school_id = $1 AND start_date <= $2::date AND end_date >= $2::date
          ORDER BY start_date DESC, id DESC LIMIT 1`, [id, todayIST()])).rows[0] : undefined
+      const scheduled = platformAdmin ? (await pool.query<PlanTerm>(
+        `SELECT ${TERM_COLS} FROM school_plan_terms WHERE school_id = $1 AND start_date > $2::date
+         ORDER BY start_date, id DESC LIMIT 1`, [id, todayIST()])).rows[0] : undefined
       return NextResponse.json({
-        ...row, staff_limit: limit, active_staff: active, seats_over: seatsOver(active, limit), ...(platformAdmin ? { term: planTerm ?? null } : {}),
+        ...row, staff_limit: limit, active_staff: active, seats_over: seatsOver(active, limit),
+        ...(platformAdmin ? { term: planTerm ?? null, scheduled: scheduled ?? null } : {}),
         plan_status: state.status, days_left: state.days_left, grace_ends: state.grace_ends,
       })
     } catch (error) {
@@ -171,6 +185,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         // ends; the cheaper term is stored to start the day after. Nothing changes or is billed now.
         if (cur && renew !== true && !term.started && TIER_RANK[tier] < (TIER_RANK[cur.tier] ?? 0)) {
           const start = addDays(cur.endDate, 1)
+          const replaced = await cancelScheduledTerms(schoolId, today)
           const { rows: [next] } = await pool.query<PlanTerm>(
             `INSERT INTO school_plan_terms (school_id, tier, start_date, end_date, billing_period, list_price, agreed_price, discount_reason, created_by)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING ${TERM_COLS}`,
@@ -179,7 +194,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
           await pool.query(
             `INSERT INTO platform_audit_log (actor_id, actor_email, action, entity_type, entity_id, entity_name, details)
              VALUES ($1, (SELECT email FROM users WHERE id = $1), 'update_subscription', 'subscription', $2, (SELECT name FROM schools WHERE id = $2), $3)`,
-            [session.userId, schoolId, JSON.stringify({ from: fromTier, to: tier, downgrade_at_renewal: true, plan_term: next })]
+            [session.userId, schoolId, JSON.stringify({ from: fromTier, to: tier, downgrade_at_renewal: true, plan_term: next, cancelled_terms: replaced })]
           ).catch(err => console.error('[audit/subscription]', err))
           return NextResponse.json({
             ...sub, tier: fromTier, plan_start_date: dates?.s ?? null, plan_end_date: dates?.e ?? null,
@@ -209,6 +224,8 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       )
 
       const { rows: [school] } = await pool.query('SELECT name, email, school_code FROM schools WHERE id = $1', [schoolId])
+
+      const cancelled = await cancelScheduledTerms(schoolId, today)
 
       // Record the agreed price, and bill a yearly term (monthly terms are billed by the monthly run).
       let planTerm: PlanTerm | null = null
@@ -254,7 +271,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         [session.userId, schoolId, school?.name ?? null,
          JSON.stringify({ from: fromTier, to: tier, staff_limit: newLimit, active_staff: active, over_by: over, confirmed_over_limit: over > 0,
            plan_start_date: term?.start ?? null, plan_end_date: term?.end ?? null, renewed: renew === true, term_started: term?.started ?? false,
-           plan_term: planTerm, bill_id: billId ?? null })]
+           plan_term: planTerm, bill_id: billId ?? null, cancelled_terms: cancelled })]
       ).catch(err => console.error('[audit/subscription]', err))
 
       // The school's own administrators are told what happened and what to do — they would
@@ -297,7 +314,12 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         plan_start_date: term?.start ?? null, plan_end_date: term?.end ?? null,
         plan_status: planStatus(tier, term?.end ?? null, today).status,
         no_expiry: !!term && term.end === null,
-        ...(planTerm ? { term: planTerm, billId, message } : {}),
+        ...(planTerm ? { term: planTerm, billId } : {}),
+        ...(() => {
+          const note = cancelled.map(t => `The change to ${tierLabel(t.tier)} waiting for ${longDate(t.startDate)} was cancelled.`)
+          const text = [planTerm ? message : undefined, ...note].filter(Boolean).join('. ').replace(/\.\. /g, '. ')
+          return text ? { message: text } : {}
+        })(),
       })
     } catch (error) {
       console.error(error)
