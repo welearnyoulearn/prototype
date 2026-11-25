@@ -8,18 +8,18 @@ import assert from 'node:assert/strict'
 const url = process.env.UPGRADE_TEST_DATABASE_URL
 if (url && !['127.0.0.1', 'localhost'].includes(new URL(url).hostname)) throw new Error('UPGRADE_TEST_DATABASE_URL must be a local database')
 
-// The version dev recorded before Student Search was added.
-const VERSION_BEFORE_SEARCH = 74
+// The dev database already recorded 77 (from work that is not on the dev branch), although dev's own code was at 74.
+const RECORDED_ON_DEV = 77
 
 test('an existing database gets the search tables', { skip: url ? false : 'set UPGRADE_TEST_DATABASE_URL to an empty local database' }, async () => {
   process.env.DATABASE_URL = url
   const { default: pool, initDB } = await import('../db')
   try {
     await initDB()
-    // Put the database back to how it looked before this feature was deployed.
+    // Make the database look like dev did: no search tables, but a higher version already recorded.
     await pool.query('DROP TABLE IF EXISTS student_searches, student_search_consents')
     await pool.query(`DELETE FROM plan_features WHERE feature_key = 'student-search'`)
-    await pool.query('UPDATE app_bootstrap_state SET schema_version = $1', [VERSION_BEFORE_SEARCH])
+    await pool.query('UPDATE app_bootstrap_state SET schema_version = $1', [RECORDED_ON_DEV])
 
     await initDB()
 
