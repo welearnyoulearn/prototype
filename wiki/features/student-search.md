@@ -61,6 +61,7 @@ A student looks up a study topic in one search box and sees Google results with 
 | Date | Change | Issue |
 |------|--------|-------|
 | 2026-11-25 | Initial build | #538 |
+| 2026-11-25 | Bug fix: existing databases did not get the search tables (`SCHEMA_VERSION` not raised), so the parent screen failed to load | #538 |
 
 ## Known issues
 
