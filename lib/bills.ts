@@ -238,8 +238,14 @@ async function createUsageBill(schoolId: number, month: string): Promise<number 
     getMonthUsage(month, schoolId),
     pool.query<{ key: string; name: string }>(`SELECT key, name FROM usage_meters WHERE is_billable ORDER BY sort_order, key`),
     pool.query<{ id: number; tier: string; agreed_price: number }>(
-      `SELECT id, tier, agreed_price::float8 AS agreed_price FROM school_plan_terms
+      // A term replaced by one saved later (e.g. monthly switched to yearly) is never billed again (#498).
+      // "Later" only counts once it had started and was saved by the end of the month being billed.
+      `SELECT id, tier, agreed_price::float8 AS agreed_price FROM school_plan_terms t
        WHERE school_id = $1 AND billing_period = 'monthly' AND start_date < $3::date AND end_date >= $2::date
+         AND NOT EXISTS (
+           SELECT 1 FROM school_plan_terms n
+           WHERE n.school_id = t.school_id AND n.id > t.id AND n.start_date < $3::date
+             AND (n.created_at AT TIME ZONE 'Asia/Kolkata')::date < $3::date)
        ORDER BY start_date DESC, id DESC LIMIT 1`,
       [schoolId, start, end]),
   ])
@@ -412,6 +418,9 @@ export async function applyStartingTerms(today = todayIST()): Promise<number> {
      -- week (catch-up if the job missed a day): never overrides a plan someone changed by hand since.
      WHERE t.start_date <= $1::date AND t.start_date > $1::date - 7 AND t.end_date >= $1::date
        AND (t.created_at AT TIME ZONE 'Asia/Kolkata')::date < t.start_date
+       -- A renewal or other term saved afterwards that reaches this start date replaces it (#497).
+       AND NOT EXISTS (SELECT 1 FROM school_plan_terms n
+                       WHERE n.school_id = t.school_id AND n.id > t.id AND n.end_date >= t.start_date)
      ORDER BY t.school_id, t.start_date DESC, t.id DESC`,
     [today],
   )
