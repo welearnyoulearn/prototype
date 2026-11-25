@@ -7,6 +7,7 @@ import { useFeature } from '@/lib/features-context'
 import { GRADE_SEQUENCE } from '@/lib/grades'
 import { InlineLoader } from '@/components/loaders'
 import { useConfirm } from '@/components/ui/use-confirm'
+import { attendancePercent } from '@/lib/attendanceRules'
 
 type Props = { schoolId: number; onNavigate?: (tab: string, subTab?: string) => void }
 
@@ -832,7 +833,8 @@ function ClassDetail({
                   <div className="divide-y divide-gray-50">
                     {attSummary.map(row => {
                       const total = row.present + row.absent + row.late
-                      const pct = total > 0 ? Math.round((row.present / total) * 100) : 0
+                      const attended = row.present + row.late // late counts as attended
+                      const pct = attendancePercent(attended, total) ?? 0
                       const d = new Date(row.date + 'T00:00:00')
                       return (
                         <div key={row.date} className="flex items-center gap-4 px-4 py-2.5">
@@ -849,7 +851,7 @@ function ClassDetail({
                           </div>
                           <div className="text-right w-24 flex-shrink-0">
                             <span className={`text-xs font-bold ${pct >= 80 ? 'text-green-600' : pct >= 60 ? 'text-yellow-600' : 'text-red-600'}`}>{pct}%</span>
-                            <span className="text-xs text-muted-foreground ml-2">{row.present}/{total}</span>
+                            <span className="text-xs text-muted-foreground ml-2">{attended}/{total}</span>
                           </div>
                         </div>
                       )
