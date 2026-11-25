@@ -9,6 +9,35 @@ type CleanupBody = {
   cleanup_all?: boolean
 }
 
+// Tables whose rows are moved to the kept record below, and tables whose rows are only messages or
+// sign-in traces and may go with the duplicate. Anything else that points at a student is history that
+// deleting the record would destroy (every such link cascades), so it stops the merge (#513).
+const MOVED = ['student_parents', 'student_fee_ledger', 'fee_payments', 'fee_waivers', 'attendance', 'exam_applicable_students']
+const DISPOSABLE = ['notifications', 'student_portal_activity', 'student_portal_sessions']
+const HISTORY_LABELS: Record<string, string> = {
+  exam_marks: 'exam marks', student_points: 'points', student_class_history: 'class history',
+  daily_quiz_attempts: 'quiz attempts', student_doubts: 'doubts', parent_mark_acks: 'parent sign-offs',
+  student_fee_category_assignments: 'variable fee assignments', passout_students: 'passout record',
+}
+
+/** Names of the kinds of history a student still has. Reads the database's own links, so a new table is covered too. */
+async function historyOf(client: PoolClient, studentId: number): Promise<string[]> {
+  const { rows: links } = await client.query<{ table_name: string; column_name: string }>(`
+    SELECT c.relname AS table_name, a.attname AS column_name
+    FROM pg_constraint k
+    JOIN pg_class c ON c.oid = k.conrelid
+    JOIN pg_attribute a ON a.attrelid = k.conrelid AND a.attnum = k.conkey[1]
+    WHERE k.contype = 'f' AND k.confrelid = 'students'::regclass AND c.relname <> ALL($1::text[])
+    ORDER BY c.relname`, [[...MOVED, ...DISPOSABLE]])
+  if (links.length === 0) return []
+  // Identifiers come from the database catalogue, quoted; the student id stays a parameter.
+  const quote = (name: string) => `"${name.replace(/"/g, '""')}"`
+  const { rows } = await client.query<{ table_name: string }>(
+    links.map((l, i) => `SELECT $${i + 2}::text AS table_name WHERE EXISTS (SELECT 1 FROM ${quote(l.table_name)} WHERE ${quote(l.column_name)} = $1)`).join(' UNION '),
+    [studentId, ...links.map(l => l.table_name)])
+  return rows.map(r => HISTORY_LABELS[r.table_name] ?? r.table_name.replace(/_/g, ' ')).sort()
+}
+
 // Merges one duplicate student into the record being kept, then deletes the
 // duplicate — or skips it (returning a reason) if real financial history
 // would otherwise be lost.
@@ -58,7 +87,7 @@ async function mergeAndDeleteDuplicate(
            AND k.period_label    = d.period_label
        )`,
     [keepId, dupId]
-  ).catch(() => {})
+  )
 
   // Any ledger row that COULDN'T be remapped (a genuine collision with a bill
   // `keep` already has) is still attached to `dupId`. Before doing anything
@@ -66,17 +95,16 @@ async function mergeAndDeleteDuplicate(
   // it — carries real financial substance. Only fee_payments/fee_waivers
   // whose ledger_id still points at one of THESE unmapped rows count; rows
   // already remapped above are no longer at risk.
-  const { rows: [remaining] } = await client.query(
+  const { rows: [remaining] } = await client.query<{ paid_total: string; waived_total: string; has_payments: boolean; has_waivers: boolean }>(
     `SELECT
        COALESCE(SUM(l.amount_paid), 0) AS paid_total,
        COALESCE(SUM(COALESCE(l.waiver_amount, 0)), 0) AS waived_total,
-       EXISTS(SELECT 1 FROM fee_payments fp WHERE fp.ledger_id = l.id) AS has_payments,
-       EXISTS(SELECT 1 FROM fee_waivers  fw WHERE fw.ledger_id = l.id) AS has_waivers
+       COALESCE(BOOL_OR(EXISTS(SELECT 1 FROM fee_payments fp WHERE fp.ledger_id = l.id)), FALSE) AS has_payments,
+       COALESCE(BOOL_OR(EXISTS(SELECT 1 FROM fee_waivers  fw WHERE fw.ledger_id = l.id)), FALSE) AS has_waivers
      FROM student_fee_ledger l
-     WHERE l.student_id = $1
-     GROUP BY l.student_id`,
+     WHERE l.student_id = $1`,
     [dupId]
-  ).then(r => r.rows.length ? r : { rows: [{ paid_total: '0', waived_total: '0', has_payments: false, has_waivers: false }] })
+  )
 
   const hasFinancialSubstance = remaining && (
     parseFloat(remaining.paid_total) > 0 ||
@@ -91,24 +119,43 @@ async function mergeAndDeleteDuplicate(
     }
   }
 
+  const history = await historyOf(client, dupId)
+  if (history.length > 0) {
+    return {
+      deleted: false,
+      skippedReason: `This record still has ${history.join(', ')}, which deleting it would destroy. Check which record is the real one before removing either.`,
+    }
+  }
+
   // Any ledger rows still on the duplicate at this point are genuinely empty
   // (amount_paid=0, no waiver, no linked payment/waiver history) — safe to
-  // let them cascade-delete with the student.
-  await client.query(`UPDATE fee_payments SET student_id = $1 WHERE student_id = $2`, [keepId, dupId]).catch(() => {})
-  await client.query(`UPDATE fee_waivers SET student_id = $1 WHERE student_id = $2`, [keepId, dupId]).catch(() => {})
-  await client.query(`UPDATE attendance SET student_id = $1 WHERE student_id = $2`, [keepId, dupId]).catch(() => {})
+  // let them cascade-delete with the student. No error is swallowed here: a failed move must stop
+  // this duplicate (the savepoint undoes it) rather than delete what could not be moved.
+  await client.query(`UPDATE fee_payments SET student_id = $1 WHERE student_id = $2`, [keepId, dupId])
+  await client.query(`UPDATE fee_waivers SET student_id = $1 WHERE student_id = $2`, [keepId, dupId])
+  // A session the kept record already has stays as it is; the duplicate's copy goes with it.
+  await client.query(
+    `UPDATE attendance d SET student_id = $1
+     WHERE d.student_id = $2
+       AND NOT EXISTS (SELECT 1 FROM attendance k WHERE k.student_id = $1 AND k.date = d.date AND k.session = d.session)`,
+    [keepId, dupId])
+  await client.query(
+    `INSERT INTO exam_applicable_students (exam_id, student_id)
+     SELECT exam_id, $1 FROM exam_applicable_students WHERE student_id = $2
+     ON CONFLICT DO NOTHING`,
+    [keepId, dupId])
   await client.query(
     `INSERT INTO student_parents (student_id, parent_id)
      SELECT $1, parent_id FROM student_parents WHERE student_id = $2
      ON CONFLICT DO NOTHING`,
     [keepId, dupId]
-  ).catch(() => {})
-  await client.query(`DELETE FROM student_parents WHERE student_id = $1`, [dupId]).catch(() => {})
+  )
+  await client.query(`DELETE FROM student_parents WHERE student_id = $1`, [dupId])
   await client.query(`DELETE FROM students WHERE id = $1 AND school_id = $2`, [dupId, schoolId])
   await client.query(
     `INSERT INTO student_cleanup_log (school_id, kept_id, deleted_id, reason, done_by) VALUES ($1,$2,$3,$4,$5)`,
     [schoolId, keepId, dupId, reason, doneBy]
-  ).catch(() => {})
+  )
 
   return { deleted: true }
 }
