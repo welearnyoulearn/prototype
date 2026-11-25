@@ -66,3 +66,8 @@ API routes these screens call (all exist):
 | Date | Change | Issue |
 |------|--------|-------|
 | 2026-09-21 | Doc created from the code; status checked with `scripts/product-docs.mjs` | #162 |
+
+## Release rules
+
+- A class with no active class teacher has no review step: once every subject is submitted, the school admin releases the results (#500).
+- Students with no marks at all (usually joined after submission) are left out of the results after the admin confirms. A student with only some marks blocks review and release until the missing subject is entered (#501).

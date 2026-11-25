@@ -242,6 +242,44 @@ export async function examAppliesToStudent(
   return rows.length > 0
 }
 
+/**
+ * True while marks are being collected for a class that has nobody to review them: no class teacher,
+ * or one who is no longer active. The school admin then releases without that step (#500).
+ */
+export async function hasNoClassTeacherReview(examId: number, db: ExamQueryClient = pool): Promise<boolean> {
+  const { rows } = await db.query(`
+    SELECT 1 FROM exam_records e
+    JOIN classes c ON c.id = e.class_id
+    WHERE e.id = $1 AND e.status = 'collecting'
+      AND NOT EXISTS (SELECT 1 FROM teachers t
+                      WHERE t.id = c.class_teacher_id AND t.status = 'active' AND t.removed_at IS NULL)
+  `, [examId])
+  return rows.length > 0
+}
+
+/**
+ * Who on the exam's roster has marks: `complete` for every subject, `partial` for some, `none` for
+ * no subject (typically a student who joined after the marks were submitted, #501).
+ */
+export async function examMarkCoverage(
+  examId: number,
+  studentIds: number[],
+  db: ExamQueryClient = pool,
+): Promise<{ complete: number[]; partial: number[]; none: number[] }> {
+  const { rows } = await db.query(`
+    SELECT s.id,
+      COUNT(em.id) FILTER (WHERE em.marks_obtained IS NOT NULL OR em.is_absent)::int AS entered,
+      (SELECT COUNT(*) FROM exam_subjects WHERE exam_id = $1)::int AS subjects
+    FROM unnest($2::int[]) AS s(id)
+    LEFT JOIN exam_marks em ON em.exam_id = $1 AND em.student_id = s.id
+      AND em.subject_name IN (SELECT subject_name FROM exam_subjects WHERE exam_id = $1)
+    GROUP BY s.id ORDER BY s.id
+  `, [examId, studentIds])
+  const out: { complete: number[]; partial: number[]; none: number[] } = { complete: [], partial: [], none: [] }
+  for (const r of rows) out[r.entered === 0 ? 'none' : r.entered >= r.subjects ? 'complete' : 'partial'].push(Number(r.id))
+  return out
+}
+
 export async function getApplicableExamStudentIds(
   examId: number,
   schoolId: number,

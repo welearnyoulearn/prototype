@@ -87,6 +87,7 @@ export async function GET(
     for (const exam of exams) {
       const subjects = allSubjects.filter(subject => Number(subject.exam_id) === Number(exam.id))
       const marks = allMarks.filter(mark => Number(mark.exam_id) === Number(exam.id))
+      if (marks.length === 0) continue // joined after the results were released, or left out of them (#501)
 
       const marksMap: Record<string, { marks_obtained: number | null; is_absent: boolean }> = {}
       marks.forEach(m => {

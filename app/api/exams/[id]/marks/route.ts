@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse, after } from 'next/server'
 import { dispatchPendingPushes } from '@/lib/push'
 import pool, { ensureDB } from '@/lib/db'
-import { requireExamsAccess, requireExamsTeacher, isClassTeacherOf, isTeacherLinkedToExam, examAppliesToStudent, getApplicableExamStudentIds } from '@/lib/examsAuth'
+import { requireExamsAccess, requireExamsTeacher, isClassTeacherOf, isTeacherLinkedToExam, examAppliesToStudent, getApplicableExamStudentIds, hasNoClassTeacherReview } from '@/lib/examsAuth'
 import { isPassing } from '@/lib/examGrading'
 
 // GET /api/exams/[id]/marks?school_id=&student_id=
@@ -104,7 +104,9 @@ export async function GET(
 
     const totalMaxMarks = subjects.reduce((sum, s) => sum + s.max_marks, 0)
 
-    const studentResults = students.map(s => {
+    // Released results do not include students who had no marks when they were released (#501).
+    const listed = exam.status === 'released' ? students.filter(s => marksMap[s.id]) : students
+    const studentResults = listed.map(s => {
       const subjMarks: Record<string, { marks_obtained: number | null; is_absent: boolean }> = {}
       let totalObtained = 0
       let allEntered = true
@@ -166,7 +168,12 @@ export async function GET(
       }
     })
 
+    const adminCanRelease = actor.kind === 'admin' && subjects.length > 0
+      && subjects.every(s => s.status === 'submitted')
+      && (exam.status === 'teacher_reviewed' || await hasNoClassTeacherReview(Number(exam_id)))
+
     return NextResponse.json({
+      admin_can_release: adminCanRelease,
       exam,
       subjects,
       students: studentResults,
