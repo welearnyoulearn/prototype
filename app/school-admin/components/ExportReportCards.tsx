@@ -1,6 +1,7 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { toast } from 'sonner'
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -55,6 +56,26 @@ const EXAM_TYPE_LABELS: Record<string, string> = {
 
 // ── Main Component ─────────────────────────────────────────────────────────
 
+// The cards are shown on the page and also placed directly under <body>, hidden until printing. The
+// print copy sits outside the app layout, so everything else can be hidden without hiding the cards (#499).
+function PrintableCards({ children }: { children: ReactNode }) {
+  return (
+    <>
+      <style>{`
+        #report-card-root { display: none; }
+        @media print {
+          body > *:not(#report-card-root) { display: none !important; }
+          #report-card-root { display: block !important; }
+          #report-card-root .print-page { break-after: page; margin: 0 0 24px; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+          #report-card-root .print-page:last-child { break-after: auto; }
+        }
+      `}</style>
+      <div className="space-y-6" data-testid="report-card-preview">{children}</div>
+      {createPortal(<div id="report-card-root">{children}</div>, document.body)}
+    </>
+  )
+}
+
 export default function ExportReportCards({ schoolId }: { schoolId: number }) {
   // Shared data
   const [classes, setClasses]         = useState<ClassRow[]>([])
@@ -66,7 +87,6 @@ export default function ExportReportCards({ schoolId }: { schoolId: number }) {
   const [rcData, setRcData]           = useState<MarksData | null>(null)
   const [rcLoading, setRcLoading]     = useState(false)
   const [rcError, setRcError]         = useState('')
-  const printRef = useRef<HTMLDivElement>(null)
 
   // School info
   const [schoolName, setSchoolName]   = useState('')
@@ -220,16 +240,8 @@ export default function ExportReportCards({ schoolId }: { schoolId: number }) {
 
           {/* Report cards preview */}
           {rcData && (
-            <div ref={printRef} className="space-y-6 print:space-y-0">
-              <style>{`
-                @media print {
-                  body > *:not(#report-card-root) { display: none !important; }
-                  .no-print { display: none !important; }
-                  .print-page { page-break-after: always; padding: 24px; }
-                }
-              `}</style>
-
-              {rcData.student_results.map((student, idx) => (
+            <PrintableCards>
+              {rcData.student_results.map((student) => (
                 <div key={student.student_id}
                   className="print-page bg-white border border-gray-300 rounded-md overflow-hidden">
 
@@ -327,7 +339,7 @@ export default function ExportReportCards({ schoolId }: { schoolId: number }) {
                   </div>
                 </div>
               ))}
-            </div>
+            </PrintableCards>
           )}
         </div>
       )}
