@@ -29,6 +29,7 @@ import { CalendarDays, Home, GraduationCap, Phone, School, UserRound } from 'luc
 import { Skeleton } from '@/components/ui/skeleton'
 import { unregisterPushDevice } from '@/lib/pushClient'
 import ParentDailyReport, { ParentDailyReportCard } from './components/ParentDailyReport'
+import ParentSearch from './components/ParentSearch'
 
 // Used by printParentReceipt below — fee category names (admin-set),
 // transaction references (parent-typed, directly attacker-controlled) and
@@ -134,6 +135,7 @@ const NAV = [
   { key: 'results',    label: 'Results',            icon: 'M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z' },
   { key: 'syllabus',   label: 'Syllabus',           icon: 'M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253' },
   { key: 'library',    label: 'Digital Library',    icon: 'M12 6.253C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253m0-13v13' },
+  { key: 'search',     label: 'Search',             icon: 'M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z' },
   { key: 'profile',    label: 'Profile',            icon: 'M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z' },
 ]
 
@@ -186,6 +188,7 @@ function ParentDashboard() {
   function isNavItemVisible(key: string) {
     // Off by default for every plan, so it stays hidden until the school is confirmed to have it.
     if (key === 'daily-quiz') return enabledFeatures?.has('daily-quiz') ?? false
+    if (key === 'search') return enabledFeatures?.has('student-search') ?? false
     if (!RESTRICTABLE_NAV_KEYS.has(key)) return true
     if (enabledFeatures === null) return true
     return enabledFeatures.has(PORTAL_NAV_KEY_ALIASES[key] ?? key)
@@ -612,7 +615,7 @@ function ParentDashboard() {
   }
   const launcherSections: LauncherSection[] = ([
     { id: 'home', label: T.navGroups.home, icon: <Home className="w-3.5 h-3.5" aria-hidden="true" />, keys: ['overview'] },
-    { id: 'learning', label: T.navGroups.learning, icon: <GraduationCap className="w-3.5 h-3.5" aria-hidden="true" />, keys: ['attendance', 'results', 'exams', 'syllabus', 'library'] },
+    { id: 'learning', label: T.navGroups.learning, icon: <GraduationCap className="w-3.5 h-3.5" aria-hidden="true" />, keys: ['attendance', 'results', 'exams', 'syllabus', 'library', 'search'] },
     { id: 'school', label: T.navGroups.school, icon: <School className="w-3.5 h-3.5" aria-hidden="true" />, keys: ['calendar', 'fees'] },
     { id: 'account', label: T.navGroups.account, icon: <UserRound className="w-3.5 h-3.5" aria-hidden="true" />, keys: ['profile'] },
   ] as const)
@@ -940,6 +943,13 @@ function ParentDashboard() {
           {visited.has('library') && isNavItemVisible('library') && (
           <div hidden={activeNav !== 'library'}>
             <DigitalLibrary apiUrl={`/api/school/library?school_id=${student.school_id}&student_id=${student.id}`} />
+          </div>
+          )}
+
+          {/* ── STUDENT SEARCH: consent and this child's searches ──────────── */}
+          {visited.has('search') && isNavItemVisible('search') && (
+          <div hidden={activeNav !== 'search'}>
+            <ParentSearch key={student.id} studentId={student.id} studentName={student.name} />
           </div>
           )}
 

@@ -38,6 +38,8 @@ export const ALL_FEATURES: { key: string; label: string; category: string; porta
   { key: 'student-doubts',     label: 'Student Doubts',                  category: 'Learning', portals: ['school-admin', 'teacher', 'student', 'parent'] },
   // Daily Newspaper. Seeded OFF at every tier in lib/newspaperSchema.ts until the pilot.
   { key: 'daily-newspaper',     label: 'Daily Newspaper',                 category: 'Learning', portals: ['student'] },
+  // Student Search (#538). Seeded OFF at every tier; a student also needs a parent's consent.
+  { key: 'student-search',      label: 'Student Search',                  category: 'Learning', portals: ['student', 'parent'] },
 
   // ── Analytics & Intelligence ─────────────────────────────────────────────────
 
@@ -81,4 +83,5 @@ export const PORTAL_NAV_KEY_ALIASES: Record<string, string> = {
   'fees': 'fee-management',           // parent portal's fees nav key for the same capability
   'academic-calendar': 'calendar',    // school-admin's nav key for the Academic Calendar feature
   'newspaper': 'daily-newspaper',     // student portal's Daily Newspaper nav key
+  'search': 'student-search',         // student and parent portals' Search nav key
 }

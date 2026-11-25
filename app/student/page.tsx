@@ -61,6 +61,7 @@ const StudentAiHub      = dynamic(() => import('./components/StudentAiHub'),    
 const StudentDailyQuiz  = dynamic(() => import('./components/StudentDailyQuiz'), { loading: () => <ModuleSkeleton /> })
 const StudentClassCircle = dynamic(() => import('./components/StudentClassCircle'), { loading: () => <ModuleSkeleton /> })
 const StudentNewspaper  = dynamic(() => import('./components/StudentNewspaper'),  { loading: () => <ModuleSkeleton /> })
+const StudentSearch     = dynamic(() => import('./components/StudentSearch'),     { loading: () => <ModuleSkeleton /> })
 
 type Student = {
   id: number; name: string; grade: string; section: string; roll_number: string
@@ -86,6 +87,7 @@ const NAV_SECTIONS: NavSection[] = [
     label: 'LEARNING',
     items: [
       { key: 'newspaper', label: 'Today’s newspaper', sticker: 'scroll' },
+      { key: 'search', label: 'Search', sticker: 'magnifying-glass' },
       { key: 'class-circle', label: 'Class circle', sticker: 'party-popper' },
     ],
   },
@@ -158,6 +160,16 @@ function StudentPortal() {
   const [enabledFeatures, setEnabledFeatures] = useState<Set<string> | null>(null)
   const [aiAccessTier, setAiAccessTier] = useState<'ai_basic' | 'ai_pro' | 'none' | null>(null)
   const logoutInFlight = useRef(false)
+  // Search needs the school's feature AND a parent's consent, so it is hidden until both are confirmed.
+  const [searchAllowed, setSearchAllowed] = useState(false)
+  const searchEnabled = enabledFeatures?.has('student-search') ?? false
+  useEffect(() => {
+    if (!searchEnabled) return
+    fetch('/api/student/search', { cache: 'no-store' })
+      .then(r => (r.ok ? r.json() : null))
+      .then(data => setSearchAllowed(data?.allowed === true))
+      .catch(() => setSearchAllowed(false))
+  }, [searchEnabled])
 
   // Filters out nav items gated by a plan feature the school doesn't have
   // enabled for this portal — null (still loading) means "show everything"
@@ -170,6 +182,7 @@ function StudentPortal() {
     // Off by default for every plan, so it stays hidden until the school is confirmed to have it.
     if (key === 'daily-quiz') return enabledFeatures?.has('daily-quiz') ?? false
     if (key === 'newspaper') return enabledFeatures?.has('daily-newspaper') ?? false
+    if (key === 'search') return searchEnabled && searchAllowed
     if (!RESTRICTABLE_NAV_KEYS.has(key)) return true
     if (enabledFeatures === null) return true
     return enabledFeatures.has(PORTAL_NAV_KEY_ALIASES[key] ?? key)
@@ -365,6 +378,7 @@ function StudentPortal() {
             {visitedNav.has('daily-quiz') && isNavItemVisible('daily-quiz') && <div hidden={activeNav !== 'daily-quiz'}><StudentDailyQuiz doubtsEnabled={enabledFeatures?.has('student-doubts') ?? false} tutorEnabled={aiAccessTier === 'ai_pro'} /></div>}
             {visitedNav.has('announcements') && <div hidden={activeNav !== 'announcements'}><NoticeCenter schoolId={student.school_id} experience="student" mode="page" /></div>}
             {visitedNav.has('newspaper') && isNavItemVisible('newspaper') && <div hidden={activeNav !== 'newspaper'}><StudentNewspaper /></div>}
+            {visitedNav.has('search') && isNavItemVisible('search') && <div hidden={activeNav !== 'search'}><StudentSearch /></div>}
             {visitedNav.has('class-circle') && <div hidden={activeNav !== 'class-circle'}><StudentClassCircle /></div>}
             {visitedNav.has('attendance') && isNavItemVisible('attendance') && (
               <div hidden={activeNav !== 'attendance'}>

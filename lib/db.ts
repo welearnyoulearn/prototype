@@ -2,6 +2,7 @@ import { Pool, types } from 'pg'
 import { matchTeacher } from './matchTeacher'
 import { buildFeedbackCategoryBackfillAllQuery } from './feedback-defaults'
 import { ensureNewspaperSchema } from './newspaperSchema'
+import { ensureStudentSearchSchema } from './studentSearch/schema'
 
 // Return DATE columns as plain "YYYY-MM-DD" strings instead of JS Date objects.
 // Without this, pg serialises dates as UTC midnight which JSON-stringifies to
@@ -4510,4 +4511,7 @@ async function runIncrementalMigrations() {
 
   // Daily Newspaper (tables, ledger index, feature seeded OFF).
   await ensureNewspaperSchema(pool)
+
+  // Student Search (#538): consent and history tables, feature seeded OFF.
+  await ensureStudentSearchSchema(pool)
 }
