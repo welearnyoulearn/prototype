@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
-import { requireExamsAdmin } from '@/lib/examsAuth'
+import { requireExamsAdmin, getApplicableExamStudentIds } from '@/lib/examsAuth'
 import { recordUsage } from '@/lib/usage'
 
 // GET /api/export/marks?school_id=&exam_id=
@@ -36,8 +36,9 @@ export async function GET(req: NextRequest) {
       [exam_id]
     )
 
-    // Pivoted by student_id, not student name — two students sharing a name
-    // in the same class previously collapsed into one CSV row.
+    // Only the students in this exam (#506): the whole class, or the ones selected for it. Pivoted by
+    // student_id, not name — two students sharing a name previously collapsed into one CSV row.
+    const applicable = await getApplicableExamStudentIds(Number(exam_id), actor.schoolId)
     const { rows: marks } = await pool.query(`
       SELECT
         s.id           AS student_id,
@@ -47,14 +48,10 @@ export async function GET(req: NextRequest) {
         em.marks_obtained,
         em.is_absent
       FROM students s
-      JOIN classes c ON c.grade = s.grade AND c.section = s.section AND c.school_id = s.school_id
-      JOIN exam_records er ON er.class_id = c.id AND er.id = $1
       LEFT JOIN exam_marks em ON em.student_id = s.id AND em.exam_id = $1
-      WHERE s.school_id = $2
-        AND c.grade = $3 AND c.section = $4
-        AND (s.status IS NULL OR s.status = 'active')
+      WHERE s.school_id = $2 AND s.id = ANY($3::int[])
       ORDER BY s.roll_number NULLS LAST, s.name, em.subject_name
-    `, [exam_id, actor.schoolId, exam.grade, exam.section])
+    `, [exam_id, actor.schoolId, applicable])
 
     const studentMap = new Map<number, { name: string; roll: string; subjects: Record<string, string> }>()
     for (const row of marks) {
@@ -77,16 +74,19 @@ export async function GET(req: NextRequest) {
     const csvRows = Array.from(studentMap.values()).map(st => {
       let totalObtained = 0
       let absent = false
+      let missing = false
       const subCols = subjectNames.map((sub: string) => {
         const val = st.subjects[sub] ?? '—'
         if (val === 'Absent') { absent = true; return 'Absent' }
         const n = parseFloat(val)
-        if (!isNaN(n)) totalObtained += n
+        if (isNaN(n)) missing = true
+        else totalObtained += n
         return val
       })
-      const pct     = totalMax > 0 ? ((totalObtained / totalMax) * 100).toFixed(1) + '%' : '—'
-      const result  = absent ? 'Absent' : (totalObtained >= totalMax * (exam.passing_pct / 100) ? 'PASS' : 'FAIL')
-      return [st.name, st.roll, ...subCols, totalObtained, pct, result]
+      // No total, percentage or result until every subject has a mark or an absence — never 0% FAIL.
+      const pct     = missing ? '' : totalMax > 0 ? ((totalObtained / totalMax) * 100).toFixed(1) + '%' : '—'
+      const result  = absent ? 'Absent' : missing ? '' : (totalObtained >= totalMax * (exam.passing_pct / 100) ? 'PASS' : 'FAIL')
+      return [st.name, st.roll, ...subCols, missing ? '' : totalObtained, pct, result]
         .map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')
     })
 
