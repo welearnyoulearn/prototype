@@ -279,7 +279,9 @@ export async function POST(
         }
         if (entry.is_absent !== true && entry.marks_obtained != null && entry.marks_obtained !== '') {
           const mark = Number(entry.marks_obtained)
-          if (!Number.isFinite(mark) || mark < 0 || mark > subject.max_marks || Math.round(mark * 100) !== mark * 100) {
+          // 64.1 * 100 is 6409.999999999999, so compare with a tolerance instead of exact equality (#502).
+          const moreThanTwoDecimals = Math.abs(mark * 100 - Math.round(mark * 100)) > 1e-6
+          if (!Number.isFinite(mark) || mark < 0 || mark > subject.max_marks || moreThanTwoDecimals) {
             errors.push(`${subject.subject_name}: marks must be between 0 and ${subject.max_marks} with at most 2 decimals`)
           }
         }
