@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "WLYL School Management API",
-    "version": "2026-11-01",
+    "version": "2026-11-25",
     "description": "Every API route in the WLYL platform, generated from the route handlers on the `dev` branch.\n\n## How to read this\n\n- **Sections and subcategories.** The sidebar groups routes by area, such as Fees & finance, then by topic, such as Waivers.\n- **Who can call.** The coloured badges on each route show which signed-in users it accepts. A red **Public** badge means the route has no sign-in check in code.\n- **Checks.** Extra rules inside the route, such as \"parent must own this student\", are listed under Checks.\n- **Feature flag.** Routes that are switched off unless the school's plan includes a feature say which one.\n\n## Signing in\n\nEach portal has its own session cookie: `wlyl-platform`, `wlyl-auth` (school admin), `wlyl-teacher`, `wlyl-student` and `wlyl-parent`. Sign in to the app in this browser, then use **Test Request** on any route. Scheduled jobs take `Authorization: Bearer $CRON_SECRET`."
   },
   "servers": [
@@ -53620,6 +53620,217 @@
             }
           }
         }
+      }
+    },
+    "/api/student/search": {
+      "get": {
+        "tags": [
+          "Student portal"
+        ],
+        "operationId": "getStudentSearch",
+        "summary": "May this student search?",
+        "description": "Signed-in student. Needs the student-search feature. Returns allowed (parent consent) and, only when allowed, the search engine ID.",
+        "responses": {
+          "200": {
+            "description": "{ allowed, engineId }"
+          },
+          "401": {
+            "description": "Not signed in"
+          },
+          "403": {
+            "description": "Feature not enabled"
+          }
+        },
+        "security": [
+          {
+            "student": []
+          }
+        ],
+        "x-source-file": "app/api/student/search/route.ts"
+      },
+      "post": {
+        "tags": [
+          "Student portal"
+        ],
+        "operationId": "postStudentSearch",
+        "summary": "Check and save a search",
+        "description": "Signed-in student. Called before the browser sends the words to Google. Returns flag (null when the search may go ahead).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "query"
+                ],
+                "properties": {
+                  "query": {
+                    "type": "string",
+                    "maxLength": 200
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "{ flag }"
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Not signed in"
+          },
+          "403": {
+            "description": "Feature not enabled, or no parent consent"
+          },
+          "429": {
+            "description": "Too many searches in a minute"
+          }
+        },
+        "security": [
+          {
+            "student": []
+          }
+        ],
+        "x-source-file": "app/api/student/search/route.ts"
+      }
+    },
+    "/api/parent/search": {
+      "get": {
+        "tags": [
+          "Daily quiz"
+        ],
+        "operationId": "getParentSearch",
+        "summary": "A child's search consent and history",
+        "description": "Signed-in parent, linked children only.",
+        "parameters": [
+          {
+            "name": "student_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{ enabled, consent, searches, keepDays }"
+          },
+          "400": {
+            "description": "Invalid student_id"
+          },
+          "401": {
+            "description": "Not signed in"
+          },
+          "404": {
+            "description": "Not your child"
+          }
+        },
+        "security": [
+          {
+            "student": []
+          }
+        ],
+        "x-source-file": "app/api/parent/search/route.ts"
+      },
+      "post": {
+        "tags": [
+          "Daily quiz"
+        ],
+        "operationId": "postParentSearch",
+        "summary": "Give or withdraw search consent",
+        "description": "Signed-in parent, linked children only. Agreeing needs confirmed=true and the feature on. Withdrawing deletes the saved searches.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "student_id",
+                  "agree"
+                ],
+                "properties": {
+                  "student_id": {
+                    "type": "integer"
+                  },
+                  "agree": {
+                    "type": "boolean"
+                  },
+                  "confirmed": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Saved"
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Not signed in"
+          },
+          "403": {
+            "description": "Feature not enabled"
+          },
+          "404": {
+            "description": "Not your child"
+          }
+        },
+        "security": [
+          {
+            "student": []
+          }
+        ],
+        "x-source-file": "app/api/parent/search/route.ts"
+      },
+      "delete": {
+        "tags": [
+          "Daily quiz"
+        ],
+        "operationId": "deleteParentSearch",
+        "summary": "Delete a child's search history",
+        "description": "Signed-in parent, linked children only.",
+        "parameters": [
+          {
+            "name": "student_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deleted"
+          },
+          "400": {
+            "description": "Invalid student_id"
+          },
+          "401": {
+            "description": "Not signed in"
+          },
+          "404": {
+            "description": "Not your child"
+          }
+        },
+        "security": [
+          {
+            "student": []
+          }
+        ],
+        "x-source-file": "app/api/parent/search/route.ts"
       }
     }
   },
