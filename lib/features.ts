@@ -40,6 +40,8 @@ export const ALL_FEATURES: { key: string; label: string; category: string; porta
   { key: 'daily-newspaper',     label: 'Daily Newspaper',                 category: 'Learning', portals: ['student'] },
   // Student Search (#538). Seeded OFF at every tier; a student also needs a parent's consent.
   { key: 'student-search',      label: 'Student Search',                  category: 'Learning', portals: ['student', 'parent'] },
+  // The "See Google AI answer" button inside Student Search. Seeded OFF; also needs a separate parent consent.
+  { key: 'student-search-ai',   label: 'Student Search: Google AI button', category: 'Learning', portals: ['student', 'parent'] },
 
   // ── Analytics & Intelligence ─────────────────────────────────────────────────
 

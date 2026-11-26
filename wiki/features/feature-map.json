@@ -115,6 +115,13 @@
       "app/parent/components/ParentSearch.tsx"
     ]
   },
+  "student-search-ai": {
+    "doc": "wiki/features/student-search-ai.md",
+    "ui": [
+      "app/student/components/StudentSearch.tsx",
+      "app/parent/components/ParentSearch.tsx"
+    ]
+  },
   "announcements": {
     "doc": "wiki/features/announcements.md",
     "ui": [

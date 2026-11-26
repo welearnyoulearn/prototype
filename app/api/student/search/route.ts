@@ -22,8 +22,11 @@ export async function GET() {
   try {
     const who = await actor()
     if (who instanceof NextResponse) return who
-    const allowed = (await getConsent(pool, who))?.granted === true
-    return NextResponse.json({ allowed, engineId: allowed ? process.env.GOOGLE_CSE_ID?.trim() || null : null }, NO_STORE)
+    const consent = await getConsent(pool, who)
+    const allowed = consent?.granted === true
+    // The Google AI button needs its own school switch and its own parent agreement.
+    const aiButton = consent?.ai === true && await schoolHasFeature(who.schoolId, 'student-search-ai')
+    return NextResponse.json({ allowed, aiButton, engineId: allowed ? process.env.GOOGLE_CSE_ID?.trim() || null : null }, NO_STORE)
   } catch (err) {
     console.error('[student/search]', err)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
@@ -39,7 +42,7 @@ export async function POST(req: NextRequest) {
     const parsed = body.safeParse(await req.json().catch(() => null))
     if (!parsed.success) return NextResponse.json({ error: 'Invalid request' }, { status: 400 })
     const result = await recordSearch(pool, who, parsed.data.query)
-    if (result.ok) return NextResponse.json({ flag: result.flag }, { status: 201 })
+    if (result.ok) return NextResponse.json({ flag: result.flag, id: result.id }, { status: 201 })
     if (result.reason === 'too_many') return NextResponse.json({ error: 'Too many searches. Wait a minute and try again.' }, { status: 429 })
     return NextResponse.json({ error: 'Your parent has not turned search on.', code: 'NO_CONSENT' }, { status: 403 })
   } catch (err) {

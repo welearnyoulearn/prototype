@@ -12,7 +12,7 @@ import { readMeanings, wordRequest, type WordRequest } from '@/lib/studentSearch
 import { checkQuery, STUDENT_MESSAGES, type SearchFlag } from '@/lib/studentSearch/safety'
 import type { ChapterMatch } from '@/lib/studentSearch/textbooks'
 import { cleanExtract, wikipediaLookup } from '@/lib/studentSearch/wikipedia'
-import { AnswerCard, TextbookCard, WordCard, type Word } from './SearchAnswerCards'
+import { AnswerCard, GoogleAiButton, TextbookCard, WordCard, type Word } from './SearchAnswerCards'
 import SearchKeyboard from './SearchKeyboard'
 import { StudentPageIntro } from './StudentExperience'
 import WikipediaCard, { type Article } from './WikipediaCard'
@@ -94,13 +94,17 @@ export default function StudentSearch({ schoolBooks, tutorQuestion, onBackToTuto
   const containerRef = useRef<HTMLDivElement>(null)
   const latest = useRef(0)
   const [fromTutor, setFromTutor] = useState(false)
+  // The Google AI button: whether this student may have it, and the accepted search it belongs to.
+  const [aiButton, setAiButton] = useState(false)
+  const [accepted, setAccepted] = useState<{ id: number; query: string } | null>(null)
   const tutorSearched = useRef(0)
 
   useEffect(() => {
     fetch('/api/student/search', { cache: 'no-store' })
       .then(async r => {
         if (!r.ok) throw new Error(`Search status returned ${r.status}`)
-        const data: { allowed: boolean; engineId: string | null } = await r.json()
+        const data: { allowed: boolean; aiButton: boolean; engineId: string | null } = await r.json()
+        setAiButton(data.aiButton)
         if (!data.allowed) setStatus('off')
         else if (!data.engineId) setStatus('unavailable')
         else setEngineId(data.engineId)
@@ -119,13 +123,15 @@ export default function StudentSearch({ schoolBooks, tutorQuestion, onBackToTuto
     setWord(null)
     setChapters(null)
     setBlocked(null)
+    setAccepted(null)
     try {
       const res = await fetch('/api/student/search', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: text }) })
-      const data: { flag?: SearchFlag | null; error?: string; code?: string } = await res.json()
+      const data: { id?: number; flag?: SearchFlag | null; error?: string; code?: string } = await res.json()
       if (turn !== latest.current) return
       if (data.code === 'NO_CONSENT') { setStatus('off'); return }
       if (!res.ok) { setSearched(false); setProblem(data.error ?? 'Search didn’t work. Try again.'); return }
       if (data.flag) { setSearched(false); setBlocked(data.flag); return }
+      if (data.id) setAccepted({ id: data.id, query: text })
     } catch (err) {
       console.error('[student search]', err)
       setSearched(false)
@@ -158,6 +164,16 @@ export default function StudentSearch({ schoolBooks, tutorQuestion, onBackToTuto
         .catch(err => console.error('[student search] textbooks', err))
     }
   }, [schoolBooks])
+
+  // keepalive: the note is still sent if the phone switches straight to Google.
+  const noteAiOpened = (id: number) => {
+    fetch('/api/student/search/ai-open', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }), keepalive: true })
+      .then(r => {
+        if (r.status === 403) setAiButton(false) // switched off since the screen loaded
+        if (!r.ok) throw new Error(`Opening was not saved: ${r.status}`)
+      })
+      .catch(err => console.error('[student search] Google AI button', err))
+  }
 
   // Load Google's element once the student is allowed to search.
   useEffect(() => {
@@ -283,6 +299,7 @@ export default function StudentSearch({ schoolBooks, tutorQuestion, onBackToTuto
           {word && <WordCard word={word} />}
           {article && <WikipediaCard key={article.url} article={article} />}
           {chapters && <TextbookCard chapters={chapters} />}
+          {aiButton && accepted && <GoogleAiButton query={accepted.query} onOpen={() => noteAiOpened(accepted.id)} />}
           <div id={RESULTS_ID} hidden={!searched} data-testid="student-search-results" />
           <p className="text-xs text-gray-600">Websites you open are outside school search. Check important facts in your textbook.</p>
         </>

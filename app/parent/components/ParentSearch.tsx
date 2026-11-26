@@ -7,8 +7,9 @@ import type { SearchFlag } from '@/lib/studentSearch/safety'
 type Data = {
   enabled: boolean
   keepDays: number
-  consent: { granted: boolean; decidedAt: string } | null
-  searches: { id: number; query: string; flag: SearchFlag | null; at: string }[]
+  aiEnabled: boolean
+  consent: { granted: boolean; ai: boolean; decidedAt: string } | null
+  searches: { id: number; query: string; flag: SearchFlag | null; at: string; aiOpenedAt: string | null }[]
 }
 
 const LABELS: Record<SearchFlag, string> = {
@@ -25,6 +26,7 @@ export default function ParentSearch({ studentId, studentName }: { studentId: nu
   const [data, setData] = useState<Data | null>(null)
   const [problem, setProblem] = useState('')
   const [confirmed, setConfirmed] = useState(false)
+  const [aiConfirmed, setAiConfirmed] = useState(false)
   const [flaggedOnly, setFlaggedOnly] = useState(false)
   const [busy, setBusy] = useState(false)
 
@@ -61,6 +63,11 @@ export default function ParentSearch({ studentId, studentName }: { studentId: nu
   const decide = (agree: boolean) => change(() => fetch('/api/parent/search', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(agree ? { student_id: studentId, agree, confirmed: true } : { student_id: studentId, agree }),
+  }))
+
+  const decideAi = (ai: boolean) => change(() => fetch('/api/parent/search', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(ai ? { student_id: studentId, ai, confirmed: true } : { student_id: studentId, ai }),
   }))
 
   const turnOff = () => {
@@ -110,6 +117,29 @@ export default function ParentSearch({ studentId, studentName }: { studentId: nu
         </section>
       )}
 
+      {data && on && (data.aiEnabled || data.consent?.ai) && (
+        <section className="space-y-3 rounded-xl border bg-white p-4 text-sm" data-testid="parent-search-ai">
+          <h3 className="font-bold">Google AI answer button (separate choice)</h3>
+          <ul className="list-disc space-y-1 pl-5">
+            <li>After a search, {studentName} can tap a button that opens Google’s own website with the same words.</li>
+            <li>That is outside the school portal. We cannot check or limit what Google shows, including its AI answer, which can be wrong.</li>
+            <li>Google collects data and can show adverts under its own rules.</li>
+            <li>You see which searches the button was tapped for. You do not see anything {studentName} does on Google.</li>
+          </ul>
+          {data.consent?.ai ? (
+            <button type="button" disabled={busy} onClick={() => void decideAi(false)} className="min-h-10 rounded-lg border border-red-300 px-4 text-red-700" data-testid="parent-search-ai-withdraw">Turn the button off</button>
+          ) : (
+            <>
+              <label className="flex items-start gap-2">
+                <input type="checkbox" checked={aiConfirmed} onChange={e => setAiConfirmed(e.target.checked)} className="mt-1" data-testid="parent-search-ai-confirm" />
+                <span>I am 18 or older, I am {studentName}’s parent or guardian, and I have read these points about the button.</span>
+              </label>
+              <button type="button" disabled={busy || !aiConfirmed} onClick={() => void decideAi(true)} className="min-h-10 rounded-lg bg-primary px-4 text-primary-foreground disabled:opacity-50" data-testid="parent-search-ai-agree">I agree, show the button</button>
+            </>
+          )}
+        </section>
+      )}
+
       {data && (data.searches.length > 0 || on) && (
         <section className="rounded-xl border bg-white p-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -125,6 +155,7 @@ export default function ParentSearch({ studentId, studentName }: { studentId: nu
                 <li key={s.id} className="flex flex-wrap items-baseline gap-3 py-2 text-sm">
                   <time dateTime={s.at} className="text-xs text-gray-600">{when(s.at)}</time>
                   <span className="min-w-0 flex-1 break-words">{s.query}</span>
+                  {s.aiOpenedAt && <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs" data-testid="parent-search-ai-opened">Opened Google AI answer · {when(s.aiOpenedAt)}</span>}
                   {s.flag && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs">{LABELS[s.flag]}</span>}
                 </li>
               ))}
