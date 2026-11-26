@@ -72,8 +72,15 @@ async function schoolChapters(query: string): Promise<ChapterMatch[]> {
   return data.chapters
 }
 
-/** `schoolBooks` is false when the student may not open the Digital Library; only the NCERT link is shown then. */
-export default function StudentSearch({ schoolBooks }: { schoolBooks: boolean }) {
+type Props = {
+  /** False when the student may not open the Digital Library; only the NCERT link is shown then. */
+  schoolBooks: boolean
+  /** A question the AI Tutor could not answer, to search once. A new `id` means a new question. */
+  tutorQuestion: { query: string; id: number } | null
+  onBackToTutor: () => void
+}
+
+export default function StudentSearch({ schoolBooks, tutorQuestion, onBackToTutor }: Props) {
   const [status, setStatus] = useState<Status>('loading')
   const [engineId, setEngineId] = useState<string | null>(null)
   const [blocked, setBlocked] = useState<SearchFlag | null>(null)
@@ -86,6 +93,8 @@ export default function StudentSearch({ schoolBooks }: { schoolBooks: boolean })
   const [searched, setSearched] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
   const latest = useRef(0)
+  const [fromTutor, setFromTutor] = useState(false)
+  const tutorSearched = useRef(0)
 
   useEffect(() => {
     fetch('/api/student/search', { cache: 'no-store' })
@@ -99,10 +108,11 @@ export default function StudentSearch({ schoolBooks }: { schoolBooks: boolean })
       .catch(err => { console.error('[student search]', err); setStatus('unavailable') })
   }, [])
 
-  const submit = useCallback(async (raw: string) => {
+  const submit = useCallback(async (raw: string, forTutor = false) => {
     const text = raw.trim().slice(0, 200)
     if (!text) return
     const turn = ++latest.current
+    setFromTutor(forTutor)
     setProblem('')
     setArticle(null)
     setAnswer(null)
@@ -210,6 +220,15 @@ export default function StudentSearch({ schoolBooks }: { schoolBooks: boolean })
   // Google creates the input inside our container once its script has run.
   const searchInput = useCallback(() => containerRef.current?.querySelector<HTMLInputElement>(`#${BOX_ID} input.gsc-input`) ?? null, [])
 
+  // The tutor's question goes through the same checks, consent and history as a typed search.
+  useEffect(() => {
+    if (status !== 'ready' || !tutorQuestion || tutorSearched.current === tutorQuestion.id) return
+    tutorSearched.current = tutorQuestion.id
+    const input = searchInput()
+    if (input) input.value = tutorQuestion.query
+    void submit(tutorQuestion.query, true)
+  }, [status, tutorQuestion, searchInput, submit])
+
   const pickTopic = (topic: string) => {
     const input = searchInput()
     if (input) input.value = topic
@@ -232,6 +251,12 @@ export default function StudentSearch({ schoolBooks }: { schoolBooks: boolean })
           {status === 'loading' && <p className="text-sm text-gray-600" role="status">Loading search…</p>}
           {status === 'unavailable' && <p className="rounded-2xl border bg-white p-4 text-sm" role="status" data-testid="student-search-unavailable">Search isn’t available right now. Please try again later.</p>}
 
+          {fromTutor && (
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm" role="status" data-testid="student-search-from-tutor">
+              <p><strong>AI Tutor couldn’t answer, so your question was searched.</strong> Your parents can see this search.</p>
+              <button type="button" onClick={onBackToTutor} className="min-h-10 rounded-full border bg-white px-4 font-bold" data-testid="student-search-back-to-tutor">Back to AI Tutor</button>
+            </div>
+          )}
           {/* Google draws inside these two; React never renders children into them. */}
           {/* The portal's own input styling must not draw a second box inside Google's. */}
           <style>{`#${BOX_ID} input.gsc-input { border: 0 !important; box-shadow: none !important; background-color: transparent !important; }`}</style>

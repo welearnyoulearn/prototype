@@ -89,6 +89,7 @@ export default function ParentSearch({ studentId, studentName }: { studentId: nu
           <ul className="list-disc space-y-1 pl-5">
             <li>Each search’s words and time are saved for {data.keepDays} days and shown to you here.</li>
             <li>Searches are sent to Google, and some to Wikipedia or its dictionary (Wiktionary), with technical details such as the internet address. Google’s search box can show adverts.</li>
+            <li>If the AI Tutor cannot answer a short question, the portal searches for that question, and it is saved and shown here like any search.</li>
             <li>Some searches are stopped by a short English, Telugu and Hindi word list. It does not catch everything, and you get no alerts.</li>
             <li>You can turn it off at any time. Turning it off deletes the saved searches.</li>
           </ul>

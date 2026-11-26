@@ -57,6 +57,7 @@ function StudentBootLoader() {
 const StudentMarks     = dynamic(() => import('./components/StudentMarks'),     { loading: () => <ModuleSkeleton /> })
 const StudentSyllabus  = dynamic(() => import('./components/StudentSyllabus'),  { loading: () => <ModuleSkeleton /> })
 const DigitalLibrary    = dynamic(() => import('../components/library/DigitalLibrary'), { loading: () => <ModuleSkeleton /> })
+const TutorSearchSwitch = dynamic(() => import('./components/TutorSearchSwitch'))
 const StudentAiHub      = dynamic(() => import('./components/StudentAiHub'),     { loading: () => <ModuleSkeleton /> })
 const StudentDailyQuiz  = dynamic(() => import('./components/StudentDailyQuiz'), { loading: () => <ModuleSkeleton /> })
 const StudentClassCircle = dynamic(() => import('./components/StudentClassCircle'), { loading: () => <ModuleSkeleton /> })
@@ -160,6 +161,10 @@ function StudentPortal() {
   const [enabledFeatures, setEnabledFeatures] = useState<Set<string> | null>(null)
   const [aiAccessTier, setAiAccessTier] = useState<'ai_basic' | 'ai_pro' | 'none' | null>(null)
   const logoutInFlight = useRef(false)
+  // A question the AI Tutor failed on, shown as a search (#538). The ref says which screen is open when it fails.
+  const [tutorQuestion, setTutorQuestion] = useState<{ query: string; id: number } | null>(null)
+  const activeNavRef = useRef(activeNav)
+  useEffect(() => { activeNavRef.current = activeNav }, [activeNav])
   // Search needs the school's feature AND a parent's consent, so it is hidden until both are confirmed.
   const [searchAllowed, setSearchAllowed] = useState(false)
   const searchEnabled = enabledFeatures?.has('student-search') ?? false
@@ -194,6 +199,12 @@ function StudentPortal() {
     setSidebarOpen(false)
     navigateSection(key)
     trackOpen(key)
+  }
+
+  function searchInstead(query: string) {
+    if (activeNavRef.current !== 'ai-hub') return // the student has moved on; don't pull them away
+    setTutorQuestion({ query, id: Date.now() })
+    navigateTo('search')
   }
 
   // Shared by the initial load and by the periodic revocation poll below —
@@ -271,6 +282,8 @@ function StudentPortal() {
 
   const firstName   = student.name.split(' ')[0]
   const currentItem = NAV_ITEMS.find(i => i.key === activeNav)
+  // Shown on the AI screen and the Search screen, to a student who has both.
+  const switchScreen = (activeNav === 'ai-hub' || activeNav === 'search') && isNavItemVisible('ai-hub') && isNavItemVisible('search') ? activeNav : null
 
   // "All features" window: the same visible items as the sidebar, grouped the same way.
   const launcherSections: LauncherSection[] = NAV_SECTIONS
@@ -372,13 +385,15 @@ function StudentPortal() {
 
         {/* ── Main Content ──────────────────────────────────────────── */}
         <main id="student-content" tabIndex={-1} className="portal-main">
-          <div className="mx-auto w-full max-w-5xl pb-28">
+          {/* The tutor chat fills the screen height, so it is told how much the switch takes. */}
+          <div className="mx-auto w-full max-w-5xl pb-28" style={switchScreen ? { '--student-switch': '54px' } as React.CSSProperties : undefined}>
             <AnnouncementPopup schoolId={student.school_id} />
+            {switchScreen && <TutorSearchSwitch active={switchScreen} aiLabel={aiAccessTier === 'ai_pro' ? 'AI Tutor' : 'AI Hub'} onSelect={navigateTo} />}
             {visitedNav.has('dashboard')   && <div hidden={activeNav !== 'dashboard'}><StudentDashboard student={student} classId={classId} schoolId={student.school_id} onNavigate={navigateTo} isNavItemVisible={isNavItemVisible} /></div>}
             {visitedNav.has('daily-quiz') && isNavItemVisible('daily-quiz') && <div hidden={activeNav !== 'daily-quiz'}><StudentDailyQuiz doubtsEnabled={enabledFeatures?.has('student-doubts') ?? false} tutorEnabled={aiAccessTier === 'ai_pro'} /></div>}
             {visitedNav.has('announcements') && <div hidden={activeNav !== 'announcements'}><NoticeCenter schoolId={student.school_id} experience="student" mode="page" /></div>}
             {visitedNav.has('newspaper') && isNavItemVisible('newspaper') && <div hidden={activeNav !== 'newspaper'}><StudentNewspaper /></div>}
-            {visitedNav.has('search') && isNavItemVisible('search') && <div hidden={activeNav !== 'search'}><StudentSearch schoolBooks={isNavItemVisible('library')} /></div>}
+            {visitedNav.has('search') && isNavItemVisible('search') && <div hidden={activeNav !== 'search'}><StudentSearch schoolBooks={isNavItemVisible('library')} tutorQuestion={tutorQuestion} onBackToTutor={() => navigateTo('ai-hub')} /></div>}
             {visitedNav.has('class-circle') && <div hidden={activeNav !== 'class-circle'}><StudentClassCircle /></div>}
             {visitedNav.has('attendance') && isNavItemVisible('attendance') && (
               <div hidden={activeNav !== 'attendance'}>
@@ -394,7 +409,7 @@ function StudentPortal() {
             {visitedNav.has('syllabus') && isNavItemVisible('syllabus') && <div hidden={activeNav !== 'syllabus'}><StudentSyllabus schoolId={student.school_id} classId={classId} grade={student.grade} /></div>}
             {visitedNav.has('library') && isNavItemVisible('library') && <div hidden={activeNav !== 'library'}><DigitalLibrary apiUrl={`/api/school/library?school_id=${student.school_id}`} experience="student" /></div>}
             {visitedNav.has('profile')     && <div hidden={activeNav !== 'profile'}><StudentProfile student={student} /></div>}
-            {visitedNav.has('ai-hub') && isNavItemVisible('ai-hub') && <div hidden={activeNav !== 'ai-hub'}><StudentAiHub tier={aiAccessTier} /></div>}
+            {visitedNav.has('ai-hub') && isNavItemVisible('ai-hub') && <div hidden={activeNav !== 'ai-hub'}><StudentAiHub tier={aiAccessTier} onCannotAnswer={isNavItemVisible('search') ? searchInstead : undefined} /></div>}
           </div>
         </main>
       </div>
