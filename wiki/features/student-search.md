@@ -26,9 +26,10 @@ A student looks up a study topic in one search box and sees Google results with 
 ## How it works
 
 - **Access:** the school has the feature on **and** a linked parent has agreed. Otherwise the student has no Search menu item.
-- **Every search** is saved by the server first, which checks consent and a short English word list; only an accepted search is sent to Google.
+- **Every search** is saved by the server first, which checks consent and a short English, Telugu and Hindi word list; only an accepted search is sent to Google.
 - **Stopped searches** (adult, dangerous, betting, self-harm wording, personal details) are not sent to Google or Wikipedia. Self-harm wording shows help contacts. The parent sees the stopped words, except personal details, which are not saved.
-- **Kept** 30 days: the words, a label and the time. Never the results.
+- **Kept** 30 days: the words, a label and the time. Never the results. Expired rows are hidden at once and deleted in batches of 5,000.
+- **Review and rollout:** `DOCS/student-search/REVIEW-PACK.md` and `DOCS/student-search/ROLLOUT.md`. Database load test: `scripts/load-test-student-search.ts`.
 - **Parent:** agree or turn off (turning off deletes the history), see searches, delete them. Every decision is recorded with the notice version.
 - Needs `GOOGLE_CSE_ID` (a Programmable Search engine). Without it the screen says search is not available.
 
@@ -63,13 +64,15 @@ A student looks up a study topic in one search box and sees Google results with 
 | 2026-11-25 | Initial build | #538 |
 | 2026-11-25 | Bug fix: existing databases did not get the search tables (`SCHEMA_VERSION` not raised), so the parent screen failed to load | #538 |
 | 2026-11-25 | Bug fix: the dev database had already recorded version 77, so 75 was skipped; raised to 78 | #538 |
+| 2026-11-26 | Telugu and Hindi safety phrases; batched clean-up of old searches; load test, review pack and rollout plan | #538 |
 
 ## Known issues
 
 - [ ] Google shows ads and its ad requests carry the search words. India's DPDP Act s.9(3) bans targeted advertising to and tracking of children. Needs an ad-free engine and confirmation of Google's handling of children's data (#538)
 - [ ] Legal review of consent wording, parent verification and whether saving searches is permitted monitoring (#538)
 - [ ] Counsellor approval of the self-harm message and help contacts (#538)
-- [ ] Word list is English only; the parent screen and student screen text are not translated (#538)
+- [ ] Telugu and Hindi phrases need review by native speakers; other languages are not covered; the screen text is English only (#538)
+- [ ] Only the database has been load tested, not a deployed web server or its connection limits (#538)
 - [ ] Confirm the Wikipedia card beside Google results is allowed by Google's terms (#538)
 - [ ] Old searches are deleted when search data is next read or written, not by a scheduled job (#538)
 
