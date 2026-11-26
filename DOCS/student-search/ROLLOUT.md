@@ -6,7 +6,7 @@
 
 - [ ] `GOOGLE_CSE_ID` set for the dev project on Vercel, then redeploy
 - [ ] Switched on **per test school** (school override), not for a whole plan tier
-- [ ] Test parent agrees; test student sees Search; results and Wikipedia card appear
+- [ ] Test parent agrees; test student sees Search; results and the Wikipedia, maths and word meaning cards appear
 - [ ] Parent sees the search; an unsuitable search is stopped and marked
 - [ ] Parent turns it off: student loses Search and history is empty
 - [ ] Repeat on a phone

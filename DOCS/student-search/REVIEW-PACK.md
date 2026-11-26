@@ -7,9 +7,11 @@ Mark each answer, name and date here or on issue #538.
 
 - A parent turns it on for their child. The school must also have the feature on.
 - The student types a search. Our server checks consent and a word list, saves the words, then the browser sends
-  them to Google (results and ads) and Wikipedia (summary card). No AI.
+  them to Google (results and ads) and, for a card, to Wikipedia (summary and pictures, with facts from
+  Wikidata) or Wiktionary (word meaning). Sums are
+  worked out in the browser. No AI.
 - We keep the words, a label and the time for 30 days. The parent sees and can delete them. No alerts are sent.
-- Stopped searches are not sent to Google or Wikipedia. Personal details are not saved.
+- Stopped searches are not sent to Google, Wikipedia or Wiktionary. Personal details are not saved.
 
 ## 1. Lawyer
 
@@ -25,7 +27,7 @@ sections 2(f), 5, 6, 8, 9 and the DPDP Rules, 2025.
 | 5 | Is the notice on the parent screen sufficient, or must the full notice be shown? Which languages? | |
 | 6 | Either linked parent can change the decision; the newest one counts. Is that acceptable? | |
 | 7 | Is 30 days right for keeping searches? How long must consent records be kept? | |
-| 8 | Is showing our Wikipedia card above Google's results allowed by [Google's terms](https://support.google.com/programmable-search/answer/1714300)? | |
+| 8 | Is showing our own cards (Wikipedia, Wiktionary, maths) above Google's results allowed by [Google's terms](https://support.google.com/programmable-search/answer/1714300)? | |
 | 9 | From which date must all of this be in place? (Secondary sources say 13 May 2027 for the children's rules.) | |
 
 Reviewer: ______________  Date: ______________  Decision: approve / change / do not launch

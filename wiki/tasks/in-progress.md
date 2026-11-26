@@ -7,9 +7,9 @@ Move an entry to [completed.md](completed.md) when it ships. Add new entries at 
 ### Student Search (#538)
 **Type:** Feature
 **Portals:** Student, Parent
-**Branch:** `feature/538-student-search`
+**Branch:** `feature/538-wikipedia-languages` (first build: `feature/538-student-search`)
 **Started:** 2026-11-25
-**Summary:** One search box (Google results plus a Wikipedia summary) with parent consent and a 30-day search history. OFF at every tier; not cleared for real students.
+**Summary:** One search box (Google results plus maths, word meaning and Wikipedia cards) with parent consent and a 30-day search history. OFF at every tier; not cleared for real students.
 **Progress:**
 - [x] Feature key (OFF), tables, safety checks, student screen, parent consent and history
 - [x] Unit and database tests; checked in both portals on a local database
