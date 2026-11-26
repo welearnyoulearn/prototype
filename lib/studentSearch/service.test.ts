@@ -4,7 +4,7 @@ import test, { after, before } from 'node:test'
 import assert from 'node:assert/strict'
 import { Pool } from 'pg'
 import { ensureStudentSearchSchema } from './schema'
-import { deleteSearches, getConsent, listSearches, parentOwnsChild, recordSearch, setConsent } from './service'
+import { deleteSearches, getConsent, listSearches, parentOwnsChild, purgeExpired, recordSearch, setConsent } from './service'
 
 const url = process.env.TEST_DATABASE_URL
 if (url && !['127.0.0.1', 'localhost'].includes(new URL(url).hostname)) throw new Error('TEST_DATABASE_URL must be a local database')
@@ -83,11 +83,14 @@ test('one family cannot reach another', opts, async () => {
   assert.equal((await listSearches(pool, a.child)).length, 1)
 })
 
-test('searches older than 30 days are deleted, and one minute is limited', opts, async () => {
+test('searches older than 30 days are hidden and deleted, and one minute is limited', opts, async () => {
   const { parentId, child } = await family()
   await setConsent(pool, parentId, child, true)
   await pool.query(`INSERT INTO student_searches (school_id, student_id, query, created_at) VALUES ($1, $2, 'old', NOW() - INTERVAL '31 days')`, [child.schoolId, child.studentId])
   assert.equal((await listSearches(pool, child)).length, 0)
+  await purgeExpired(pool)
+  const old = await pool.query(`SELECT 1 FROM student_searches WHERE student_id = $1 AND query = 'old'`, [child.studentId])
+  assert.equal(old.rows.length, 0)
   for (let i = 0; i < 20; i++) assert.equal((await recordSearch(pool, child, `topic ${i}`)).ok, true)
   assert.deepEqual(await recordSearch(pool, child, 'one more'), { ok: false, reason: 'too_many' })
 })

@@ -18,6 +18,22 @@ test('lets schoolwork through', () => {
     'speed of light 299792458', 'population 1428627663', 'date 2026-11-25']) assert.equal(checkQuery(q), null, q)
 })
 
+test('stops Telugu and Hindi searches with the right reason', () => {
+  const expected = {
+    support: ['నాకు చనిపోవాలని ఉంది', 'ఆత్మహత్య ఎలా చేసుకోవాలి', 'मैं मरना चाहता हूँ', 'आत्महत्या कैसे करें', 'naaku chanipovalani undi', 'mai marna chahti hu'],
+    adult: ['సెక్స్ వీడియో', 'బూతు వీడియోలు', 'सेक्स वीडियो', 'अश्लील फिल्म'],
+    danger: ['బాంబు ఎలా తయారు చేయాలి', 'बम कैसे बनाते हैं'],
+    gambling: ['సట్టా', 'सट्टा नंबर'],
+    personal: ['నా నంబర్ ౯౮౭౬౫౪౩౨౧౦', 'मेरा नंबर ९८७६५४३२१०'],
+  } as const
+  for (const [flag, queries] of Object.entries(expected)) for (const q of queries) assert.equal(checkQuery(q), flag, q)
+})
+
+test('lets Telugu and Hindi schoolwork through', () => {
+  for (const q of ['కిరణజన్య సంయోగక్రియ', 'ఆత్మహత్యల నివారణ దినోత్సవం', 'జల చక్రం', 'లింగ నిర్ధారణ',
+    'प्रकाश संश्लेषण', 'आत्महत्या रोकथाम दिवस', 'मादक पदार्थों का दुरुपयोग निबंध', 'बम्बई का इतिहास', 'परमाणु बम का इतिहास']) assert.equal(checkQuery(q), null, q)
+})
+
 test('every reason has a message for the student', () => {
   for (const flag of SEARCH_FLAGS) assert.ok(STUDENT_MESSAGES[flag].title && STUDENT_MESSAGES[flag].body, flag)
 })
