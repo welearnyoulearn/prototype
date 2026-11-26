@@ -6,7 +6,7 @@ type Db = Pick<Pool | PoolClient, 'query'>
 type Child = { studentId: number; schoolId: number }
 
 export const KEEP_DAYS = 30
-export const NOTICE_VERSION = '2026-11-draft-2'
+export const NOTICE_VERSION = '2026-11-draft-3'
 const PER_MINUTE = 20
 const LIST_LIMIT = 500
 export const PURGE_BATCH = 5000

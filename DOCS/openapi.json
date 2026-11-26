@@ -53775,6 +53775,55 @@
         "x-source-file": "app/api/student/search/route.ts"
       }
     },
+    "/api/student/search/textbooks": {
+      "post": {
+        "tags": [
+          "Student portal"
+        ],
+        "operationId": "postStudentSearchTextbooks",
+        "summary": "Chapters in the student’s school books that match a search",
+        "description": "Signed-in student with the student-search feature and parent consent. Saves nothing. Book links only when the school has the library feature.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "query"
+                ],
+                "properties": {
+                  "query": {
+                    "type": "string",
+                    "maxLength": 200
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "{ chapters: [{ board, subject, chapter, topic, books }] }"
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Not signed in"
+          },
+          "403": {
+            "description": "Feature not enabled, or no parent consent"
+          }
+        },
+        "security": [
+          {
+            "student": []
+          }
+        ],
+        "x-source-file": "app/api/student/search/textbooks/route.ts"
+      }
+    },
     "/api/parent/search": {
       "get": {
         "tags": [

@@ -378,7 +378,7 @@ function StudentPortal() {
             {visitedNav.has('daily-quiz') && isNavItemVisible('daily-quiz') && <div hidden={activeNav !== 'daily-quiz'}><StudentDailyQuiz doubtsEnabled={enabledFeatures?.has('student-doubts') ?? false} tutorEnabled={aiAccessTier === 'ai_pro'} /></div>}
             {visitedNav.has('announcements') && <div hidden={activeNav !== 'announcements'}><NoticeCenter schoolId={student.school_id} experience="student" mode="page" /></div>}
             {visitedNav.has('newspaper') && isNavItemVisible('newspaper') && <div hidden={activeNav !== 'newspaper'}><StudentNewspaper /></div>}
-            {visitedNav.has('search') && isNavItemVisible('search') && <div hidden={activeNav !== 'search'}><StudentSearch /></div>}
+            {visitedNav.has('search') && isNavItemVisible('search') && <div hidden={activeNav !== 'search'}><StudentSearch schoolBooks={isNavItemVisible('library')} /></div>}
             {visitedNav.has('class-circle') && <div hidden={activeNav !== 'class-circle'}><StudentClassCircle /></div>}
             {visitedNav.has('attendance') && isNavItemVisible('attendance') && (
               <div hidden={activeNav !== 'attendance'}>

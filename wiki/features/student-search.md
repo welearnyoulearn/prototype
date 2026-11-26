@@ -15,19 +15,23 @@ Screens: `app/student/components/StudentSearch.tsx`, `app/parent/components/Pare
 API routes these screens call (all exist):
 - `DELETE/GET/POST` /api/parent/search
 - `GET/POST` /api/student/search
+- `POST` /api/student/search/textbooks
 
 ✅ Every API route the screens call exists.
 <!-- AUTO:evidence:student-search:end -->
 
 ## What it does
 
-A student looks up a study topic in one search box and sees Google results with a Wikipedia summary above them. No AI answer and no chat. A parent turns it on and can see what their child searched.
+A student looks up a study topic in one search box and sees Google results with one card above them: a maths or unit answer, a word meaning, or a Wikipedia summary. They can type in English, Telugu or Hindi, with the device keyboard or the on-screen one. No AI answer and no chat. A parent turns it on and can see what their child searched.
 
 ## How it works
 
 - **Access:** the school has the feature on **and** a linked parent has agreed. Otherwise the student has no Search menu item.
 - **Every search** is saved by the server first, which checks consent and a short English, Telugu and Hindi word list; only an accepted search is sent to Google.
-- **Stopped searches** (adult, dangerous, betting, self-harm wording, personal details) are not sent to Google or Wikipedia. Self-harm wording shows help contacts. The parent sees the stopped words, except personal details, which are not saved.
+- **Cards:** a search that is only a sum or unit conversion is answered in the browser. A search asking for a meaning ("meaning of habitat", "నీరు అర్థం") sends that word to English Wiktionary; senses marked or worded as unsuitable are left out (not a complete filter). Other searches ask Wikipedia. A sum goes to Google (as every accepted search does) but to no card service.
+- **Wikipedia card:** the article's introduction (six lines, then "Show more"), up to four more pictures from the same article, and up to six facts from Wikidata when it has useful ones. Articles whose title or opening paragraph suggest a sensitive topic show no pictures; this is a word list and cannot judge a picture.
+- **Textbook card** (under the Wikipedia card, not for sums or meanings): up to three chapters of the student's own grade whose name or topic matches, with the library textbook links, leaving out chapters hidden from the class; then a link to NCERT's official textbook page. School chapters need the student to be allowed the Digital Library. Matching is on the words in the chapter or topic name only.
+- **Stopped searches** (adult, dangerous, betting, self-harm wording, personal details) are not sent to Google, Wikipedia or Wiktionary. Self-harm wording shows help contacts. The parent sees the stopped words, except personal details, which are not saved.
 - **Kept** 30 days: the words, a label and the time. Never the results. Expired rows are hidden at once and deleted in batches of 5,000.
 - **Review and rollout:** `DOCS/student-search/REVIEW-PACK.md` and `DOCS/student-search/ROLLOUT.md`. Database load test: `scripts/load-test-student-search.ts`.
 - **Parent:** agree or turn off (turning off deletes the history), see searches, delete them. Every decision is recorded with the notice version.
@@ -40,6 +44,12 @@ A student looks up a study topic in one search box and sees Google results with 
 | `app/student/components/StudentSearch.tsx` | Student screen |
 | `app/parent/components/ParentSearch.tsx` | Consent and history |
 | `lib/studentSearch/safety.ts` | Word list and student messages |
+| `app/student/components/SearchKeyboard.tsx`, `lib/studentSearch/keyboard.ts` | Telugu and Hindi on-screen keyboards |
+| `lib/studentSearch/wikipedia.ts` | Which language Wikipedia to ask |
+| `app/student/components/WikipediaCard.tsx`, `lib/studentSearch/wikiArticle.ts` | Wikipedia card, its pictures and facts |
+| `lib/studentSearch/calculator.ts` | Maths and unit answers |
+| `lib/studentSearch/dictionary.ts`, `app/student/components/SearchAnswerCards.tsx` | Word meanings; answer and meaning cards |
+| `lib/studentSearch/textbooks.ts`, `app/api/student/search/textbooks/route.ts` | Matching chapters in school books |
 | `lib/studentSearch/service.ts` | Consent, history, retention, limits |
 | `lib/studentSearch/schema.ts` | Tables; feature seeded OFF |
 
@@ -48,6 +58,7 @@ A student looks up a study topic in one search box and sees Google results with 
 | Method | Endpoint | Purpose |
 |--------|----------|---------|
 | GET, POST | `/api/student/search` | May I search; check and save a search |
+| POST | `/api/student/search/textbooks` | Matching school chapters (saves nothing) |
 | GET, POST, DELETE | `/api/parent/search` | Consent, history, delete |
 
 ## Database tables
@@ -65,6 +76,11 @@ A student looks up a study topic in one search box and sees Google results with 
 | 2026-11-25 | Bug fix: existing databases did not get the search tables (`SCHEMA_VERSION` not raised), so the parent screen failed to load | #538 |
 | 2026-11-25 | Bug fix: the dev database had already recorded version 77, so 75 was skipped; raised to 78 | #538 |
 | 2026-11-26 | Telugu and Hindi safety phrases; batched clean-up of old searches; load test, review pack and rollout plan | #538 |
+| 2026-11-26 | The Wikipedia card uses Telugu or Hindi Wikipedia when the search is typed in that script | #538 |
+| 2026-11-26 | Telugu and Hindi on-screen keyboards | #538 |
+| 2026-11-26 | Maths, unit and word meaning cards; notice version `2026-11-draft-3` | #538 |
+| 2026-11-26 | Textbook card: matching school chapters and the NCERT textbooks link | #538 |
+| 2026-11-26 | Richer Wikipedia card: longer text, more pictures, quick facts | #538 |
 
 ## Known issues
 
@@ -74,9 +90,11 @@ A student looks up a study topic in one search box and sees Google results with 
 - [ ] Telugu and Hindi phrases need review by native speakers; other languages are not covered; the screen text is English only (#538)
 - [ ] Only the database has been load tested, not a deployed web server or its connection limits (#538)
 - [ ] Confirm the Wikipedia card beside Google results is allowed by Google's terms (#538)
+- [ ] Wikipedia pictures are not individually checked; a safety review is needed before real students (#538)
 - [ ] Old searches are deleted when search data is next read or written, not by a scheduled job (#538)
 
 ## Notes
 
-- Google's results include a "Search on Google" link that leads to the whole web; SafeSearch does not cover the Wikipedia card.
+- Google's results include a "Search on Google" link that leads to the whole web; SafeSearch does not cover the Wikipedia or Wiktionary cards.
+- Parents who agreed under an earlier notice version are not asked again about Wiktionary; settle this before real students.
 - Parents get no alerts.
