@@ -12,6 +12,8 @@ Mark each answer, name and date here or on issue #538.
   worked out in the browser. No AI.
 - We keep the words, a label and the time for 30 days. The parent sees and can delete them. No alerts are sent.
 - If the AI Tutor fails on a question of 200 characters or less, the portal searches for it the same way.
+- Optional, off by default and separately agreed: a button that opens Google’s own page with the search words. The
+  tap is shown to the parent; nothing on Google’s page is visible to us.
 - Stopped searches are not sent to Google, Wikipedia or Wiktionary. Personal details are not saved.
 
 ## 1. Lawyer

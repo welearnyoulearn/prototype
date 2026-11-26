@@ -46,6 +46,22 @@ export function TextbookCard({ chapters }: { chapters: ChapterMatch[] }) {
   )
 }
 
+/** Opens Google's own results page, where Google shows its AI answer when it has one. Nothing opens without a tap. */
+export function GoogleAiButton({ query, onOpen }: { query: string; onOpen: () => void }) {
+  const open = () => {
+    const url = `https://www.google.com/search?${new URLSearchParams({ q: query, safe: 'active' })}`
+    // A small window beside the portal on a computer; a new tab on most phones. Must run directly in the tap.
+    window.open(url, '_blank', 'popup,noopener,noreferrer,width=520,height=720')
+    onOpen()
+  }
+  return (
+    <section className="rounded-2xl border bg-white p-5" aria-label="Google AI answer" data-testid="student-search-ai">
+      <button type="button" onClick={open} className="min-h-11 rounded-full border px-5 text-sm font-bold" data-testid="student-search-ai-open">See Google AI answer ↗</button>
+      <p className="mt-2 text-xs text-gray-600">Opens Google in a new window, outside school search. Google doesn’t always show an AI answer, and it can be wrong. Your parents can see that you opened it.</p>
+    </section>
+  )
+}
+
 export function WordCard({ word }: { word: Word }) {
   return (
     <section className="rounded-2xl border bg-white p-5" aria-label="Word meaning" data-testid="student-search-meaning">

@@ -71,6 +71,7 @@ API routes these screens call (all exist):
 - `GET` /api/student/quiz/progress
 - `GET` /api/student/quiz/today
 - `GET/POST` /api/student/search
+- `POST` /api/student/search/ai-open
 - `POST` /api/student/search/textbooks
 - `GET` /api/student/subjects
 - `GET/POST` /api/student/tutor

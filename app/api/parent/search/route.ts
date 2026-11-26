@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import pool from '@/lib/db'
 import { getParentSession, schoolHasFeature } from '@/lib/auth'
-import { deleteSearches, getConsent, KEEP_DAYS, listSearches, parentOwnsChild, setConsent } from '@/lib/studentSearch/service'
+import { deleteSearches, getConsent, KEEP_DAYS, listSearches, parentOwnsChild, setAiConsent, setConsent } from '@/lib/studentSearch/service'
 
 // A parent's consent for Student Search and their child's search history.
 // Who can call: a signed-in parent, only for a child linked to them. Reading, withdrawing and deleting keep working
@@ -11,9 +11,12 @@ import { deleteSearches, getConsent, KEEP_DAYS, listSearches, parentOwnsChild, s
 const NO_STORE = { headers: { 'Cache-Control': 'no-store' } }
 const studentId = z.coerce.number().int().positive()
 // "I agree" also needs the parent's confirmation that they are the child's parent or guardian and have read the notice.
-const decision = z.discriminatedUnion('agree', [
+// The Google AI button is agreed to separately (`ai`), with the same confirmation.
+const decision = z.union([
   z.object({ student_id: studentId, agree: z.literal(true), confirmed: z.literal(true) }).strict(),
   z.object({ student_id: studentId, agree: z.literal(false) }).strict(),
+  z.object({ student_id: studentId, ai: z.literal(true), confirmed: z.literal(true) }).strict(),
+  z.object({ student_id: studentId, ai: z.literal(false) }).strict(),
 ])
 
 async function childOf(rawStudentId: unknown) {
@@ -35,12 +38,13 @@ export async function GET(req: NextRequest) {
   try {
     const who = await childOf(req.nextUrl.searchParams.get('student_id'))
     if (who instanceof NextResponse) return who
-    const [enabled, consent, searches] = await Promise.all([
+    const [enabled, aiFeature, consent, searches] = await Promise.all([
       schoolHasFeature(who.child.schoolId, 'student-search'),
+      schoolHasFeature(who.child.schoolId, 'student-search-ai'),
       getConsent(pool, who.child),
       listSearches(pool, who.child),
     ])
-    return NextResponse.json({ enabled, consent, searches, keepDays: KEEP_DAYS }, NO_STORE)
+    return NextResponse.json({ enabled, aiEnabled: enabled && aiFeature, consent, searches, keepDays: KEEP_DAYS }, NO_STORE)
   } catch (err) { return failed(err) }
 }
 
@@ -50,10 +54,18 @@ export async function POST(req: NextRequest) {
     if (!parsed.success) return NextResponse.json({ error: 'Invalid request' }, { status: 400 })
     const who = await childOf(parsed.data.student_id)
     if (who instanceof NextResponse) return who
-    if (parsed.data.agree && !await schoolHasFeature(who.child.schoolId, 'student-search')) {
-      return NextResponse.json({ error: 'Feature not enabled', code: 'FEATURE_DISABLED', feature: 'student-search' }, { status: 403 })
+    const body = parsed.data
+    // Agreeing needs the school's switches on; saying no always works.
+    const needed = 'ai' in body ? (body.ai ? ['student-search', 'student-search-ai'] : []) : (body.agree ? ['student-search'] : [])
+    for (const feature of needed) {
+      if (!await schoolHasFeature(who.child.schoolId, feature)) {
+        return NextResponse.json({ error: 'Feature not enabled', code: 'FEATURE_DISABLED', feature }, { status: 403 })
+      }
     }
-    await setConsent(pool, who.parentId, who.child, parsed.data.agree)
+    if (!('ai' in body)) await setConsent(pool, who.parentId, who.child, body.agree)
+    else if (!await setAiConsent(pool, who.parentId, who.child, body.ai)) {
+      return NextResponse.json({ error: 'Turn search on first.' }, { status: 409 })
+    }
     return NextResponse.json({ ok: true })
   } catch (err) { return failed(err) }
 }
