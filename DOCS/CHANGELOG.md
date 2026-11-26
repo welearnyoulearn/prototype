@@ -2,6 +2,17 @@
 
 All notable changes to the WLYL School prototype are documented here.
 
+## [Unreleased] - QA fixes from the 25 November pass (#527)
+
+### Fixed
+- **Students:** viewing, editing, removing and restoring a student no longer fails with a server error (#496).
+- **Platform billing:** renewing or saving a plan cancels a downgrade still waiting to start, which the school page now shows with a cancel button (#497). The monthly run no longer charges a monthly plan fee after a newer term has replaced it (#498).
+- **Closed fee year:** dues left open can be collected, waived, carried forward or written off after the year is closed, also after rollover (#495). A reported payment waiting for approval blocks carry forward, write-off and passout (#509).
+- **Exams:** marks with one or two decimals are accepted (#502). A class without a class teacher can be released by the school admin (#500), and a student who joins after marks are submitted no longer blocks release (#501).
+- **Results:** the marks CSV lists only the exam's students and shows no result without marks (#506). Report cards print one page per student (#499).
+- **Teacher portal:** exam notifications open the class (#511). The class overview shows real results and attendance (#503). Teachers can save their phone number and qualification (#504).
+- **Attendance:** late counts as attended in the admin day register, the teacher's today card and Class Management (#505).
+
 ## [Unreleased] - Teacher mobile app: long sessions and Expo push
 
 ### Added
