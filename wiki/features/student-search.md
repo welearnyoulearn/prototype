@@ -31,6 +31,8 @@ A student looks up a study topic in one search box and sees Google results with 
 - **Cards:** a search that is only a sum or unit conversion is answered in the browser. A search asking for a meaning ("meaning of habitat", "నీరు అర్థం") sends that word to English Wiktionary; senses marked or worded as unsuitable are left out (not a complete filter). Other searches ask Wikipedia. A sum goes to Google (as every accepted search does) but to no card service.
 - **Wikipedia card:** the article's introduction (six lines, then "Show more"), up to four more pictures from the same article, and up to six facts from Wikidata when it has useful ones. Articles whose title or opening paragraph suggest a sensitive topic show no pictures; this is a word list and cannot judge a picture.
 - **Textbook card** (under the Wikipedia card, not for sums or meanings): up to three chapters of the student's own grade whose name or topic matches, with the library textbook links, leaving out chapters hidden from the class; then a link to NCERT's official textbook page. School chapters need the student to be allowed the Digital Library. Matching is on the words in the chapter or topic name only.
+- **Switch:** a student with both the AI screen (AI Pro tutor, or AI Basic links) and Search sees two buttons above either screen to move between them. Both menu items remain.
+- **When the AI Tutor fails** (server error, error mid-stream before any answer, or lost connection), and the student may use Search, a question of 200 characters or less opens Search with that question and a "Back to AI Tutor" button. It goes through the same checks, consent and history. Question limits, a plan without the tutor and the Stop button do not trigger it. The tutor screen says this beforehand.
 - **Stopped searches** (adult, dangerous, betting, self-harm wording, personal details) are not sent to Google, Wikipedia or Wiktionary. Self-harm wording shows help contacts. The parent sees the stopped words, except personal details, which are not saved.
 - **Kept** 30 days: the words, a label and the time. Never the results. Expired rows are hidden at once and deleted in batches of 5,000.
 - **Review and rollout:** `DOCS/student-search/REVIEW-PACK.md` and `DOCS/student-search/ROLLOUT.md`. Database load test: `scripts/load-test-student-search.ts`.
@@ -50,6 +52,7 @@ A student looks up a study topic in one search box and sees Google results with 
 | `lib/studentSearch/calculator.ts` | Maths and unit answers |
 | `lib/studentSearch/dictionary.ts`, `app/student/components/SearchAnswerCards.tsx` | Word meanings; answer and meaning cards |
 | `lib/studentSearch/textbooks.ts`, `app/api/student/search/textbooks/route.ts` | Matching chapters in school books |
+| `app/student/components/TutorSearchSwitch.tsx` | Switch between the AI screen and Search |
 | `lib/studentSearch/service.ts` | Consent, history, retention, limits |
 | `lib/studentSearch/schema.ts` | Tables; feature seeded OFF |
 
@@ -81,6 +84,8 @@ A student looks up a study topic in one search box and sees Google results with 
 | 2026-11-26 | Maths, unit and word meaning cards; notice version `2026-11-draft-3` | #538 |
 | 2026-11-26 | Textbook card: matching school chapters and the NCERT textbooks link | #538 |
 | 2026-11-26 | Richer Wikipedia card: longer text, more pictures, quick facts | #538 |
+| 2026-11-26 | Search opens when the AI Tutor cannot answer; notice version `2026-11-draft-4` | #538 |
+| 2026-11-26 | Switch between AI Tutor and Search | #538 |
 
 ## Known issues
 
@@ -91,6 +96,7 @@ A student looks up a study topic in one search box and sees Google results with 
 - [ ] Only the database has been load tested, not a deployed web server or its connection limits (#538)
 - [ ] Confirm the Wikipedia card beside Google results is allowed by Google's terms (#538)
 - [ ] Wikipedia pictures are not individually checked; a safety review is needed before real students (#538)
+- [ ] A tutor question that fails is sent to Google; the word check does not catch names or addresses. Needs legal review before real students (#538)
 - [ ] Old searches are deleted when search data is next read or written, not by a scheduled job (#538)
 
 ## Notes
