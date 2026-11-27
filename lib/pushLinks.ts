@@ -65,3 +65,20 @@ export function teacherAppLink(type: string, data: unknown): string {
   }
   return '/notifications'
 }
+
+// Where a tapped push opens in the student mobile app (wlyl-student-mobile, #552). Paths are the app's
+// expo-router routes; anything without a screen of its own opens Notifications.
+const STUDENT_RESULT_TYPES = new Set(['marks_released'])
+const STUDENT_DOUBT_TYPES = new Set(['doubt_answered', 'doubt_explained', 'doubt_reopened', 'doubt_clarified'])
+
+export function studentAppLink(type: string, data: unknown): string {
+  if (STUDENT_RESULT_TYPES.has(type)) {
+    const examId = positiveId(data, 'exam_id')
+    return examId ? `/marks/${examId}` : '/progress'
+  }
+  if (STUDENT_DOUBT_TYPES.has(type) || type.startsWith('doubt_')) return '/doubts'
+  if (type.startsWith('daily_quiz')) return '/quiz'
+  if (type === 'daily_newspaper') return '/newspaper'
+  if (type === 'birthday') return '/class-circle'
+  return '/notifications'
+}

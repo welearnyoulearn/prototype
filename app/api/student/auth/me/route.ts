@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import pool from '@/lib/db'
 import { getStudentSession, schoolHasFeature, clearStudentAuthCookie } from '@/lib/auth'
+import { removeStudentDevices } from '@/lib/portalSessionPolicy'
 
 export async function GET() {
   try {
@@ -13,6 +14,8 @@ export async function GET() {
     // signed in, not just new login attempts.
     if (!(await schoolHasFeature(session.schoolId, 'student-portal'))) {
       await clearStudentAuthCookie()
+      // The app can't unregister once it is signed out, so its phones go now (#552).
+      await removeStudentDevices(pool, session.studentId)
       return NextResponse.json(
         { error: 'access_revoked', message: "Your school has disabled student portal access. Please contact your school admin." },
         { status: 401 }

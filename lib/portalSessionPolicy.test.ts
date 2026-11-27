@@ -8,7 +8,9 @@ import {
   parentLoginChanged,
   parentSessionLimits,
   removeParentDevices,
+  removeStudentDevices,
   removeTeacherDevices,
+  studentSessionLimits,
   teacherSessionLimits,
 } from './portalSessionPolicy'
 
@@ -71,5 +73,21 @@ test('removing a teacher\'s devices deletes only that teacher\'s tokens', async 
   await removeTeacherDevices({ query: async (sql: string, params: unknown[]) => { calls.push({ sql, params }) } }, 42)
   assert.equal(calls.length, 1)
   assert.match(calls[0].sql, /DELETE FROM device_tokens WHERE recipient_role = 'teacher' AND recipient_id = \$1/)
+  assert.deepEqual(calls[0].params, [42])
+})
+
+test('students (#552): the web portal keeps 20 min / 12 h, the student app stays signed in like parents', () => {
+  for (const mobile of [undefined, false]) {
+    assert.deepEqual(studentSessionLimits(mobile), { idleMinutes: SESSION_IDLE_MINUTES, maxHours: SESSION_MAX_HOURS, cookieMaxAgeSeconds: null })
+  }
+  assert.deepEqual(studentSessionLimits(true), parentSessionLimits(true))
+  assert.ok(studentSessionLimits(true).cookieMaxAgeSeconds! < 2 ** 31)
+})
+
+test('removing a student\'s devices deletes only that student\'s rows', async () => {
+  const calls: { sql: string; params: unknown[] }[] = []
+  await removeStudentDevices({ query: async (sql, params) => { calls.push({ sql, params }); return {} } }, 42)
+  assert.equal(calls.length, 1)
+  assert.match(calls[0].sql, /recipient_role = 'student' AND recipient_id = \$1/)
   assert.deepEqual(calls[0].params, [42])
 })

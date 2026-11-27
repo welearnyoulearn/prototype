@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
 import { requireSchoolAdmin, revokePortalSessions } from '@/lib/auth'
-import { parentLoginChanged, removeParentDevices } from '@/lib/portalSessionPolicy'
+import { parentLoginChanged, removeParentDevices, removeStudentDevices } from '@/lib/portalSessionPolicy'
 import { sendStudentRemovedEmail, sendParentStudentRemovedEmail } from '@/lib/email'
 import { sendWhatsappMessage } from '@/lib/whatsapp'
 import { parsePositiveInteger, validateOptionalStudentUpdate } from '@/lib/studentValidation'
@@ -92,6 +92,8 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     })
     values.push(studentId)
     await client.query(`UPDATE students SET ${assignments.join(', ')} WHERE id = $${values.length}`, values)
+    // A student who is no longer active stops getting pushes on their phones (#552).
+    if (body.status !== undefined && normalizeUpdateValue('status', body.status) !== 'active') await removeStudentDevices(client, studentId)
 
     const nextGrade = body.grade !== undefined ? String(body.grade).trim() : existing.grade
     const nextSection = body.section !== undefined ? String(body.section).trim().toUpperCase() : existing.section
@@ -162,6 +164,7 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
     const result = await pool.query(
       `UPDATE students SET status = 'inactive' WHERE id = $1 RETURNING ${SAFE_STUDENT_COLUMNS}`, [studentId],
     )
+    await removeStudentDevices(pool, studentId)
     const student = result.rows[0]
     const schoolRes = await pool.query('SELECT name FROM schools WHERE id = $1', [student.school_id])
     const schoolName = schoolRes.rows[0]?.name || 'Your School'
