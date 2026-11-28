@@ -1,6 +1,7 @@
 import pool from '@/lib/db'
 import { gradeOrderSql } from '@/lib/grades'
 import { yearClassSql } from '@/lib/feeYearClass'
+import { oldestBillFirstSql } from '@/lib/feeBillOrder'
 
 // Shared builder for the Fee Audit Report — used by the JSON, Excel and PDF routes.
 // Every money section uses the reconcilable model:
@@ -94,7 +95,7 @@ export async function buildFeeAuditReport(opts: {
               GREATEST(l.amount_due - COALESCE(l.waiver_amount,0) - l.amount_paid, 0) AS balance, l.due_date, l.status
        FROM student_fee_ledger l JOIN fee_categories fc ON fc.id = l.fee_category_id
        JOIN students s ON s.id = l.student_id
-       WHERE ${WHERE} ORDER BY fc.name, l.due_date`, vals
+       WHERE ${WHERE} ORDER BY fc.name, ${oldestBillFirstSql('l')}`, vals
     )
     const { rows: payments } = await pool.query(
       `SELECT fp.receipt_number, fp.amount, fp.payment_mode, fp.payment_status, fp.paid_date,

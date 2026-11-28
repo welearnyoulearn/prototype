@@ -5,6 +5,7 @@ import { gradeOrderSql } from '@/lib/grades'
 import { withWatchline } from '@/lib/logger'
 import { toCSV } from '@/lib/csv'
 import { YEAR_CLASS_JOIN, CLASS_GRADE, CLASS_SECTION, CLASS_ROLL } from '@/lib/feeYearClass'
+import { samePeriodOrderSql } from '@/lib/feeBillOrder'
 
 // GET /api/fees/export?school_id=X&academic_year=Y&type=ledger|payments&grade=Z&status=S
 async function handleGET(req: NextRequest) {
@@ -60,7 +61,7 @@ async function handleGET(req: NextRequest) {
              FROM fee_waivers WHERE COALESCE(is_revoked, FALSE) = FALSE GROUP BY ledger_id
            ) wv ON wv.ledger_id = l.id
            WHERE ${conditions.join(' AND ')}
-           ORDER BY ${gradeOrderSql(CLASS_GRADE)}, ${CLASS_SECTION}, s.name, l.due_date, fc.name, l.id`,
+           ORDER BY ${gradeOrderSql(CLASS_GRADE)}, ${CLASS_SECTION}, s.name, s.id, l.due_date, fc.name, ${samePeriodOrderSql('l')}`,
           values
         )
 

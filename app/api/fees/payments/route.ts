@@ -6,6 +6,7 @@ import { withWatchline } from '@/lib/logger'
 import { todayIST } from '@/lib/istDate'
 import { claimIdempotencyKey, saveIdempotentResponse } from '@/lib/idempotency'
 import { lockLedgerYears } from '@/lib/feeRollover'
+import { oldestBillFirstSql } from '@/lib/feeBillOrder'
 
 // Hard ceiling on rows per request so a payment history can never come back unbounded.
 const MAX_LIMIT = 500
@@ -261,7 +262,7 @@ async function handlePOST(req: NextRequest) {
            FROM student_fee_ledger
            WHERE id = ANY($1) AND school_id = $2 AND student_id = $3
              AND status NOT IN ('paid', 'waived')
-           ORDER BY due_date ASC
+           ORDER BY ${oldestBillFirstSql('student_fee_ledger')}
            FOR UPDATE`,
           [ledger_ids, school_id, student_id]
         )
@@ -346,7 +347,8 @@ async function handlePOST(req: NextRequest) {
          FROM fee_payments fp
          JOIN student_fee_ledger l ON l.id = fp.ledger_id
          JOIN fee_categories fc ON fc.id = l.fee_category_id
-         WHERE fp.id = ANY($1::int[])`,
+         WHERE fp.id = ANY($1::int[])
+         ORDER BY fp.id`,
         [createdPayments.map(p => p.id)]
       )
 

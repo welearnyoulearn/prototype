@@ -5,6 +5,7 @@ import {
   countWorkingSessions, enumerateDates, monthBounds, summarizeCounts, todayIST,
   type SessionRecord,
 } from './attendanceRules'
+import { oldestBillFirstSql } from '@/lib/feeBillOrder'
 
 // Everything the school admin needs to talk to a parent about ONE student, for one academic year:
 // who they are, attendance, marks, fees, engagement. Attendance uses the shared rules
@@ -193,7 +194,7 @@ export async function buildStudentProfile(schoolId: number, studentId: number, y
                 l.due_date::text AS due_date, l.status
          FROM student_fee_ledger l JOIN fee_categories c ON c.id = l.fee_category_id
          WHERE l.school_id = $1 AND l.student_id = $2 AND l.academic_year = $3
-         ORDER BY l.due_date NULLS LAST, l.id`,
+         ORDER BY ${oldestBillFirstSql('l')}`,
         [schoolId, studentId, year.label]),
       pool.query<{ id: number; receipt_number: string | null; amount: string; payment_mode: string; payment_status: string; paid_date: string; category: string }>(
         `SELECT p.id, p.receipt_number, p.amount, p.payment_mode, p.payment_status, p.paid_date::text AS paid_date, c.name AS category

@@ -4,6 +4,7 @@ import { requireFeeAccess } from '@/lib/auth'
 import { gradeOrderSql } from '@/lib/grades'
 import { withWatchline } from '@/lib/logger'
 import { resolveAcademicYear } from '@/lib/academicYear'
+import { samePeriodOrderSql } from '@/lib/feeBillOrder'
 
 // Hard ceiling on rows per request so a ledger can never come back unbounded.
 const MAX_LIMIT = 500
@@ -106,7 +107,7 @@ async function handleGET(req: NextRequest) {
            (CURRENT_DATE - l.due_date) AS days_overdue
          ${from}
          ${where}
-         ORDER BY l.due_date, ${gradeOrderSql('s.grade')}, s.section, s.school_roll_number NULLS LAST, s.name, l.id
+         ORDER BY l.due_date, ${gradeOrderSql('s.grade')}, s.section, s.school_roll_number NULLS LAST, s.name, s.id, ${samePeriodOrderSql('l')}
          ${pageClause}`,
         values
       )
