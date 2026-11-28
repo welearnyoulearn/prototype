@@ -54,7 +54,7 @@ export type ParentInfo = {
 // batchCache collapses repeated lookups/creates for the same parent within one request
 // (e.g. two siblings in the same upload) so they resolve to a single parent_id instead
 // of racing to insert duplicate rows. Pass the same Map across all calls in one request.
-export type ParentMatchResult = { parentId: number; wasCreated: boolean } | null
+export type ParentMatchResult = { parentId: number; wasCreated: boolean; emailTaken?: boolean } | null
 
 export async function findOrCreateParent(
   client: PoolClient,
@@ -87,15 +87,32 @@ export async function findOrCreateParent(
 
   if (!createIfMissing || !parentHash) return null
 
+  // A parent email can belong to only one parent account across all schools (parents_email_unique).
+  const emailTaken = !!pe && (await emailsUsedElsewhere(client, schoolId, [pe.toLowerCase()])).size > 0
+  if (emailTaken && !pp) return null
+
   const insertRes = await client.query(
     `INSERT INTO parents (school_id, name, email, phone, password_hash, password_changed)
      VALUES ($1,$2,$3,$4,$5,FALSE) RETURNING id`,
-    [schoolId, pn, pe, pp, parentHash]
+    [schoolId, pn, emailTaken ? null : pe, pp, parentHash]
   )
   const parentId = insertRes.rows[0].id as number
   batchCache.set(batchKey, parentId)
-  return { parentId, wasCreated: true }
+  return { parentId, wasCreated: true, ...(emailTaken ? { emailTaken: true } : {}) }
 }
+
+/** Which of these (lower-cased) emails already belong to a parent account of another school. */
+async function emailsUsedElsewhere(client: PoolClient, schoolId: number, emails: string[]): Promise<Set<string>> {
+  if (emails.length === 0) return new Set()
+  const { rows } = await client.query<{ email_l: string }>(
+    `SELECT LOWER(email) AS email_l FROM parents WHERE school_id <> $1 AND LOWER(email) = ANY($2::text[])`,
+    [schoolId, emails])
+  return new Set(rows.map(r => r.email_l))
+}
+
+/** Shown to the admin when a parent account had to be made without the email they typed. */
+export const parentEmailTakenWarning = (parentName: string | null) =>
+  `${parentName || 'A parent'}: that email address is already used by another parent account, so this parent signs in with their phone number. Ask them for a different email if they need one.`
 
 export async function linkStudentParent(client: PoolClient, studentId: number, parentId: number): Promise<void> {
   await client.query(
@@ -309,16 +326,25 @@ export type ParentLinkRow = {
 }
 export type ResolvedParentContact = { email: string | null; phone: string | null; name: string | null } | null
 
+export type LinkedParent = {
+  /** The account the student is linked to, or null when there is none. */
+  contact: ResolvedParentContact
+  /** The input row whose password hash created this account, or null if it already existed. */
+  createdFromRow: number | null
+  /** The typed email belongs to another school's parent, so the new account has no email. */
+  emailTaken: boolean
+}
+
 // Set-based equivalent of calling findOrCreateParent + linkStudentParent + a contact
 // SELECT for every student: one lookup, one bulk INSERT of new parents, one bulk INSERT
 // of links and one contact SELECT — a handful of statements instead of ~4 per student.
-// Matching rules are unchanged: a row's key is its email (case-insensitive) when it has
-// one, else its phone; an existing parent is matched by email OR phone; rows sharing a
-// key within the batch share one parent. Returns the resolved contact per input row.
+//
+// An existing parent of this school is matched by email OR phone. Rows of the batch that
+// share an email or a phone are one family: they get one parent, whichever of them
+// carries the email (#517). Returns one entry per input row.
 export async function linkParentsBulk(
   client: PoolClient, schoolId: number, rows: ParentLinkRow[]
-): Promise<ResolvedParentContact[]> {
-  type Ref = { id: number } | { createIdx: number }
+): Promise<LinkedParent[]> {
   const trimmed = rows.map(r => ({
     pe: r.parent.email?.trim() || null, pp: r.parent.phone?.trim() || null, pn: r.parent.name?.trim() || null,
   }))
@@ -332,25 +358,56 @@ export async function linkParentsBulk(
         [schoolId, emails, phones]
       )).rows
     : []
+  const taken = await emailsUsedElsewhere(client, schoolId, emails)
 
-  const cache = new Map<string, Ref>()
-  const toCreate: { name: string | null; email: string | null; phone: string | null; hash: string }[] = []
-  const refs: (Ref | null)[] = rows.map((r, i) => {
-    const { pe, pp, pn } = trimmed[i]
-    if (!pe && !pp) return null
-    const key = pe ? `email:${pe.toLowerCase()}` : `phone:${pp}`
-    const cached = cache.get(key)
-    if (cached) return cached
-    const match = existing.find(e => (pe && e.email_l === pe.toLowerCase()) || (pp && e.phone === pp))
-    let ref: Ref | null = null
-    if (match) ref = { id: match.id }
-    else if (r.createIfMissing && r.hash) {
-      ref = { createIdx: toCreate.length }
-      toCreate.push({ name: pn, email: pe, phone: pp, hash: r.hash })
+  // Group the rows into families: union-find over shared email or phone.
+  const group = rows.map((_, i) => i)
+  const find = (i: number): number => group[i] === i ? i : (group[i] = find(group[i]))
+  const firstWith = new Map<string, number>()
+  trimmed.forEach(({ pe, pp }, i) => {
+    for (const key of [pe && `email:${pe.toLowerCase()}`, pp && `phone:${pp}`]) {
+      if (!key) continue
+      const other = firstWith.get(key)
+      if (other === undefined) firstWith.set(key, i)
+      else group[find(i)] = find(other)
     }
-    if (ref) cache.set(key, ref)
-    return ref
   })
+  const matched = trimmed.map(({ pe, pp }) =>
+    existing.find(e => (pe && e.email_l === pe.toLowerCase()) || (pp && e.phone === pp))?.id ?? null)
+  const families = new Map<number, number[]>()
+  trimmed.forEach(({ pe, pp }, i) => {
+    if (!pe && !pp) return
+    families.set(find(i), [...(families.get(find(i)) ?? []), i])
+  })
+
+  type Ref = { id: number } | { createIdx: number }
+  const refs: (Ref | null)[] = rows.map(() => null)
+  const createdFrom: (number | null)[] = rows.map(() => null)
+  const emailTaken: boolean[] = rows.map(() => false)
+  const toCreate: { name: string | null; email: string | null; phone: string | null; hash: string }[] = []
+  for (const members of families.values()) {
+    const known = members.map(i => matched[i]).find(id => id !== null)
+    let shared: Ref | null = known != null ? { id: known } : null
+    if (!shared) {
+      const owner = members.find(i => rows[i].createIfMissing && rows[i].hash)
+      if (owner !== undefined) {
+        const typed = members.map(i => trimmed[i].pe).filter((e): e is string => !!e)
+        const email = typed.find(e => !taken.has(e.toLowerCase())) ?? null
+        const phone = trimmed[owner].pp ?? members.map(i => trimmed[i].pp).find(Boolean) ?? null
+        const blocked = !email && typed.length > 0
+        if (blocked) for (const i of members) emailTaken[i] = true
+        if (email || phone) {
+          shared = { createIdx: toCreate.length }
+          toCreate.push({ name: members.map(i => trimmed[i].pn).find(Boolean) ?? null, email, phone, hash: rows[owner].hash! })
+          for (const i of members) createdFrom[i] = owner
+        }
+      }
+    }
+    for (const i of members) {
+      const own = matched[i]
+      refs[i] = own !== null ? { id: own } : shared
+    }
+  }
 
   let createdIds: number[] = []
   if (toCreate.length > 0) {
@@ -383,8 +440,12 @@ export async function linkParentsBulk(
     )
     for (const c of cr) contacts.set(c.id, { email: c.email || null, phone: c.phone || null, name: c.name || null })
   }
-  return refs.map(ref => {
+  return refs.map((ref, i) => {
     const pid = parentIdOf(ref)
-    return pid === null ? null : (contacts.get(pid) ?? { email: null, phone: null, name: null })
+    return {
+      contact: pid === null ? null : (contacts.get(pid) ?? { email: null, phone: null, name: null }),
+      createdFromRow: ref && 'createIdx' in ref ? createdFrom[i] : null,
+      emailTaken: emailTaken[i],
+    }
   })
 }

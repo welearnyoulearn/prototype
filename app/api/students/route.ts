@@ -8,7 +8,7 @@ import {
 import { STUDENT_READ_FEATURES } from '@/lib/featureRoutes'
 import { sendStudentWelcomeEmail, sendParentWelcomeEmail, sendChildCredentialsToParentEmail } from '@/lib/email'
 import { sendWhatsappMessage } from '@/lib/whatsapp'
-import { findOrCreateParent, linkStudentParent, generateUniqueStudentIds } from '@/lib/studentOnboarding'
+import { findOrCreateParent, linkStudentParent, parentEmailTakenWarning, generateUniqueStudentIds } from '@/lib/studentOnboarding'
 import { gradeOrderSql } from '@/lib/grades'
 import { normalizeStudentInput } from '@/lib/studentValidation'
 import { withWatchline } from '@/lib/logger'
@@ -428,7 +428,7 @@ async function provisionParentAccount({
       const schoolResult = await pool.query('SELECT name FROM schools WHERE id = $1', [schoolId])
       const schoolName = schoolResult.rows[0]?.name || 'Your School'
       const displayName = parentName || parentEmail || resolvedPhone || 'there'
-      if (parentEmail) {
+      if (parentEmail && !match.emailTaken) {
         sendParentWelcomeEmail({
           schoolId: schoolId, to: parentEmail, parentName: displayName, studentName, schoolName,
           tempPassword, loginUrl: `${appUrl}/parent/login`,
@@ -439,12 +439,13 @@ async function provisionParentAccount({
           schoolId, to: resolvedPhone, templateName: 'parent_credentials', recipientName: displayName,
           templateParams: {
             parent_name: displayName, student_name: studentName, school_name: schoolName,
-            login: parentEmail || resolvedPhone, temp_password: tempPassword, login_url: `${appUrl}/parent/login`,
+            login: resolvedEmail || resolvedPhone, temp_password: tempPassword, login_url: `${appUrl}/parent/login`,
           },
         }).catch(console.error)
       }
     }
-    return { warning: null, resolvedEmail, resolvedPhone, resolvedName }
+    const warning = match.emailTaken ? parentEmailTakenWarning(parentName) : null
+    return { warning, resolvedEmail, resolvedPhone, resolvedName }
   } catch (err) {
     console.error('[provisionParentAccount]', err)
     return {
