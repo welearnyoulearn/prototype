@@ -27,6 +27,7 @@ School admin.
 - Schools without Fee Management are not gated.
 - After the rollover the old fee year cannot be reopened.
 - Class roll numbers are unique per class: each promoted student keeps their roll number if it is free in the new class, otherwise it is cleared and the school sets a new one (the result screen says how many). Graduated students' roll numbers are cleared; the old value stays in the class history.
+- A class that promoted students move into is created if the school does not have it yet (with the new year's subjects, no class teacher); the result screen lists the new classes. If students would move into a class the school **removed**, nothing runs until it is restored or those students are moved to another section.
 - The active year cannot be switched by hand (Settings or API) once a school has a current year.
 - **Exceptions:** before running, the admin can mark individual students to **repeat the year** (same grade and section, roll number kept) or to be promoted into a **different section** of the next grade (the section must already exist). A student in the final grade can repeat instead of graduating. Each student's outcome (promoted / repeated / moved / graduated) is stored in the class history. Bad exceptions (unknown student, missing section) are refused before anything changes.
 - Past years stay available in Student 360 through the year switcher.
