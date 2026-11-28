@@ -110,8 +110,21 @@ export type BackfillResult = {
   parentCredentials: { name: string; phone: string; login: string; temp_password: string; is_new: boolean }[]
 }
 
+/**
+ * Which active students still need portal access: no student login ($2), or a parent contact on file
+ * and no parent account linked ($3). Used for the count on the button and for the activation itself.
+ */
+export const PORTAL_PENDING_SQL = `
+  FROM students s
+  WHERE s.school_id = $1 AND s.status = 'active' AND (
+    ($2::boolean AND s.password_hash IS NULL)
+    OR ($3::boolean
+        AND COALESCE(NULLIF(TRIM(s.parent_email), ''), NULLIF(TRIM(s.parent_phone), '')) IS NOT NULL
+        AND NOT EXISTS (SELECT 1 FROM student_parents sp WHERE sp.student_id = s.id))
+  )`
+
 // Generates + delivers portal credentials for every active student at this
-// school still missing one (password_hash IS NULL), for whichever of
+// school still missing them (see PORTAL_PENDING_SQL), for whichever of
 // student/parent is requested. Shared by:
 //   - the manual "Activate Portal Access" button (POST /api/school-admin/students/backfill-portal)
 //   - the automatic catch-up that fires when a platform admin turns
@@ -128,9 +141,10 @@ export async function backfillPortalCredentials({
   const schoolName = schoolRes.rows[0]?.name || 'Your School'
   const appUrl = process.env.APP_URL || 'http://localhost:3000'
 
+  // A student without a login is still visited on a parent-only run, to link them to their parent.
   const targetRes = await pool.query(
-    `SELECT * FROM students WHERE school_id = $1 AND status = 'active' AND password_hash IS NULL`,
-    [schoolId]
+    `SELECT s.* ${PORTAL_PENDING_SQL} ORDER BY s.id`,
+    [schoolId, true, wantParent]
   )
   const targets = targetRes.rows
 
@@ -150,7 +164,8 @@ export async function backfillPortalCredentials({
     for (const student of targets) {
       let studentTempPassword: string | null = null
 
-      if (wantStudent) {
+      // Never replace a login the student already has: they may be here only because a parent is missing.
+      if (wantStudent && !student.password_hash) {
         studentTempPassword = generateTempPassword(8)
         const passwordHash = await hashPortalPassword(studentTempPassword)
         await client.query(`UPDATE students SET password_hash = $1 WHERE id = $2`, [passwordHash, student.id])
@@ -161,7 +176,8 @@ export async function backfillPortalCredentials({
           grade: student.grade || '',
           section: student.section || '',
           school_roll_number: student.school_roll_number,
-          login: student.email || '(no email — share manually)',
+          // Students sign in with their Login ID, never their email (#519).
+          login: student.roll_number,
           temp_password: studentTempPassword,
         })
 
@@ -223,31 +239,33 @@ export async function backfillPortalCredentials({
 
           if (wantParent && match.wasCreated && !credParentsSeen.has(batchKey) && parentTempPassword) {
             credParentsSeen.add(batchKey)
+            // The account's own contact details: what was typed may not all have been stored.
+            const { email, phone } = resolvedParentContact
             parentCredentials.push({
-              name: pn || pe || pp || '',
-              phone: pp || '',
-              login: pe || pp || '(no contact)',
+              name: pn || email || phone || '',
+              phone: phone || '',
+              login: email || phone || '(no contact)',
               temp_password: parentTempPassword,
               is_new: true,
             })
-            const parentDisplayName = pn || pe || pp || 'there'
-            if (pe) {
+            const parentDisplayName = pn || email || phone || 'there'
+            if (email) {
               const studentName = student.name
               sendsToFire.push(() => {
                 sendParentWelcomeEmail({
-                  schoolId: schoolId, to: pe, parentName: parentDisplayName, studentName, schoolName,
+                  schoolId: schoolId, to: email, parentName: parentDisplayName, studentName, schoolName,
                   tempPassword: parentTempPassword!, loginUrl: `${appUrl}/parent/login`,
                 }).catch(console.error)
               })
             }
-            if (pp) {
+            if (phone) {
               const studentName = student.name
               sendsToFire.push(() => {
                 sendWhatsappMessage({
-                  schoolId, to: pp, templateName: 'parent_credentials', recipientName: parentDisplayName,
+                  schoolId, to: phone, templateName: 'parent_credentials', recipientName: parentDisplayName,
                   templateParams: {
                     parent_name: parentDisplayName, student_name: studentName, school_name: schoolName,
-                    login: pe || pp, temp_password: parentTempPassword!, login_url: `${appUrl}/parent/login`,
+                    login: email || phone, temp_password: parentTempPassword!, login_url: `${appUrl}/parent/login`,
                   },
                 }).catch(console.error)
               })

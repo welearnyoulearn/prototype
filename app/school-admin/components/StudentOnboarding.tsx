@@ -779,7 +779,7 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
             <div className="px-6 py-5">
               <p className="text-sm text-gray-600">
                 This will generate new login credentials for <strong>{portalStatus.pendingCount}</strong> existing
-                student{portalStatus.pendingCount !== 1 ? 's' : ''} (and any linked parents) who don&apos;t have one yet,
+                student{portalStatus.pendingCount !== 1 ? 's' : ''} (and their parents) who don&apos;t have access yet,
                 and send welcome emails where an email address is on file. This cannot be undone.
               </p>
               <div className="flex gap-3 mt-5">

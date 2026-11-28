@@ -1,12 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 import { requireFeeAccess, schoolHasFeature } from '@/lib/auth'
-import { backfillPortalCredentials } from '@/lib/studentOnboarding'
+import { backfillPortalCredentials, PORTAL_PENDING_SQL } from '@/lib/studentOnboarding'
 
 // GET /api/school-admin/students/backfill-portal?school_id=
-// Returns current portal flags and how many active students are missing a
-// student login (password_hash IS NULL) — used to decide whether to show the
-// "Activate portal access" button in the school-admin UI.
+// Returns current portal flags and how many active students still need a student login or a parent
+// account, for the portals that are on — used to show the "Activate portal access" button.
 export async function GET(req: NextRequest) {
   await ensureDB()
   try {
@@ -15,14 +14,14 @@ export async function GET(req: NextRequest) {
     const access = await requireFeeAccess(schoolIdParam)
     if (!access) return NextResponse.json({ error: 'Unauthorized' }, { status: 403 })
 
-    const [studentPortalEnabled, parentPortalEnabled, pendingRes] = await Promise.all([
+    const [studentPortalEnabled, parentPortalEnabled] = await Promise.all([
       schoolHasFeature(access.schoolId, 'student-portal'),
       schoolHasFeature(access.schoolId, 'parent-portal'),
-      pool.query(
-        `SELECT COUNT(*) FROM students WHERE school_id = $1 AND status = 'active' AND password_hash IS NULL`,
-        [access.schoolId]
-      ),
     ])
+    const pendingRes = await pool.query(
+      `SELECT COUNT(*) ${PORTAL_PENDING_SQL}`,
+      [access.schoolId, studentPortalEnabled, parentPortalEnabled]
+    )
 
     return NextResponse.json({
       studentPortalEnabled,
