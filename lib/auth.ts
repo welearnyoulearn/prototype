@@ -11,7 +11,7 @@ import { PASSWORD_RULES } from './passwordPolicy'
 const COOKIE_MAX_AGE = 60 * 60 * 24 * 7 // 7 days — teacher/student/parent/platform cookies
 
 // School-staff sessions are short-lived and server-tracked (user_sessions table).
-import { SESSION_IDLE_MINUTES, SESSION_MAX_HOURS, parentSessionLimits, teacherSessionLimits } from './portalSessionPolicy'
+import { SESSION_IDLE_MINUTES, SESSION_MAX_HOURS, parentSessionLimits, studentSessionLimits, teacherSessionLimits } from './portalSessionPolicy'
 export { SESSION_IDLE_MINUTES, SESSION_MAX_HOURS }
 
 // ─── Cookie names ─────────────────────────────────────────────────────────────
@@ -50,6 +50,7 @@ export type StudentJWTPayload = {
   section: string
   rollNumber: string
   sid?: string
+  mobile?: boolean   // set at login by the student mobile app: long-lived session, see MOBILE_SESSION_DAYS (#552)
 }
 
 export type ParentJWTPayload = {
@@ -362,7 +363,7 @@ export async function createPortalSession(
 ): Promise<string> {
   const sid = randomUUID()
   const userAgent = (await headers()).get('user-agent')?.slice(0, 300) ?? null
-  const hours = (actorType === 'parent' || actorType === 'teacher') && opts.longLived ? parentSessionLimits(true).maxHours : SESSION_MAX_HOURS
+  const hours = opts.longLived ? parentSessionLimits(true).maxHours : SESSION_MAX_HOURS
   await pool.query(
     `INSERT INTO portal_sessions (id, actor_type, actor_id, school_id, expires_at, user_agent)
      VALUES ($1, $2, $3, $4, NOW() + make_interval(hours => $5), $6)`,
@@ -395,9 +396,10 @@ async function validatePortalSession<T extends { sid?: string; schoolId: number;
   actorId: number,
 ): Promise<T | null> {
   if (!payload?.sid) return null
-  // Only a parent or teacher token minted by its login route can carry `mobile`; it is signed, so it can't be forged.
+  // Only a token minted by its login route can carry `mobile`; it is signed, so it can't be forged.
   const idleMinutes = actorType === 'parent' ? parentSessionLimits(payload.mobile).idleMinutes
     : actorType === 'teacher' ? teacherSessionLimits(payload.mobile).idleMinutes
+    : actorType === 'student' ? studentSessionLimits(payload.mobile).idleMinutes
     : SESSION_IDLE_MINUTES
   const { rows } = await pool.query(
     `SELECT 1 FROM portal_sessions
@@ -456,7 +458,14 @@ export function getTeacherSessionFromRequest(req: NextRequest): TeacherJWTPayloa
 // ─── Student JWT ──────────────────────────────────────────────────────────────
 export function signStudentToken(payload: StudentJWTPayload): string              { return sign(payload) }
 export function verifyStudentToken(token: string): StudentJWTPayload | null       { return verify<StudentJWTPayload>(token) }
-export async function setStudentAuthCookie(payload: StudentJWTPayload)            { await setCookie(COOKIE_STUDENT, sign(payload, `${SESSION_MAX_HOURS}h`), false) }
+// Web: browser-session cookie capped at SESSION_MAX_HOURS. Student mobile app (#552): a persistent cookie
+// for MOBILE_SESSION_DAYS, so the phone's cookie jar keeps it across app restarts (same as parents).
+export async function setStudentAuthCookie(payload: StudentJWTPayload) {
+  const { maxHours, cookieMaxAgeSeconds } = studentSessionLimits(payload.mobile)
+  const token = sign(payload, `${maxHours}h`)
+  if (cookieMaxAgeSeconds === null) await setCookie(COOKIE_STUDENT, token, false)
+  else await setCookie(COOKIE_STUDENT, token, true, cookieMaxAgeSeconds)
+}
 export async function clearStudentAuthCookie()                                    { await clearCookie(COOKIE_STUDENT) }
 
 export async function getStudentSession(opts: { allowFirstLogin?: boolean } = {}): Promise<StudentJWTPayload | null> {

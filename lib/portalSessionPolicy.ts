@@ -4,7 +4,7 @@
 export const SESSION_IDLE_MINUTES = 20   // no authenticated activity for this long → logged out
 export const SESSION_MAX_HOURS    = 12   // hard cap, however active the user is
 
-// The parent and teacher mobile apps (login sent with `x-wlyl-client: mobile`) stay signed in for life,
+// The parent, teacher and student mobile apps (login sent with `x-wlyl-client: mobile`) stay signed in for life,
 // like a chat app: only logout, a password change or reset, or the school removing / deactivating the
 // account (all revoke it server-side) end it.
 // 50 years rather than "never" so every expiry stays a real date; it also keeps the cookie
@@ -30,6 +30,10 @@ export function mobileAwareSessionLimits(mobile: boolean | undefined): SessionLi
 
 export const parentSessionLimits = mobileAwareSessionLimits
 export const teacherSessionLimits = mobileAwareSessionLimits
+// Students too (#552): the student app keeps them signed in; the web student portal keeps 20 min / 12 h.
+// A student's session still ends on logout, a password change or reset, a credentials reset by the
+// school, deactivation, or the school switching Student Portal Access off.
+export const studentSessionLimits = mobileAwareSessionLimits
 
 export function isMobileClient(headerValue: string | null): boolean {
   return headerValue === 'mobile'
@@ -52,6 +56,15 @@ export async function removeParentDevices(
   parentId: number,
 ): Promise<void> {
   await db.query(`DELETE FROM device_tokens WHERE recipient_role = 'parent' AND recipient_id = $1`, [parentId])
+}
+
+// A student's phones stop receiving pushes once the school deactivates them or resets their credentials,
+// or they reset their password: a revoked app can no longer unregister itself (#552).
+export async function removeStudentDevices(
+  db: { query: (sql: string, params: unknown[]) => Promise<unknown> },
+  studentId: number,
+): Promise<void> {
+  await db.query(`DELETE FROM device_tokens WHERE recipient_role = 'student' AND recipient_id = $1`, [studentId])
 }
 
 // A teacher's phones stop receiving pushes once the school removes or deactivates them, resets their

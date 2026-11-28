@@ -14,7 +14,7 @@ Each portal has its own login and its own cookie. Schools are never selected by 
 | Platform Admin | `wlyl-platform` | email + password | JWT 7 days; admin subdomain only |
 | School Admin / Principal / VP | `wlyl-auth` | **own email** + password (School ID is not a login) | JWT (12 h cap) + revocable `user_sessions` row: **20 min idle / 12 h max**, browser-session cookie |
 | Teacher | `wlyl-teacher` | email + password | Web: 20 min idle, 12 h cap. Teacher mobile app (`x-wlyl-client: mobile` at login): until logout, password change or reset, deactivation, removal or a login-email change; 50-year safety net |
-| Student | `wlyl-student` | system student id (`wlyl-stu-…`) + password | JWT 7 days |
+| Student | `wlyl-student` | system student id (`wlyl-stu-…`) + password | Web: 20 min idle, 12 h cap. Student mobile app (`x-wlyl-client: mobile` at login): until logout, password change or reset, a credentials reset by the school, deactivation, or Student Portal Access switched off; 50-year safety net (#552) |
 | Parent | `wlyl-parent` | email **or** phone + password | Web: 20 min idle, 12 h cap. Mobile app (`x-wlyl-client: mobile` at login): until logout or password change, 50-year safety net (#424) |
 
 All five have login, logout, change-password, forgot/reset-password (email link) and a date-of-birth step for teacher, student and parent. **WhatsApp OTP is not live** (draft PR #155).
