@@ -29,6 +29,18 @@ Move an entry to [completed.md](completed.md) when it ships. Add new entries at 
 - [ ] Review and merge
 - [ ] Live dry run with a working GROQ_API_KEY (the local key returned 401 on 2026-11-04) and the real feeds; set CRON_SECRET in production
 
+### Teacher–Student Chat (#556)
+**Type:** Feature
+**Portals:** School Admin, Teacher, Student, Parent
+**Branch:** `feature/558-teacher-chat`
+**Started:** 2026-11-28
+**Summary:** A student asks a teacher any doubt in a chat with delivery ticks; parents read along. Key `teacher-chat` (OFF).
+**Progress:**
+- [x] Phase 1 (#558): chat, parent view, school review, safety controls
+- [x] Browser tests (`e2e/teacher-chat.spec.ts`)
+- [ ] Review and merge
+- [ ] Reviews before real students (#557) · Phase 2 (#559)
+
 ### Daily Quiz + Student Doubts (#430)
 **Type:** Feature (epic)
 **Portals:** School Admin, Teacher, Student, Parent

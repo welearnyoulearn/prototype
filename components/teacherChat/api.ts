@@ -1,6 +1,9 @@
 // Browser helpers for Teacher Chat (#558).
 import { useEffect, useRef } from 'react'
 
+/** Where each portal's chat routes live. Written out so a search for a route finds its caller. */
+export const CHAT_API = { student: '/api/student/chat', teacher: '/api/teacher/chat', parent: '/api/parent/chat', school: '/api/school/chat' } as const
+
 export class ApiError extends Error {
   constructor(message: string, public status: number) { super(message) }
 }

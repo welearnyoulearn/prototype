@@ -8,7 +8,7 @@ import { MessageCircle, Plus } from 'lucide-react'
 import { MAX_OPEN_THREADS, MAX_STUDENT_MESSAGE, STATUS_LABEL } from '@/lib/teacherChat/rules'
 import type { StudentSetup, ThreadSummary } from '@/lib/teacherChat/service'
 import ChatThread from './ChatThread'
-import { ApiError, call, messageId, usePoll, when } from './api'
+import { ApiError, CHAT_API, call, messageId, usePoll, when } from './api'
 
 const LIST_POLL_MS = 30_000
 
@@ -20,7 +20,7 @@ export default function TeacherChat({ role, studentId, studentName, active }: Pr
   const [error, setError] = useState<string | null>(null)
   const [openId, setOpenId] = useState<number | null>(null)
   const [asking, setAsking] = useState(false)
-  const url = `/api/${role}/chat${role === 'parent' ? `?student_id=${studentId}` : ''}`
+  const url = `${CHAT_API[role]}${role === 'parent' ? `?student_id=${studentId}` : ''}`
 
   const load = useCallback(async () => {
     try { setData(await call<List>(url)); setError(null) }

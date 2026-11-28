@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "WLYL School Management API",
-    "version": "2026-11-25",
+    "version": "2026-11-28",
     "description": "Every API route in the WLYL platform, generated from the route handlers on the `dev` branch.\n\n## How to read this\n\n- **Sections and subcategories.** The sidebar groups routes by area, such as Fees & finance, then by topic, such as Waivers.\n- **Who can call.** The coloured badges on each route show which signed-in users it accepts. A red **Public** badge means the route has no sign-in check in code.\n- **Checks.** Extra rules inside the route, such as \"parent must own this student\", are listed under Checks.\n- **Feature flag.** Routes that are switched off unless the school's plan includes a feature say which one.\n\n## Signing in\n\nEach portal has its own session cookie: `wlyl-platform`, `wlyl-auth` (school admin), `wlyl-teacher`, `wlyl-student` and `wlyl-parent`. Sign in to the app in this browser, then use **Test Request** on any route. Scheduled jobs take `Authorization: Bearer $CRON_SECRET`."
   },
   "servers": [
@@ -191,6 +191,10 @@
     {
       "name": "Platform admin: newspaper",
       "description": "WLYL controls for the Daily Newspaper."
+    },
+    {
+      "name": "Teacher chat",
+      "description": "A student asks a teacher any doubt; parents read along; the school reviews. Needs the teacher-chat feature."
     }
   ],
   "x-tagGroups": [
@@ -54007,6 +54011,1501 @@
           }
         ],
         "x-source-file": "app/api/parent/search/route.ts"
+      }
+    },
+    "/api/student/chat": {
+      "get": {
+        "tags": [
+          "Teacher chat"
+        ],
+        "summary": "List chats",
+        "description": "List chats.\n\n**Who can call:** Student.\n\n**Checks:** getStudentSession(); only their own chats; teacher-chat feature on.",
+        "operationId": "getStudentChat",
+        "security": [
+          {
+            "student": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Done"
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden, or the feature is off"
+          },
+          "404": {
+            "description": "Not found, or not yours"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Student",
+            "color": "#15803d"
+          }
+        ],
+        "x-source-file": "app/api/student/chat/route.ts"
+      },
+      "post": {
+        "tags": [
+          "Teacher chat"
+        ],
+        "summary": "Ask a new doubt",
+        "description": "Ask a new doubt.\n\n**Who can call:** Student.\n\n**Checks:** getStudentSession(); only their own chats; teacher-chat feature on.",
+        "operationId": "postStudentChat",
+        "security": [
+          {
+            "student": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "subject",
+                  "body",
+                  "client_message_id"
+                ],
+                "properties": {
+                  "subject": {
+                    "type": "string"
+                  },
+                  "body": {
+                    "type": "string"
+                  },
+                  "client_message_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Done"
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden, or the feature is off"
+          },
+          "404": {
+            "description": "Not found, or not yours"
+          },
+          "409": {
+            "description": "Not possible in the chat’s current state"
+          },
+          "422": {
+            "description": "Message refused by the safety check"
+          },
+          "429": {
+            "description": "Limit reached"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Student",
+            "color": "#15803d"
+          }
+        ],
+        "x-source-file": "app/api/student/chat/route.ts"
+      }
+    },
+    "/api/student/chat/{id}": {
+      "get": {
+        "tags": [
+          "Teacher chat"
+        ],
+        "summary": "Read one chat with its messages and ticks",
+        "description": "Read one chat with its messages and ticks.\n\n**Who can call:** Student.\n\n**Checks:** getStudentSession(); only their own chats; teacher-chat feature on.",
+        "operationId": "getStudentChatId",
+        "security": [
+          {
+            "student": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Done"
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden, or the feature is off"
+          },
+          "404": {
+            "description": "Not found, or not yours"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Student",
+            "color": "#15803d"
+          }
+        ],
+        "x-source-file": "app/api/student/chat/[id]/route.ts"
+      }
+    },
+    "/api/student/chat/{id}/report": {
+      "post": {
+        "tags": [
+          "Teacher chat"
+        ],
+        "summary": "Report a chat or message to the school",
+        "description": "Report a chat or message to the school.\n\n**Who can call:** Student.\n\n**Checks:** getStudentSession(); only their own chats; teacher-chat feature on.",
+        "operationId": "postStudentChatIdReport",
+        "security": [
+          {
+            "student": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "message_id",
+                  "reason"
+                ],
+                "properties": {
+                  "message_id": {
+                    "type": "integer",
+                    "nullable": true
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Done"
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden, or the feature is off"
+          },
+          "404": {
+            "description": "Not found, or not yours"
+          },
+          "409": {
+            "description": "Not possible in the chat’s current state"
+          },
+          "422": {
+            "description": "Message refused by the safety check"
+          },
+          "429": {
+            "description": "Limit reached"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Student",
+            "color": "#15803d"
+          }
+        ],
+        "x-source-file": "app/api/student/chat/[id]/report/route.ts"
+      }
+    },
+    "/api/teacher/chat": {
+      "get": {
+        "tags": [
+          "Teacher chat"
+        ],
+        "summary": "List chats",
+        "description": "List chats.\n\n**Who can call:** Teacher.\n\n**Checks:** getTeacherSession(); only subjects this teacher answers in the class; teacher-chat feature on.",
+        "operationId": "getTeacherChat",
+        "security": [
+          {
+            "teacher": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Done"
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden, or the feature is off"
+          },
+          "404": {
+            "description": "Not found, or not yours"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Student",
+            "color": "#15803d"
+          }
+        ],
+        "x-source-file": "app/api/teacher/chat/route.ts"
+      }
+    },
+    "/api/teacher/chat/{id}": {
+      "get": {
+        "tags": [
+          "Teacher chat"
+        ],
+        "summary": "Read one chat with its messages and ticks",
+        "description": "Read one chat with its messages and ticks.\n\n**Who can call:** Teacher.\n\n**Checks:** getTeacherSession(); only subjects this teacher answers in the class; teacher-chat feature on.",
+        "operationId": "getTeacherChatId",
+        "security": [
+          {
+            "teacher": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Done"
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden, or the feature is off"
+          },
+          "404": {
+            "description": "Not found, or not yours"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Student",
+            "color": "#15803d"
+          }
+        ],
+        "x-source-file": "app/api/teacher/chat/[id]/route.ts"
+      }
+    },
+    "/api/teacher/chat/{id}/report": {
+      "post": {
+        "tags": [
+          "Teacher chat"
+        ],
+        "summary": "Report a chat or message to the school",
+        "description": "Report a chat or message to the school.\n\n**Who can call:** Teacher.\n\n**Checks:** getTeacherSession(); only subjects this teacher answers in the class; teacher-chat feature on.",
+        "operationId": "postTeacherChatIdReport",
+        "security": [
+          {
+            "teacher": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "message_id",
+                  "reason"
+                ],
+                "properties": {
+                  "message_id": {
+                    "type": "integer",
+                    "nullable": true
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Done"
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden, or the feature is off"
+          },
+          "404": {
+            "description": "Not found, or not yours"
+          },
+          "409": {
+            "description": "Not possible in the chat’s current state"
+          },
+          "422": {
+            "description": "Message refused by the safety check"
+          },
+          "429": {
+            "description": "Limit reached"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Student",
+            "color": "#15803d"
+          }
+        ],
+        "x-source-file": "app/api/teacher/chat/[id]/report/route.ts"
+      }
+    },
+    "/api/parent/chat": {
+      "get": {
+        "tags": [
+          "Teacher chat"
+        ],
+        "summary": "List chats",
+        "description": "List chats.\n\n**Who can call:** Parent.\n\n**Checks:** getParentSession(); student_id must be their own child; read and report only; teacher-chat feature on.",
+        "operationId": "getParentChat",
+        "security": [
+          {
+            "parent": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "student_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Done"
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden, or the feature is off"
+          },
+          "404": {
+            "description": "Not found, or not yours"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Student",
+            "color": "#15803d"
+          }
+        ],
+        "x-source-file": "app/api/parent/chat/route.ts"
+      }
+    },
+    "/api/parent/chat/{id}": {
+      "get": {
+        "tags": [
+          "Teacher chat"
+        ],
+        "summary": "Read one chat with its messages and ticks",
+        "description": "Read one chat with its messages and ticks.\n\n**Who can call:** Parent.\n\n**Checks:** getParentSession(); student_id must be their own child; read and report only; teacher-chat feature on.",
+        "operationId": "getParentChatId",
+        "security": [
+          {
+            "parent": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "student_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Done"
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden, or the feature is off"
+          },
+          "404": {
+            "description": "Not found, or not yours"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Student",
+            "color": "#15803d"
+          }
+        ],
+        "x-source-file": "app/api/parent/chat/[id]/route.ts"
+      }
+    },
+    "/api/parent/chat/{id}/report": {
+      "post": {
+        "tags": [
+          "Teacher chat"
+        ],
+        "summary": "Report a chat or message to the school",
+        "description": "Report a chat or message to the school.\n\n**Who can call:** Parent.\n\n**Checks:** getParentSession(); student_id must be their own child; read and report only; teacher-chat feature on.",
+        "operationId": "postParentChatIdReport",
+        "security": [
+          {
+            "parent": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "student_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "message_id",
+                  "reason"
+                ],
+                "properties": {
+                  "message_id": {
+                    "type": "integer",
+                    "nullable": true
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Done"
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden, or the feature is off"
+          },
+          "404": {
+            "description": "Not found, or not yours"
+          },
+          "409": {
+            "description": "Not possible in the chat’s current state"
+          },
+          "422": {
+            "description": "Message refused by the safety check"
+          },
+          "429": {
+            "description": "Limit reached"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Student",
+            "color": "#15803d"
+          }
+        ],
+        "x-source-file": "app/api/parent/chat/[id]/report/route.ts"
+      }
+    },
+    "/api/student/chat/{id}/messages": {
+      "post": {
+        "tags": [
+          "Teacher chat"
+        ],
+        "summary": "Send a message (safe to retry with the same id)",
+        "description": "Send a message (safe to retry with the same id).\n\n**Who can call:** Student.\n\n**Checks:** getStudentSession(); only their own chats; teacher-chat feature on.",
+        "operationId": "postStudentChatIdMessages",
+        "security": [
+          {
+            "student": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "body",
+                  "client_message_id"
+                ],
+                "properties": {
+                  "body": {
+                    "type": "string"
+                  },
+                  "client_message_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Done"
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden, or the feature is off"
+          },
+          "404": {
+            "description": "Not found, or not yours"
+          },
+          "409": {
+            "description": "Not possible in the chat’s current state"
+          },
+          "422": {
+            "description": "Message refused by the safety check"
+          },
+          "429": {
+            "description": "Limit reached"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Student",
+            "color": "#15803d"
+          }
+        ],
+        "x-source-file": "app/api/student/chat/[id]/messages/route.ts"
+      }
+    },
+    "/api/student/chat/{id}/read": {
+      "post": {
+        "tags": [
+          "Teacher chat"
+        ],
+        "summary": "Mark the chat read up to a message",
+        "description": "Mark the chat read up to a message.\n\n**Who can call:** Student.\n\n**Checks:** getStudentSession(); only their own chats; teacher-chat feature on.",
+        "operationId": "postStudentChatIdRead",
+        "security": [
+          {
+            "student": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "up_to"
+                ],
+                "properties": {
+                  "up_to": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Done"
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden, or the feature is off"
+          },
+          "404": {
+            "description": "Not found, or not yours"
+          },
+          "409": {
+            "description": "Not possible in the chat’s current state"
+          },
+          "422": {
+            "description": "Message refused by the safety check"
+          },
+          "429": {
+            "description": "Limit reached"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Student",
+            "color": "#15803d"
+          }
+        ],
+        "x-source-file": "app/api/student/chat/[id]/read/route.ts"
+      }
+    },
+    "/api/student/chat/{id}/status": {
+      "post": {
+        "tags": [
+          "Teacher chat"
+        ],
+        "summary": "Understood, or still not clear",
+        "description": "Understood, or still not clear.\n\n**Who can call:** Student.\n\n**Checks:** getStudentSession(); only their own chats; teacher-chat feature on.",
+        "operationId": "postStudentChatIdStatus",
+        "security": [
+          {
+            "student": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "action"
+                ],
+                "properties": {
+                  "action": {
+                    "type": "string",
+                    "enum": [
+                      "understood",
+                      "still_unclear"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Done"
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden, or the feature is off"
+          },
+          "404": {
+            "description": "Not found, or not yours"
+          },
+          "409": {
+            "description": "Not possible in the chat’s current state"
+          },
+          "422": {
+            "description": "Message refused by the safety check"
+          },
+          "429": {
+            "description": "Limit reached"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Student",
+            "color": "#15803d"
+          }
+        ],
+        "x-source-file": "app/api/student/chat/[id]/status/route.ts"
+      }
+    },
+    "/api/teacher/chat/{id}/messages": {
+      "post": {
+        "tags": [
+          "Teacher chat"
+        ],
+        "summary": "Send a message (safe to retry with the same id)",
+        "description": "Send a message (safe to retry with the same id).\n\n**Who can call:** Teacher.\n\n**Checks:** getTeacherSession(); only subjects this teacher answers in the class; teacher-chat feature on.",
+        "operationId": "postTeacherChatIdMessages",
+        "security": [
+          {
+            "teacher": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "body",
+                  "client_message_id"
+                ],
+                "properties": {
+                  "body": {
+                    "type": "string"
+                  },
+                  "client_message_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Done"
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden, or the feature is off"
+          },
+          "404": {
+            "description": "Not found, or not yours"
+          },
+          "409": {
+            "description": "Not possible in the chat’s current state"
+          },
+          "422": {
+            "description": "Message refused by the safety check"
+          },
+          "429": {
+            "description": "Limit reached"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Student",
+            "color": "#15803d"
+          }
+        ],
+        "x-source-file": "app/api/teacher/chat/[id]/messages/route.ts"
+      }
+    },
+    "/api/teacher/chat/{id}/read": {
+      "post": {
+        "tags": [
+          "Teacher chat"
+        ],
+        "summary": "Mark the chat read up to a message",
+        "description": "Mark the chat read up to a message.\n\n**Who can call:** Teacher.\n\n**Checks:** getTeacherSession(); only subjects this teacher answers in the class; teacher-chat feature on.",
+        "operationId": "postTeacherChatIdRead",
+        "security": [
+          {
+            "teacher": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "up_to"
+                ],
+                "properties": {
+                  "up_to": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Done"
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden, or the feature is off"
+          },
+          "404": {
+            "description": "Not found, or not yours"
+          },
+          "409": {
+            "description": "Not possible in the chat’s current state"
+          },
+          "422": {
+            "description": "Message refused by the safety check"
+          },
+          "429": {
+            "description": "Limit reached"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Student",
+            "color": "#15803d"
+          }
+        ],
+        "x-source-file": "app/api/teacher/chat/[id]/read/route.ts"
+      }
+    },
+    "/api/teacher/chat/{id}/status": {
+      "post": {
+        "tags": [
+          "Teacher chat"
+        ],
+        "summary": "Mark answered",
+        "description": "Mark answered.\n\n**Who can call:** Teacher.\n\n**Checks:** getTeacherSession(); only subjects this teacher answers in the class; teacher-chat feature on.",
+        "operationId": "postTeacherChatIdStatus",
+        "security": [
+          {
+            "teacher": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "action"
+                ],
+                "properties": {
+                  "action": {
+                    "type": "string",
+                    "enum": [
+                      "answered"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Done"
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden, or the feature is off"
+          },
+          "404": {
+            "description": "Not found, or not yours"
+          },
+          "409": {
+            "description": "Not possible in the chat’s current state"
+          },
+          "422": {
+            "description": "Message refused by the safety check"
+          },
+          "429": {
+            "description": "Limit reached"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Student",
+            "color": "#15803d"
+          }
+        ],
+        "x-source-file": "app/api/teacher/chat/[id]/status/route.ts"
+      }
+    },
+    "/api/school/chat": {
+      "get": {
+        "tags": [
+          "Teacher chat"
+        ],
+        "summary": "Classes, open reports and chats",
+        "description": "Classes, open reports and chats.\n\n**Who can call:** School admin or principal.\n\n**Checks:** requireSchoolAdmin(); own school; opening a chat is logged; teacher-chat feature on.",
+        "operationId": "getSchoolChat",
+        "security": [
+          {
+            "schoolAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Done"
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden, or the feature is off"
+          },
+          "404": {
+            "description": "Not found, or not yours"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
+          }
+        ],
+        "x-source-file": "app/api/school/chat/route.ts"
+      }
+    },
+    "/api/school/chat/classes": {
+      "put": {
+        "tags": [
+          "Teacher chat"
+        ],
+        "summary": "Open or close chat for a class",
+        "description": "Open or close chat for a class.\n\n**Who can call:** School admin or principal.\n\n**Checks:** requireSchoolAdmin(); own school; opening a chat is logged; teacher-chat feature on.",
+        "operationId": "putSchoolChatClasses",
+        "security": [
+          {
+            "schoolAdmin": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "class_id",
+                  "enabled"
+                ],
+                "properties": {
+                  "class_id": {
+                    "type": "integer"
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Done"
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden, or the feature is off"
+          },
+          "404": {
+            "description": "Not found, or not yours"
+          },
+          "409": {
+            "description": "Not possible in the chat’s current state"
+          },
+          "422": {
+            "description": "Message refused by the safety check"
+          },
+          "429": {
+            "description": "Limit reached"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
+          }
+        ],
+        "x-source-file": "app/api/school/chat/classes/route.ts"
+      }
+    },
+    "/api/school/chat/{id}": {
+      "get": {
+        "tags": [
+          "Teacher chat"
+        ],
+        "summary": "Read one chat (logged)",
+        "description": "Read one chat (logged).\n\n**Who can call:** School admin or principal.\n\n**Checks:** requireSchoolAdmin(); own school; opening a chat is logged; teacher-chat feature on.",
+        "operationId": "getSchoolChatId",
+        "security": [
+          {
+            "schoolAdmin": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Done"
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden, or the feature is off"
+          },
+          "404": {
+            "description": "Not found, or not yours"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
+          }
+        ],
+        "x-source-file": "app/api/school/chat/[id]/route.ts"
+      }
+    },
+    "/api/school/chat/{id}/reviewed": {
+      "post": {
+        "tags": [
+          "Teacher chat"
+        ],
+        "summary": "Clear the review mark",
+        "description": "Clear the review mark.\n\n**Who can call:** School admin or principal.\n\n**Checks:** requireSchoolAdmin(); own school; opening a chat is logged; teacher-chat feature on.",
+        "operationId": "postSchoolChatIdReviewed",
+        "security": [
+          {
+            "schoolAdmin": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Done"
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden, or the feature is off"
+          },
+          "404": {
+            "description": "Not found, or not yours"
+          },
+          "409": {
+            "description": "Not possible in the chat’s current state"
+          },
+          "422": {
+            "description": "Message refused by the safety check"
+          },
+          "429": {
+            "description": "Limit reached"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
+          }
+        ],
+        "x-source-file": "app/api/school/chat/[id]/reviewed/route.ts"
+      }
+    },
+    "/api/school/chat/messages/{id}/hide": {
+      "post": {
+        "tags": [
+          "Teacher chat"
+        ],
+        "summary": "Hide a message from the student and teacher",
+        "description": "Hide a message from the student and teacher.\n\n**Who can call:** School admin or principal.\n\n**Checks:** requireSchoolAdmin(); own school; opening a chat is logged; teacher-chat feature on.",
+        "operationId": "postSchoolChatMessagesIdHide",
+        "security": [
+          {
+            "schoolAdmin": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Done"
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden, or the feature is off"
+          },
+          "404": {
+            "description": "Not found, or not yours"
+          },
+          "409": {
+            "description": "Not possible in the chat’s current state"
+          },
+          "422": {
+            "description": "Message refused by the safety check"
+          },
+          "429": {
+            "description": "Limit reached"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
+          }
+        ],
+        "x-source-file": "app/api/school/chat/messages/[id]/hide/route.ts"
+      }
+    },
+    "/api/school/chat/reports/{id}/resolve": {
+      "post": {
+        "tags": [
+          "Teacher chat"
+        ],
+        "summary": "Close a report",
+        "description": "Close a report.\n\n**Who can call:** School admin or principal.\n\n**Checks:** requireSchoolAdmin(); own school; opening a chat is logged; teacher-chat feature on.",
+        "operationId": "postSchoolChatReportsIdResolve",
+        "security": [
+          {
+            "schoolAdmin": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "resolution"
+                ],
+                "properties": {
+                  "resolution": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Done"
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden, or the feature is off"
+          },
+          "404": {
+            "description": "Not found, or not yours"
+          },
+          "409": {
+            "description": "Not possible in the chat’s current state"
+          },
+          "422": {
+            "description": "Message refused by the safety check"
+          },
+          "429": {
+            "description": "Limit reached"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
+          }
+        ],
+        "x-source-file": "app/api/school/chat/reports/[id]/resolve/route.ts"
       }
     }
   },

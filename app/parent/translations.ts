@@ -30,6 +30,7 @@ const en = {
   nav: {
     overview:     'Overview',
     'daily-quiz': 'Daily Report',
+    'teacher-chat': 'Teacher Chats',
     announcements: 'Announcements',
     syllabus:     'Syllabus',
     library:      'Digital Library',
@@ -191,6 +192,7 @@ const te: typeof en = {
   nav: {
     overview:     'అవలోకనం',
     'daily-quiz': 'రోజువారీ నివేదిక',
+    'teacher-chat': 'టీచర్ చాట్‌లు',
     announcements: 'ప్రకటనలు',
     syllabus:     'పాఠ్యక్రమం',
     library:      'డిజిటల్ లైబ్రరీ',

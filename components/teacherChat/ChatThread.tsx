@@ -12,7 +12,7 @@ import {
   MAX_STUDENT_MESSAGE, MAX_TEACHER_MESSAGE, STATUS_LABEL, TICK_LABEL, tickFor, type ChatSender, type Tick,
 } from '@/lib/teacherChat/rules'
 import type { ChatMessage, ThreadView } from '@/lib/teacherChat/service'
-import { ApiError, call, messageId, usePoll, when } from './api'
+import { ApiError, CHAT_API, call, messageId, usePoll, when } from './api'
 
 export type ChatRole = 'student' | 'teacher' | 'parent' | 'school'
 type Pending = { id: string; body: string }
@@ -40,7 +40,7 @@ export default function ChatThread({ role, threadId, studentId, active, onBack, 
   const sending = useRef(false)
   const readUpTo = useRef(0)
 
-  const base = `/api/${role}/chat/${threadId}`
+  const base = `${CHAT_API[role]}/${threadId}`
   const query = role === 'parent' ? `?student_id=${studentId}` : ''
   const participant = role === 'student' || role === 'teacher'
 
@@ -128,8 +128,9 @@ export default function ChatThread({ role, threadId, studentId, active, onBack, 
           <ArrowLeft className="h-4 w-4" aria-hidden="true" /> Back
         </button>
         {thread && (
-          <div className="min-w-0 flex-1">
-            <h2 className="truncate text-sm font-bold">
+          // On a phone the report link drops to its own line so the subject and name stay readable.
+          <div className="min-w-[12rem] flex-1">
+            <h2 className="break-words text-sm font-bold">
               {thread.subject} · {role === 'student' ? (thread.teacher ?? 'No teacher yet') : role === 'teacher' ? `${thread.student} (${thread.className})` : `${thread.student} with ${thread.teacher ?? 'no teacher'}`}
             </h2>
             <p className="text-xs text-gray-600" data-testid="chat-status">{STATUS_LABEL[thread.status]}</p>
