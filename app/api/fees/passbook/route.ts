@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
+import { oldestBillFirstSql, periodStartSql } from '@/lib/feeBillOrder'
 
 // GET /api/fees/passbook?school_id=X&student_id=Y
 // Returns complete financial history for one student across ALL academic years.
@@ -52,7 +53,7 @@ export async function GET(req: NextRequest) {
        FROM student_fee_ledger l
        JOIN fee_categories fc ON fc.id = l.fee_category_id
        WHERE l.school_id = $1 AND l.student_id = $2
-       ORDER BY l.academic_year ASC, l.due_date ASC, l.created_at ASC`,
+       ORDER BY l.academic_year ASC, ${oldestBillFirstSql('l')}`,
       [school_id, student_id]
     ).catch(async () => {
       return pool.query(
@@ -66,7 +67,7 @@ export async function GET(req: NextRequest) {
          FROM student_fee_ledger l
          JOIN fee_categories fc ON fc.id = l.fee_category_id
          WHERE l.school_id = $1 AND l.student_id = $2
-         ORDER BY l.academic_year ASC, l.due_date ASC, l.created_at ASC`,
+         ORDER BY l.academic_year ASC, l.due_date ASC, ${periodStartSql('l')} NULLS LAST, l.id`,
         [school_id, student_id]
       )
     })

@@ -3,6 +3,7 @@ import pool from '@/lib/db'
 import { getParentSession, schoolHasFeature } from '@/lib/auth'
 import { resolveAcademicYear } from '@/lib/academicYear'
 import { claimIdempotencyKey, saveIdempotentResponse } from '@/lib/idempotency'
+import { oldestBillFirstSql } from '@/lib/feeBillOrder'
 
 // GET /api/parent/fees?school_id=X&student_id=Y&academic_year=2025-26
 export async function GET(req: NextRequest) {
@@ -62,7 +63,7 @@ export async function GET(req: NextRequest) {
          FROM student_fee_ledger l
          JOIN fee_categories fc ON fc.id = l.fee_category_id
          WHERE l.school_id = $1 AND l.student_id = $2 AND l.academic_year = $3
-         ORDER BY l.due_date ASC`,
+         ORDER BY ${oldestBillFirstSql('l')}, fc.name`,
         [school_id, student_id, academic_year]
       )
 
@@ -110,7 +111,7 @@ export async function GET(req: NextRequest) {
          WHERE l.school_id = $1 AND l.student_id = $2
            AND (l.academic_year = 'passout' OR (l.academic_year ~ '^[0-9]{4}-[0-9]{2}$' AND l.academic_year < $3))
            AND GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0) > 0
-         ORDER BY l.academic_year, l.due_date`,
+         ORDER BY l.academic_year, ${oldestBillFirstSql('l')}`,
         [school_id, student_id, academic_year]
       ).catch(() => ({ rows: [] as Array<{ id: number; academic_year: string; category_name: string; period_label: string; due_date: string; balance: string }> }))
       const prior_dues = {
@@ -285,7 +286,7 @@ export async function POST(req: NextRequest) {
            FROM student_fee_ledger
            WHERE id = ANY($1) AND school_id = $2 AND student_id = $3
              AND status NOT IN ('paid', 'waived')
-           ORDER BY due_date ASC
+           ORDER BY ${oldestBillFirstSql('student_fee_ledger')}
            FOR UPDATE`,
           [ledger_ids, school_id, student_id]
         )
