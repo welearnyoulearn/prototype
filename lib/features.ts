@@ -36,6 +36,8 @@ export const ALL_FEATURES: { key: string; label: string; category: string; porta
   // plan_features / override rows for the removed Ask a Doubt (#137) under that name.
   { key: 'daily-quiz',         label: 'Daily Quiz & Leaderboard',        category: 'Learning', portals: ['school-admin', 'teacher', 'student', 'parent'] },
   { key: 'student-doubts',     label: 'Student Doubts',                  category: 'Learning', portals: ['school-admin', 'teacher', 'student', 'parent'] },
+  // Teacher Chat (#556): a student asks a teacher any doubt; parents can read it. Seeded OFF in lib/teacherChat/schema.ts.
+  { key: 'teacher-chat',        label: 'Teacher Chat',                    category: 'Learning', portals: ['school-admin', 'teacher', 'student', 'parent'] },
   // Daily Newspaper. Seeded OFF at every tier in lib/newspaperSchema.ts until the pilot.
   { key: 'daily-newspaper',     label: 'Daily Newspaper',                 category: 'Learning', portals: ['student'] },
   // Student Search (#538). Seeded OFF at every tier; a student also needs a parent's consent.

@@ -22,7 +22,7 @@ import { hueForSection } from '@/components/portal/sectionHues'
 import { Skeleton } from '@/components/ui/skeleton'
 
 // Always-loaded (small, needed immediately)
-import { Brain, BookOpen, Building2, CalendarDays, ChevronDown, ClipboardCheck, Download, GraduationCap, LayoutDashboard, Library, GripVertical, LayoutGrid, LineChart, ListChecks, Megaphone, MessageSquareText, NotebookPen, Receipt, RefreshCcw, School, SlidersHorizontal, Users, Wallet, Wrench } from 'lucide-react'
+import { Brain, BookOpen, Building2, CalendarDays, ChevronDown, ClipboardCheck, Download, GraduationCap, LayoutDashboard, Library, GripVertical, LayoutGrid, LineChart, ListChecks, Megaphone, MessageSquareText, MessagesSquare, NotebookPen, Receipt, RefreshCcw, School, SlidersHorizontal, Users, Wallet, Wrench } from 'lucide-react'
 import Overview from './components/Overview'
 import StaffProfile from './components/StaffProfile'
 import { unregisterPushDevice } from '@/lib/pushClient'
@@ -48,6 +48,7 @@ const ClassManagement       = dynamic(() => import('./components/ClassManagement
 const CurriculumCustomizer   = dynamic(() => import('./components/CurriculumCustomizer'),   { loading: () => <ModuleSkeleton /> })
 const DigitalLibrary         = dynamic(() => import('@/app/components/library/DigitalLibrary'), { loading: () => <ModuleSkeleton /> })
 const SchoolDailyQuiz        = dynamic(() => import('./components/SchoolDailyQuiz'),        { loading: () => <ModuleSkeleton /> })
+const SchoolTeacherChat      = dynamic(() => import('./components/SchoolTeacherChat'),      { loading: () => <ModuleSkeleton /> })
 const SchoolDoubts           = dynamic(() => import('./components/SchoolDoubts'),           { loading: () => <ModuleSkeleton /> })
 const AcademicAnalytics      = dynamic(() => import('./components/AcademicAnalytics'),      { loading: () => <ModuleSkeleton /> })
 const ExamSchedule          = dynamic(() => import('./components/ExamSchedule'),           { loading: () => <ModuleSkeleton /> })
@@ -93,7 +94,7 @@ const NAV_SECTIONS: { label: string; shortLabel?: string; keys: string[]; icon: 
   { label: 'MONEY MANAGEMENT', shortLabel: 'MONEY', keys: ['fee-management', 'expenses'], icon: <Wallet className="w-3.5 h-3.5" aria-hidden="true" /> },
   { label: 'SCHEDULING',    keys: ['attendance', 'academic-calendar', 'exam-schedule'], icon: <CalendarDays className="w-3.5 h-3.5" aria-hidden="true" /> },
   { label: 'ACADEMICS',     keys: ['curriculum', 'syllabus-tracking', 'daily-quiz', 'library'], icon: <BookOpen className="w-3.5 h-3.5" aria-hidden="true" /> },
-  { label: 'COMMUNICATION', keys: ['announcements', 'feedback-management'], icon: <Megaphone className="w-3.5 h-3.5" aria-hidden="true" /> },
+  { label: 'COMMUNICATION', keys: ['announcements', 'teacher-chat', 'feedback-management'], icon: <Megaphone className="w-3.5 h-3.5" aria-hidden="true" /> },
   { label: 'TOOLS',         keys: ['settings', 'export', 'traffic', 'year-rollover'], icon: <Wrench className="w-3.5 h-3.5" aria-hidden="true" /> },
 ]
 
@@ -212,6 +213,12 @@ const NAV_ITEMS: NavItem[] = [
     label: 'Announcements',
     tier: ['basic', 'standard', 'premium'],
     icon: (<Megaphone className="w-4 h-4" aria-hidden="true" />),
+  },
+  {
+    key: 'teacher-chat',
+    label: 'Teacher Chat',
+    tier: ['basic', 'standard', 'premium'],
+    icon: (<MessagesSquare className="w-4 h-4" aria-hidden="true" />),
   },
   {
     key: 'feedback-management',
@@ -499,7 +506,9 @@ function SchoolAdmin() {
     tier !== 'none' &&
     navEnabled(item.key) &&
     isSchoolAdminScoped(item.key) &&
-    !(isStaffAccount && item.key === 'settings')
+    !(isStaffAccount && item.key === 'settings') &&
+    // Children's chats are for the school admin and principal only.
+    !(myRole === 'vice_principal' && item.key === 'teacher-chat')
   )
 
   // Same grouping and saved order as the sidebar, flattened for the "All features" window.
@@ -988,6 +997,7 @@ function SchoolAdmin() {
                 {visited.has('syllabus-tracking') && <div hidden={activeNav !== 'syllabus-tracking'}><AcademicAnalytics schoolId={selectedSchool.id} /></div>}
                 {visited.has('daily-quiz') && navEnabled('daily-quiz') && <div hidden={activeNav !== 'daily-quiz'}><SchoolDailyQuiz extra={navEnabled('student-doubts') ? <SchoolDoubts /> : null} /></div>}
                 {visited.has('exam-schedule')    && <div hidden={activeNav !== 'exam-schedule'}><ExamSchedule schoolId={selectedSchool.id} /></div>}
+                {visited.has('teacher-chat') && navEnabled('teacher-chat') && myRole !== 'vice_principal' && <div hidden={activeNav !== 'teacher-chat'}><SchoolTeacherChat active={activeNav === 'teacher-chat'} /></div>}
                 {visited.has('announcements')    && <div hidden={activeNav !== 'announcements'}><AnnouncementBoard schoolId={selectedSchool.id} schoolName={selectedSchool.name} /></div>}
                 {visited.has('feedback-management') && <div hidden={activeNav !== 'feedback-management'}><FeedbackManagement schoolId={selectedSchool.id} /></div>}
                 {visited.has('export')           && <div hidden={activeNav !== 'export'}><ExportCenter schoolId={selectedSchool.id} /></div>}

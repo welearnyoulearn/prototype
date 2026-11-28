@@ -62,6 +62,7 @@ const StudentAiHub      = dynamic(() => import('./components/StudentAiHub'),    
 const StudentDailyQuiz  = dynamic(() => import('./components/StudentDailyQuiz'), { loading: () => <ModuleSkeleton /> })
 const StudentClassCircle = dynamic(() => import('./components/StudentClassCircle'), { loading: () => <ModuleSkeleton /> })
 const StudentNewspaper  = dynamic(() => import('./components/StudentNewspaper'),  { loading: () => <ModuleSkeleton /> })
+const TeacherChat       = dynamic(() => import('@/components/teacherChat/TeacherChat'), { loading: () => <ModuleSkeleton /> })
 const StudentSearch     = dynamic(() => import('./components/StudentSearch'),     { loading: () => <ModuleSkeleton /> })
 
 type Student = {
@@ -79,6 +80,7 @@ const NAV_SECTIONS: NavSection[] = [
     items: [
       { key: 'dashboard', label: 'Overview', sticker: 'house' },
       { key: 'daily-quiz', label: 'Daily quiz', sticker: 'brain' },
+      { key: 'teacher-chat', label: 'Ask your teacher', sticker: 'speech-balloon' },
       { key: 'announcements', label: 'Announcements', sticker: 'megaphone' },
       { key: 'syllabus', label: 'Syllabus', sticker: 'graduation-cap' },
       { key: 'library', label: 'Digital library', sticker: 'open-book' },
@@ -186,6 +188,7 @@ function StudentPortal() {
     if (key === 'ai-hub') return aiAccessTier === 'ai_basic' || aiAccessTier === 'ai_pro'
     // Off by default for every plan, so it stays hidden until the school is confirmed to have it.
     if (key === 'daily-quiz') return enabledFeatures?.has('daily-quiz') ?? false
+    if (key === 'teacher-chat') return enabledFeatures?.has('teacher-chat') ?? false
     if (key === 'newspaper') return enabledFeatures?.has('daily-newspaper') ?? false
     if (key === 'search') return searchEnabled && searchAllowed
     if (!RESTRICTABLE_NAV_KEYS.has(key)) return true
@@ -391,6 +394,7 @@ function StudentPortal() {
             {switchScreen && <TutorSearchSwitch active={switchScreen} aiLabel={aiAccessTier === 'ai_pro' ? 'AI Tutor' : 'AI Hub'} onSelect={navigateTo} />}
             {visitedNav.has('dashboard')   && <div hidden={activeNav !== 'dashboard'}><StudentDashboard student={student} classId={classId} schoolId={student.school_id} onNavigate={navigateTo} isNavItemVisible={isNavItemVisible} /></div>}
             {visitedNav.has('daily-quiz') && isNavItemVisible('daily-quiz') && <div hidden={activeNav !== 'daily-quiz'}><StudentDailyQuiz doubtsEnabled={enabledFeatures?.has('student-doubts') ?? false} tutorEnabled={aiAccessTier === 'ai_pro'} /></div>}
+            {visitedNav.has('teacher-chat') && isNavItemVisible('teacher-chat') && <div hidden={activeNav !== 'teacher-chat'}><TeacherChat role="student" active={activeNav === 'teacher-chat'} /></div>}
             {visitedNav.has('announcements') && <div hidden={activeNav !== 'announcements'}><NoticeCenter schoolId={student.school_id} experience="student" mode="page" /></div>}
             {visitedNav.has('newspaper') && isNavItemVisible('newspaper') && <div hidden={activeNav !== 'newspaper'}><StudentNewspaper /></div>}
             {visitedNav.has('search') && isNavItemVisible('search') && <div hidden={activeNav !== 'search'}><StudentSearch schoolBooks={isNavItemVisible('library')} tutorQuestion={tutorQuestion} onBackToTutor={() => navigateTo('ai-hub')} /></div>}
