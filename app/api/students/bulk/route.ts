@@ -4,7 +4,7 @@ import { invalidateCache } from '@/lib/responseCache'
 import { hashPortalPassword, generateTempPassword, requireSchoolAdmin, schoolHasFeature } from '@/lib/auth'
 import { sendStudentWelcomeEmail, sendParentWelcomeEmail, sendChildCredentialsToParentEmail } from '@/lib/email'
 import { sendWhatsappMessage } from '@/lib/whatsapp'
-import { linkParentsBulk, generateUniqueStudentIds } from '@/lib/studentOnboarding'
+import { linkParentsBulk, generateUniqueStudentIds, parentEmailTakenWarning } from '@/lib/studentOnboarding'
 import { normalizeStudentInput, type NormalizedStudentInput } from '@/lib/studentValidation'
 import { ClassWorkflowError, ensureClassWithSetup } from '@/lib/classManagement'
 
@@ -213,7 +213,7 @@ export async function POST(req: NextRequest) {
       // (e.g. a sibling onboarded earlier while the flag was on) — only suppress
       // creating a brand-new parents row while the flag is off. Set-based: see
       // linkParentsBulk (one lookup, one bulk create, one bulk link).
-      const resolvedParentContact = await linkParentsBulk(
+      const linkedParents = await linkParentsBulk(
         client, school_id,
         toInsert.map((s, i) => ({
           studentId: insertedStudents[i].id,
@@ -224,6 +224,10 @@ export async function POST(req: NextRequest) {
       )
 
       await client.query('COMMIT')
+      const resolvedParentContact = linkedParents.map(p => p.contact)
+      // One warning per family whose typed email could not be used (#516).
+      const parentWarnings = [...new Set(linkedParents.flatMap((p, i) =>
+        p.emailTaken ? [parentEmailTakenWarning(toInsert[i].parent_name?.trim() || null)] : []))]
 
       // Login is always roll_number — /api/student/auth/login never checks
       // email, it's only where the credential email gets delivered.
@@ -238,19 +242,14 @@ export async function POST(req: NextRequest) {
       })) : []
 
       const parentCredentials: { name: string; phone: string; login: string; temp_password: string; is_new: boolean }[] = []
-      const credParentsSeen = new Set<string>()
+      // One credential per account created, with the password hashed for it and the login it really has.
       for (let i = 0; i < toInsert.length; i++) {
-        const s = toInsert[i]
-        if (!parentPortalEnabled || !needsNewParent[i] || !parentTempPasswords[i]) continue
-        const pe = s.parent_email?.trim() || null
-        const pp = s.parent_phone?.trim() || null
-        const key = pe ? `email:${pe.toLowerCase()}` : `phone:${pp}`
-        if (credParentsSeen.has(key)) continue
-        credParentsSeen.add(key)
+        const { contact, createdFromRow } = linkedParents[i]
+        if (!parentPortalEnabled || createdFromRow !== i || !contact || !parentTempPasswords[i]) continue
         parentCredentials.push({
-          name: s.parent_name?.trim() || pe || pp || '',
-          phone: pp || '',
-          login: pe || pp || '(no contact)',
+          name: contact.name || contact.email || contact.phone || '',
+          phone: contact.phone || '',
+          login: contact.email || contact.phone || '(no contact)',
           temp_password: parentTempPasswords[i],
           is_new: true,
         })
@@ -259,7 +258,6 @@ export async function POST(req: NextRequest) {
       // needsNewParent is true only for the first row for a new parent in this
       // batch. Siblings reuse the processed-parent cache, so only one password
       // is hashed, persisted and delivered for that parent account.
-      const parentWelcomeSent = new Set<string>()
       for (let i = 0; i < toInsert.length; i++) {
         const s = toInsert[i]
         const student = insertedStudents[i]
@@ -279,13 +277,12 @@ export async function POST(req: NextRequest) {
             },
           }).catch(console.error)
         }
-        if (parentPortalEnabled && needsNewParent[i] && (s.parent_email?.trim() || s.parent_phone?.trim())) {
-          const pe = s.parent_email?.trim() || null
-          const pp = s.parent_phone?.trim() || null
-          const key = pe ? `email:${pe.toLowerCase()}` : `phone:${pp}`
-          if (!parentWelcomeSent.has(key)) {
-            parentWelcomeSent.add(key)
-            const displayName = s.parent_name?.trim() || pe || pp || 'there'
+        {
+          const { contact, createdFromRow } = linkedParents[i]
+          if (parentPortalEnabled && createdFromRow === i && contact) {
+            const pe = contact.email
+            const pp = contact.phone
+            const displayName = contact.name || pe || pp || 'there'
             if (pe) {
               sendParentWelcomeEmail({
                 schoolId: school_id, to: pe, parentName: displayName,
@@ -339,6 +336,7 @@ export async function POST(req: NextRequest) {
         skipped,
         students: insertedStudents,
         errors,
+        warnings: parentWarnings,
         credentials: { students: studentCredentials, parents: parentCredentials },
         studentPortalEnabled,
         parentPortalEnabled,

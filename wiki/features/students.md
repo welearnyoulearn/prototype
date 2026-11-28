@@ -67,3 +67,8 @@ API routes these screens call (all exist):
 | 2026-09-21 | Doc created from the code; status checked with `scripts/product-docs.mjs` | #162 |
 | 2026-10-06 | Student List paginated (50/page) with server-side search, filters and summary counts | #352 |
 | 2026-10-18 | Onboard Students is the first/default tab; Student List loads on demand | #389 |
+
+## Parent accounts
+
+- Siblings that share a parent email or phone on an import get one parent account (#517).
+- A parent email can belong to only one parent account across all schools. If another school already uses it, the new parent is created without it, signs in with their phone number, and the admin sees a warning (#516).

@@ -25,6 +25,7 @@ type ParentCredential = {
 type OnboardingResult = {
   inserted: number
   skipped: { row: number; name: string; reason: string }[]
+  warnings?: string[]
   students: { id: number; roll_number: string; name: string }[]
   errors: { row: number; message: string }[]
   credentials: { students: StudentCredential[]; parents: ParentCredential[] }
@@ -594,6 +595,7 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
                   {result.skipped.length} skipped — already exist
                 </p>
               )}
+              {result.warnings?.map(w => <p key={w} className="text-amber-700 text-xs mt-1">{w}</p>)}
               {result.errors.length > 0 && (
                 <div className="mt-1 space-y-0.5">
                   {result.errors.map((e, i) => <p key={i} className="text-orange-600 text-xs">Row {e.row}: {e.message}</p>)}
@@ -637,6 +639,11 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
             </div>
 
             <div className="px-6 py-4 space-y-6">
+              {!!result.warnings?.length && (
+                <div className="bg-amber-50 border border-amber-200 rounded-md px-4 py-3 space-y-0.5" data-testid="onboarding-warnings">
+                  {result.warnings.map(w => <p key={w} className="text-xs text-amber-800">{w}</p>)}
+                </div>
+              )}
               {result.skipped?.length > 0 && (
                 <div className="bg-amber-50 border border-amber-200 rounded-md px-4 py-3">
                   <p className="text-sm font-semibold text-amber-800 mb-1">
