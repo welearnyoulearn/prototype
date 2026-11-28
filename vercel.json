@@ -45,6 +45,10 @@
       "schedule": "30 18 * * *"
     },
     {
+      "path": "/api/cron/notification-retention",
+      "schedule": "0 21 * * *"
+    },
+    {
       "path": "/api/cron/plan-expiry",
       "schedule": "30 4 * * *"
     },

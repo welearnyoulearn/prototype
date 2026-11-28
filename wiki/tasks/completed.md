@@ -177,3 +177,4 @@ All finished features and bug fixes. Most recent first.
 -->
 
 - 2026-10-31: Parent sessions are revoked when a school changes the parent's email or phone (#468)
+- 2026-11-28: Notifications are cleaned up daily: read ones after 7 days, any after 30 days, never before their push is sent (#554)
