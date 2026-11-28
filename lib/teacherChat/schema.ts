@@ -83,6 +83,50 @@ export async function ensureTeacherChatSchema(db: Db): Promise<void> {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
+    -- Phase 2 (#559).
+    ALTER TABLE chat_threads ADD COLUMN IF NOT EXISTS waiting_since TIMESTAMPTZ;
+    ALTER TABLE chat_threads ADD COLUMN IF NOT EXISTS escalated_at TIMESTAMPTZ;
+    -- Chats already open when this arrives start waiting from their last message, if the student wrote it.
+    UPDATE chat_threads t SET waiting_since = t.last_message_at
+      WHERE t.status = 'open' AND t.waiting_since IS NULL
+        AND (SELECT m.sender_type FROM chat_messages m WHERE m.thread_id = t.id ORDER BY m.id DESC LIMIT 1) = 'student';
+    CREATE INDEX IF NOT EXISTS idx_chat_threads_waiting ON chat_threads (waiting_since) WHERE status = 'open' AND escalated_at IS NULL;
+
+    CREATE TABLE IF NOT EXISTS chat_settings (
+      school_id INTEGER PRIMARY KEY REFERENCES schools(id) ON DELETE CASCADE,
+      opens TIME NOT NULL,
+      closes TIME NOT NULL CHECK (closes > opens),
+      updated_by INTEGER,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS chat_presence (
+      actor_type VARCHAR(10) NOT NULL CHECK (actor_type IN ('student', 'teacher')),
+      actor_id INTEGER NOT NULL,
+      last_seen_at TIMESTAMPTZ NOT NULL,
+      PRIMARY KEY (actor_type, actor_id)
+    );
+    CREATE TABLE IF NOT EXISTS chat_teacher_prefs (
+      teacher_id INTEGER PRIMARY KEY REFERENCES teachers(id) ON DELETE CASCADE,
+      hide_online BOOLEAN NOT NULL DEFAULT FALSE
+    );
+    CREATE TABLE IF NOT EXISTS chat_saved_replies (
+      id SERIAL PRIMARY KEY,
+      teacher_id INTEGER NOT NULL REFERENCES teachers(id) ON DELETE CASCADE,
+      body VARCHAR(500) NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_chat_saved_replies_teacher ON chat_saved_replies (teacher_id, id);
+    CREATE TABLE IF NOT EXISTS chat_parent_prefs (
+      parent_id INTEGER PRIMARY KEY REFERENCES parents(id) ON DELETE CASCADE,
+      instant BOOLEAN NOT NULL DEFAULT FALSE
+    );
+    CREATE TABLE IF NOT EXISTS chat_repeat_alerts (
+      class_id INTEGER NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
+      subject_name VARCHAR(100) NOT NULL,
+      week_start DATE NOT NULL,
+      PRIMARY KEY (class_id, subject_name, week_start)
+    );
+
     -- OFF at every tier until a platform admin switches it on.
     INSERT INTO plan_features (feature_key, tier, enabled)
     VALUES ('teacher-chat', 'basic', false), ('teacher-chat', 'standard', false), ('teacher-chat', 'premium', false)

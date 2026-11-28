@@ -8,6 +8,7 @@ import ChatThread from '@/components/teacherChat/ChatThread'
 import { call, usePoll, when } from '@/components/teacherChat/api'
 import { STATUS_LABEL } from '@/lib/teacherChat/rules'
 import type { SchoolOverview, ThreadSummary } from '@/lib/teacherChat/service'
+import type { ChatHours } from '@/lib/teacherChat/hours'
 
 export default function SchoolTeacherChat({ active }: { active: boolean }) {
   const [data, setData] = useState<SchoolOverview | null>(null)
@@ -78,6 +79,24 @@ export default function SchoolTeacherChat({ active }: { active: boolean }) {
               ))}
             </ul>
           </section>
+          <section className="overflow-x-auto rounded-xl border bg-white p-4" aria-labelledby="chat-speed">
+            <h2 id="chat-speed" className="font-semibold">Replies by teacher</h2>
+            {data.teachers.length === 0 ? <p className="mt-2 text-sm text-gray-500">Nothing to show yet.</p> : (
+              <table className="mt-2 w-full text-left text-sm" data-testid="school-chat-stats">
+                <thead><tr className="text-xs text-gray-600"><th className="py-1 pr-3">Teacher</th><th className="py-1 pr-3">Waiting</th><th className="py-1 pr-3">Over 2 school days</th><th className="py-1">Average reply (30 days)</th></tr></thead>
+                <tbody>
+                  {data.teachers.map(t => (
+                    <tr key={t.teacher} className="border-t">
+                      <td className="py-1.5 pr-3 font-semibold">{t.teacher}</td><td className="py-1.5 pr-3">{t.waiting}</td>
+                      <td className={`py-1.5 pr-3 ${t.overdue ? 'font-bold text-red-700' : ''}`}>{t.overdue}</td>
+                      <td className="py-1.5">{t.avgReplyHours === null ? '—' : `${t.avgReplyHours} h`}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </section>
+          <HoursForm key={`${data.hours.opens}-${data.hours.closes}`} hours={data.hours} onSave={hours => act('/api/school/chat/settings', 'PUT', hours)} />
           <section className="rounded-xl border bg-white p-4" aria-labelledby="chat-all">
             <h2 id="chat-all" className="font-semibold">Other chats</h2>
             {rest.length === 0 ? <p className="mt-2 text-sm text-gray-500">No chats yet.</p> : <ul className="divide-y">{rest.map(row)}</ul>}
@@ -85,6 +104,23 @@ export default function SchoolTeacherChat({ active }: { active: boolean }) {
         </>
       )}
     </div>
+  )
+}
+
+function HoursForm({ hours, onSave }: { hours: ChatHours; onSave: (hours: ChatHours) => void }) {
+  const [opens, setOpens] = useState(hours.opens)
+  const [closes, setCloses] = useState(hours.closes)
+  const field = 'rounded-lg border bg-white px-3 py-1.5 text-sm text-gray-900'
+  return (
+    <form className="rounded-xl border bg-white p-4" onSubmit={e => { e.preventDefault(); onSave({ opens, closes }) }}>
+      <h2 className="font-semibold">Chat hours</h2>
+      <p className="text-sm text-gray-600">Monday to Saturday. Students can write at any time; teachers show as online and get phone alerts only in these hours.</p>
+      <div className="mt-2 flex flex-wrap items-end gap-3 text-sm">
+        <label>From <input type="time" required value={opens} onChange={e => setOpens(e.target.value)} className={field} data-testid="school-chat-opens" /></label>
+        <label>To <input type="time" required value={closes} onChange={e => setCloses(e.target.value)} className={field} data-testid="school-chat-closes" /></label>
+        <button type="submit" disabled={closes <= opens || (opens === hours.opens && closes === hours.closes)} className="rounded-lg bg-gray-900 px-3 py-2 text-xs font-bold text-white disabled:opacity-50" data-testid="school-chat-hours-save">Save hours</button>
+      </div>
+    </form>
   )
 }
 

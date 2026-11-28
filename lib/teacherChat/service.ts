@@ -10,14 +10,17 @@
 // uses the transaction's connection: production allows one connection per instance.
 
 import type { Pool, PoolClient } from 'pg'
+import { ChatError } from './errors'
+import { chatHours, presenceOf, replyStats, touchPresence, type Presence, type TeacherReplyStats } from './extras'
+import { withinHours, type ChatHours } from './hours'
 import {
   AUTO_CLOSE_DAYS, MAX_OPEN_THREADS, STUDENT_MESSAGES_PER_DAY, checkMessage,
   type ChatFlag, type ChatSender, type ChatStatus,
 } from './rules'
 
-export class ChatError extends Error {
-  constructor(message: string, public status: number = 400) { super(message) }
-}
+export { ChatError }
+/** Different students asking about one subject in a week before the teacher is told. */
+export const REPEAT_ALERT_STUDENTS = 3
 
 type Queryable = Pick<Pool, 'query'>
 export type ChatDb = Pick<Pool, 'query' | 'connect'>
@@ -37,6 +40,8 @@ export type ThreadView = {
   cursors: Record<ChatSender, Cursor>
   canSend: boolean
   closedReason: string | null
+  /** The other person's online status; only for the two chatting. */
+  presence: Presence | null
 }
 
 type Viewer =
@@ -48,7 +53,7 @@ export type ChatViewer = Viewer
 export type ChatParticipant = Extract<Viewer, { role: 'student' | 'teacher' }>
 
 /** The teacher who answers a subject in a class today: the subject teacher, else the class teacher. */
-const ROUTED_TEACHER = (classId: string, subject: string) => `COALESCE(
+export const ROUTED_TEACHER = (classId: string, subject: string) => `COALESCE(
   (SELECT cs.teacher_id FROM class_subjects cs JOIN teachers x ON x.id = cs.teacher_id AND x.status = 'active' AND x.removed_at IS NULL
     WHERE cs.class_id = ${classId} AND LOWER(cs.subject_name) = LOWER(${subject}) ORDER BY cs.id LIMIT 1),
   (SELECT y.id FROM classes c2 JOIN teachers y ON y.id = c2.class_teacher_id AND y.status = 'active' AND y.removed_at IS NULL
@@ -169,7 +174,10 @@ async function markDelivered(db: Queryable, role: ChatSender, threadIds: number[
 export async function listThreads(db: Queryable, viewer: Viewer, now: Date = new Date()): Promise<ThreadSummary[]> {
   await closeStale(db, viewer.schoolId, now)
   const rows = await threadRows(db, viewer, null)
-  if (viewer.role === 'student' || viewer.role === 'teacher') await markDelivered(db, viewer.role, rows.filter(r => r.unread > 0).map(r => r.id))
+  if (viewer.role === 'student' || viewer.role === 'teacher') {
+    await touchPresence(db, viewer.role, senderId(viewer), now)
+    await markDelivered(db, viewer.role, rows.filter(r => r.unread > 0).map(r => r.id))
+  }
   return rows.map(r => summary(r, viewer))
 }
 
@@ -185,10 +193,19 @@ export async function viewThread(db: Queryable, viewer: Viewer, threadId: number
   const row = await ownThread(db, viewer, threadId)
   if (viewer.role === 'school') {
     await db.query(`INSERT INTO chat_access_log (school_id, thread_id, user_id, created_at) VALUES ($1, $2, $3, $4)`, [viewer.schoolId, threadId, viewer.userId, now])
-    await db.query(`UPDATE notifications SET is_read = TRUE WHERE recipient_school_id = $1 AND type IN ('chat_safety', 'chat_report') AND is_read = FALSE AND data->>'thread_id' = $2::text`,
+    await db.query(`UPDATE notifications SET is_read = TRUE WHERE recipient_school_id = $1 AND type IN ('chat_safety', 'chat_report', 'chat_overdue') AND is_read = FALSE AND data->>'thread_id' = $2::text`,
       [viewer.schoolId, threadId])
   }
-  if (viewer.role === 'student' || viewer.role === 'teacher') await markDelivered(db, viewer.role, [threadId])
+  let presence: Presence | null = null
+  if (viewer.role === 'student' || viewer.role === 'teacher') {
+    await markDelivered(db, viewer.role, [threadId])
+    await touchPresence(db, viewer.role, senderId(viewer), now)
+    const { rows: [ids] } = await db.query<{ student_id: number; teacher_id: number | null }>(
+      `SELECT student_id, ${ROUTED_TEACHER('t.class_id', 't.subject_name')} AS teacher_id FROM chat_threads t WHERE id = $1`, [threadId])
+    presence = viewer.role === 'student'
+      ? await presenceOf(db, viewer.schoolId, 'teacher', ids.teacher_id, now)
+      : await presenceOf(db, viewer.schoolId, 'student', ids.student_id, now)
+  }
   const { rows: messages } = await db.query<{
     id: number; sender_type: ChatSender; sender_name: string; body: string; created_at: Date; hidden_at: Date | null; flag: ChatFlag | null; client_message_id: string
   }>(`SELECT id, sender_type, sender_name, body, created_at, hidden_at, flag, client_message_id FROM chat_messages WHERE thread_id = $1 ORDER BY id`, [threadId])
@@ -222,6 +239,7 @@ export async function viewThread(db: Queryable, viewer: Viewer, threadId: number
     cursors: { student: cursor('student'), teacher: cursor('teacher') },
     canSend: (viewer.role === 'student' || viewer.role === 'teacher') && closedReason === null,
     closedReason: viewer.role === 'student' || viewer.role === 'teacher' ? closedReason : null,
+    presence,
   }
 }
 
@@ -238,7 +256,7 @@ export async function markRead(db: Queryable, viewer: ChatParticipant, threadId:
   `, [threadId, viewer.role, upTo])
   // Reading the chat clears its bell entry, so the next message rings again.
   const column = viewer.role === 'student' ? 'recipient_student_id' : 'recipient_teacher_id'
-  await db.query(`UPDATE notifications SET is_read = TRUE WHERE ${column} = $1 AND type IN ('chat_new_message', 'chat_reply') AND is_read = FALSE AND data->>'thread_id' = $2::text`,
+  await db.query(`UPDATE notifications SET is_read = TRUE WHERE ${column} = $1 AND type IN ('chat_new_message', 'chat_reply', 'chat_repeated_subject', 'chat_overdue') AND is_read = FALSE AND data->>'thread_id' = $2::text`,
     [senderId(viewer), threadId])
 }
 
@@ -253,22 +271,34 @@ async function senderName(db: Queryable, viewer: ChatParticipant): Promise<strin
 const senderId = (viewer: ChatParticipant) => viewer.role === 'student' ? viewer.studentId : viewer.teacherId
 
 /** One bell entry per thread until it is read, never containing the message text. */
-async function notifyOnce(db: Queryable, column: 'recipient_student_id' | 'recipient_teacher_id' | 'recipient_school_id', recipientId: number, schoolId: number, type: string, title: string, message: string, threadId: number) {
+/** `quiet` keeps the bell entry but sends no push (the outbox treats it as already sent). */
+async function notifyOnce(db: Queryable, column: 'recipient_student_id' | 'recipient_teacher_id' | 'recipient_school_id' | 'recipient_parent_id', recipientId: number, schoolId: number, type: string, title: string, message: string, threadId: number, quiet = false) {
   await db.query(`
-    INSERT INTO notifications (school_id, ${column}, type, title, message, data)
-    SELECT $1::int, $2::int, $3::varchar, $4::varchar, $5::text, jsonb_build_object('thread_id', $6::int)
+    INSERT INTO notifications (school_id, ${column}, type, title, message, data, push_sent_at)
+    SELECT $1::int, $2::int, $3::varchar, $4::varchar, $5::text, jsonb_build_object('thread_id', $6::int), CASE WHEN $7::boolean THEN NOW() END
     WHERE NOT EXISTS (SELECT 1 FROM notifications n WHERE n.${column} = $2 AND n.type = $3 AND n.is_read = FALSE AND n.data->>'thread_id' = $6::text)
-  `, [schoolId, recipientId, type, title, message, threadId])
+  `, [schoolId, recipientId, type, title, message, threadId, quiet])
 }
 
-async function afterMessage(db: Queryable, viewer: ChatParticipant, threadId: number, flag: ChatFlag | null) {
+async function afterMessage(db: Queryable, viewer: ChatParticipant, threadId: number, flag: ChatFlag | null, now: Date) {
   const { rows: [t] } = await db.query<{ student_id: number; teacher_id: number | null }>(
     `SELECT student_id, ${ROUTED_TEACHER('t.class_id', 't.subject_name')} AS teacher_id FROM chat_threads t WHERE id = $1`, [threadId])
   if (viewer.role === 'student' && t.teacher_id) {
-    await notifyOnce(db, 'recipient_teacher_id', t.teacher_id, viewer.schoolId, 'chat_new_message', '💬 A student sent you a message', 'Open Teacher Chat to read it.', threadId)
+    await notifyOnce(db, 'recipient_teacher_id', t.teacher_id, viewer.schoolId, 'chat_new_message', '💬 A student sent you a message', 'Open Teacher Chat to read it.', threadId,
+      // Teachers' phones stay quiet outside chat hours.
+      !withinHours(await chatHours(db, viewer.schoolId), now))
   }
   if (viewer.role === 'teacher') {
     await notifyOnce(db, 'recipient_student_id', t.student_id, viewer.schoolId, 'chat_reply', '💬 Your teacher replied', 'Open Teacher Chat to read it.', threadId)
+    const { rows: parents } = await db.query<{ parent_id: number }>(`
+      SELECT sp.parent_id FROM student_parents sp
+      JOIN parents p ON p.id = sp.parent_id AND p.school_id = $2
+      JOIN chat_parent_prefs pp ON pp.parent_id = sp.parent_id AND pp.instant
+      WHERE sp.student_id = $1
+    `, [t.student_id, viewer.schoolId])
+    for (const p of parents) {
+      await notifyOnce(db, 'recipient_parent_id', p.parent_id, viewer.schoolId, 'chat_parent_reply', '💬 A teacher replied to your child', 'Open Teacher Chats to read it.', threadId)
+    }
   }
   if (flag === 'support') {
     await notifyOnce(db, 'recipient_school_id', viewer.schoolId, viewer.schoolId, 'chat_safety', '⚠️ A chat needs attention now', 'A message suggests someone may need support. Open Teacher Chat review.', threadId)
@@ -300,7 +330,10 @@ async function insertMessage(client: PoolClient, viewer: ChatParticipant, thread
   `, [threadId, viewer.role, senderId(viewer), await senderName(client, viewer), body, clientMessageId, flag, now])
   await client.query(`
     UPDATE chat_threads SET last_message_at = $2, needs_review = needs_review OR $3,
-      status = CASE WHEN $4::boolean THEN 'open' ELSE status END, answered_at = CASE WHEN $4::boolean THEN NULL ELSE answered_at END
+      status = CASE WHEN $4::boolean THEN 'open' ELSE status END, answered_at = CASE WHEN $4::boolean THEN NULL ELSE answered_at END,
+      -- Waiting runs from the student's first unanswered message; a reply ends it.
+      waiting_since = CASE WHEN $4::boolean THEN COALESCE(waiting_since, $2) END,
+      escalated_at = CASE WHEN $4::boolean THEN escalated_at END
     WHERE id = $1
   `, [threadId, now, flag !== null, viewer.role === 'student'])
   return m.id
@@ -338,8 +371,29 @@ export async function startThread(db: ChatDb, viewer: Extract<Viewer, { role: 's
     const messageId = await insertMessage(client, viewer, t.id, input.body, input.clientMessageId, flag, now)
     return { threadId: t.id, messageId, flag, repeat: false }
   })
-  if (!result.repeat) await afterMessage(db, viewer, result.threadId, result.flag)
+  if (!result.repeat) {
+    await afterMessage(db, viewer, result.threadId, result.flag, now)
+    await repeatedSubjectAlert(db, viewer.schoolId, result.threadId, now)
+  }
   return { threadId: result.threadId, messageId: result.messageId, support: result.flag === 'support' }
+}
+
+/** Tells the teacher, at most once a week per class and subject, that several students are asking. */
+async function repeatedSubjectAlert(db: Queryable, schoolId: number, threadId: number, now: Date) {
+  const { rows: [r] } = await db.query<{ class_id: number; subject: string; teacher_id: number | null; students: number }>(`
+    SELECT t.class_id, t.subject_name AS subject, ${ROUTED_TEACHER('t.class_id', 't.subject_name')} AS teacher_id,
+           (SELECT COUNT(DISTINCT o.student_id)::int FROM chat_threads o
+             WHERE o.class_id = t.class_id AND o.subject_name = t.subject_name AND o.created_at > $2::timestamptz - INTERVAL '7 days') AS students
+    FROM chat_threads t WHERE t.id = $1
+  `, [threadId, now])
+  if (!r?.teacher_id || r.students < REPEAT_ALERT_STUDENTS) return
+  const { rowCount } = await db.query(`
+    INSERT INTO chat_repeat_alerts (class_id, subject_name, week_start)
+    VALUES ($1, $2, date_trunc('week', $3::timestamptz AT TIME ZONE 'Asia/Kolkata')::date) ON CONFLICT DO NOTHING
+  `, [r.class_id, r.subject, now])
+  if (!rowCount) return
+  await notifyOnce(db, 'recipient_teacher_id', r.teacher_id, schoolId, 'chat_repeated_subject', `📌 Several students are asking about ${r.subject}`,
+    'Three or more students in one class asked this week. It may help to explain it in class.', threadId, !withinHours(await chatHours(db, schoolId), now))
 }
 
 export async function sendMessage(db: ChatDb, viewer: ChatParticipant, threadId: number, input: { body: string; clientMessageId: string }, now: Date = new Date()): Promise<Sent> {
@@ -359,7 +413,7 @@ export async function sendMessage(db: ChatDb, viewer: ChatParticipant, threadId:
     if (viewer.role === 'student') await underDailyLimit(client, viewer.studentId, now)
     return { messageId: await insertMessage(client, viewer, threadId, input.body, input.clientMessageId, flag, now), flag, repeat: false }
   })
-  if (!result.repeat) await afterMessage(db, viewer, threadId, result.flag)
+  if (!result.repeat) await afterMessage(db, viewer, threadId, result.flag, now)
   return { threadId, messageId: result.messageId, support: result.flag === 'support' }
 }
 
@@ -376,7 +430,8 @@ export async function setStatus(db: Queryable, viewer: ChatParticipant, threadId
   const replied = action === 'answered'
     ? `AND (SELECT sender_type FROM chat_messages WHERE thread_id = $1 ORDER BY id DESC LIMIT 1) = 'teacher'` : ''
   const { rowCount } = await db.query(`
-    UPDATE chat_threads SET status = $2::varchar, answered_at = CASE WHEN $2::varchar = 'answered' THEN $4::timestamptz WHEN $2::varchar = 'open' THEN NULL ELSE answered_at END
+    UPDATE chat_threads SET status = $2::varchar, answered_at = CASE WHEN $2::varchar = 'answered' THEN $4::timestamptz WHEN $2::varchar = 'open' THEN NULL ELSE answered_at END,
+      waiting_since = CASE WHEN $2::varchar = 'open' THEN $4::timestamptz END, escalated_at = NULL
     WHERE id = $1 AND status = $3 ${replied}
   `, [threadId, to, from, now])
   if (!rowCount) throw new ChatError(action === 'answered' ? 'Reply to the student first.' : 'This chat is not waiting for that.', 409)
@@ -405,6 +460,8 @@ export type SchoolOverview = {
   classes: { id: number; name: string; enabled: boolean; students: number; withoutParent: number }[]
   reports: { id: number; threadId: number; messageId: number | null; by: string; reason: string; at: string; student: string }[]
   threads: ThreadSummary[]
+  hours: ChatHours
+  teachers: TeacherReplyStats[]
 }
 
 export async function schoolOverview(db: Queryable, viewer: Extract<Viewer, { role: 'school' }>, now: Date = new Date()): Promise<SchoolOverview> {
@@ -429,6 +486,8 @@ export async function schoolOverview(db: Queryable, viewer: Extract<Viewer, { ro
     classes: classes.map(c => ({ id: c.id, name: `${c.grade}-${c.section}`, enabled: c.enabled, students: c.students, withoutParent: c.without_parent })),
     reports: reports.map(r => ({ id: r.id, threadId: r.thread_id, messageId: r.message_id, by: r.reporter_type, reason: r.reason, at: r.created_at.toISOString(), student: r.student })),
     threads,
+    hours: await chatHours(db, viewer.schoolId),
+    teachers: await replyStats(db, viewer.schoolId, ROUTED_TEACHER('t.class_id', 't.subject_name'), now),
   }
 }
 

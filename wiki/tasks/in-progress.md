@@ -39,7 +39,8 @@ Move an entry to [completed.md](completed.md) when it ships. Add new entries at 
 - [x] Phase 1 (#558): chat, parent view, school review, safety controls
 - [x] Browser tests (`e2e/teacher-chat.spec.ts`)
 - [ ] Review and merge
-- [ ] Reviews before real students (#557) · Phase 2 (#559)
+- [x] Phase 2 (#559): hours, online status, parent alerts, saved replies, escalation, reply report
+- [ ] Reviews before real students (#557) · staging load test
 
 ### Daily Quiz + Student Doubts (#430)
 **Type:** Feature (epic)

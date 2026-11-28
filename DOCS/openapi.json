@@ -55507,6 +55507,485 @@
         ],
         "x-source-file": "app/api/school/chat/reports/[id]/resolve/route.ts"
       }
+    },
+    "/api/teacher/chat/settings": {
+      "get": {
+        "tags": [
+          "Teacher chat"
+        ],
+        "summary": "Chat hours, online choice and saved replies",
+        "description": "Chat hours, online choice and saved replies.\n\n**Who can call:** Teacher.\n\n**Checks:** signed-in teacher, own school; teacher-chat feature on.",
+        "operationId": "getTeacherChatSettings",
+        "security": [
+          {
+            "teacher": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Done"
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden, or the feature is off"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Student",
+            "color": "#15803d"
+          }
+        ],
+        "x-source-file": "app/api/teacher/chat/settings/route.ts"
+      },
+      "put": {
+        "tags": [
+          "Teacher chat"
+        ],
+        "summary": "Hide or show my online status",
+        "description": "Hide or show my online status.\n\n**Who can call:** Teacher.\n\n**Checks:** signed-in teacher, own school; teacher-chat feature on.",
+        "operationId": "putTeacherChatSettings",
+        "security": [
+          {
+            "teacher": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "hide_online"
+                ],
+                "properties": {
+                  "hide_online": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Done"
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden, or the feature is off"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Student",
+            "color": "#15803d"
+          }
+        ],
+        "x-source-file": "app/api/teacher/chat/settings/route.ts"
+      }
+    },
+    "/api/teacher/chat/saved-replies": {
+      "post": {
+        "tags": [
+          "Teacher chat"
+        ],
+        "summary": "Keep a reply to reuse",
+        "description": "Keep a reply to reuse.\n\n**Who can call:** Teacher.\n\n**Checks:** signed-in teacher, own school; teacher-chat feature on.",
+        "operationId": "postTeacherChatSavedReplies",
+        "security": [
+          {
+            "teacher": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "body"
+                ],
+                "properties": {
+                  "body": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Done"
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden, or the feature is off"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Student",
+            "color": "#15803d"
+          }
+        ],
+        "x-source-file": "app/api/teacher/chat/saved-replies/route.ts"
+      }
+    },
+    "/api/teacher/chat/saved-replies/{id}": {
+      "delete": {
+        "tags": [
+          "Teacher chat"
+        ],
+        "summary": "Remove a saved reply",
+        "description": "Remove a saved reply.\n\n**Who can call:** Teacher.\n\n**Checks:** signed-in teacher, own school; teacher-chat feature on.",
+        "operationId": "deleteTeacherChatSavedRepliesId",
+        "security": [
+          {
+            "teacher": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Done"
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden, or the feature is off"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Student",
+            "color": "#15803d"
+          }
+        ],
+        "x-source-file": "app/api/teacher/chat/saved-replies/[id]/route.ts"
+      }
+    },
+    "/api/parent/chat/alerts": {
+      "get": {
+        "tags": [
+          "Teacher chat"
+        ],
+        "summary": "Whether I get an alert for each teacher reply",
+        "description": "Whether I get an alert for each teacher reply.\n\n**Who can call:** Parent.\n\n**Checks:** signed-in parent, own school; teacher-chat feature on.",
+        "operationId": "getParentChatAlerts",
+        "security": [
+          {
+            "parent": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "student_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Done"
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden, or the feature is off"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Student",
+            "color": "#15803d"
+          }
+        ],
+        "x-source-file": "app/api/parent/chat/alerts/route.ts"
+      },
+      "put": {
+        "tags": [
+          "Teacher chat"
+        ],
+        "summary": "Choose alerts for each teacher reply",
+        "description": "Choose alerts for each teacher reply.\n\n**Who can call:** Parent.\n\n**Checks:** signed-in parent, own school; teacher-chat feature on.",
+        "operationId": "putParentChatAlerts",
+        "security": [
+          {
+            "parent": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "student_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "instant"
+                ],
+                "properties": {
+                  "instant": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Done"
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden, or the feature is off"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Student",
+            "color": "#15803d"
+          }
+        ],
+        "x-source-file": "app/api/parent/chat/alerts/route.ts"
+      }
+    },
+    "/api/school/chat/settings": {
+      "put": {
+        "tags": [
+          "Teacher chat"
+        ],
+        "summary": "Set the school’s chat hours",
+        "description": "Set the school’s chat hours.\n\n**Who can call:** School admin or principal.\n\n**Checks:** signed-in school admin or principal, own school; teacher-chat feature on.",
+        "operationId": "putSchoolChatSettings",
+        "security": [
+          {
+            "schoolAdmin": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "opens",
+                  "closes"
+                ],
+                "properties": {
+                  "opens": {
+                    "type": "string"
+                  },
+                  "closes": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Done"
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden, or the feature is off"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Student",
+            "color": "#15803d"
+          }
+        ],
+        "x-source-file": "app/api/school/chat/settings/route.ts"
+      }
+    },
+    "/api/cron/teacher-chat": {
+      "get": {
+        "tags": [
+          "Teacher chat"
+        ],
+        "summary": "Run a daily Teacher Chat job",
+        "description": "Run a daily Teacher Chat job.\n\n**Who can call:** The scheduler.\n\n**Checks:** Authorization: Bearer CRON_SECRET; refused when none is set.",
+        "operationId": "getCronTeacherChat",
+        "security": [
+          {
+            "cron": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "run",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "escalate",
+                "summary"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Done"
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden, or the feature is off"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Student",
+            "color": "#15803d"
+          }
+        ],
+        "x-source-file": "app/api/cron/teacher-chat/route.ts"
+      },
+      "post": {
+        "tags": [
+          "Teacher chat"
+        ],
+        "summary": "Run a daily Teacher Chat job",
+        "description": "Run a daily Teacher Chat job.\n\n**Who can call:** The scheduler.\n\n**Checks:** Authorization: Bearer CRON_SECRET; refused when none is set.",
+        "operationId": "postCronTeacherChat",
+        "security": [
+          {
+            "cron": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "run",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "escalate",
+                "summary"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Done"
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden, or the feature is off"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Student",
+            "color": "#15803d"
+          }
+        ],
+        "x-source-file": "app/api/cron/teacher-chat/route.ts"
+      }
     }
   },
   "components": {

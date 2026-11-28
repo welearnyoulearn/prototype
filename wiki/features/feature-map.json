@@ -106,6 +106,7 @@
     "ui": [
       "components/teacherChat/TeacherChat.tsx",
       "components/teacherChat/ChatThread.tsx",
+      "components/teacherChat/ChatSettings.tsx",
       "app/school-admin/components/SchoolTeacherChat.tsx"
     ]
   },
