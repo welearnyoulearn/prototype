@@ -130,7 +130,7 @@ function DuplicatesPanel({
           <p className="font-medium">
             {dupResult.deleted > 0 && `Merged and removed ${dupResult.deleted} duplicate${dupResult.deleted !== 1 ? 's' : ''}.`}
             {dupResult.deleted > 0 && dupResult.skipped > 0 && ' '}
-            {dupResult.skipped > 0 && `${dupResult.skipped} left untouched — they still have payment or waiver history that conflicts with the record being kept.`}
+            {dupResult.skipped > 0 && `${dupResult.skipped} left untouched — the reason for each is below.`}
           </p>
           {dupResult.errors.length > 0 && (
             <ul className="mt-2 space-y-1 text-xs">
