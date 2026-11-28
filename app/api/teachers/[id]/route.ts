@@ -45,6 +45,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
         return NextResponse.json({ error: 'Staff Management is not enabled for this school', code: 'FEATURE_DISABLED' }, { status: 403 })
       }
 
+      if (req.nextUrl.searchParams.get('consequences') === 'true') {
+        return NextResponse.json(await removalConsequences(id))
+      }
+
       const result = await pool.query(
         `SELECT id, school_id, name, email, phone, subject, department, qualification, date_of_joining,
                 staff_type, status, teaches_grades, employee_id, password_changed, removed_at, created_at
@@ -61,6 +65,18 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     console.error('[API]', err)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
+}
+
+// What removing a teacher would unassign, shown before the admin confirms.
+async function removalConsequences(id: string) {
+  const [subjects, classes] = await Promise.all([
+    pool.query(
+      `SELECT cs.subject_name, c.grade, c.section
+       FROM class_subjects cs JOIN classes c ON c.id = cs.class_id
+       WHERE cs.teacher_id = $1 AND c.deleted_at IS NULL ORDER BY c.grade, c.section, cs.subject_name`, [id]),
+    pool.query(`SELECT grade, section FROM classes WHERE class_teacher_id = $1 AND deleted_at IS NULL ORDER BY grade, section`, [id]),
+  ])
+  return { subjects_teaching: subjects.rows, class_teacher_of: classes.rows }
 }
 
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -281,23 +297,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
 
     // Preview mode: return what will be affected without deleting
     if (url.searchParams.get('consequences') === 'true') {
-      try {
-        const [subjectsRes, classTeacherRes] = await Promise.all([
-          pool.query(
-            `SELECT cs.subject_name, c.grade, c.section
-             FROM class_subjects cs JOIN classes c ON c.id = cs.class_id
-             WHERE cs.teacher_id = $1`, [id]),
-          pool.query(
-            `SELECT grade, section FROM classes WHERE class_teacher_id = $1`, [id]),
-        ])
-        return NextResponse.json({
-          subjects_teaching: subjectsRes.rows,
-          class_teacher_of: classTeacherRes.rows,
-        })
-      } catch (error) {
-        console.error(error)
-        return NextResponse.json({ error: 'Failed to fetch consequences' }, { status: 500 })
-      }
+      return NextResponse.json(await removalConsequences(id))
     }
 
     const client = await pool.connect()
