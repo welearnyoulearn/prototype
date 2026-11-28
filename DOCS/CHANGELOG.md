@@ -2,6 +2,14 @@
 
 All notable changes to the WLYL School prototype are documented here.
 
+## [Unreleased] - Student app privacy and account deletion pages (#569)
+
+### Added
+- `/privacy/student-app` and `/privacy/student-app/delete-account`: the WLYL Student Android app's privacy policy and account-deletion pages, on our own domain, for its Google Play listing and the app's Me screen. Public, no sign-in.
+
+### Tests
+- `e2e/student-app-legal.spec.ts`: both pages open without signing in (never redirected to the student sign-in).
+
 ## [Unreleased] - Student mobile app: long sessions and Expo push (#552)
 
 ### Added
