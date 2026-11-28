@@ -8,6 +8,7 @@ import { MessageCircle, Plus } from 'lucide-react'
 import { MAX_OPEN_THREADS, MAX_STUDENT_MESSAGE, STATUS_LABEL } from '@/lib/teacherChat/rules'
 import type { StudentSetup, ThreadSummary } from '@/lib/teacherChat/service'
 import ChatThread from './ChatThread'
+import { ParentChatAlerts, TeacherChatSettings } from './ChatSettings'
 import { ApiError, CHAT_API, call, messageId, usePoll, when } from './api'
 
 const LIST_POLL_MS = 30_000
@@ -65,6 +66,9 @@ export default function TeacherChat({ role, studentId, studentName, active }: Pr
       {asking && data?.setup && (
         <AskForm setup={data.setup} onCancel={() => setAsking(false)} onStarted={id => { setAsking(false); setOpenId(id); void load() }} />
       )}
+
+      {role === 'teacher' && data && <TeacherChatSettings />}
+      {role === 'parent' && studentId && <ParentChatAlerts studentId={studentId} />}
 
       {data && threads.length === 0 && <p className="rounded-xl border bg-white p-4 text-sm text-gray-500" data-testid="chat-empty">No chats yet.</p>}
       <ul className="space-y-2">

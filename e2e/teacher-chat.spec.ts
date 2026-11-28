@@ -4,7 +4,7 @@ import 'dotenv/config'
 import { randomUUID } from 'node:crypto'
 import bcrypt from 'bcryptjs'
 import { Client } from 'pg'
-import { test, expect, type APIRequestContext, type Browser } from '@playwright/test'
+import { test, expect, type APIRequestContext, type Browser, type BrowserContext } from '@playwright/test'
 
 const BASE = process.env.PLAYWRIGHT_BASE_URL ?? 'http://localhost:3000'
 const DB = process.env.DATABASE_URL ?? ''
@@ -24,9 +24,13 @@ test.describe.serial('Teacher chat', () => {
   }
   let db: Client
   let school = 0, klass = 0, child = 0, thread = 0
+  // Closed after each test, so earlier screens stop refreshing in the background.
+  const open: BrowserContext[] = []
+  test.afterEach(async () => { await Promise.all(open.splice(0).map(c => c.close())) })
 
   async function signIn(browser: Browser, who: keyof typeof logins) {
     const context = await browser.newContext({ baseURL: BASE, extraHTTPHeaders: { Origin: BASE } })
+    open.push(context)
     const res = await context.request.post(logins[who].url, { data: { ...logins[who].body, password } })
     expect(res.ok(), `${who} sign-in: ${res.status()}`).toBe(true)
     return context
@@ -40,6 +44,8 @@ test.describe.serial('Teacher chat', () => {
     const id = async (sql: string, args: unknown[]) => (await db.query<{ id: number }>(`${sql} RETURNING id`, args)).rows[0].id
     const hash = await bcrypt.hash(password, 10)
     school = await id(`INSERT INTO schools (name, school_code) VALUES ('Chat E2E School', $1)`, [`chat-e2e-${tag}`])
+    // The school admin screen needs a plan.
+    await db.query(`INSERT INTO school_subscriptions (school_id, tier) VALUES ($1, 'premium')`, [school])
     // Switched on for this school only, so no other test sees it.
     await db.query(`INSERT INTO school_feature_overrides (school_id, feature_key, enabled) SELECT $1, k, TRUE FROM unnest(ARRAY['teacher-chat','student-portal','parent-portal']) k`, [school])
     const teacher = await id(`INSERT INTO teachers (school_id, name, email, password_hash, password_changed, status) VALUES ($1, 'E2E Teacher', $2, $3, TRUE, 'active')`, [school, logins.teacher.body.email, hash])
@@ -122,5 +128,59 @@ test.describe.serial('Teacher chat', () => {
     expect((await admin.request.get(`/api/school/chat/${thread}`)).status()).toBe(200)
     const { rows } = await db.query<{ n: number }>(`SELECT COUNT(*)::int AS n FROM chat_access_log WHERE thread_id = $1`, [thread])
     expect(rows[0].n).toBeGreaterThan(0)
+  })
+
+  test('chat hours, online status, saved replies and parent alerts', async ({ browser }) => {
+    test.setTimeout(180_000)
+    const admin = await signIn(browser, 'admin')
+    const office = await admin.newPage()
+    await office.goto('/school-admin?tab=teacher-chat')
+    await office.getByTestId('school-chat-opens').fill('00:00', { timeout: 90_000 })
+    await office.getByTestId('school-chat-closes').fill('23:59')
+    await office.getByTestId('school-chat-hours-save').click()
+    await expect(office.getByTestId('school-chat-stats')).toContainText('E2E Teacher')
+
+    const student = await signIn(browser, 'student')
+    const started = await student.request.post('/api/student/chat', { data: { subject: 'Mathematics', body: 'One more doubt', client_message_id: randomUUID() } })
+    expect(started.status()).toBe(201)
+    const next = (await started.json() as { threadId: number }).threadId
+
+    const parent = await signIn(browser, 'parent')
+    const family = await parent.newPage()
+    await family.goto('/parent?tab=teacher-chat')
+    await family.getByTestId('chat-parent-instant').check({ timeout: 90_000 })
+
+    const teacher = await signIn(browser, 'teacher')
+    const inbox = await teacher.newPage()
+    await inbox.goto('/teacher?tab=teacher-chat')
+    await inbox.getByTestId('chat-teacher-settings').locator('summary').click({ timeout: 90_000 })
+    await inbox.getByTestId('chat-saved-input').fill('Show me your working.')
+    await inbox.getByTestId('chat-saved-add').click()
+    await expect(inbox.getByTestId('chat-teacher-settings')).toContainText('Show me your working.')
+    await inbox.getByTestId(`chat-row-${next}`).click()
+    await inbox.locator('[data-testid^="chat-saved-use-"]').click()
+    await expect(inbox.getByTestId('chat-input')).toHaveValue('Show me your working.')
+    await inbox.getByTestId('chat-send').click()
+
+    const page = await student.newPage()
+    await page.goto('/student?tab=teacher-chat')
+    await page.getByTestId(`chat-row-${next}`).click({ timeout: 90_000 })
+    // Chat days are Monday to Saturday in India.
+    const sunday = new Date(Date.now() + 330 * 60_000).getUTCDay() === 0
+    if (!sunday) await expect(page.getByTestId('chat-online')).toBeVisible({ timeout: 20_000 })
+
+    await expect.poll(async () => (await db.query<{ n: number }>(
+      `SELECT COUNT(*)::int AS n FROM notifications WHERE school_id = $1 AND type = 'chat_parent_reply'`, [school])).rows[0].n, { timeout: 20_000 }).toBe(1)
+  })
+
+  test('the daily jobs need the cron secret and are safe to run twice', async ({ request }) => {
+    const secret = process.env.CRON_SECRET
+    expect((await request.get('/api/cron/teacher-chat?run=summary')).status()).toBe(401)
+    test.skip(!secret, 'Set CRON_SECRET to run the jobs')
+    const headers = { Authorization: `Bearer ${secret}` }
+    for (const job of ['summary', 'summary', 'escalate']) expect((await request.get(`/api/cron/teacher-chat?run=${job}`, { headers })).status()).toBe(200)
+    expect((await request.get('/api/cron/teacher-chat?run=other', { headers })).status()).toBe(400)
+    const { rows } = await db.query<{ n: number }>(`SELECT COUNT(*)::int AS n FROM notifications WHERE school_id = $1 AND type = 'chat_parent_summary'`, [school])
+    expect(rows[0].n).toBe(1)
   })
 })

@@ -8,10 +8,10 @@ export class ApiError extends Error {
   constructor(message: string, public status: number) { super(message) }
 }
 
-export async function call<T>(url: string, init?: { method: 'POST' | 'PUT'; body: object }): Promise<T> {
+export async function call<T>(url: string, init?: { method: 'POST' | 'PUT' | 'DELETE'; body?: object }): Promise<T> {
   const res = await fetch(url, {
     cache: 'no-store', method: init?.method ?? 'GET',
-    ...(init ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(init.body) } : {}),
+    ...(init?.body ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(init.body) } : {}),
   })
   const data = await res.json().catch(() => ({}))
   if (!res.ok) throw new ApiError(data.error ?? 'Something went wrong', res.status)

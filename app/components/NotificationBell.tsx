@@ -110,6 +110,10 @@ const TYPE_NAV: Record<string, string> = {
   chat_reply: 'teacher-chat',           // student: the teacher replied
   chat_safety: 'teacher-chat',          // school admin: a message needs attention
   chat_report: 'teacher-chat',          // school admin: a chat was reported
+  chat_overdue: 'teacher-chat',         // school admin / class teacher: a doubt unanswered for two school days
+  chat_repeated_subject: 'teacher-chat', // teacher: several students asking about one subject
+  chat_parent_reply: 'teacher-chat',    // parent: a teacher replied to the child
+  chat_parent_summary: 'teacher-chat',  // parent: the day's chats
 }
 
 export type NotificationPortal = 'teacher' | 'admin' | 'student' | 'parent'

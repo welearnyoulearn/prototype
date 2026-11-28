@@ -62,7 +62,7 @@ before(async () => {
     CREATE TABLE IF NOT EXISTS parents (id SERIAL PRIMARY KEY, school_id INTEGER REFERENCES schools(id) ON DELETE CASCADE, name VARCHAR(255));
     CREATE TABLE IF NOT EXISTS student_parents (id SERIAL PRIMARY KEY, student_id INTEGER REFERENCES students(id) ON DELETE CASCADE, parent_id INTEGER REFERENCES parents(id) ON DELETE CASCADE);
     CREATE TABLE IF NOT EXISTS plan_features (feature_key VARCHAR(50), tier VARCHAR(20), enabled BOOLEAN, UNIQUE(feature_key, tier));
-    CREATE TABLE IF NOT EXISTS notifications (id SERIAL PRIMARY KEY, school_id INTEGER, recipient_student_id INTEGER, recipient_teacher_id INTEGER, recipient_school_id INTEGER, type VARCHAR(50), title VARCHAR(200), message TEXT, data JSONB, is_read BOOLEAN DEFAULT FALSE);
+    CREATE TABLE IF NOT EXISTS notifications (id SERIAL PRIMARY KEY, school_id INTEGER, recipient_student_id INTEGER, recipient_teacher_id INTEGER, recipient_school_id INTEGER, recipient_parent_id INTEGER, push_sent_at TIMESTAMPTZ, type VARCHAR(50), title VARCHAR(200), message TEXT, data JSONB, is_read BOOLEAN DEFAULT FALSE);
   `)
   await ensureTeacherChatSchema(pool)
   await ensureTeacherChatSchema(pool) // safe to run twice

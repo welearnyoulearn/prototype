@@ -36,6 +36,7 @@ export default function ChatThread({ role, threadId, studentId, active, onBack, 
   const [draft, setDraft] = useState(() => (typeof window === 'undefined' ? '' : window.sessionStorage.getItem(draftKey) ?? ''))
   const [pending, setPending] = useState<Pending[]>([])
   const [reporting, setReporting] = useState<number | 'chat' | null>(null)
+  const [saved, setSaved] = useState<{ id: number; body: string }[]>([])
   const bottom = useRef<HTMLDivElement>(null)
   const sending = useRef(false)
   const readUpTo = useRef(0)
@@ -62,6 +63,11 @@ export default function ChatThread({ role, threadId, studentId, active, onBack, 
   }, [base, query, role, onChanged])
 
   usePoll(load, THREAD_POLL_MS, active)
+
+  useEffect(() => {
+    if (role !== 'teacher') return
+    call<{ savedReplies: { id: number; body: string }[] }>(`${CHAT_API.teacher}/settings`).then(r => setSaved(r.savedReplies)).catch(() => {})
+  }, [role])
 
   // Sends waiting messages one at a time, in order. A network or server failure leaves them queued.
   const flush = useCallback(async () => {
@@ -114,7 +120,7 @@ export default function ChatThread({ role, threadId, studentId, active, onBack, 
 
   const status = (action: string) => act(`${base}/status`, { action })
   const other: ChatSender = role === 'teacher' ? 'student' : 'teacher'
-  const saved = new Set(view?.messages.map(m => m.clientMessageId))
+  const delivered = new Set(view?.messages.map(m => m.clientMessageId))
   const max = role === 'student' ? MAX_STUDENT_MESSAGE : MAX_TEACHER_MESSAGE
   const thread = view?.thread
 
@@ -134,6 +140,12 @@ export default function ChatThread({ role, threadId, studentId, active, onBack, 
               {thread.subject} · {role === 'student' ? (thread.teacher ?? 'No teacher yet') : role === 'teacher' ? `${thread.student} (${thread.className})` : `${thread.student} with ${thread.teacher ?? 'no teacher'}`}
             </h2>
             <p className="text-xs text-gray-600" data-testid="chat-status">{STATUS_LABEL[thread.status]}</p>
+            {view.presence?.online && (
+              <p className="flex items-center gap-1 text-xs font-semibold text-emerald-700" data-testid="chat-online">
+                <span className="h-2 w-2 rounded-full bg-emerald-600" aria-hidden="true" /> Online
+              </p>
+            )}
+            {view.presence?.hint && <p className="text-xs text-gray-500" data-testid="chat-hours">{view.presence.hint}</p>}
           </div>
         )}
         {role !== 'school' && thread && (
@@ -179,7 +191,7 @@ export default function ChatThread({ role, threadId, studentId, active, onBack, 
             </div>
           </div>
         ))}
-        {pending.filter(p => !saved.has(p.id)).map(p => (
+        {pending.filter(p => !delivered.has(p.id)).map(p => (
           <div key={p.id} className="flex justify-end" data-testid="chat-pending">
             <div className="max-w-[85%] rounded-2xl bg-sky-50 px-3 py-2 text-sm opacity-70">
               <p className="whitespace-pre-wrap break-words">{p.body}</p>
@@ -209,6 +221,14 @@ export default function ChatThread({ role, threadId, studentId, active, onBack, 
           )}
           {role === 'teacher' && thread?.status === 'open' && view.canSend && view.messages.at(-1)?.sender === 'teacher' && (
             <button type="button" onClick={() => status('answered')} className="rounded-full border-2 border-emerald-700 px-4 py-1.5 text-sm font-bold text-emerald-800" data-testid="chat-mark-answered">Mark answered</button>
+          )}
+          {view.canSend && saved.length > 0 && (
+            <div className="flex flex-wrap gap-1.5" aria-label="Saved replies">
+              {saved.map(r => (
+                <button key={r.id} type="button" onClick={() => setDraft(d => (d ? `${d} ${r.body}` : r.body).slice(0, max))}
+                  className="max-w-full truncate rounded-full border px-3 py-1 text-xs font-semibold" data-testid={`chat-saved-use-${r.id}`}>{r.body}</button>
+              ))}
+            </div>
           )}
           {view.canSend ? (
             <form className="flex items-end gap-2" onSubmit={e => { e.preventDefault(); send() }}>

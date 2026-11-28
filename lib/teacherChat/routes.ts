@@ -9,6 +9,7 @@ import { getParentSession, getStudentSession, getTeacherSession, requireSchoolAd
 import { parentOwnsStudent } from '@/lib/examsAuth'
 import { dispatchPendingPushes } from '@/lib/push'
 import { cached } from '@/lib/ttlCache'
+import { addSavedReply, deleteSavedReply, parentAlerts, setChatHours, setHideOnline, setParentAlerts, teacherSettings, MAX_SAVED_REPLY } from './extras'
 import { MAX_STUDENT_MESSAGE, MAX_TEACHER_MESSAGE, SUPPORT_MESSAGE } from './rules'
 import {
   ChatError, hideMessage, listThreads, markRead, markReviewed, reportChat, resolveReport, schoolOverview, sendMessage,
@@ -151,3 +152,36 @@ export const handleResolve = (req: NextRequest, rawId: string) => handle(req, 's
 
 export const handleReviewed = (req: NextRequest, rawId: string) => handle(req, 'school', 'reviewed', async viewer =>
   NextResponse.json(await markReviewed(pool, viewer, id(rawId))))
+
+// ── Phase 2 settings (#559) ──────────────────────────────────────────────────
+export const handleTeacherSettings = (req: NextRequest) => handle(req, 'teacher', 'settings', async viewer =>
+  NextResponse.json(await teacherSettings(pool, viewer.teacherId, viewer.schoolId), NO_STORE))
+
+const onlineBody = z.object({ hide_online: z.boolean() }).strict()
+export const handleTeacherOnline = (req: NextRequest) => handle(req, 'teacher', 'online', async viewer => {
+  const input = await body(req, onlineBody)
+  return NextResponse.json(await setHideOnline(pool, viewer.teacherId, input.hide_online))
+})
+
+const savedBody = z.object({ body: text(MAX_SAVED_REPLY) }).strict()
+export const handleAddSaved = (req: NextRequest) => handle(req, 'teacher', 'saved reply', async viewer => {
+  const input = await body(req, savedBody)
+  return NextResponse.json(await addSavedReply(pool, viewer.teacherId, input.body), { status: 201 })
+})
+
+export const handleDeleteSaved = (req: NextRequest, rawId: string) => handle(req, 'teacher', 'delete saved reply', async viewer =>
+  NextResponse.json(await deleteSavedReply(pool, viewer.teacherId, id(rawId))))
+
+export const handleParentAlerts = (req: NextRequest) => handle(req, 'parent', 'alerts', async viewer =>
+  NextResponse.json(await parentAlerts(pool, viewer.parentId), NO_STORE))
+
+const alertsBody = z.object({ instant: z.boolean() }).strict()
+export const handleSetParentAlerts = (req: NextRequest) => handle(req, 'parent', 'set alerts', async viewer => {
+  const input = await body(req, alertsBody)
+  return NextResponse.json(await setParentAlerts(pool, viewer.parentId, input.instant))
+})
+
+const time = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Use a time like 08:00.')
+const hoursBody = z.object({ opens: time, closes: time }).strict()
+export const handleSchoolHours = (req: NextRequest) => handle(req, 'school', 'hours', async viewer =>
+  NextResponse.json(await setChatHours(pool, viewer.schoolId, viewer.userId, await body(req, hoursBody))))

@@ -69,6 +69,14 @@
       "schedule": "0 14 * * *"
     },
     {
+      "path": "/api/cron/teacher-chat?run=escalate",
+      "schedule": "30 2 * * *"
+    },
+    {
+      "path": "/api/cron/teacher-chat?run=summary",
+      "schedule": "0 13 * * *"
+    },
+    {
       "path": "/api/cron/daily-quiz?run=close",
       "schedule": "0 16 * * *"
     }
