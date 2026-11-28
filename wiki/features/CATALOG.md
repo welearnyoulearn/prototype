@@ -4,7 +4,7 @@
 
 Every feature a school can be switched on for has exactly one doc below. "Code evidence" is computed: the feature's screens are read and every `/api/...` route they call is looked up on disk. ⚠ means a screen calls a route that does not exist on `dev` (that call returns 404), so the feature cannot be shown as fully working.
 
-## Platform Admin features (24)
+## Platform Admin features (25)
 
 | Feature (Platform Admin → features) | Category | Portals | Doc | Code evidence |
 |---|---|---|---|---|
@@ -20,6 +20,7 @@ Every feature a school can be switched on for has exactly one doc below. "Code e
 | **Exam Schedule & Marks** (`exam-marks`) | Scheduling | school-admin, student, parent, teacher | [exam-marks.md](exam-marks.md) | ✅ all routes exist |
 | **Daily Quiz & Leaderboard** (`daily-quiz`) | Learning | school-admin, teacher, student, parent | [daily-quiz.md](daily-quiz.md) | ✅ all routes exist |
 | **Student Doubts** (`student-doubts`) | Learning | school-admin, teacher, student, parent | [student-doubts.md](student-doubts.md) | ✅ all routes exist |
+| **Teacher Chat** (`teacher-chat`) | Learning | school-admin, teacher, student, parent | [teacher-chat.md](teacher-chat.md) | ✅ all routes exist |
 | **Daily Newspaper** (`daily-newspaper`) | Learning | student | [daily-newspaper.md](daily-newspaper.md) | ✅ all routes exist |
 | **Student Search** (`student-search`) | Learning | student, parent | [student-search.md](student-search.md) | ✅ all routes exist |
 | **Student Search: Google AI button** (`student-search-ai`) | Learning | student, parent | [student-search-ai.md](student-search-ai.md) | ✅ all routes exist |

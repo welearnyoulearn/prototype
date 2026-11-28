@@ -106,6 +106,10 @@ const TYPE_NAV: Record<string, string> = {
   doubt_new: 'doubts',                  // teacher: a student asked
   doubt_reopened: 'doubts',
   doubt_clarified: 'doubts',
+  chat_new_message: 'teacher-chat',     // teacher: a student wrote
+  chat_reply: 'teacher-chat',           // student: the teacher replied
+  chat_safety: 'teacher-chat',          // school admin: a message needs attention
+  chat_report: 'teacher-chat',          // school admin: a chat was reported
 }
 
 export type NotificationPortal = 'teacher' | 'admin' | 'student' | 'parent'

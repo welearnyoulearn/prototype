@@ -101,6 +101,14 @@
       "app/school-admin/components/SchoolDoubts.tsx"
     ]
   },
+  "teacher-chat": {
+    "doc": "wiki/features/teacher-chat.md",
+    "ui": [
+      "components/teacherChat/TeacherChat.tsx",
+      "components/teacherChat/ChatThread.tsx",
+      "app/school-admin/components/SchoolTeacherChat.tsx"
+    ]
+  },
   "daily-newspaper": {
     "doc": "wiki/features/daily-newspaper.md",
     "ui": [

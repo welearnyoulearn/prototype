@@ -40,6 +40,12 @@ export function checkQuery(query: string): SearchFlag | null {
   return RULES.find(rule => rule.pattern.test(text))?.flag ?? null
 }
 
+/** Whether the text matches any rule for one reason, even if an earlier rule matches too (Teacher Chat, #558). */
+export function matchesFlag(query: string, flag: SearchFlag): boolean {
+  const text = normalise(query)
+  return RULES.some(rule => rule.flag === flag && rule.pattern.test(text))
+}
+
 /** What the student is told when a search is stopped. */
 export const STUDENT_MESSAGES: Record<SearchFlag, { title: string; body: string }> = {
   support: { title: 'You are not alone', body: 'It sounds like something may be hurting. Please talk to a parent, teacher or another adult you trust today. You can also call Childline on 1098, or Tele-MANAS on 14416 (free, in India). If you are in danger now, call 112.' },
