@@ -29,6 +29,7 @@ Students (own data only).
 - **Session:** a login from the app (`x-wlyl-client: mobile`) stays signed in like the parent and teacher apps; the web portal keeps 20 min / 12 h. See [auth.md](auth.md).
 - **Push:** `POST/DELETE /api/student/push/expo` stores the app's Expo token in `device_tokens` (role `student`, platform `expo`). The dispatcher (`lib/push.ts`) opens app screens with `studentAppLink`: results → `/marks/<examId>`, doubts → `/doubts`, daily quiz → `/quiz`, newspaper → `/newspaper`, birthday → `/class-circle`, else `/notifications`.
 - **Devices removed** (`removeStudentDevices`) when the school deactivates the student or resets their credentials, when they reset their password, and when `/api/student/auth/me` finds Student Portal Access switched off. No pushes go to students of a school with Student Portal Access off.
+- **Reporting AI answers:** `POST /api/student/ai-report` stores a student's flag on an AI tutor answer or a WLYL AI quiz hint (reason: harmful, inappropriate, wrong, other) in `ai_content_reports`, as Google Play's AI-generated content policy requires. Rate limited to 20 an hour per student. A Platform Admin review screen is still to build.
 - Student Search stays web-only for now.
 
 ## AI Tutor (AI Pro)

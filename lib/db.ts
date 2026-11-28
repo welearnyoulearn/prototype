@@ -89,7 +89,7 @@ const BOOTSTRAP_MARKER_KEY   = 'initial_schema_bootstrap'
 // silently never runs anywhere, and you will chase a "column does not exist" 500
 // that reproduces on production but never locally against a fresh DB.
 // Adding a migration statement and bumping this number is ONE change, not two.
-const SCHEMA_VERSION = 79
+const SCHEMA_VERSION = 80
 
 // Records the schema level this build finished applying, on the same row as the
 // bootstrap marker (no extra row, no extra round-trip to read it back).
@@ -1432,6 +1432,22 @@ export async function initDB() {
     // changes the default for NEW subject-template rows; existing rows keep whatever
     // to_grade an admin already set.
     `ALTER TABLE school_subject_templates ALTER COLUMN to_grade SET DEFAULT 10`,
+
+    // ── Reports of AI-written content from the student app (#552). Google Play requires apps with
+    // generative AI to let users flag offensive output in the app; these rows are what they flag.
+    `CREATE TABLE IF NOT EXISTS ai_content_reports (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+      source VARCHAR(20) NOT NULL CHECK (source IN ('tutor', 'doubt_ai')),
+      chat_session_id INTEGER,
+      content TEXT NOT NULL,
+      reason VARCHAR(30) NOT NULL CHECK (reason IN ('harmful', 'inappropriate', 'wrong', 'other')),
+      note TEXT,
+      status VARCHAR(20) NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'reviewed')),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_ai_content_reports_open ON ai_content_reports(status, created_at DESC)`,
   ]
 
   for (const sql of migrations) {
