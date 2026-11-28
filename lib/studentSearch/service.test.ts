@@ -4,7 +4,7 @@ import test, { after, before } from 'node:test'
 import assert from 'node:assert/strict'
 import { Pool } from 'pg'
 import { ensureStudentSearchSchema } from './schema'
-import { deleteSearches, getConsent, listSearches, parentOwnsChild, recordSearch, setConsent } from './service'
+import { deleteSearches, getConsent, listSearches, markAiOpened, parentOwnsChild, purgeExpired, recordSearch, setAiConsent, setConsent } from './service'
 
 const url = process.env.TEST_DATABASE_URL
 if (url && !['127.0.0.1', 'localhost'].includes(new URL(url).hostname)) throw new Error('TEST_DATABASE_URL must be a local database')
@@ -37,8 +37,8 @@ before(async () => {
 after(async () => { await pool?.end() })
 
 test('the feature is seeded off for every plan', opts, async () => {
-  const { rows } = await pool.query(`SELECT enabled FROM plan_features WHERE feature_key = 'student-search'`)
-  assert.deepEqual(rows.map(r => r.enabled), [false, false, false])
+  const { rows } = await pool.query(`SELECT enabled FROM plan_features WHERE feature_key IN ('student-search', 'student-search-ai')`)
+  assert.deepEqual(rows.map(r => r.enabled), Array(6).fill(false))
 })
 
 test('nothing is searched or saved without consent', opts, async () => {
@@ -50,10 +50,40 @@ test('nothing is searched or saved without consent', opts, async () => {
 test('with consent a search is saved; personal details are not', opts, async () => {
   const { parentId, child } = await family()
   await setConsent(pool, parentId, child, true)
-  assert.deepEqual(await recordSearch(pool, child, 'water cycle'), { ok: true, flag: null })
-  assert.deepEqual(await recordSearch(pool, child, 'call 9876543210'), { ok: true, flag: 'personal' })
+  const first = await recordSearch(pool, child, 'water cycle')
+  assert.ok(first.ok && first.id > 0 && first.flag === null)
+  const second = await recordSearch(pool, child, 'call 9876543210')
+  assert.ok(second.ok && second.flag === 'personal')
   const saved = await listSearches(pool, child)
   assert.deepEqual(saved.map(s => s.query), ['(personal details, not saved)', 'water cycle'])
+})
+
+test('the Google AI button needs its own agreement, and only the student’s own accepted search is marked', opts, async () => {
+  const { parentId, child } = await family()
+  const other = await family()
+  assert.equal(await setAiConsent(pool, parentId, child, true), false) // search is not on yet
+  await setConsent(pool, parentId, child, true)
+  const saved = await recordSearch(pool, child, 'photosynthesis')
+  const stopped = await recordSearch(pool, child, 'call 9876543210')
+  assert.ok(saved.ok && stopped.ok)
+  assert.equal(await markAiOpened(pool, child, saved.id), 'no_consent')
+  assert.equal(await setAiConsent(pool, parentId, child, true), true)
+  assert.equal((await getConsent(pool, child))?.ai, true)
+  assert.equal(await markAiOpened(pool, child, stopped.id), 'not_found')
+  await setConsent(pool, other.parentId, other.child, true)
+  await setAiConsent(pool, other.parentId, other.child, true)
+  assert.equal(await markAiOpened(pool, other.child, saved.id), 'not_found')
+  assert.equal(await markAiOpened(pool, child, saved.id), 'saved')
+  const when = (await listSearches(pool, child)).find(s => s.id === saved.id)?.aiOpenedAt
+  assert.ok(when)
+  await markAiOpened(pool, child, saved.id)
+  assert.equal((await listSearches(pool, child)).find(s => s.id === saved.id)?.aiOpenedAt, when) // first time kept
+  await setAiConsent(pool, parentId, child, false)
+  assert.deepEqual([(await getConsent(pool, child))?.granted, (await getConsent(pool, child))?.ai], [true, false])
+  await setAiConsent(pool, parentId, child, true)
+  await setConsent(pool, parentId, child, false)
+  await setConsent(pool, parentId, child, true)
+  assert.equal((await getConsent(pool, child))?.ai, false) // turning search on again does not bring the button back
 })
 
 test('withdrawing consent stops search, deletes history and keeps the decisions', opts, async () => {
@@ -83,11 +113,14 @@ test('one family cannot reach another', opts, async () => {
   assert.equal((await listSearches(pool, a.child)).length, 1)
 })
 
-test('searches older than 30 days are deleted, and one minute is limited', opts, async () => {
+test('searches older than 30 days are hidden and deleted, and one minute is limited', opts, async () => {
   const { parentId, child } = await family()
   await setConsent(pool, parentId, child, true)
   await pool.query(`INSERT INTO student_searches (school_id, student_id, query, created_at) VALUES ($1, $2, 'old', NOW() - INTERVAL '31 days')`, [child.schoolId, child.studentId])
   assert.equal((await listSearches(pool, child)).length, 0)
+  await purgeExpired(pool)
+  const old = await pool.query(`SELECT 1 FROM student_searches WHERE student_id = $1 AND query = 'old'`, [child.studentId])
+  assert.equal(old.rows.length, 0)
   for (let i = 0; i < 20; i++) assert.equal((await recordSearch(pool, child, `topic ${i}`)).ok, true)
   assert.deepEqual(await recordSearch(pool, child, 'one more'), { ok: false, reason: 'too_many' })
 })

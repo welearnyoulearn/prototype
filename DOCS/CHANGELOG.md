@@ -2,6 +2,30 @@
 
 All notable changes to the WLYL School prototype are documented here.
 
+## [Unreleased] - Student mobile app: long sessions and Expo push (#552)
+
+### Added
+- **Student mobile app sessions**: a student login sent with `x-wlyl-client: mobile` gets the long-lived session the parent and teacher apps have (persistent cookie, no 20-minute idle timeout). It ends on logout, a password change or reset, a credentials reset by the school, deactivation, or the school switching Student Portal Access off. Web student logins keep 20 min idle / 12 h.
+- **Reporting AI answers**: `POST /api/student/ai-report` lets a student flag an AI tutor answer or a WLYL AI quiz hint; reports are stored in the new `ai_content_reports` table (`SCHEMA_VERSION` 80). Needed for Google Play's AI-generated content policy.
+- **Student push via Expo**: `POST/DELETE /api/student/push/expo` registers the student app's Expo push token in `device_tokens` (platform `expo`). The dispatcher sends students a deep link into the student app (`studentAppLink`: result, doubts, daily quiz, newspaper, Class Circle, else Notifications).
+
+### Changed
+- Deactivating a student, resetting their credentials, a student password reset, and Student Portal Access being switched off now delete the student's push devices (`removeStudentDevices`). Students of a school with Student Portal Access off get no pushes.
+
+### Tests
+- `lib/portalSessionPolicy.test.ts`, `lib/pushLinks.test.ts`.
+
+## [Unreleased] - QA fixes from the 25 November pass (#527)
+
+### Fixed
+- **Students:** viewing, editing, removing and restoring a student no longer fails with a server error (#496).
+- **Platform billing:** renewing or saving a plan cancels a downgrade still waiting to start, which the school page now shows with a cancel button (#497). The monthly run no longer charges a monthly plan fee after a newer term has replaced it (#498).
+- **Closed fee year:** dues left open can be collected, waived, carried forward or written off after the year is closed, also after rollover (#495). A reported payment waiting for approval blocks carry forward, write-off and passout (#509).
+- **Exams:** marks with one or two decimals are accepted (#502). A class without a class teacher can be released by the school admin (#500), and a student who joins after marks are submitted no longer blocks release (#501).
+- **Results:** the marks CSV lists only the exam's students and shows no result without marks (#506). Report cards print one page per student (#499).
+- **Teacher portal:** exam notifications open the class (#511). The class overview shows real results and attendance (#503). Teachers can save their phone number and qualification (#504).
+- **Attendance:** late counts as attended in the admin day register, the teacher's today card and Class Management (#505).
+
 ## [Unreleased] - Teacher mobile app: long sessions and Expo push
 
 ### Added

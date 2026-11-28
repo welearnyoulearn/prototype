@@ -23,7 +23,9 @@ const AI_TOOLS: AiTool[] = [
 
 const INTRO = { eyebrow: 'School-enabled AI', title: 'AI Hub', sticker: 'robot' as const, tone: 'orange' as const }
 
-export default function StudentAiHub({ tier }: { tier: 'ai_basic' | 'ai_pro' | 'none' | null }) {
+type Props = { tier: 'ai_basic' | 'ai_pro' | 'none' | null; onCannotAnswer?: (question: string) => void }
+
+export default function StudentAiHub({ tier, onCannotAnswer }: Props) {
   const reduceMotion = useReducedMotion()
 
   if (tier === 'ai_pro') {
@@ -35,7 +37,7 @@ export default function StudentAiHub({ tier }: { tier: 'ai_basic' | 'ai_pro' | '
           <h1 className="sb-display text-xl">AI Tutor</h1>
           <span className="sb-chip" data-tone="violet"><Sticker name="sparkles" size="xs" />AI Pro</span>
         </div>
-        <StudentTutorChat />
+        <StudentTutorChat onCannotAnswer={onCannotAnswer} />
       </div>
     )
   }

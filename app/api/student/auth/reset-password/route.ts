@@ -3,6 +3,7 @@ import pool from '@/lib/db'
 import { hashPassword, revokePortalSessions, validateNewPassword } from '@/lib/auth'
 import { invalidateActorResetTokens, isResetTokenValid, lockResetToken } from '@/lib/passwordReset'
 import { checkAuthRateLimit, LOGIN_LIMIT } from '@/lib/authRateLimit'
+import { removeStudentDevices } from '@/lib/portalSessionPolicy'
 
 export async function POST(req: NextRequest) {
   try {
@@ -20,6 +21,7 @@ export async function POST(req: NextRequest) {
       await client.query('UPDATE students SET password_hash = $1, password_changed = TRUE WHERE id = $2', [newHash, rec.reference_id])
       await invalidateActorResetTokens(client, 'student', rec.reference_id)
       await revokePortalSessions('student', rec.reference_id, undefined, client)
+      await removeStudentDevices(client, rec.reference_id)
       await client.query('COMMIT')
     } catch (error) { await client.query('ROLLBACK'); throw error } finally { client.release() }
 

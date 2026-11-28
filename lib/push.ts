@@ -1,5 +1,5 @@
 // Push delivery for notifications: Firebase Cloud Messaging (HTTP v1) for browsers, and Expo's push service
-// for the parent mobile app (lib/expoPush.ts), from one dispatcher.
+// for the parent, teacher and student mobile apps (lib/expoPush.ts), from one dispatcher.
 //
 // The notifications table stays the source of truth (history, read state, the bell). This file only
 // wakes devices up. It talks to FCM directly with fetch + jose instead of firebase-admin: that SDK is
@@ -17,7 +17,7 @@
 import { z } from 'zod'
 import { SignJWT, importPKCS8 } from 'jose'
 import pool from '@/lib/db'
-import { mobilePushLink, pushLinkFor, teacherAppLink, type PushRole } from '@/lib/pushLinks'
+import { mobilePushLink, pushLinkFor, studentAppLink, teacherAppLink, type PushRole } from '@/lib/pushLinks'
 import { pushKindFor, sendExpo } from '@/lib/expoPush'
 
 const serviceAccountSchema = z.object({
@@ -216,20 +216,33 @@ export async function dispatchPendingPushes(limit = 100): Promise<number> {
       devicesByRecipient.set(key, [...(devicesByRecipient.get(key) ?? []), d])
     }
 
+    // A school that switched Student Portal Access off gets no pushes on its students' phones (#552).
+    // Checked once per school per run, and only when this batch has student devices.
+    const studentSchools = [...new Set(targets.filter(t => t.role === 'student' && t.row.school_id && devicesByRecipient.has(`student:${t.id}`)).map(t => t.row.school_id as number))]
+    const studentPortalOff = new Set<number>()
+    if (studentSchools.length > 0) {
+      const { schoolHasFeature } = await import('@/lib/auth')
+      for (const id of studentSchools) if (!(await schoolHasFeature(id, 'student-portal'))) studentPortalOff.add(id)
+    }
+
     const firebaseOn = isPushConfigured()
     const fcmJobs: { token: string; message: PushMessage }[] = []
     const expoJobs: { tokens: string[]; title: string; body: string; url: string; type: string; id: string }[] = []
     for (const t of targets) {
       const mine = devicesByRecipient.get(`${t.role}:${t.id}`) ?? []
       if (mine.length === 0) continue
+      if (t.role === 'student' && t.row.school_id && studentPortalOff.has(t.row.school_id)) continue
       const title = t.row.title ?? 'New notification'
       const body = (t.row.message ?? '').slice(0, BODY_MAX)
       // Deep link for the parent apps; other portals have none.
       const link = pushLinkFor(t.role, t.row.type, t.row.data)
       const expoTokens = mine.filter(d => d.platform === 'expo').map(d => d.token)
       if (expoTokens.length > 0) {
-        // Each mobile app opens its own screens: the parent app from its link, the teacher app from teacherAppLink.
-        const url = t.role === 'teacher' ? teacherAppLink(t.row.type, parsedData(t.row.data)) : mobilePushLink(link)
+        // Each mobile app opens its own screens: the parent app from its link, the teacher and student apps
+        // from their own maps.
+        const url = t.role === 'teacher' ? teacherAppLink(t.row.type, parsedData(t.row.data))
+          : t.role === 'student' ? studentAppLink(t.row.type, parsedData(t.row.data))
+          : mobilePushLink(link)
         expoJobs.push({ tokens: expoTokens, title, body, url, type: t.row.type, id: String(t.row.id) })
       }
       if (!firebaseOn) continue

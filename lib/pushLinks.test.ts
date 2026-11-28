@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mobilePushLink, pushLinkFor, teacherAppLink } from './pushLinks'
+import { mobilePushLink, pushLinkFor, studentAppLink, teacherAppLink } from './pushLinks'
 
 test('parents get a deep link into the parent app; other portals get none', () => {
   assert.equal(pushLinkFor('teacher', 'exam_scheduled', null), null)
@@ -45,4 +45,21 @@ test('teacher pushes open the matching teacher-app screen', () => {
   assert.equal(teacherAppLink('syllabus_behind_nudge', null), '/syllabus')
   for (const type of ['teacher_broadcast', 'substitute_needed', 'something_new']) assert.equal(teacherAppLink(type, null), '/notifications', type)
   assert.equal(teacherAppLink('marks_submitted', { class_id: 'abc' }), '/classes')
+})
+
+test('student app (#552): results open that exam, doubts, quiz, newspaper and birthdays open their screens', () => {
+  assert.equal(studentAppLink('marks_released', { exam_id: 12, percentage: '82.0' }), '/marks/12')
+  assert.equal(studentAppLink('marks_released', JSON.parse('{"exam_id":"7"}')), '/marks/7')
+  assert.equal(studentAppLink('marks_released', null), '/progress')
+  assert.equal(studentAppLink('doubt_answered', { doubt_id: 3 }), '/doubts')
+  assert.equal(studentAppLink('daily_quiz_ready', { quiz_id: 1 }), '/quiz')
+  assert.equal(studentAppLink('daily_quiz_reminder', null), '/quiz')
+  assert.equal(studentAppLink('daily_newspaper', null), '/newspaper')
+  assert.equal(studentAppLink('birthday', null), '/class-circle')
+})
+
+test('student app: anything without its own screen opens Notifications', () => {
+  for (const type of ['exam_scheduled', 'exam_cancelled', 'teacher_broadcast', 'something_new']) {
+    assert.equal(studentAppLink(type, null), '/notifications')
+  }
 })

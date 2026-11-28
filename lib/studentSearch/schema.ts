@@ -30,9 +30,14 @@ export async function ensureStudentSearchSchema(db: Db): Promise<void> {
     CREATE INDEX IF NOT EXISTS idx_student_searches_student ON student_searches (student_id, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_student_searches_age ON student_searches (created_at);
 
+    -- The "See Google AI answer" button: a parent's separate yes, and when the student tapped it for a search.
+    ALTER TABLE student_search_consents ADD COLUMN IF NOT EXISTS ai_granted BOOLEAN NOT NULL DEFAULT FALSE;
+    ALTER TABLE student_searches ADD COLUMN IF NOT EXISTS ai_opened_at TIMESTAMPTZ;
+
     -- OFF at every tier until a platform admin switches it on.
     INSERT INTO plan_features (feature_key, tier, enabled)
-    VALUES ('student-search', 'basic', false), ('student-search', 'standard', false), ('student-search', 'premium', false)
+    VALUES ('student-search', 'basic', false), ('student-search', 'standard', false), ('student-search', 'premium', false),
+           ('student-search-ai', 'basic', false), ('student-search-ai', 'standard', false), ('student-search-ai', 'premium', false)
     ON CONFLICT (feature_key, tier) DO NOTHING;
   `)
 }

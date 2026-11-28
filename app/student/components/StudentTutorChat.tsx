@@ -5,6 +5,7 @@ import { ArrowUp, BookOpen, Check, Copy, History, Square, SquarePen, X } from 'l
 import { Sticker } from './stickers'
 import { citedSources, isTableSeparator, tableCells } from '@/lib/tutor-text'
 import { TUTOR_HANDOFF_EVENT, readTutorHandoff, tutorPromptWithin, type TutorHandoff } from '@/lib/tutorHandoff'
+import { MAX_QUERY } from '@/lib/studentSearch/safety'
 
 type Source = { n: number; title: string; page: number; url: string }
 type ChatMessage = { role: 'user' | 'assistant'; content: string; sources: Source[] }
@@ -101,7 +102,8 @@ const MAX_INPUT_PX = 168 // ~6 rows, then the textarea scrolls
 // The composer sits inside its own rounded box, so it drops the portal's heavy input styling.
 const bareInput = { border: 'none', boxShadow: 'none', background: 'transparent', outline: 'none', borderRadius: 0, resize: 'none' } as const
 
-export default function StudentTutorChat() {
+/** `onCannotAnswer` is given only when the student may use Search; it receives a short question the tutor failed on. */
+export default function StudentTutorChat({ onCannotAnswer }: { onCannotAnswer?: (question: string) => void }) {
   const [subjects, setSubjects] = useState<string[]>([])
   const [subjectsLoaded, setSubjectsLoaded] = useState(false)
   // A confusing Daily Quiz question waiting to be sent to the tutor (#476).
@@ -205,6 +207,9 @@ export default function StudentTutorChat() {
     setStreaming(true)
     const controller = new AbortController()
     abortRef.current = controller
+    // Set when the tutor itself fails. A question limit, a plan without the tutor, or the student pressing Stop is not that.
+    let failed = false
+    let answered = false
     try {
       const res = await fetch('/api/student/tutor', {
         method: 'POST',
@@ -213,6 +218,7 @@ export default function StudentTutorChat() {
         signal: controller.signal,
       })
       if (!res.ok || !res.body) {
+        failed = res.status >= 500
         const data = await res.json().catch(() => null) as { error?: string } | null
         setMessages(prev => prev.slice(0, -2))
         setInput(message)
@@ -228,9 +234,9 @@ export default function StudentTutorChat() {
         if (!raw.trim()) return
         const line = JSON.parse(raw) as StreamLine
         if (line.type === 'sources') updateLast(m => ({ ...m, sources: line.sources }))
-        else if (line.type === 'delta') updateLast(m => ({ ...m, content: m.content + line.text }))
+        else if (line.type === 'delta') { answered = true; updateLast(m => ({ ...m, content: m.content + line.text })) }
         else if (line.type === 'session' || line.type === 'done') setSessionId(line.sessionId)
-        else if (line.type === 'error') setError(line.message)
+        else if (line.type === 'error') { failed = true; setError(line.message) }
       }
       for (;;) {
         const { done, value } = await reader.read()
@@ -242,11 +248,13 @@ export default function StudentTutorChat() {
       }
       handle(buffer)
     } catch (err) {
-      if (!(err instanceof DOMException && err.name === 'AbortError')) setError('Connection lost. Please try again.')
+      if (!(err instanceof DOMException && err.name === 'AbortError')) { failed = true; setError('Connection lost. Please try again.') }
     } finally {
       abortRef.current = null
       setStreaming(false)
       void loadPastChats()
+      // Search takes short questions only, and half an answer is left on screen rather than replaced.
+      if (failed && !answered && message.length <= MAX_QUERY) onCannotAnswer?.(message)
     }
   }
 
@@ -295,7 +303,7 @@ export default function StudentTutorChat() {
   const iconButton = 'inline-flex min-h-10 shrink-0 items-center whitespace-nowrap gap-1.5 rounded-full px-3 text-sm font-bold text-[var(--sb-ink-soft)] hover:bg-black/5 hover:text-[var(--sb-ink)]'
 
   return (
-    <div className="relative flex h-[calc(100dvh-204px)] min-h-[420px] flex-col lg:h-[calc(100dvh-188px)] lg:max-h-[900px]" data-testid="tutor-chat">
+    <div className="relative flex h-[calc(100dvh-204px-var(--student-switch,0px))] min-h-[420px] flex-col lg:h-[calc(100dvh-188px-var(--student-switch,0px))] lg:max-h-[900px]" data-testid="tutor-chat">
       <div className="flex items-center gap-2 border-b border-black/10 pb-2">
         <label className="min-w-0">
           <span className="sr-only">Subject</span>
@@ -405,7 +413,7 @@ export default function StudentTutorChat() {
           )}
         </form>
         <p id="tutor-input-hint" className="sb-muted flex justify-between gap-3 px-2 pt-1.5 text-xs">
-          <span>AI Tutor answers from your textbooks. Your parents can see these chats.</span>
+          <span>AI Tutor answers from your textbooks. Your parents can see these chats.{onCannotAnswer && ' If it can’t answer a short question, that question is searched on Google.'}</span>
           {input.length > COUNTER_FROM && <span className="shrink-0" data-testid="tutor-input-count">{input.length}/{MAX_CHARS}</span>}
         </p>
       </div>

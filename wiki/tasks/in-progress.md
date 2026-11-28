@@ -7,9 +7,9 @@ Move an entry to [completed.md](completed.md) when it ships. Add new entries at 
 ### Student Search (#538)
 **Type:** Feature
 **Portals:** Student, Parent
-**Branch:** `feature/538-student-search`
+**Branch:** `feature/538-wikipedia-languages` (first build: `feature/538-student-search`)
 **Started:** 2026-11-25
-**Summary:** One search box (Google results plus a Wikipedia summary) with parent consent and a 30-day search history. OFF at every tier; not cleared for real students.
+**Summary:** One search box (Google results plus maths, word meaning and Wikipedia cards) with parent consent and a 30-day search history. OFF at every tier; not cleared for real students.
 **Progress:**
 - [x] Feature key (OFF), tables, safety checks, student screen, parent consent and history
 - [x] Unit and database tests; checked in both portals on a local database
@@ -76,6 +76,7 @@ Move an entry to [completed.md](completed.md) when it ships. Add new entries at 
 - [x] Web: `firebase-messaging-sw.js`, "Turn on" prompt in NotificationBell, token registered on enable/visit and removed on logout (all four portals). Needs a real Firebase project to test end to end.
 - [x] Parent mobile app (Expo, #133): `/api/parent/push/expo` on `device_tokens`, Expo sender in the same dispatcher
 - [x] Teacher mobile app (Expo): `/api/teacher/push/expo`, teacher deep links (`teacherAppLink`); devices removed when the school deactivates / removes / re-emails a teacher
+- [x] Student mobile app (Expo, #552): `/api/student/push/expo`, student deep links (`studentAppLink`); devices removed on deactivation, credential/password reset and Student Portal Access off; long-lived student mobile session
 - [ ] `FIREBASE_SERVICE_ACCOUNT` in Vercel; real-phone test of the mobile app on a development or Play build
 ### Usage credits & real WhatsApp sending (#358, #359)
 **Type:** Feature
