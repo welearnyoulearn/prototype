@@ -38,6 +38,7 @@ type RolloverResult = {
   repeated?: number
   moved?: number
   roll_numbers_cleared?: number
+  classes_created?: string[]
   errors: string[]
   message: string
 }
@@ -319,6 +320,11 @@ export default function YearRollover({ schoolId, onGoToFeeYearEnd }: { schoolId:
           {(result.roll_numbers_cleared ?? 0) > 0 && (
             <div data-testid="rollover-rolls-cleared" className="bg-amber-50 border border-amber-100 rounded-xl p-4 text-left max-w-lg mx-auto text-xs text-amber-700">
               {result.roll_numbers_cleared} student{result.roll_numbers_cleared === 1 ? '' : 's'} need a new class roll number — the old one is already taken in the new class. Set it in Students.
+            </div>
+          )}
+          {(result.classes_created?.length ?? 0) > 0 && (
+            <div data-testid="rollover-classes-created" className="bg-amber-50 border border-amber-100 rounded-xl p-4 text-left max-w-lg mx-auto text-xs text-amber-700">
+              New class{result.classes_created!.length === 1 ? '' : 'es'} created: {result.classes_created!.join(', ')}. Assign class teachers and check subjects in Class Management.
             </div>
           )}
           {result.errors.length > 0 && (

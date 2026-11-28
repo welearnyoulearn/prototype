@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import pool from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
+import { ensureClassWithSetup } from '@/lib/classManagement'
+import { normalizeClassIdentity } from '@/lib/classValidation'
+import { invalidateCache } from '@/lib/responseCache'
 import { lockYearClose, nextAcademicYearLabel } from '@/lib/feeRollover'
 import { FEES_NOT_CLOSED, FEES_NOT_CLOSED_MESSAGE, feeGateRequired, getRolloverReadiness, isFeeYearClosed } from '@/lib/yearRollover'
 
@@ -21,6 +24,8 @@ import { FEES_NOT_CLOSED, FEES_NOT_CLOSED_MESSAGE, feeGateRequired, getRolloverR
 //      Exceptions (optional body.exceptions): a student can REPEAT the year (same grade + section) or be
 //      MOVED into another existing section of the next grade. Each student's outcome is recorded in
 //      student_class_history (promoted / repeated / moved / graduated).
+//      A class that promoted students move into is created if it does not exist yet. If it was
+//      removed by the school, nothing runs (409 CLASS_REMOVED) until it is restored or they are moved.
 //   4. GRADUATES: marks final-grade students as status='graduated'
 //   5. SETS new year as current academic year — the whole school follows it
 //
@@ -36,7 +41,7 @@ import { FEES_NOT_CLOSED, FEES_NOT_CLOSED_MESSAGE, feeGateRequired, getRolloverR
 //   grade_sequence,    -- ordered array of all grades e.g. ["Nursery","LKG","UKG","1","2"..."10"]
 // }
 //
-// Returns: { snapshotted, promoted, graduated, errors }
+// Returns: { snapshotted, promoted, graduated, classes_created, errors }
 
 // Per-student exceptions to the default "everyone moves up one grade, same section":
 //   repeat — stays in the same grade and section for the new year
@@ -128,6 +133,8 @@ export async function POST(req: NextRequest) {
   let repeated = 0
   let moved = 0
   const rollBack: Array<{ id: number; grade: string; section: string | null; roll: number }> = []
+  const classesCreated: string[] = []
+  let withoutSection = 0
   const errors: string[] = []
   const now = new Date().toISOString()
 
@@ -178,6 +185,15 @@ export async function POST(req: NextRequest) {
     const roster = new Map(students.map(st => [Number(st.id), st]))
     const maxSeq = Math.max(0, ...grade_sequence.filter((g: string) => /^\d+$/.test(g)).map(Number))
     const graduatesNow = (grade: string) => (!!final_grade && grade === final_grade) || (/^\d+$/.test(grade) && Number(grade) > maxSeq)
+    // Where a student with a grade ends up in the new year.
+    const placement = (st: { id: number; grade: string; section: string | null }) => {
+      const exception = exceptionById.get(Number(st.id))
+      const repeating = exception?.action === 'repeat'
+      const isGraduating = !repeating && graduatesNow(st.grade)
+      const moveTo = exception?.action === 'move' ? exception.to_section : null
+      const nextGrade = repeating ? st.grade : isGraduating ? null : nextGradeInSequence(st.grade, grade_sequence)
+      return { repeating, isGraduating, moveTo, nextGrade, section: moveTo ?? st.section }
+    }
     const badRequest = async (message: string) => {
       await client.query('ROLLBACK')
       return NextResponse.json({ error: message }, { status: 400 })
@@ -191,10 +207,32 @@ export async function POST(req: NextRequest) {
         const target = nextGradeInSequence(st.grade, grade_sequence)
         if (!target) return badRequest(`Grade "${st.grade}" is not in the grade sequence — cannot move student ${ex.student_id}`)
         const { rows: [cls] } = await client.query(
-          `SELECT 1 AS x FROM classes WHERE school_id = $1 AND grade = $2 AND section = $3`, [sid, target, ex.to_section]
+          `SELECT 1 AS x FROM classes WHERE school_id = $1 AND grade = $2 AND section = $3 AND deleted_at IS NULL`, [sid, target, ex.to_section]
         )
         if (!cls) return badRequest(`Section ${ex.to_section} does not exist for grade ${target}. Create the class first.`)
       }
+    }
+
+    // The classes that promoted students move into.
+    const targets = new Map<string, { grade: string; section: string }>()
+    for (const st of students) {
+      if (!st.grade) continue
+      const to = placement(st)
+      if (to.repeating || !to.nextGrade) continue
+      if (!to.section) { withoutSection++; continue }
+      targets.set(`${to.nextGrade}-${to.section}`, { grade: to.nextGrade, section: to.section })
+    }
+    const { rows: existingClasses } = await client.query<{ grade: string; section: string; removed: boolean }>(
+      `SELECT grade, section, deleted_at IS NOT NULL AS removed FROM classes WHERE school_id = $1`, [sid]
+    )
+    const existing = new Map(existingClasses.map(c => [`${c.grade}-${c.section}`, c]))
+    const removedTargets = [...targets.keys()].filter(key => existing.get(key)?.removed).sort()
+    if (removedTargets.length) {
+      await client.query('ROLLBACK')
+      return NextResponse.json({
+        error: `Students would move into removed classes: ${removedTargets.join(', ')}. Restore them in Class Management, or move those students to another section, then run the rollover again.`,
+        code: 'CLASS_REMOVED',
+      }, { status: 409 })
     }
 
     for (const student of students) {
@@ -212,17 +250,7 @@ export async function POST(req: NextRequest) {
       // in it (e.g. a grade 11/12 student left over from a school that shortened its
       // ladder to end at grade 10), is treated as graduating rather than silently
       // stuck un-promoted.
-      const maxSeqNum = Math.max(0, ...grade_sequence.filter((g: string) => /^\d+$/.test(g)).map(Number))
-      const isBeyondSequence = /^\d+$/.test(student.grade) && Number(student.grade) > maxSeqNum
-      const exception = exceptionById.get(Number(student.id))
-      const repeating = exception?.action === 'repeat'
-      const isGraduating = !repeating && ((!!final_grade && student.grade === final_grade) || isBeyondSequence)
-      const moveTo = exception?.action === 'move' ? exception.to_section : null
-      const nextGrade = repeating
-        ? student.grade
-        : isGraduating
-          ? null
-          : nextGradeInSequence(student.grade, grade_sequence)
+      const { repeating, isGraduating, moveTo, nextGrade } = placement(student)
       const outcome = repeating ? 'repeated' : isGraduating ? 'graduated' : moveTo ? 'moved' : 'promoted'
 
       // 1. Snapshot — record where this student IS RIGHT NOW (from_year).
@@ -304,7 +332,25 @@ export async function POST(req: NextRequest) {
       [to_year_id]
     )
 
+    // 4. Create the missing classes — after the year switch, so they get the new year's subjects.
+    for (const [key, target] of [...targets].sort(([a], [b]) => a.localeCompare(b, 'en', { numeric: true }))) {
+      if (existing.has(key)) continue
+      const identity = normalizeClassIdentity(target.grade, target.section).data
+      // A name the class rules would rewrite or refuse cannot be matched to these students.
+      if (!identity || identity.grade !== target.grade || identity.section !== target.section) {
+        errors.push(`Class ${key} could not be created. Correct the grade or section of its students in Students.`)
+        continue
+      }
+      await ensureClassWithSetup(client, { schoolId: sid, grade: target.grade, section: target.section })
+      classesCreated.push(key)
+    }
+    if (withoutSection > 0) {
+      errors.push(`${withoutSection} promoted student${withoutSection === 1 ? ' has' : 's have'} no section, so they are not in any class. Set it in Students.`)
+    }
+
     await client.query('COMMIT')
+    invalidateCache(`classes:${sid}`)
+    invalidateCache(`health:${sid}`)
 
     return NextResponse.json({
       ok: true,
@@ -314,6 +360,7 @@ export async function POST(req: NextRequest) {
       repeated,
       moved,
       roll_numbers_cleared: rollsCleared,
+      classes_created: classesCreated,
       errors,
       message: `Rollover complete: ${promoted} promoted${moved > 0 ? ` (${moved} into a different section)` : ''}, ${repeated} repeating, ${graduated} graduated, ${snapshotted} records archived.` +
         (rollsCleared > 0 ? ` ${rollsCleared} student${rollsCleared === 1 ? '' : 's'} need a new class roll number (the old one is taken in the new class).` : ''),
