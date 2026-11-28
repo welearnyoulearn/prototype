@@ -8,6 +8,7 @@ type Result = {
   label: string
   sub?: string
   nav?: string
+  subTab?: string
   action?: () => void
 }
 
@@ -26,7 +27,7 @@ const NAV_SEARCH: Result[] = [
   { type: 'nav', label: 'Overview',         sub: 'Dashboard',           nav: 'overview' },
   { type: 'nav', label: 'Attendance',       sub: 'Daily register',      nav: 'attendance' },
   { type: 'nav', label: 'Teachers',         sub: 'Staff management',    nav: 'staff' },
-  { type: 'nav', label: 'Students',         sub: 'Student management',  nav: 'students' },
+  { type: 'nav', label: 'Students',         sub: 'Student management',  nav: 'students', subTab: 'list' },
   { type: 'nav', label: 'Class Management', sub: 'Manage classes',      nav: 'class-management' },
   { type: 'nav', label: 'Exam Schedule',    sub: 'Exams & marks',       nav: 'exam-schedule' },
   { type: 'nav', label: 'Fee Management',   sub: 'Ledger, payments',    nav: 'fee-management' },
@@ -54,8 +55,10 @@ const TYPE_COLOR: Record<string, string> = {
 
 type Props = {
   schoolId: number
-  onNavigate: (key: string) => void
+  onNavigate: (key: string, subTab?: string) => void
 }
+
+type Teacher = { name: string; email?: string; employee_id?: string; department?: string; subject?: string }
 
 export default function CommandBar({ schoolId, onNavigate }: Props) {
   const [open, setOpen]     = useState(false)
@@ -65,6 +68,8 @@ export default function CommandBar({ schoolId, onNavigate }: Props) {
   const [loading, setLoading] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const searchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Only the newest search may set the results: an older, slower reply is ignored.
+  const latestSearch = useRef(0)
 
   // Recent nav history stored in sessionStorage
   const [recent, setRecent] = useState<Result[]>([])
@@ -110,25 +115,27 @@ export default function CommandBar({ schoolId, onNavigate }: Props) {
     const lower = q.toLowerCase()
     const navMatches = NAV_SEARCH.filter(n => n.label.toLowerCase().includes(lower) || n.sub?.toLowerCase().includes(lower))
 
-    // API search for students and teachers in parallel
+    // The students API filters by `q`. The staff list has no search of its own, so it is filtered here.
+    const run = ++latestSearch.current
     const [stuRes, tchRes] = await Promise.all([
-      fetch(`/api/students?school_id=${schoolId}&search=${encodeURIComponent(q)}`).then(r => r.ok ? r.json() : []).catch(() => []),
-      fetch(`/api/teachers?school_id=${schoolId}&search=${encodeURIComponent(q)}`).then(r => r.ok ? r.json() : []).catch(() => []),
+      fetch(`/api/students?school_id=${schoolId}&q=${encodeURIComponent(q.trim())}&limit=5`).then(r => r.ok ? r.json() : null).catch(() => null),
+      fetch(`/api/teachers?school_id=${schoolId}`).then(r => r.ok ? r.json() : []).catch(() => []),
     ])
+    if (run !== latestSearch.current) return
 
-    const studentResults: Result[] = (Array.isArray(stuRes) ? stuRes.slice(0, 5) : []).map((s: { name: string; grade: string; section: string; roll_number: string }) => ({
+    const studentResults: Result[] = (Array.isArray(stuRes?.data) ? stuRes.data : []).map((s: { name: string; grade: string; section: string; roll_number: string }) => ({
       type: 'student' as const,
       label: s.name,
       sub: `Grade ${s.grade}-${s.section} · ${s.roll_number}`,
       nav: 'students',
+      subTab: 'list',
     }))
 
-    const teacherResults: Result[] = (Array.isArray(tchRes) ? tchRes.slice(0, 3) : []).map((t: { name: string; department?: string; subject?: string }) => ({
-      type: 'teacher' as const,
-      label: t.name,
-      sub: t.department || t.subject || 'Teacher',
-      nav: 'teachers',
-    }))
+    const needle = lower.trim()
+    const teacherResults: Result[] = (Array.isArray(tchRes) ? tchRes as Teacher[] : [])
+      .filter(t => [t.name, t.email, t.employee_id, t.department, t.subject].some(v => v?.toLowerCase().includes(needle)))
+      .slice(0, 3)
+      .map(t => ({ type: 'teacher' as const, label: t.name, sub: t.department || t.subject || 'Teacher', nav: 'staff' }))
 
     setResults([...studentResults, ...teacherResults, ...navMatches.slice(0, 6)])
     setCursor(0)
@@ -137,7 +144,7 @@ export default function CommandBar({ schoolId, onNavigate }: Props) {
 
   useEffect(() => {
     if (searchTimeout.current) clearTimeout(searchTimeout.current)
-    if (!query.trim()) { setResults([]); setLoading(false); return }
+    if (!query.trim()) { latestSearch.current++; setResults([]); setLoading(false); return }
     setLoading(true)
     searchTimeout.current = setTimeout(() => search(query), 200)
     return () => { if (searchTimeout.current) clearTimeout(searchTimeout.current) }
@@ -145,7 +152,7 @@ export default function CommandBar({ schoolId, onNavigate }: Props) {
 
   function selectResult(r: Result) {
     addRecent(r)
-    if (r.nav) onNavigate(r.nav)
+    if (r.nav) onNavigate(r.nav, r.subTab)
     if (r.action) r.action()
     setOpen(false)
     setQuery('')
